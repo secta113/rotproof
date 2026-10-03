@@ -142,7 +142,7 @@ fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Directi
             let read = crate::python::read(&source, &path);
             if let Some((line, why)) = read.error {
                 found.push(format!(
-                    "{path}:{line}: cannot be read as Python ({why}), so the imports after it are not checked"
+                    "{path}:{line}: cannot be read as Python ({why}), so the imports after it may be misread"
                 ));
             }
             for (line, module) in read.imports {

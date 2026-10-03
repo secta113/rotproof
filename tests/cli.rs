@@ -1350,13 +1350,26 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
     let out = run(&["--root", &root_arg(r), "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
-    fs::write(r.join("utils/broken.py"), "import os\ndef (:\n").unwrap();
+    fs::write(
+        r.join("utils/broken.py"),
+        "import os\ndef (:\nimport handler\n",
+    )
+    .unwrap();
     fs::write(r.join("utils/latin.py"), b"x = '\xff'\n").unwrap();
     let out = run(&["--root", &root_arg(r), "check"]);
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{said}");
+    let error = said
+        .lines()
+        .find(|line| line.contains("utils/broken.py:2: cannot be read as Python ("))
+        .unwrap_or_else(|| panic!("{said}"));
+    // The parser recovers, and the imports after the error are judged all the same: what it says has to fit that
     assert!(
-        said.contains("utils/broken.py:2: cannot be read as Python ("),
+        error.ends_with("), so the imports after it may be misread"),
+        "{error}"
+    );
+    assert!(
+        said.contains("utils/broken.py:3: imports handler, in handler; "),
         "{said}"
     );
     assert!(
