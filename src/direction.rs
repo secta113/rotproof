@@ -8,14 +8,15 @@
 //! - An import of a module in no layer present (the standard library, a third-party package, a layer declared absent)
 //!   is not judged. Imports built at run time (`importlib.import_module`, `__import__`) are not seen.
 //!
-//! For `python`, a module is named by its dotted name (`python.rs`), and sits in the place its parts start with. For
-//! `typescript`, an import is resolved to a path (`typescript.rs`), and sits in the place that path starts with. For
-//! `rust`, the check says that it did not run.
+//! The layout's `language` says how the code is read. For `python`, a module is named by its dotted name
+//! (`python.rs`), and sits in the place its parts start with. For `typescript`, an import is resolved to a path
+//! (`typescript.rs`), and sits in the place that path starts with. For a layout without one (`rust`), the check says
+//! that it did not run.
 
 use std::io;
 use std::path::Path;
 
-use crate::layers::{Declared, Entry, Layout, Place, Table, listed, table};
+use crate::layers::{Declared, Entry, Language, Layout, Place, Table, listed, not_read, table};
 use crate::python::module_parts;
 use crate::source::{code_files, read_code};
 
@@ -41,13 +42,14 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Direction> {
         .iter()
         .filter(|p| !declared.is_absent(p) && crate::source::exactly(root, &p.path).is_ok())
         .collect();
-    match declared.declaration.stack.as_str() {
-        "python" => python(root, layout, &places),
-        "typescript" => typescript(root, layout, &places),
-        stack => Ok(Direction {
+    match layout.language {
+        Some(Language::Python) => python(root, layout, &places),
+        Some(Language::TypeScript) => typescript(root, layout, &places),
+        None => Ok(Direction {
             found: Vec::new(),
             skipped: Some(format!(
-                "the direction of imports is not checked: Rotproof does not read the imports of a {stack} project yet"
+                "the direction of imports is not checked: {}",
+                not_read(&declared.declaration.stack, "imports")
             )),
         }),
     }

@@ -100,6 +100,25 @@ pub struct Layout {
     /// Where code outside the layers goes in this stack, said in the finding for it
     #[serde(default)]
     pub where_code_goes: Option<String>,
+    /// The language Rotproof reads the code as. `None` when it reads none of this stack: the checks that read code say
+    /// they did not run
+    #[serde(default)]
+    pub language: Option<Language>,
+}
+
+/// A language Rotproof reads: the imports for the direction check, and the comments for the marker check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Language {
+    /// With Ruff's parser (`python.rs`)
+    Python,
+    /// TypeScript and JavaScript, with oxc (`typescript.rs`)
+    TypeScript,
+}
+
+/// Why a check that reads code did not run for a stack whose layout names no language: `what` is what it would read.
+pub fn not_read(stack: &str, what: &str) -> String {
+    format!("Rotproof does not read the {what} of a {stack} project yet")
 }
 
 /// One place in the tree a layout makes: a layer (`domain`) or a level of `ui` (`ui.pages`).
@@ -489,6 +508,11 @@ mod tests {
                     table.layers.iter().any(|l| &l.name == name),
                     "{stack}: no layer {name}"
                 );
+            }
+            // The Python reader names a module after its `.py` file, and the marker check reads every code file of a
+            // Python layout without asking
+            if layout.language == Some(Language::Python) {
+                assert_eq!(layout.code, "*.py", "{stack}: code a Python layout reads");
             }
             let places = layout.places(&table);
             assert!(places.len() >= 5, "{stack} makes {} places", places.len());

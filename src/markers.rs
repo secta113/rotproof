@@ -7,10 +7,10 @@
 //! - Every code file of the layout is read, `tests/` and the other paths that are not layers included, except the
 //!   paths the project lists in `unchecked` (generated code is written by a tool the project does not edit).
 //!
-//! Python and TypeScript: a Python file's `#` comments are read with Ruff's parser (`python.rs`), and a TypeScript or
-//! JavaScript file's `//` and `/* */` comments with oxc (`typescript.rs`), where JSX text is not a comment. For `rust`,
-//! the check says that it did not run. The floor: at least one source file is read, or the check fails instead of
-//! passing with nothing read.
+//! The layout's `language` says how the code is read: a Python file's `#` comments with Ruff's parser (`python.rs`), a
+//! TypeScript or JavaScript file's `//` and `/* */` comments with oxc (`typescript.rs`), where JSX text is not a
+//! comment. For a layout without one (`rust`), the check says that it did not run. The floor: at least one source file
+//! is read, or the check fails instead of passing with nothing read.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::layers::Declared;
+use crate::layers::{Declared, Language, not_read};
 use crate::source::{code_files, line_of, read_code, within};
 
 /// The words that fail in a comment.
@@ -67,17 +67,16 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         // A repository of records only has no code to read
         return Ok(Markers::default());
     };
-    let typescript = declared.declaration.stack == "typescript";
-    if !typescript && declared.declaration.stack != "python" {
+    let Some(language) = layout.language else {
         return Ok(Markers {
             skipped: Some(format!(
-                "comments are not checked for {}: Rotproof does not read the comments of a {} project yet",
+                "comments are not checked for {}: {}",
                 MARKERS.join(", "),
-                declared.declaration.stack
+                not_read(&declared.declaration.stack, "comments")
             )),
             ..Markers::default()
         });
-    }
+    };
     let unchecked: Vec<&str> = declared
         .declaration
         .unchecked
@@ -91,8 +90,13 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         if unchecked.iter().any(|skip| within(&path, skip)) {
             continue;
         }
-        // Every file in `src/` is code in the layout; only source has comments to read
-        if typescript && !crate::typescript::is_source(&path) {
+        let is_source = match language {
+            // Every code file of a Python layout is a `.py` file: a test reads every layout
+            Language::Python => true,
+            // Every file in `src/` is code in the layout; only source has comments to read
+            Language::TypeScript => crate::typescript::is_source(&path),
+        };
+        if !is_source {
             continue;
         }
         let Some(source) = read_code(root, &path, "comments", &mut found)? else {
@@ -100,10 +104,9 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         };
         read += 1;
         let lines: Vec<&str> = source.lines().collect();
-        let comments = if typescript {
-            crate::typescript::read(&source, &path).comments
-        } else {
-            crate::python::read(&source, &path).comments
+        let comments = match language {
+            Language::Python => crate::python::read(&source, &path).comments,
+            Language::TypeScript => crate::typescript::read(&source, &path).comments,
         };
         for (line, in_comment) in in_comments(&source, &comments) {
             found.push(format!("{path}:{line}\n{}", lines[line - 1].trim()));

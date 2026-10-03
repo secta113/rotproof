@@ -9,6 +9,8 @@ scope = "src"
 code = "*"
 not_layers = []
 doc_prefix = " * "
+# Every source file in `src/` (`.ts`, `.tsx`, `.js` and the others), read with oxc; the other files there are not read
+language = "typescript"
 # Vite's React starter (`npm create vite -- --template react-ts`) puts its entry point at `src/main.tsx`, which
 # `index.html` loads: it is `handler`'s by what it holds, and moving it would mean editing `index.html` too
 belongs = { "src/main.tsx" = "handler" }

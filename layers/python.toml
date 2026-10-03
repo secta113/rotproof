@@ -10,6 +10,8 @@ code = "*.py"
 not_layers = ["tests"]
 # Each line of the documentation starts with this
 doc_prefix = ""
+# What Rotproof reads the code as: its imports for the direction check, its comments for the marker check
+language = "python"
 
 [layer]
 path = "{name}"

@@ -12,6 +12,8 @@ doc_prefix = "//! "
 # Rust UI is written with very different tools (Leptos, Dioxus, egui, ratatui), and the atomic levels inside one crate
 # could only be checked by reading `use` statements. `ui` joins this layout with its tool and its check
 without = ["ui"]
+# No `language`: Rotproof does not read Rust yet, so neither the direction of imports nor the comments are checked,
+# and `rotproof check` says so
 
 [layer]
 path = "crates/{name}"
