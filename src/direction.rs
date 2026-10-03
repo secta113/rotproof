@@ -8,18 +8,16 @@
 //! - An import of a module in no layer present (the standard library, a third-party package, a layer declared absent)
 //!   is not judged. Imports built at run time (`importlib.import_module`, `__import__`) are not seen.
 //!
-//! For `python`, a module is named by its dotted name, and sits in the place its parts start with. For `typescript`,
-//! an import is resolved to a path (`typescript.rs`), and sits in the place that path starts with. For `rust`, the
-//! check says that it did not run.
+//! For `python`, a module is named by its dotted name (`python.rs`), and sits in the place its parts start with. For
+//! `typescript`, an import is resolved to a path (`typescript.rs`), and sits in the place that path starts with. For
+//! `rust`, the check says that it did not run.
 
 use std::io;
 use std::path::Path;
 
-use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
-use ruff_python_ast::{PySourceType, Stmt};
-
 use crate::layers::{Declared, Entry, Layout, Place, Table, listed, table};
-use crate::source::{code_files, line_of, read_code};
+use crate::python::module_parts;
+use crate::source::{code_files, read_code};
 
 /// What the direction check found.
 #[derive(Debug, Default)]
@@ -142,13 +140,13 @@ fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Directi
             let Some(source) = read_code(root, &path, "imports", &mut found)? else {
                 continue;
             };
-            let (imports, error) = imports(&source, &package(&path));
-            if let Some((line, why)) = error {
+            let read = crate::python::read(&source, &path);
+            if let Some((line, why)) = read.error {
                 found.push(format!(
                     "{path}:{line}: cannot be read as Python ({why}), so the imports after it are not checked"
                 ));
             }
-            for (line, module) in imports {
+            for (line, module) in read.imports {
                 let Some(to) = place_of(&module, places) else {
                     continue;
                 };
@@ -168,31 +166,6 @@ fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Directi
     })
 }
 
-/// The module a file is, as parts: `ui/pages/home.py` is `ui.pages.home`, and `ui/pages/__init__.py` is `ui.pages`.
-fn module_parts(path: &str) -> Vec<String> {
-    let mut parts: Vec<String> = path.split('/').map(String::from).collect();
-    let last = parts.pop().unwrap_or_default();
-    // `.PY` too: Windows runs it with Python
-    let stem = &last[..last.len() - ".py".len()];
-    if !stem.eq_ignore_ascii_case("__init__") {
-        parts.push(stem.to_string());
-    }
-    parts
-}
-
-/// The package a file's relative imports start from: the module itself for `__init__.py`, its parent otherwise.
-fn package(path: &str) -> Vec<String> {
-    let mut parts = module_parts(path);
-    let is_init = path
-        .rsplit('/')
-        .next()
-        .is_some_and(|name| name.eq_ignore_ascii_case("__init__.py"));
-    if !is_init {
-        parts.pop();
-    }
-    parts
-}
-
 /// The place a module sits in: the one whose path is the longest prefix of the module's parts.
 fn place_of<'a>(module: &[String], places: &[&'a Place]) -> Option<&'a Place> {
     places
@@ -203,81 +176,6 @@ fn place_of<'a>(module: &[String], places: &[&'a Place]) -> Option<&'a Place> {
             module.len() >= parts.len() && parts.iter().zip(module).all(|(a, b)| a == b)
         })
         .max_by_key(|place| place.path.len())
-}
-
-/// The line of an import, and the module it names as parts.
-type Import = (usize, Vec<String>);
-/// The line of a syntax error, and what the parser says.
-type SyntaxError = (usize, String);
-
-/// What a file imports, with the line of each import: every module an `import` or `from ... import` names, inside
-/// functions, classes and `if TYPE_CHECKING:` too. `from m import n` names `m.n`, which is the module `n` when there is
-/// one and `m` otherwise; both sit in the place of `m` unless `m.n` is a place itself (`from ui import atoms`). A
-/// relative import is resolved against `package`, and one that climbs above the top package is left out: Python fails
-/// on it. The first syntax error, if any, with its line: the parser recovers, but what follows may be misread.
-fn imports(source: &str, package: &[String]) -> (Vec<Import>, Option<SyntaxError>) {
-    struct Imports<'s> {
-        source: &'s str,
-        package: &'s [String],
-        found: Vec<Import>,
-    }
-    impl Imports<'_> {
-        fn line(&self, at: usize) -> usize {
-            line_of(self.source, at)
-        }
-    }
-    impl<'a> StatementVisitor<'a> for Imports<'_> {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            match stmt {
-                Stmt::Import(import) => {
-                    for alias in &import.names {
-                        let module = alias.name.split('.').map(String::from).collect();
-                        self.found
-                            .push((self.line(alias.range.start().to_usize()), module));
-                    }
-                }
-                Stmt::ImportFrom(import) => {
-                    let level = import.level as usize;
-                    let mut base: Vec<String> = if level == 0 {
-                        Vec::new()
-                    } else if level - 1 < self.package.len() {
-                        self.package[..self.package.len() - (level - 1)].to_vec()
-                    } else {
-                        // Above the top package: Python fails on it, so it imports nothing
-                        walk_stmt(self, stmt);
-                        return;
-                    };
-                    if let Some(module) = &import.module {
-                        base.extend(module.split('.').map(String::from));
-                    }
-                    for alias in &import.names {
-                        let mut module = base.clone();
-                        if alias.name.as_str() != "*" {
-                            module.push(alias.name.to_string());
-                        }
-                        self.found
-                            .push((self.line(alias.range.start().to_usize()), module));
-                    }
-                }
-                _ => {}
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-    let parsed = ruff_python_parser::parse_unchecked_source(source, PySourceType::Python);
-    let mut visitor = Imports {
-        source,
-        package,
-        found: Vec::new(),
-    };
-    visitor.visit_body(&parsed.syntax().body);
-    let error = parsed.errors().first().map(|e| {
-        (
-            line_of(source, e.location.start().to_usize()),
-            e.error.to_string(),
-        )
-    });
-    (visitor.found, error)
 }
 
 /// The table's entry for a place: a layer by its name, a level of `ui` by the part after the dot.
@@ -397,16 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn a_module_is_named_from_its_path() {
-        assert_eq!(module_parts("ui/pages/home.py"), parts("ui.pages.home"));
-        assert_eq!(module_parts("ui/pages/__init__.py"), parts("ui.pages"));
-        assert_eq!(module_parts("domain/Stray.PY"), parts("domain.Stray"));
-        assert_eq!(package("ui/pages/home.py"), parts("ui.pages"));
-        assert_eq!(package("ui/pages/__init__.py"), parts("ui.pages"));
-        assert_eq!(package("domain/__INIT__.PY"), parts("domain"));
-    }
-
-    #[test]
     fn a_module_sits_in_the_longest_place_it_starts_with() {
         let places = python_places();
         let places: Vec<&Place> = places.iter().collect();
@@ -420,51 +308,6 @@ mod tests {
         assert_eq!(name("domains.song"), None);
         assert_eq!(name("ui_kit"), None);
         assert_eq!(name("os.path"), None);
-    }
-
-    #[test]
-    fn every_form_of_import_is_read() {
-        let source = "\
-import os, domain.song as song
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from application import play
-def f():
-    import infrastructure.db
-class C:
-    from . import theme
-from .. import organisms
-from ..molecules.row import Row
-from ... import beyond
-from .... import further
-from ui import *
-";
-        let (found, error) = imports(source, &parts("ui.atoms"));
-        assert_eq!(error, None);
-        let found: Vec<(usize, String)> =
-            found.into_iter().map(|(l, m)| (l, m.join("."))).collect();
-        let expected = [
-            (1, "os"),
-            (1, "domain.song"),
-            (2, "typing.TYPE_CHECKING"),
-            (4, "application.play"),
-            (6, "infrastructure.db"),
-            (8, "ui.atoms.theme"),
-            (9, "ui.organisms"),
-            (10, "ui.molecules.row.Row"),
-            // Lines 11 and 12 climb above the top package `ui`, which Python fails on: they import nothing
-            (13, "ui"),
-        ];
-        let expected: Vec<(usize, String)> =
-            expected.iter().map(|(l, m)| (*l, m.to_string())).collect();
-        assert_eq!(found, expected);
-    }
-
-    #[test]
-    fn a_syntax_error_is_named_with_its_line() {
-        let (found, error) = imports("import domain\ndef (:\nimport utils\n", &parts("ui"));
-        assert_eq!(found.first().map(|(l, _)| *l), Some(1));
-        assert_eq!(error.map(|(line, _)| line), Some(2));
     }
 
     #[test]

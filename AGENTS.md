@@ -36,6 +36,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `layers.rs` | Reading the layer definitions in `layers/` and a project's `.config/rotproof.toml` |
 | `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript) |
+| `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, and the functions and classes a file defines |
 | `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports, where each lands (through `tsconfig*.json`), and comments |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript) |
 | `hook.rs` | `rotproof stop-hook`, the hook Claude Code runs when the agent stops, and the settings file that `rotproof create` writes for it |

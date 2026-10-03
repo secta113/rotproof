@@ -8,8 +8,6 @@ use std::sync::LazyLock;
 use percent_encoding::percent_decode_str;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use regex::Regex;
-use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
-use ruff_python_ast::{PySourceType, Stmt};
 use unicode_general_category::{GeneralCategory, get_general_category};
 
 use crate::source::{Lookup, lookup, read_source};
@@ -303,7 +301,7 @@ pub fn broken(text: &str, target: &str, here: &Path, bundle_root: &Path) -> Opti
         }
         // The name has to be defined, not only mentioned: a call, a comment or a string can keep a name after the
         // definition was renamed
-        let defined = python_definitions(&source);
+        let defined = crate::python::definitions(&source);
         if !defined.contains(name) {
             return Some(format!(
                 "no def or class named {name} in {target}; {}",
@@ -314,32 +312,6 @@ pub fn broken(text: &str, target: &str, here: &Path, bundle_root: &Path) -> Opti
         return Some(format!("no heading with this anchor: {target}"));
     }
     None
-}
-
-/// The names of the functions and classes a Python file defines, at any depth (methods, and definitions inside
-/// functions, `if` and `try`). The file is parsed, so a `def` line inside a string or a docstring is not a definition.
-/// A file with a syntax error is read past the error, as far as the parser recovers.
-fn python_definitions(source: &str) -> BTreeSet<String> {
-    #[derive(Default)]
-    struct Definitions(BTreeSet<String>);
-    impl<'a> StatementVisitor<'a> for Definitions {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            match stmt {
-                Stmt::FunctionDef(def) => {
-                    self.0.insert(def.name.to_string());
-                }
-                Stmt::ClassDef(class) => {
-                    self.0.insert(class.name.to_string());
-                }
-                _ => {}
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-    let module = ruff_python_parser::parse_unchecked_source(source, PySourceType::Python);
-    let mut definitions = Definitions::default();
-    definitions.visit_body(&module.syntax().body);
-    definitions.0
 }
 
 /// How to fix a link text that names nothing the file defines, so whoever wrote it can fix it from the message alone.
@@ -677,13 +649,6 @@ Text <!-- one line --> and text <!--
             .any(|entry| entry.unwrap().file_name() == "log.md:hidden");
         let why = reasons(root.path(), &[("x", "/log.md:hidden")]).remove(0);
         assert_eq!(why.is_none(), a_file, "{why:?}");
-    }
-
-    #[test]
-    fn definitions_after_a_syntax_error_are_read() {
-        // A half-written file still names what it defines below the error
-        let names = python_definitions("def broken(:\n    pass\n\ndef after():\n    pass\n");
-        assert!(names.contains("after"), "{names:?}");
     }
 
     #[test]

@@ -7,18 +7,17 @@
 //! - Every code file of the layout is read, `tests/` and the other paths that are not layers included, except the
 //!   paths the project lists in `unchecked` (generated code is written by a tool the project does not edit).
 //!
-//! Python and TypeScript: a TypeScript or JavaScript file's `//` and `/* */` comments are read with oxc
-//! (`typescript.rs`), and JSX text is not a comment. For `rust`, the check says that it did not run. The floor: at
-//! least one source file is read, or the check fails instead of passing with nothing read.
+//! Python and TypeScript: a Python file's `#` comments are read with Ruff's parser (`python.rs`), and a TypeScript or
+//! JavaScript file's `//` and `/* */` comments with oxc (`typescript.rs`), where JSX text is not a comment. For `rust`,
+//! the check says that it did not run. The floor: at least one source file is read, or the check fails instead of
+//! passing with nothing read.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
-use ruff_python_ast::PySourceType;
-use ruff_python_ast::token::TokenKind;
 
 use crate::layers::Declared;
 use crate::source::{code_files, line_of, read_code, within};
@@ -101,12 +100,12 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         };
         read += 1;
         let lines: Vec<&str> = source.lines().collect();
-        let in_comments = if typescript {
-            typescript_markers(&source, &path)
+        let comments = if typescript {
+            crate::typescript::read(&source, &path).comments
         } else {
-            markers(&source)
+            crate::python::read(&source, &path).comments
         };
-        for (line, in_comment) in in_comments {
+        for (line, in_comment) in in_comments(&source, &comments) {
             found.push(format!("{path}:{line}\n{}", lines[line - 1].trim()));
             words.extend(in_comment);
         }
@@ -125,34 +124,13 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
     })
 }
 
-/// Every comment of a Python source that holds a marker: its line (from 1), and the markers in it as positions in
-/// [`MARKERS`]. The lexer reads comments past a syntax error too; the direction check reports the error.
-fn markers(source: &str) -> Vec<(usize, Vec<usize>)> {
-    let parsed = ruff_python_parser::parse_unchecked_source(source, PySourceType::Python);
-    let mut found = Vec::new();
-    for token in parsed.tokens().iter() {
-        let (kind, range) = token.as_tuple();
-        if kind != TokenKind::Comment {
-            continue;
-        }
-        let comment = &source[range.start().to_usize()..range.end().to_usize()];
-        let words: Vec<usize> = MARKER
-            .find_iter(comment)
-            .map(|word| MARKERS.iter().position(|m| *m == word.as_str()).unwrap())
-            .collect();
-        if !words.is_empty() {
-            found.push((line_of(source, range.start().to_usize()), words));
-        }
-    }
-    found
-}
-
-/// Every line of a TypeScript or JavaScript source whose comment holds a marker, and the markers on it as positions in
-/// [`MARKERS`]. A block comment of several lines is named at the line of each marker in it.
-fn typescript_markers(source: &str, path: &str) -> Vec<(usize, Vec<usize>)> {
-    let mut lines: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
-    for (at, comment) in crate::typescript::read(source, path).comments {
-        for word in MARKER.find_iter(&comment) {
+/// Every line of a source whose comments hold a marker, and the markers on it as positions in [`MARKERS`], from the
+/// comments the reader of its language found (byte offset, text). A comment of several lines is named at the line of
+/// each marker in it.
+fn in_comments(source: &str, comments: &[(usize, String)]) -> Vec<(usize, Vec<usize>)> {
+    let mut lines: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (at, comment) in comments {
+        for word in MARKER.find_iter(comment) {
             lines
                 .entry(line_of(source, at + word.start()))
                 .or_default()
@@ -166,11 +144,18 @@ fn typescript_markers(source: &str, path: &str) -> Vec<(usize, Vec<usize>)> {
 mod tests {
     use super::*;
 
-    fn words(source: &str) -> Vec<(usize, Vec<&'static str>)> {
-        markers(source)
+    fn named(found: Vec<(usize, Vec<usize>)>) -> Vec<(usize, Vec<&'static str>)> {
+        found
             .into_iter()
-            .map(|(line, found)| (line, found.into_iter().map(|i| MARKERS[i]).collect()))
+            .map(|(line, at)| (line, at.into_iter().map(|i| MARKERS[i]).collect()))
             .collect()
+    }
+
+    fn words(source: &str) -> Vec<(usize, Vec<&'static str>)> {
+        named(in_comments(
+            source,
+            &crate::python::read(source, "x.py").comments,
+        ))
     }
 
     #[test]
@@ -233,10 +218,10 @@ note = Status.TODO  # todo in lower case, TODOS and NOTES, NOTE_X and XXXL are o
     }
 
     fn typescript_words(source: &str) -> Vec<(usize, Vec<&'static str>)> {
-        typescript_markers(source, "src/a.tsx")
-            .into_iter()
-            .map(|(line, at)| (line, at.into_iter().map(|i| MARKERS[i]).collect()))
-            .collect()
+        named(in_comments(
+            source,
+            &crate::typescript::read(source, "src/a.tsx").comments,
+        ))
     }
 
     #[test]
