@@ -1,4 +1,5 @@
-//! Reading the files the checks look at.
+//! Reading the files the checks look at: finding the code files in a tree, reading a file, and the paths and lines in
+//! messages.
 
 use std::fs;
 use std::io;
@@ -12,6 +13,82 @@ pub fn read_source(path: &Path) -> io::Result<String> {
     Ok(fs::read_to_string(path)?
         .replace("\r\n", "\n")
         .replace('\r', "\n"))
+}
+
+/// Read a code file, `path` from the root, for a check: `None`, with a finding that its `what` are not checked, when it
+/// is not UTF-8. An error is a file that could not be read at all.
+pub fn read_code(
+    root: &Path,
+    path: &str,
+    what: &str,
+    found: &mut Vec<String>,
+) -> io::Result<Option<String>> {
+    match read_source(&root.join(path)) {
+        Ok(source) => Ok(Some(source)),
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+            found.push(format!(
+                "{path}: cannot be read as UTF-8, so its {what} are not checked"
+            ));
+            Ok(None)
+        }
+        Err(e) => Err(io::Error::new(e.kind(), format!("{path}: {e}"))),
+    }
+}
+
+/// The line (from 1) at a byte offset.
+pub fn line_of(source: &str, at: usize) -> usize {
+    source.as_bytes()[..at.min(source.len())]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count()
+        + 1
+}
+
+/// Whether `path` is `prefix` or inside it. Both are from the root, with `/`.
+pub fn within(path: &str, prefix: &str) -> bool {
+    path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+
+/// Every file in `dir` (from the root, "" for the root) whose name `is_code` accepts, from the root with `/`. Files the
+/// project's `.gitignore` files exclude, and hidden ones, are not looked at.
+///
+/// Only the `.gitignore` files inside the project count. A global excludes file, `.git/info/exclude` and a
+/// `.gitignore` above the root differ from one machine to another, and would hide code on one machine that fails on
+/// another.
+pub fn code_files(
+    root: &Path,
+    dir: &str,
+    is_code: impl Fn(&str) -> bool,
+) -> io::Result<Vec<String>> {
+    let mut found = Vec::new();
+    if !exactly(root, dir).is_ok_and(|path| path.is_dir()) {
+        return Ok(found);
+    }
+    let walk = ignore::WalkBuilder::new(root)
+        .require_git(false)
+        .parents(false)
+        .ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        // From the root, so its `.gitignore` applies to `dir` too; into `dir` only
+        .filter_entry({
+            let root = root.to_path_buf();
+            let dir = dir.to_string();
+            move |entry| {
+                let path = relative_path(entry.path(), &root);
+                dir.is_empty() || path.is_empty() || within(&path, &dir) || within(&dir, &path)
+            }
+        })
+        .build();
+    for entry in walk {
+        let entry = entry.map_err(|e| io::Error::other(e.to_string()))?;
+        if entry.file_type().is_some_and(|t| t.is_file())
+            && is_code(&entry.file_name().to_string_lossy())
+        {
+            found.push(relative_path(entry.path(), root));
+        }
+    }
+    Ok(found)
 }
 
 /// The path from the root, for messages: with `/` on every platform, so the output is the same on Windows.
@@ -134,6 +211,14 @@ mod tests {
                 .unwrap_err()
                 .contains("README.md is there")
         );
+    }
+
+    #[test]
+    fn within_compares_whole_names() {
+        assert!(within("domain", "domain"));
+        assert!(within("domain/x.py", "domain"));
+        assert!(!within("domains/x.py", "domain"));
+        assert!(!within("domain", "domain/x.py"));
     }
 
     #[test]

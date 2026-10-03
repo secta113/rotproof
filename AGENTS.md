@@ -46,7 +46,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `schema.rs` | The frontmatter of each document type |
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
 | `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
-| `source.rs` | Reading files, and the paths in messages |
+| `source.rs` | Reading files: the code files in a tree, a file as UTF-8, and the paths and lines in messages |
 
 ## How this repository differs from what Rotproof keeps
 

@@ -25,7 +25,7 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
 
-use crate::source::read_source;
+use crate::source::{line_of, read_source};
 
 /// The extensions read as source, in lower case
 pub const EXTENSIONS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
@@ -150,15 +150,6 @@ fn literal<'b>(expression: &'b Expression) -> Option<&'b str> {
             .map(|cooked| cooked.as_str()),
         _ => None,
     }
-}
-
-/// The line (from 1) at a byte offset.
-pub fn line_of(source: &str, at: usize) -> usize {
-    source.as_bytes()[..at.min(source.len())]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count()
-        + 1
 }
 
 /// One entry of `compilerOptions.paths`: a pattern with at most one `*`, and the first of its targets.

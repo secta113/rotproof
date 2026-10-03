@@ -16,12 +16,7 @@ use std::io;
 use std::path::Path;
 
 use crate::layers::{DECLARATION, Declared, Layout, MISSING, Place, declaration};
-use crate::source::{exactly, relative_path};
-
-/// Whether `path` is `prefix` or inside it. Both are from the root, with `/`.
-pub(crate) fn within(path: &str, prefix: &str) -> bool {
-    path == prefix || path.starts_with(&format!("{prefix}/"))
-}
+use crate::source::{code_files, exactly, within};
 
 /// What the structure check found.
 #[derive(Debug, Default)]
@@ -183,11 +178,8 @@ pub fn problems(root: &Path) -> io::Result<Structure> {
 }
 
 /// The entries of the layout's scope that hold code outside `places` and `skipped`: a file, or the directory directly
-/// in the scope that holds it. Files the project's `.gitignore` files exclude, and hidden ones, are not looked at.
-///
-/// Only the `.gitignore` files inside the project count. A global excludes file, `.git/info/exclude` and a
-/// `.gitignore` above the root differ from one machine to another, and would hide code on one machine that fails on
-/// another.
+/// in the scope that holds it. Files the project's `.gitignore` files exclude, and hidden ones, are not looked at: see
+/// [`code_files`].
 fn outside(
     root: &Path,
     layout: &Layout,
@@ -196,7 +188,7 @@ fn outside(
 ) -> io::Result<BTreeSet<String>> {
     let scope = &layout.scope;
     let mut found = BTreeSet::new();
-    for path in code_files(root, layout, scope)? {
+    for path in code_files(root, scope, |name| layout.is_code(name))? {
         if places.iter().chain(skipped).any(|p| within(&path, p)) {
             continue;
         }
@@ -221,40 +213,6 @@ fn first_entry(path: &str, dir: &str) -> String {
     }
 }
 
-/// Every code file in `dir` (from the root, "" for the root), from the root with `/`. Files the project's `.gitignore`
-/// files exclude, and hidden ones, are not looked at: see [`outside`].
-pub fn code_files(root: &Path, layout: &Layout, dir: &str) -> io::Result<Vec<String>> {
-    let mut found = Vec::new();
-    if !exactly(root, dir).is_ok_and(|path| path.is_dir()) {
-        return Ok(found);
-    }
-    let walk = ignore::WalkBuilder::new(root)
-        .require_git(false)
-        .parents(false)
-        .ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        // From the root, so its `.gitignore` applies to `dir` too; into `dir` only
-        .filter_entry({
-            let root = root.to_path_buf();
-            let dir = dir.to_string();
-            move |entry| {
-                let path = relative_path(entry.path(), &root);
-                dir.is_empty() || path.is_empty() || within(&path, &dir) || within(&dir, &path)
-            }
-        })
-        .build();
-    for entry in walk {
-        let entry = entry.map_err(|e| io::Error::other(e.to_string()))?;
-        if entry.file_type().is_some_and(|t| t.is_file())
-            && layout.is_code(&entry.file_name().to_string_lossy())
-        {
-            found.push(relative_path(entry.path(), root));
-        }
-    }
-    Ok(found)
-}
-
 /// The code in a layer with levels (`ui`) that sits beside its levels, as entries directly in the layer: the layer's
 /// own files (`ui/__init__.py`) are not counted. Every level counts as a level here, absent or not: an absent level
 /// that exists has a finding of its own.
@@ -265,7 +223,7 @@ fn beside_levels(
     levels: &[&Place],
 ) -> io::Result<BTreeSet<String>> {
     let mut found = BTreeSet::new();
-    for path in code_files(root, layout, &layer.path)? {
+    for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
         if layer.files.iter().any(|(own, _)| *own == path)
             || levels.iter().any(|level| within(&path, &level.path))
         {
@@ -295,17 +253,4 @@ fn where_ui_parts_go(places: &[Place]) -> String {
         path("ui.pages"),
         path("utils"),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn within_compares_whole_names() {
-        assert!(within("domain", "domain"));
-        assert!(within("domain/x.py", "domain"));
-        assert!(!within("domains/x.py", "domain"));
-        assert!(!within("domain", "domain/x.py"));
-    }
 }

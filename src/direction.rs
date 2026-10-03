@@ -19,8 +19,7 @@ use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
 use ruff_python_ast::{PySourceType, Stmt};
 
 use crate::layers::{Declared, Entry, Layout, Place, Table, listed, table};
-use crate::source::read_source;
-use crate::structure::code_files;
+use crate::source::{code_files, line_of, read_code};
 
 /// What the direction check found.
 #[derive(Debug, Default)]
@@ -56,20 +55,6 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Direction> {
     }
 }
 
-/// Read a code file for its imports: `None`, with a finding, when it is not UTF-8.
-fn source_of(root: &Path, path: &str, found: &mut Vec<String>) -> io::Result<Option<String>> {
-    match read_source(&root.join(path)) {
-        Ok(source) => Ok(Some(source)),
-        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
-            found.push(format!(
-                "{path}: cannot be read as UTF-8, so its imports are not checked"
-            ));
-            Ok(None)
-        }
-        Err(e) => Err(io::Error::new(e.kind(), format!("{path}: {e}"))),
-    }
-}
-
 /// The finding for an import from `from` that lands in `to`, or `None` when the table allows it.
 fn judged(table: &Table, at: &str, what: &str, from: &Place, to: &Place) -> Option<String> {
     (!allowed(table, from, to)).then(|| {
@@ -96,7 +81,7 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Dir
     // the layer it belongs to, while that layer is there
     let mut files: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
-        for path in code_files(root, layout, &layer.path)? {
+        for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
             if let Some(from) = place_of(&parts(&path), places) {
                 files.push((path, from));
             }
@@ -114,7 +99,7 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Dir
         if !crate::typescript::is_source(&path) {
             continue;
         }
-        let Some(source) = source_of(root, &path, &mut found)? else {
+        let Some(source) = read_code(root, &path, "imports", &mut found)? else {
             continue;
         };
         let read = crate::typescript::read(&source, &path);
@@ -150,11 +135,11 @@ fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Directi
     let table = table();
     let mut found = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
-        for path in code_files(root, layout, &layer.path)? {
+        for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
             let Some(from) = place_of(&module_parts(&path), places) else {
                 continue;
             };
-            let Some(source) = source_of(root, &path, &mut found)? else {
+            let Some(source) = read_code(root, &path, "imports", &mut found)? else {
                 continue;
             };
             let (imports, error) = imports(&source, &package(&path));
@@ -293,16 +278,6 @@ fn imports(source: &str, package: &[String]) -> (Vec<Import>, Option<SyntaxError
         )
     });
     (visitor.found, error)
-}
-
-/// The line (from 1) at a byte offset.
-fn line_of(source: &str, at: usize) -> usize {
-    let at = at.min(source.len());
-    source.as_bytes()[..at]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count()
-        + 1
 }
 
 /// The table's entry for a place: a layer by its name, a level of `ui` by the part after the dot.

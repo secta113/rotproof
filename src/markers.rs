@@ -21,8 +21,7 @@ use ruff_python_ast::PySourceType;
 use ruff_python_ast::token::TokenKind;
 
 use crate::layers::Declared;
-use crate::source::read_source;
-use crate::structure::{code_files, within};
+use crate::source::{code_files, line_of, read_code, within};
 
 /// The words that fail in a comment.
 pub const MARKERS: [&str; 5] = ["TODO", "FIXME", "XXX", "HACK", "NOTE"];
@@ -89,7 +88,7 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
     let mut found = Vec::new();
     let mut words = BTreeSet::new();
     let mut read = 0;
-    for path in code_files(root, layout, &layout.scope)? {
+    for path in code_files(root, &layout.scope, |name| layout.is_code(name))? {
         if unchecked.iter().any(|skip| within(&path, skip)) {
             continue;
         }
@@ -97,15 +96,8 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         if typescript && !crate::typescript::is_source(&path) {
             continue;
         }
-        let source = match read_source(&root.join(&path)) {
-            Ok(source) => source,
-            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
-                found.push(format!(
-                    "{path}: cannot be read as UTF-8, so its comments are not checked"
-                ));
-                continue;
-            }
-            Err(e) => return Err(io::Error::new(e.kind(), format!("{path}: {e}"))),
+        let Some(source) = read_code(root, &path, "comments", &mut found)? else {
+            continue;
         };
         read += 1;
         let lines: Vec<&str> = source.lines().collect();
@@ -168,15 +160,6 @@ fn typescript_markers(source: &str, path: &str) -> Vec<(usize, Vec<usize>)> {
         }
     }
     lines.into_iter().collect()
-}
-
-/// The line (from 1) at a byte offset.
-fn line_of(source: &str, at: usize) -> usize {
-    source.as_bytes()[..at.min(source.len())]
-        .iter()
-        .filter(|&&b| b == b'\n')
-        .count()
-        + 1
 }
 
 #[cfg(test)]
