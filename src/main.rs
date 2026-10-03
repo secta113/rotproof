@@ -54,7 +54,7 @@ enum Command {
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/ and
-    /// docs/log.md, and the project's files (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, the agents'
+    /// docs/log.md, and the project's files (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's
     /// hook settings, and for python and none the pin of Rotproof and a CI workflow), each when it does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files and rules in
     /// docs/. Adds the fields the declaration lacks, keeping its comments and values. Never overwrites another file,
@@ -87,13 +87,13 @@ enum Command {
     /// index.md by hand. Lists the documents it left out and why, and the backlog items past their stale_after. Exits
     /// 2 when the declaration or a document cannot be read.
     Index,
-    /// Run as Claude Code's Stop or Gemini CLI's AfterAgent hook: send the agent back once when its last message
-    /// leaves something open and nothing in docs/ changed. Reads the hook input on stdin
+    /// Run as Claude Code's Stop hook: send the agent back once when its last message leaves something open and
+    /// nothing in docs/ changed. Reads the hook input on stdin
     ///
-    /// Not run by hand: `rotproof create` writes .claude/settings.json and .gemini/settings.json that run it. When the
-    /// agent's last message holds a phrase that leaves something open (such as "not checked") and git shows no change
-    /// in docs/, it asks the agent once to record the finding or say where it is. Exits 1, never 2, when it fails, so
-    /// a broken hook never keeps the agent from stopping.
+    /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. When the agent's last message
+    /// holds a phrase that leaves something open (such as "not checked") and git shows no change in docs/, it asks the
+    /// agent once to record the finding or say where it is. Exits 1, never 2, when it fails, so a broken hook never
+    /// keeps the agent from stopping.
     StopHook,
 }
 
@@ -201,8 +201,7 @@ fn check(root: &Path) -> Result<bool, String> {
     Ok(found.is_empty())
 }
 
-/// Answer the agent's stop hook. An error exits 1, never 2: Claude Code and Gemini CLI both take exit code 2 from it
-/// for "do not stop", and a broken hook would keep the agent from stopping instead of being shown.
+/// Answer the agent's stop hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "do not stop", and a broken hook would keep the agent from stopping instead of being shown.
 fn stop_hook(root: &Path) -> ExitCode {
     let mut input = String::new();
     let answer = std::io::stdin()

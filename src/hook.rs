@@ -1,18 +1,17 @@
-//! `rotproof stop-hook`: the hook an agent runs when it stops (Claude Code's `Stop`, Gemini CLI's `AfterAgent`). It
-//! sends the agent back once when its last message leaves something open and nothing in `docs/` changed.
+//! `rotproof stop-hook`: the hook Claude Code runs when the agent stops (its `Stop` hook). It sends the agent back once
+//! when its last message leaves something open and nothing in `docs/` changed.
 //!
 //! - An agent's findings are written somewhere before they are lost: in its report ("not checked", "out of scope").
 //!   The hook reads that report when the agent stops, and when it holds one of [`PHRASES`] while `docs/` has no
 //!   change (`git status --porcelain -- docs`), it asks the agent to record the finding or to say where it already is.
-//! - The agent decides what the phrase meant; the hook only makes the moment. It answers each agent in its own form
-//!   ([`Agent`]): Claude Code with `additionalContext`, which it shows as feedback rather than an error; Gemini CLI
-//!   with `decision: "deny"`, whose `reason` it sends the agent as the next prompt.
+//! - The agent decides what the phrase meant; the hook only makes the moment. It answers with `additionalContext`,
+//!   which Claude Code shows as feedback rather than an error.
 //! - It sends the agent back at most once per stop: while the agent is already continuing because of a stop hook
-//!   (`stop_hook_active`, in both), it lets the agent stop, so a phrase quoted in the answer cannot loop.
+//!   (`stop_hook_active`), it lets the agent stop, so a phrase quoted in the answer cannot loop.
 //! - The project is the nearest directory, from where the hook runs upwards, that holds `.config/rotproof.toml`.
 //!   Outside one, the hook lets the agent stop and says nothing: it may be configured for every repository.
 //!
-//! An input from neither hook, or a `git` that fails, is an error: the agent shows it, and stops.
+//! An input from another hook, or a `git` that fails, is an error: the agent shows it, and stops.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,52 +22,16 @@ use serde_json::{Value, json};
 
 use crate::layers::DECLARATION;
 
-/// The agents whose stop hook this answers, by the `hook_event_name` of their input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Agent {
-    /// Claude Code's `Stop`: the last message in `last_assistant_message`
-    Claude,
-    /// Gemini CLI's `AfterAgent`: the last message in `prompt_response`
-    Gemini,
-}
+/// The event of the hook this answers, in `hook_event_name`
+const EVENT: &str = "Stop";
+/// The field of the input that holds the agent's last message
+const MESSAGE: &str = "last_assistant_message";
 
-impl Agent {
-    fn of(event: &str) -> Option<Agent> {
-        match event {
-            "Stop" => Some(Agent::Claude),
-            "AfterAgent" => Some(Agent::Gemini),
-            _ => None,
-        }
-    }
-
-    /// The field that holds the agent's last message.
-    fn message_field(self) -> &'static str {
-        match self {
-            Agent::Claude => "last_assistant_message",
-            Agent::Gemini => "prompt_response",
-        }
-    }
-
-    /// What sends the agent back with `text`.
-    fn send_back(self, text: String) -> Value {
-        match self {
-            Agent::Claude => json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "Stop",
-                    "additionalContext": text,
-                }
-            }),
-            Agent::Gemini => json!({ "decision": "deny", "reason": text }),
-        }
-    }
-}
-
-/// The settings that run the hook, and where `rotproof create` writes each, once: the project's files from then on.
+/// The settings that run the hook, and where `rotproof create` writes them, once: the project's file from then on.
 /// `rotproof` has to be on the `PATH` the agent runs hooks with.
-pub const SETTINGS: [(&str, &str); 2] = [
-    (
-        ".claude/settings.json",
-        r#"{
+pub const SETTINGS: [(&str, &str); 1] = [(
+    ".claude/settings.json",
+    r#"{
   "hooks": {
     "Stop": [
       {
@@ -83,27 +46,7 @@ pub const SETTINGS: [(&str, &str); 2] = [
   }
 }
 "#,
-    ),
-    (
-        ".gemini/settings.json",
-        r#"{
-  "hooks": {
-    "AfterAgent": [
-      {
-        "hooks": [
-          {
-            "name": "rotproof-stop-hook",
-            "type": "command",
-            "command": "rotproof stop-hook"
-          }
-        ]
-      }
-    ]
-  }
-}
-"#,
-    ),
-];
+)];
 
 // A line that points at the records: the word spec, specs, backlog or knowledge standing alone in ASCII (so `spec に`,
 // `docs/specs/x.md` and `Backlog` count, and `specific` or `inspect` do not). Matched against the line in lower case
@@ -152,21 +95,19 @@ fn decide(
         .get("hook_event_name")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let Some(agent) = Agent::of(event) else {
+    if event != EVENT {
         return Err(format!(
-            "the hook input is from {event:?}: run `rotproof stop-hook` as Claude Code's Stop hook or Gemini CLI's \
-             AfterAgent hook"
+            "the hook input is from {event:?}: run `rotproof stop-hook` as Claude Code's Stop hook"
         ));
-    };
+    }
     if input.get("stop_hook_active").and_then(Value::as_bool) == Some(true) {
         return Ok(None);
     }
-    let field = agent.message_field();
-    let message = match input.get(field) {
+    let message = match input.get(MESSAGE) {
         Some(Value::String(message)) => message.as_str(),
         // A turn that ended without text
         Some(Value::Null) => "",
-        _ => return Err(format!("the {event} hook input has no {field}")),
+        _ => return Err(format!("the {event} hook input has no {MESSAGE}")),
     };
     let found = open_phrases(message);
     if found.is_empty() || recorded()? {
@@ -179,7 +120,13 @@ fn decide(
          a finding, say where or why in one line, then stop.",
         quoted.join(", ")
     );
-    Ok(Some(agent.send_back(text).to_string()))
+    let answer = json!({
+        "hookSpecificOutput": {
+            "hookEventName": EVENT,
+            "additionalContext": text,
+        }
+    });
+    Ok(Some(answer.to_string()))
 }
 
 /// The phrases of [`PHRASES`] that `message` holds, in the order of the list. A line that points at the records is
@@ -237,16 +184,6 @@ mod tests {
         .to_string()
     }
 
-    fn gemini(message: &str, active: bool) -> String {
-        json!({
-            "hook_event_name": "AfterAgent",
-            "prompt": "fix it",
-            "stop_hook_active": active,
-            "prompt_response": message,
-        })
-        .to_string()
-    }
-
     #[test]
     fn a_phrase_with_no_change_in_docs_sends_the_agent_back() {
         let out = decide(
@@ -261,26 +198,6 @@ mod tests {
             .unwrap();
         assert!(context.contains("\"not checked\""), "{context}");
         assert_eq!(out["hookSpecificOutput"]["hookEventName"], "Stop");
-    }
-
-    #[test]
-    fn gemini_cli_is_sent_back_in_its_own_form() {
-        let out = decide(&gemini("Linux は未確認です", false), || Ok(false))
-            .unwrap()
-            .expect("sent back");
-        let out: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(out["decision"], "deny");
-        assert!(
-            out["reason"].as_str().unwrap().contains("\"未確認\""),
-            "{out}"
-        );
-        assert_eq!(
-            decide(&gemini("未確認", true), || panic!("not asked")),
-            Ok(None)
-        );
-        // Each agent's message is read from its own field only
-        let crossed = json!({"hook_event_name": "AfterAgent", "last_assistant_message": "未確認"});
-        assert!(decide(&crossed.to_string(), || Ok(false)).is_err());
     }
 
     #[test]
@@ -326,11 +243,14 @@ mod tests {
     }
 
     #[test]
-    fn an_input_from_neither_hook_fails() {
+    fn an_input_from_another_hook_fails() {
         assert!(decide("not json", || Ok(false)).is_err());
         assert!(decide("{}", || Ok(false)).is_err());
         let other = json!({"hook_event_name": "PreToolUse", "last_assistant_message": "未確認"});
         assert!(decide(&other.to_string(), || Ok(false)).is_err());
+        // Gemini CLI's event is no longer answered
+        let gemini = json!({"hook_event_name": "AfterAgent", "prompt_response": "未確認"});
+        assert!(decide(&gemini.to_string(), || Ok(false)).is_err());
         let empty = json!({"hook_event_name": "Stop"});
         assert!(decide(&empty.to_string(), || Ok(false)).is_err());
     }

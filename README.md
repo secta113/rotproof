@@ -67,7 +67,7 @@ rotproof --root <repository> create  # make the layers .config/rotproof.toml dec
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write every generated file in docs/ (the index files and the rules)
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
-rotproof stop-hook                   # run by Claude Code or Gemini CLI when the agent stops (see "The stop hook")
+rotproof stop-hook                   # run by Claude Code when the agent stops (see "The stop hook")
 ```
 
 `--root` defaults to the current directory. The declaration is read from `<repository>/.config/rotproof.toml`, and the
@@ -101,7 +101,7 @@ The project's files are written once, as a starting point, and are the project's
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
-| `.claude/settings.json`, `.gemini/settings.json` | The stop hook (see "The stop hook") |
+| `.claude/settings.json` | The stop hook (see "The stop hook") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
 
@@ -131,17 +131,16 @@ in `CLAUDE.md` for Claude Code:
 ## The stop hook
 
 An agent's findings are lost when it reports them and stops: "not checked", "out of scope" in its last message, and
-nothing in the backlog. `rotproof stop-hook` is the hook an agent runs when it stops, and reads that last message:
-[Claude Code's `Stop`](https://code.claude.com/docs/en/hooks) and
-[Gemini CLI's `AfterAgent`](https://geminicli.com/docs/hooks/reference/), told apart by the event in their input. When
-the message holds a phrase that leaves something open and `git status` shows no change in `docs/`, the hook sends the
-agent back once, asking it to record the finding or to say in one line where it already is. While the agent is
+nothing in the backlog. `rotproof stop-hook` is [Claude Code's `Stop` hook](https://code.claude.com/docs/en/hooks),
+run when the agent stops, and reads that last message. When the message holds a phrase that leaves something open
+and `git status` shows no change in `docs/`, the hook sends the agent back once, asking it to record the finding or to
+say in one line where it already is. While the agent is
 continuing because of a stop hook, the hook lets it stop, so it never loops. A line that points at the records (the
 word `spec`, `backlog` or `knowledge`) is not read: what it leaves open is recorded where it points. The
 phrases are built in (Japanese and English); the agent decides what each one meant.
 
-`rotproof create` writes `.claude/settings.json` and `.gemini/settings.json` with the hook, each when it does not
-exist. A project that has one adds the hook to it:
+`rotproof create` writes `.claude/settings.json` with the hook when it does not exist. A project that has one adds the
+hook to it:
 
 ```json
 {
@@ -150,8 +149,6 @@ exist. A project that has one adds the hook to it:
   }
 }
 ```
-
-In `.gemini/settings.json` the event is `AfterAgent` instead of `Stop`.
 
 `rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active). The
 project is the nearest directory upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A

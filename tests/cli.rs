@@ -1794,17 +1794,13 @@ fn the_stop_hook_sends_the_agent_back_once_while_docs_did_not_change() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     assert!(run(&["--root", &root_arg(r), "create"]).status.success());
-    // create wrote the settings that run the hook, for each agent
-    for (path, event) in [
-        (".claude/settings.json", "\"Stop\""),
-        (".gemini/settings.json", "\"AfterAgent\""),
-    ] {
-        let settings = fs::read_to_string(r.join(path)).unwrap();
-        assert!(
-            settings.contains("\"command\": \"rotproof stop-hook\"") && settings.contains(event),
-            "{settings}"
-        );
-    }
+    // create wrote the settings that run the hook, for Claude Code only
+    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
+    assert!(
+        settings.contains("\"command\": \"rotproof stop-hook\"") && settings.contains("\"Stop\""),
+        "{settings}"
+    );
+    assert!(!r.join(".gemini").exists());
     git(r, &["init", "-q"]);
     git(r, &["add", "-A"]);
     git(r, &["commit", "-q", "-m", "start"]);
@@ -1823,10 +1819,6 @@ fn the_stop_hook_sends_the_agent_back_once_while_docs_did_not_change() {
         assert!(said.contains("\"additionalContext\""), "{said}");
         assert!(said.contains("\\\"not checked\\\""), "{said}");
     }
-    // Gemini CLI, in its own form
-    let gemini = r#"{"hook_event_name": "AfterAgent", "stop_hook_active": false, "prompt_response": "Linux は未確認"}"#;
-    let said = stdout(&stop_hook(r, gemini));
-    assert!(said.contains("\"decision\":\"deny\""), "{said}");
     // Once per stop
     let again = open.replace("\"stop_hook_active\": false", "\"stop_hook_active\": true");
     assert_eq!(stdout(&stop_hook(r, &again)), "");
