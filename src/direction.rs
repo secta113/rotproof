@@ -16,7 +16,7 @@
 use std::io;
 use std::path::Path;
 
-use crate::layers::{Declared, Entry, Language, Layout, Place, Table, listed, not_read, table};
+use crate::layers::{Declared, Language, Layout, Place, listed, not_read};
 use crate::python::module_parts;
 use crate::source::{code_files, read_code};
 
@@ -56,12 +56,12 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Direction> {
 }
 
 /// The finding for an import from `from` that lands in `to`, or `None` when the table allows it.
-fn judged(table: &Table, at: &str, what: &str, from: &Place, to: &Place) -> Option<String> {
-    (!allowed(table, from, to)).then(|| {
+fn judged(at: &str, what: &str, from: &Place, to: &Place) -> Option<String> {
+    (!allowed(from, to)).then(|| {
         format!(
             "{at}: imports {what}, {}; {}",
             described(from, to),
-            what_it_may_import(table, from)
+            what_it_may_import(from)
         )
     })
 }
@@ -69,7 +69,6 @@ fn judged(table: &Table, at: &str, what: &str, from: &Place, to: &Place) -> Opti
 /// The direction check of a TypeScript project: every import of a source file in a layer, resolved to a path
 /// (`typescript.rs`), judged by the place that path sits in.
 fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Direction> {
-    let table = table();
     let aliases = crate::typescript::aliases(root)?;
     let mut found: Vec<String> = aliases
         .problems
@@ -116,7 +115,6 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Dir
                 continue;
             };
             found.extend(judged(
-                &table,
                 &format!("{path}:{line}"),
                 &format!("{specifier} ({target})"),
                 from,
@@ -132,7 +130,6 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Dir
 
 /// The direction check of a Python project: every import of a `.py` file in a layer, as the module it names.
 fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Direction> {
-    let table = table();
     let mut found = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
@@ -153,7 +150,6 @@ fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Directi
                     continue;
                 };
                 found.extend(judged(
-                    &table,
                     &format!("{path}:{line}"),
                     &module.join("."),
                     from,
@@ -180,31 +176,17 @@ fn place_of<'a>(module: &[String], places: &[&'a Place]) -> Option<&'a Place> {
         .max_by_key(|place| place.path.len())
 }
 
-/// The table's entry for a place: a layer by its name, a level of `ui` by the part after the dot.
-fn entry<'t>(table: &'t Table, place: &Place) -> &'t Entry {
-    let (list, name) = match &place.parent {
-        None => (&table.layers, place.name.as_str()),
-        Some(_) => (
-            &table.levels,
-            place.name.rsplit('.').next().unwrap_or(&place.name),
-        ),
-    };
-    list.iter()
-        .find(|e| e.name == name)
-        .unwrap_or_else(|| panic!("every place is in the table: {}", place.name))
-}
-
 /// The layer a place sits in: itself, or the layer of a level.
 fn layer_name(place: &Place) -> &str {
     place.parent.as_deref().unwrap_or(&place.name)
 }
 
 /// Whether the place `from` may import the place `to`.
-fn allowed(table: &Table, from: &Place, to: &Place) -> bool {
+fn allowed(from: &Place, to: &Place) -> bool {
     if from.name == to.name {
         return true;
     }
-    let imports = &entry(table, from).imports;
+    let imports = &from.imports;
     match &from.parent {
         // A layer may import itself, the levels inside it included, and the layers in its imports with their levels
         None => layer_name(to) == from.name || imports.iter().any(|i| i == layer_name(to)),
@@ -213,16 +195,7 @@ fn allowed(table: &Table, from: &Place, to: &Place) -> bool {
             if layer_name(to) != parent {
                 return imports.iter().any(|i| i == layer_name(to));
             }
-            if to.parent.is_none() {
-                return false;
-            }
-            let rank = |place: &Place| {
-                table
-                    .levels
-                    .iter()
-                    .position(|l| entry(table, place).name == l.name)
-            };
-            rank(to) > rank(from)
+            from.below.contains(&to.name)
         }
     }
 }
@@ -237,21 +210,15 @@ fn described(from: &Place, to: &Place) -> String {
 }
 
 /// What a place may import, for the message.
-fn what_it_may_import(table: &Table, place: &Place) -> String {
-    let entry = entry(table, place);
-    let below = place.parent.is_some()
-        && table
-            .levels
-            .last()
-            .is_some_and(|last| last.name != entry.name);
-    match (below, entry.imports.is_empty()) {
-        (false, true) => format!("{} imports no other layer", place.name),
-        (false, false) => format!("{} may import {}", place.name, listed(&entry.imports)),
-        (true, true) => format!("{} may import the levels below it", place.name),
-        (true, false) => format!(
+fn what_it_may_import(place: &Place) -> String {
+    match (place.below.is_empty(), place.imports.is_empty()) {
+        (true, true) => format!("{} imports no other layer", place.name),
+        (true, false) => format!("{} may import {}", place.name, listed(&place.imports)),
+        (false, true) => format!("{} may import the levels below it", place.name),
+        (false, false) => format!(
             "{} may import the levels below it and {}",
             place.name,
-            listed(&entry.imports)
+            listed(&place.imports)
         ),
     }
 }
@@ -259,7 +226,7 @@ fn what_it_may_import(table: &Table, place: &Place) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layers::layout;
+    use crate::layers::{layout, table};
 
     fn python_places() -> Vec<Place> {
         layout("python").unwrap().places(&table())
@@ -272,16 +239,15 @@ mod tests {
     #[test]
     fn what_the_table_allows_is_closed_under_chaining() {
         // Only direct imports are judged, so a chain of allowed imports must never reach what its first may not
-        let table = table();
         let places = python_places();
         let mut chains = 0;
         for a in &places {
             for b in &places {
                 for c in &places {
-                    if allowed(&table, a, b) && allowed(&table, b, c) {
+                    if allowed(a, b) && allowed(b, c) {
                         chains += 1;
                         assert!(
-                            allowed(&table, a, c),
+                            allowed(a, c),
                             "{} may import {}, which may import {}, but {} may not import {}",
                             a.name,
                             b.name,
@@ -314,11 +280,8 @@ mod tests {
 
     #[test]
     fn the_message_says_what_a_place_may_import() {
-        let table = table();
         let places = python_places();
-        let say = |name: &str| {
-            what_it_may_import(&table, places.iter().find(|p| p.name == name).unwrap())
-        };
+        let say = |name: &str| what_it_may_import(places.iter().find(|p| p.name == name).unwrap());
         assert_eq!(say("utils"), "utils imports no other layer");
         assert_eq!(say("domain"), "domain may import `utils`");
         assert_eq!(say("ui.atoms"), "ui.atoms may import `utils`");

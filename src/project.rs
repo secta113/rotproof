@@ -96,18 +96,17 @@ pub fn project_files(
 /// The rows of the map for the layers present in the declaration, each with the first line of its role, which the
 /// project rewrites into what the layer holds there.
 fn map(declared: &Declared) -> String {
-    let table = table();
     declared
         .places
         .iter()
         .filter(|p| p.parent.is_none() && !declared.is_absent(p))
         .map(|place| {
-            let role = table
-                .layers
-                .iter()
-                .find(|l| l.name == place.name)
-                .and_then(|l| l.role.trim().lines().next())
-                .expect("a place of a layout is a layer of the table: a test reads every layout");
+            let role = place
+                .role
+                .trim()
+                .lines()
+                .next()
+                .expect("every role has text: a test reads the table");
             format!("| `{}/` | {role} |\n", place.path)
         })
         .collect()
@@ -172,43 +171,30 @@ pub fn guide(stack: &str, layout: Option<&Layout>) -> String {
 
 /// The section on the layers: the rules, and the table of where each layer lives in this stack and what it may import.
 fn layers_section(layout: &Layout) -> String {
-    let table = table();
     let has = |name: &String| !layout.without.contains(name);
     let mut rows = vec![
         "| Layer | Where | May import |".to_string(),
         "|---|---|---|".to_string(),
     ];
-    for layer in table.layers.iter().filter(|l| has(&l.name)) {
-        let path = layout.layer.path.replace("{name}", &layer.name);
-        let imports: Vec<String> = layer.imports.iter().filter(|n| has(n)).cloned().collect();
-        let imports = if layer.name == "ui" {
+    for place in layout.places(&table()) {
+        let imports = if place.parent.is_some() {
+            let below = if place.below.is_empty() {
+                ""
+            } else {
+                "The levels below it, and "
+            };
+            format!("{below}{}", listed(&place.imports))
+        } else if place.name == "ui" {
             "Nothing: it holds only its levels".to_string()
-        } else if imports.is_empty() {
+        } else if place.imports.is_empty() {
             "No other layer".to_string()
         } else {
-            listed(&imports)
+            listed(&place.imports)
         };
-        rows.push(format!("| `{}` | `{path}/` | {imports} |", layer.name));
-        if layer.name != "ui" {
-            continue;
-        }
-        let level = layout
-            .level
-            .as_ref()
-            .expect("a layout with ui has its levels: a test reads every layout");
-        for (i, entry) in table.levels.iter().enumerate() {
-            let path = level.path.replace("{name}", &entry.name);
-            let below = if i + 1 < table.levels.len() {
-                "The levels below it, and "
-            } else {
-                ""
-            };
-            rows.push(format!(
-                "| `ui.{}` | `{path}/` | {below}{} |",
-                entry.name,
-                listed(&entry.imports)
-            ));
-        }
+        rows.push(format!(
+            "| `{}` | `{}/` | {imports} |",
+            place.name, place.path
+        ));
     }
     let not_layers = if layout.not_layers.is_empty() {
         String::new()

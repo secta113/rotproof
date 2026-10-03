@@ -130,6 +130,13 @@ pub struct Place {
     pub path: String,
     /// The layer it sits in, for a level of `ui`
     pub parent: Option<String>,
+    /// Its role, as the table writes it
+    pub role: String,
+    /// The layers it may import besides itself, as the table lists them, without those this stack does not have
+    pub imports: Vec<String>,
+    /// For a level of `ui`, the levels below it, which it may import too: `ui.molecules` and `ui.atoms` for
+    /// `ui.organisms`. Empty for a layer
+    pub below: Vec<String>,
     /// Path from the root -> text
     pub files: Vec<(String, String)>,
 }
@@ -146,33 +153,38 @@ pub fn layout(stack: &str) -> Option<Layout> {
 }
 
 impl Layout {
-    /// Every place of this layout, layers first in the table's order, each followed by its levels.
+    /// Every place of this layout, layers first in the table's order, each followed by its levels: where it lives, and
+    /// what the table says it may import. The checks, the documentation of each layer and Rotproof's guide all read
+    /// this, so they cannot disagree.
     pub fn places(&self, table: &Table) -> Vec<Place> {
         let mut out = Vec::new();
-        // A layer documents only the imports this stack has: a Rust crate cannot import `ui`
+        // A place imports only the layers this stack has: a Rust crate cannot import `ui`
         let has = |name: &String| !self.without.contains(name);
+        let imports = |entry: &Entry| -> Vec<String> {
+            entry.imports.iter().filter(|n| has(n)).cloned().collect()
+        };
         for layer in table.layers.iter().filter(|l| has(&l.name)) {
-            let layer = &Entry {
-                imports: layer.imports.iter().filter(|n| has(n)).cloned().collect(),
-                ..layer.clone()
-            };
             let files = self
                 .layers
                 .get(&layer.name)
                 .map_or(&self.layer.files, |o| &o.files);
-            let path = self.layer.path.replace("{name}", &layer.name);
-            out.push(Place {
+            let mut place = Place {
                 name: layer.name.clone(),
-                files: render(
-                    files,
-                    &path,
-                    &layer.name,
-                    &self.doc_prefix,
-                    &layer_doc(layer),
-                ),
-                path,
+                path: self.layer.path.replace("{name}", &layer.name),
                 parent: None,
-            });
+                role: layer.role.clone(),
+                imports: imports(layer),
+                below: Vec::new(),
+                files: Vec::new(),
+            };
+            place.files = render(
+                files,
+                &place.path,
+                &layer.name,
+                &self.doc_prefix,
+                &doc(&place),
+            );
+            out.push(place);
             if layer.name != "ui" {
                 continue;
             }
@@ -181,14 +193,26 @@ impl Layout {
                 .as_ref()
                 .expect("a layout with ui has its levels: a test reads every layout");
             for (i, entry) in table.levels.iter().enumerate() {
-                let path = level.path.replace("{name}", &entry.name);
-                let doc = level_doc(entry, i + 1 < table.levels.len());
-                out.push(Place {
+                let mut place = Place {
                     name: format!("ui.{}", entry.name),
-                    files: render(&level.files, &path, &entry.name, &self.doc_prefix, &doc),
-                    path,
+                    path: level.path.replace("{name}", &entry.name),
                     parent: Some("ui".into()),
-                });
+                    role: entry.role.clone(),
+                    imports: imports(entry),
+                    below: table.levels[i + 1..]
+                        .iter()
+                        .map(|lower| format!("ui.{}", lower.name))
+                        .collect(),
+                    files: Vec::new(),
+                };
+                place.files = render(
+                    &level.files,
+                    &place.path,
+                    &entry.name,
+                    &self.doc_prefix,
+                    &doc(&place),
+                );
+                out.push(place);
             }
         }
         out
@@ -218,26 +242,21 @@ pub fn listed(names: &[String]) -> String {
     }
 }
 
-fn layer_doc(layer: &Entry) -> String {
-    let imports = if layer.imports.is_empty() {
+/// The documentation of a place: its role, then what it may import.
+fn doc(place: &Place) -> String {
+    let imports = if place.parent.is_some() {
+        let below = if place.below.is_empty() {
+            ""
+        } else {
+            "the levels below it, and "
+        };
+        format!("May import {below}{}.", listed(&place.imports))
+    } else if place.imports.is_empty() {
         "Imports no other layer.".to_string()
     } else {
-        format!("May import {}.", listed(&layer.imports))
+        format!("May import {}.", listed(&place.imports))
     };
-    format!("{}\n\n{imports}", layer.role.trim())
-}
-
-fn level_doc(level: &Entry, has_lower: bool) -> String {
-    let below = if has_lower {
-        "the levels below it, and "
-    } else {
-        ""
-    };
-    format!(
-        "{}\n\nMay import {below}{}.",
-        level.role.trim(),
-        listed(&level.imports)
-    )
+    format!("{}\n\n{imports}", place.role.trim())
 }
 
 /// The files of one place, from the root: `{name}` and `{doc}` filled in, each line of the documentation with the
