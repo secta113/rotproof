@@ -10,31 +10,26 @@
 //!
 //! The layout's `language` says how the code is read. For `python`, a module is named by its dotted name
 //! (`python.rs`), and sits in the place its parts start with. For `typescript`, an import is resolved to a path
-//! (`typescript.rs`), and sits in the place that path starts with. For a layout without one (`rust`), the check says
-//! that it did not run.
+//! (`typescript.rs`), and sits in the place that path starts with. For `rust`, a crate's code file is its
+//! `Cargo.toml`, and each dependency it declares (`cargo.rs`) is resolved to the path it names, directly or through
+//! its workspace, and sits in the place that path starts with, case not counting: Windows finds `../Domain` for
+//! `../domain`. Cargo compiles a crate only against the crates it declares, so the declarations are its imports.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
-use crate::layers::{Declared, Language, Layout, Place, listed, not_read};
+use crate::cargo::{Manifest, Origin};
+use crate::layers::{Declared, Language, Layout, Place, listed};
 use crate::python::module_parts;
-use crate::source::{code_files, read_code};
+use crate::source::{code_files, exactly, read_code, relative_path};
 
-/// What the direction check found.
-#[derive(Debug, Default)]
-pub struct Direction {
-    /// Every import a layer may not make, and every file that could not be read
-    pub found: Vec<String>,
-    /// What was not checked, and why
-    pub skipped: Option<String>,
-}
-
-/// Every import in the layers of `declared` that the table does not allow. An error is a directory that could not be
-/// walked.
-pub fn problems(root: &Path, declared: &Declared) -> io::Result<Direction> {
+/// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
+/// error is a directory that could not be walked.
+pub fn problems(root: &Path, declared: &Declared) -> io::Result<Vec<String>> {
     let Some(layout) = &declared.layout else {
         // A repository of records only: the structure check already says that the layers were not checked
-        return Ok(Direction::default());
+        return Ok(Vec::new());
     };
     // Only the places that are there: an import of a layer declared absent names a module the project does not have
     let places: Vec<&Place> = declared
@@ -43,32 +38,201 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Direction> {
         .filter(|p| !declared.is_absent(p) && crate::source::exactly(root, &p.path).is_ok())
         .collect();
     match layout.language {
-        Some(Language::Python) => python(root, layout, &places),
-        Some(Language::TypeScript) => typescript(root, layout, &places),
-        None => Ok(Direction {
-            found: Vec::new(),
-            skipped: Some(format!(
-                "the direction of imports is not checked: {}",
-                not_read(&declared.declaration.stack, "imports")
-            )),
-        }),
+        Language::Python => python(root, layout, &places),
+        Language::TypeScript => typescript(root, layout, &places),
+        Language::Rust => rust(root, layout, &places),
     }
 }
 
-/// The finding for an import from `from` that lands in `to`, or `None` when the table allows it.
+/// The finding for an import from `from` that lands in `to`, or `None` when the table allows it. `what` says what
+/// was imported, as "imports x" or "depends on x".
 fn judged(at: &str, what: &str, from: &Place, to: &Place) -> Option<String> {
     (!allowed(from, to)).then(|| {
         format!(
-            "{at}: imports {what}, {}; {}",
+            "{at}: {what}, {}; {}",
             described(from, to),
             what_it_may_import(from)
         )
     })
 }
 
+/// The direction check of a Rust project: every dependency the manifest of a crate in a layer declares, judged by the
+/// place the path it comes from sits in.
+fn rust(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
+    let mut found = Vec::new();
+    let mut manifests = Manifests::default();
+    let parts = |path: &str| -> Vec<String> { path.split('/').map(String::from).collect() };
+    for layer in places.iter().filter(|p| p.parent.is_none()) {
+        for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
+            let Some(from) = place_of(&parts(&path), places) else {
+                continue;
+            };
+            let Some(manifest) = manifests.read(root, &path, &mut found)? else {
+                continue;
+            };
+            let dir = parent(&path);
+            for dependency in &manifest.dependencies {
+                let at = format!("{path}:{}", dependency.line);
+                let name = &dependency.name;
+                let (target, through) = match &dependency.origin {
+                    Origin::Path(rel) => (joined(root, dir, rel), ""),
+                    Origin::Workspace => {
+                        let Some((workspace, entry)) =
+                            manifests.workspace(root, dir, &manifest, &mut found)?
+                        else {
+                            let looked = match &manifest.workspace {
+                                Some(rel) => format!(
+                                    "{rel}, which [package] workspace names, is no workspace"
+                                ),
+                                None => {
+                                    format!("no Cargo.toml from {dir} up to the root declares one")
+                                }
+                            };
+                            found.push(format!(
+                                "{at}: {name} comes from the workspace, and {looked}, so it is not checked"
+                            ));
+                            continue;
+                        };
+                        let Some(rel) = entry.workspace_dependencies.get(name) else {
+                            found.push(format!(
+                                "{at}: {name} comes from the workspace, and {} has no {name} in \
+                                 [workspace.dependencies], so it is not checked",
+                                in_dir(&workspace, "Cargo.toml")
+                            ));
+                            continue;
+                        };
+                        // One from a registry or git names no place
+                        let Some(rel) = rel else {
+                            continue;
+                        };
+                        (joined(root, &workspace, rel), ", from the workspace")
+                    }
+                };
+                let Some(target) = target else {
+                    continue;
+                };
+                let Some(to) = place_where(&parts(&target), places, str::eq_ignore_ascii_case)
+                else {
+                    continue;
+                };
+                found.extend(judged(
+                    &at,
+                    &format!("depends on {name} ({target}{through})"),
+                    from,
+                    to,
+                ));
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Every manifest read by the Rust check, by its path from the root, so a workspace is read once for all its members
+/// and a manifest that cannot be read is said once.
+#[derive(Default)]
+struct Manifests(BTreeMap<String, Option<Manifest>>);
+
+impl Manifests {
+    /// The manifest at `path`, from the root: `None`, with a finding, when it cannot be read as TOML or UTF-8.
+    fn read(
+        &mut self,
+        root: &Path,
+        path: &str,
+        found: &mut Vec<String>,
+    ) -> io::Result<Option<Manifest>> {
+        if let Some(manifest) = self.0.get(path) {
+            return Ok(manifest.clone());
+        }
+        let manifest = match read_code(root, path, "dependencies", found)? {
+            None => None,
+            Some(source) => match crate::cargo::read(&source) {
+                Ok(manifest) => Some(manifest),
+                Err((line, why)) => {
+                    found.push(format!(
+                        "{path}:{line}: cannot be read as TOML ({why}), so its dependencies are not checked"
+                    ));
+                    None
+                }
+            },
+        };
+        self.0.insert(path.to_string(), manifest.clone());
+        Ok(manifest)
+    }
+
+    /// The workspace of the manifest in `dir`, as Cargo finds it: the directory its `[package] workspace` names, or
+    /// the first directory from `dir` up to the root whose `Cargo.toml` declares `[workspace]`. Its directory from the
+    /// root and its manifest, or `None` when there is none in the project.
+    fn workspace(
+        &mut self,
+        root: &Path,
+        dir: &str,
+        manifest: &Manifest,
+        found: &mut Vec<String>,
+    ) -> io::Result<Option<(String, Manifest)>> {
+        let mut at = match &manifest.workspace {
+            Some(rel) => match joined(root, dir, rel) {
+                Some(workspace) => workspace,
+                None => return Ok(None),
+            },
+            None => dir.to_string(),
+        };
+        loop {
+            let path = in_dir(&at, "Cargo.toml");
+            if exactly(root, &path).is_ok_and(|full| full.is_file())
+                && let Some(candidate) = self.read(root, &path, found)?
+                && candidate.is_workspace
+            {
+                return Ok(Some((at, candidate)));
+            }
+            // `[package] workspace` names the one directory to look in
+            if manifest.workspace.is_some() || at.is_empty() {
+                return Ok(None);
+            }
+            at = parent(&at).to_string();
+        }
+    }
+}
+
+/// The directory of a path from the root ("" for the root).
+fn parent(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// The path of `name` in `dir`, both from the root.
+fn in_dir(dir: &str, name: &str) -> String {
+    if dir.is_empty() {
+        name.to_string()
+    } else {
+        format!("{dir}/{name}")
+    }
+}
+
+/// The path `rel` names from `dir` (from the root), from the root with `/`, or `None` when it leaves the root. `\`
+/// separates parts too, as Windows reads it, and an absolute path counts when it is inside the root.
+fn joined(root: &Path, dir: &str, rel: &str) -> Option<String> {
+    let (start, rel) = if Path::new(rel).is_absolute() {
+        let root = std::path::absolute(root).ok()?;
+        let inside = Path::new(rel).strip_prefix(&root).ok()?;
+        (String::new(), relative_path(inside, Path::new("")))
+    } else {
+        (dir.to_string(), rel.to_string())
+    };
+    let mut parts: Vec<&str> = start.split('/').filter(|p| !p.is_empty()).collect();
+    for part in rel.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            _ => parts.push(part),
+        }
+    }
+    Some(parts.join("/"))
+}
+
 /// The direction check of a TypeScript project: every import of a source file in a layer, resolved to a path
 /// (`typescript.rs`), judged by the place that path sits in.
-fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Direction> {
+fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
     let aliases = crate::typescript::aliases(root)?;
     let mut found: Vec<String> = aliases
         .problems
@@ -116,20 +280,17 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Dir
             };
             found.extend(judged(
                 &format!("{path}:{line}"),
-                &format!("{specifier} ({target})"),
+                &format!("imports {specifier} ({target})"),
                 from,
                 to,
             ));
         }
     }
-    Ok(Direction {
-        found,
-        skipped: None,
-    })
+    Ok(found)
 }
 
 /// The direction check of a Python project: every import of a `.py` file in a layer, as the module it names.
-fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Direction> {
+fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
     let mut found = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
@@ -151,27 +312,33 @@ fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Directi
                 };
                 found.extend(judged(
                     &format!("{path}:{line}"),
-                    &module.join("."),
+                    &format!("imports {}", module.join(".")),
                     from,
                     to,
                 ));
             }
         }
     }
-    Ok(Direction {
-        found,
-        skipped: None,
-    })
+    Ok(found)
 }
 
 /// The place a module sits in: the one whose path is the longest prefix of the module's parts.
 fn place_of<'a>(module: &[String], places: &[&'a Place]) -> Option<&'a Place> {
+    place_where(module, places, |a, b| a == b)
+}
+
+/// The place a module sits in, its parts compared with `same`.
+fn place_where<'a>(
+    module: &[String],
+    places: &[&'a Place],
+    same: impl Fn(&str, &str) -> bool,
+) -> Option<&'a Place> {
     places
         .iter()
         .copied()
         .filter(|place| {
             let parts: Vec<&str> = place.path.split('/').collect();
-            module.len() >= parts.len() && parts.iter().zip(module).all(|(a, b)| a == b)
+            module.len() >= parts.len() && parts.iter().zip(module).all(|(a, b)| same(a, b))
         })
         .max_by_key(|place| place.path.len())
 }

@@ -9,8 +9,8 @@
 //!
 //! The layout's `language` says how the code is read: a Python file's `#` comments with Ruff's parser (`python.rs`), a
 //! TypeScript or JavaScript file's `//` and `/* */` comments with oxc (`typescript.rs`), where JSX text is not a
-//! comment. For a layout without one (`rust`), the check says that it did not run. The floor: at least one source file
-//! is read, or the check fails instead of passing with nothing read.
+//! comment. For `rust`, whose code files are the crates' manifests, the check says that it did not run. The floor:
+//! at least one source file is read, or the check fails instead of passing with nothing read.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -67,15 +67,29 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         // A repository of records only has no code to read
         return Ok(Markers::default());
     };
-    let Some(language) = layout.language else {
-        return Ok(Markers {
-            skipped: Some(format!(
-                "comments are not checked for {}: {}",
-                MARKERS.join(", "),
-                not_read(&declared.declaration.stack, "comments")
-            )),
-            ..Markers::default()
-        });
+    // Which code files have comments to read, and how to read them
+    type Comments = fn(&str, &str) -> Vec<(usize, String)>;
+    let (is_source, comments): (fn(&str) -> bool, Comments) = match layout.language {
+        // Every code file of a Python layout is a `.py` file: a test reads every layout
+        Language::Python => (
+            |_| true,
+            |source, path| crate::python::read(source, path).comments,
+        ),
+        // Every file in `src/` is code in the layout; only source has comments to read
+        Language::TypeScript => (crate::typescript::is_source, |source, path| {
+            crate::typescript::read(source, path).comments
+        }),
+        // The code files of a Rust layout are its manifests, and the comments of `.rs` files are not read yet
+        Language::Rust => {
+            return Ok(Markers {
+                skipped: Some(format!(
+                    "comments are not checked for {}: {}",
+                    MARKERS.join(", "),
+                    not_read(&declared.declaration.stack, "comments")
+                )),
+                ..Markers::default()
+            });
+        }
     };
     let unchecked: Vec<&str> = declared
         .declaration
@@ -90,13 +104,7 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         if unchecked.iter().any(|skip| within(&path, skip)) {
             continue;
         }
-        let is_source = match language {
-            // Every code file of a Python layout is a `.py` file: a test reads every layout
-            Language::Python => true,
-            // Every file in `src/` is code in the layout; only source has comments to read
-            Language::TypeScript => crate::typescript::is_source(&path),
-        };
-        if !is_source {
+        if !is_source(&path) {
             continue;
         }
         let Some(source) = read_code(root, &path, "comments", &mut found)? else {
@@ -104,11 +112,7 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         };
         read += 1;
         let lines: Vec<&str> = source.lines().collect();
-        let comments = match language {
-            Language::Python => crate::python::read(&source, &path).comments,
-            Language::TypeScript => crate::typescript::read(&source, &path).comments,
-        };
-        for (line, in_comment) in in_comments(&source, &comments) {
+        for (line, in_comment) in in_comments(&source, &comments(&source, &path)) {
             found.push(format!("{path}:{line}\n{}", lines[line - 1].trim()));
             words.extend(in_comment);
         }

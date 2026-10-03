@@ -2,8 +2,8 @@
 //!
 //! - **The tree matches `.config/rotproof.toml`**: the layers of the stack are present or declared absent, and no code
 //!   sits outside them (`structure.rs`).
-//! - **The layers import only what the table allows** (`direction.rs`), for `python` and `typescript`; `rust` says
-//!   that the direction was not checked.
+//! - **The layers import only what the table allows** (`direction.rs`): the imports of `python` and `typescript`, and
+//!   the dependencies each crate of `rust` declares.
 //! - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`** (`markers.rs`), for `python` and `typescript`:
 //!   work left to do belongs in the backlog, where it is listed and closed.
 //! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
@@ -105,11 +105,10 @@ pub fn check(root: &Path) -> io::Result<Report> {
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
         let direction = crate::direction::problems(root, declared)?;
-        findings.extend(direction.found.into_iter().map(|detail| Finding {
+        findings.extend(direction.into_iter().map(|detail| Finding {
             check: "the layers import only what layers/table.toml allows".into(),
             detail,
         }));
-        skipped.extend(direction.skipped);
         let markers = crate::markers::problems(root, declared)?;
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {

@@ -1,0 +1,5 @@
+- **Each layer imports only what this table allows, besides itself.** A crate uses only the crates its `Cargo.toml`
+  declares, so `rotproof check` reads the dependencies each crate declares (`[dependencies]` and
+  `[build-dependencies]`, under `[target]` too) and fails on any other; `[dev-dependencies]` serve the tests and are
+  not judged. Only direct dependencies are judged: what the table allows is closed under chaining. Each layer's role
+  is in the documentation `rotproof create` wrote into it.

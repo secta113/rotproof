@@ -1068,71 +1068,184 @@ const MAY_IMPORT: [&str; 11] = [
 
 #[test]
 fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
-    // (stack, the file of a place, how a line imports a place, how the finding names the import)
-    type Form = fn(&str) -> String;
-    let stacks: [(&str, Form, Form, Form); 2] = [
-        (
-            "python",
-            |from| format!("{}/__init__.py", from.replace('.', "/")),
-            |to| format!("import {to}\n"),
-            |to| to.to_string(),
-        ),
-        (
-            "typescript",
-            |from| format!("src/{}/index.ts", from.replace('.', "/")),
-            |to| format!("import '/src/{}';\n", to.replace('.', "/")),
-            |to| {
+    // A stack: the file of a place, the text before its imports, how a line imports a place, how the finding says the
+    // import with the verb it starts with, and how many pairs the table forbids among the places the stack has
+    struct Stack {
+        name: &'static str,
+        file: fn(&str) -> String,
+        head: &'static str,
+        import: fn(&str) -> String,
+        said_as: fn(&str) -> String,
+        verb: &'static str,
+        forbidden: usize,
+    }
+    let stacks = [
+        Stack {
+            name: "python",
+            file: |from| format!("{}/__init__.py", from.replace('.', "/")),
+            head: "",
+            import: |to| format!("import {to}\n"),
+            said_as: |to| format!("imports {to}"),
+            verb: "imports",
+            forbidden: 68,
+        },
+        Stack {
+            name: "typescript",
+            file: |from| format!("src/{}/index.ts", from.replace('.', "/")),
+            head: "",
+            import: |to| format!("import '/src/{}';\n", to.replace('.', "/")),
+            said_as: |to| {
                 let path = to.replace('.', "/");
-                format!("/src/{path} (src/{path})")
+                format!("imports /src/{path} (src/{path})")
             },
-        ),
+            verb: "imports",
+            forbidden: 68,
+        },
+        Stack {
+            // No ui: a crate per layer
+            name: "rust",
+            file: |from| format!("crates/{from}/Cargo.toml"),
+            head: "[package]\nname = \"place\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\n",
+            import: |to| format!("{to} = {{ path = \"../{to}\" }}\n"),
+            said_as: |to| format!("depends on {to} (crates/{to})"),
+            verb: "depends on",
+            forbidden: 11,
+        },
     ];
-    for (stack, file, import, named_as) in stacks {
-        let root = repo_with_ui(stack, "");
+    for stack in stacks {
+        let name = stack.name;
+        let root = repo_with_ui(name, "");
         let r = root.path();
+        let has = |place: &&str| name != "rust" || !place.starts_with("ui");
+        let places: Vec<(usize, &str)> = PLACES
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, p)| has(p))
+            .collect();
         // Each place's own file imports every place, one per line, in the order of PLACES
-        let imports: String = PLACES.iter().map(|to| import(to)).collect();
-        for from in PLACES {
-            fs::write(r.join(file(from)), &imports).unwrap();
+        let imports: String = places.iter().map(|(_, to)| (stack.import)(to)).collect();
+        for (_, from) in &places {
+            fs::write(
+                r.join((stack.file)(from)),
+                format!("{}{imports}", stack.head),
+            )
+            .unwrap();
         }
         let out = run(&["--root", &root_arg(r), "check"]);
         let said = stdout(&out);
         let mut forbidden = 0;
-        for (row, from) in PLACES.iter().enumerate() {
-            let cells: Vec<&str> = MAY_IMPORT[row].split(' ').collect();
+        for (row, from) in &places {
+            let cells: Vec<&str> = MAY_IMPORT[*row].split(' ').collect();
             assert_eq!(cells.len(), PLACES.len(), "{from}");
-            for (column, to) in PLACES.iter().enumerate() {
+            for (line, (column, to)) in places.iter().enumerate() {
                 let named = format!(
-                    "{}:{}: imports {}, in {to}",
-                    file(from),
-                    column + 1,
-                    named_as(to)
+                    "{}:{}: {}, in {to}",
+                    (stack.file)(from),
+                    stack.head.lines().count() + line + 1,
+                    (stack.said_as)(to)
                 );
-                match cells[column] {
+                match cells[*column] {
                     "Y" => assert!(
                         !said.contains(&named),
-                        "{stack}: {from} -> {to} failed:\n{said}"
+                        "{name}: {from} -> {to} failed:\n{said}"
                     ),
                     _ => {
                         forbidden += 1;
                         assert!(
                             said.contains(&named),
-                            "{stack}: {from} -> {to} passed:\n{said}"
+                            "{name}: {from} -> {to} passed:\n{said}"
                         );
                     }
                 }
             }
         }
         // The floor: every forbidden pair is one line, and nothing else failed
-        assert_eq!(forbidden, 68);
+        assert_eq!(forbidden, stack.forbidden, "{name}");
         assert_eq!(
-            said.matches(": imports ").count(),
+            said.matches(&format!(": {} ", stack.verb)).count(),
             forbidden,
-            "{stack}: {said}"
+            "{name}: {said}"
         );
         assert_eq!(out.status.code(), Some(1));
         assert!(said.contains("the layers import only what layers/table.toml allows:"));
     }
+}
+
+#[test]
+fn every_form_of_rust_dependency_is_judged() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let write = |path: &str, text: &str| fs::write(r.join(path), text).unwrap();
+    let package = |name: &str| {
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n")
+    };
+    write(
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"crates/*\"]\nresolver = \"3\"\n\n[workspace.dependencies]\n\
+         application = { path = \"crates/application\" }\ncore = { path = \"crates/domain\", package = \"domain\" }\n\
+         serde = \"1\"\n",
+    );
+    write(
+        "crates/domain/Cargo.toml",
+        &format!(
+            "{}\n[dependencies]\n\
+             serde = {{ workspace = true }}\n\
+             application.workspace = true\n\
+             utils = {{ path = \"../utils\" }}\n\
+             infra = {{ path = \"../Infrastructure\", package = \"infrastructure\" }}\n\
+             regex = \"1\"\n\
+             missing = {{ workspace = true }}\n\
+             \n[build-dependencies]\nhandler = {{ path = \"../handler\" }}\n\
+             \n[dev-dependencies]\nhandler = {{ path = \"../handler\" }}\n\
+             \n[target.'cfg(windows)'.dependencies]\n\
+             app = {{ path = \"..\\\\..\\\\crates\\\\application\\\\\", package = \"application\" }}\n\
+             outside = {{ path = \"../../../elsewhere\" }}\n",
+            package("domain")
+        ),
+    );
+    // A member that names its workspace, and one whose named workspace is none
+    write(
+        "crates/utils/Cargo.toml",
+        &format!(
+            "{}workspace = \"../..\"\n\n[dependencies]\ncore.workspace = true\n",
+            package("utils")
+        ),
+    );
+    write(
+        "crates/infrastructure/Cargo.toml",
+        &format!(
+            "{}workspace = \"..\"\n\n[dependencies]\ncore.workspace = true\n",
+            package("infrastructure")
+        ),
+    );
+    // Not TOML: its dependencies cannot be read
+    write("crates/application/Cargo.toml", "[package\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    for line in [
+        "crates/domain/Cargo.toml:8: depends on application (crates/application, from the workspace), in application; \
+         domain may import `utils`",
+        "crates/domain/Cargo.toml:10: depends on infra (crates/Infrastructure), in infrastructure; ",
+        "crates/domain/Cargo.toml:12: missing comes from the workspace, and Cargo.toml has no missing in \
+         [workspace.dependencies], so it is not checked",
+        "crates/domain/Cargo.toml:15: depends on handler (crates/handler), in handler; ",
+        "crates/domain/Cargo.toml:21: depends on app (crates/application), in application; ",
+        "crates/utils/Cargo.toml:8: depends on core (crates/domain, from the workspace), in domain; utils imports no \
+         other layer",
+        "crates/infrastructure/Cargo.toml:8: core comes from the workspace, and .., which [package] workspace names, \
+         is no workspace, so it is not checked",
+        "crates/application/Cargo.toml:1: cannot be read as TOML (",
+    ] {
+        assert!(said.contains(line), "{line}:\n{said}");
+    }
+    assert_eq!(said.matches(": depends on ").count(), 5, "{said}");
+    assert_eq!(
+        said.matches("comes from the workspace").count(),
+        2,
+        "{said}"
+    );
 }
 
 #[test]
@@ -1392,11 +1505,9 @@ fn what_a_stack_does_not_check_is_said() {
         let out = run(&["--root", &arg, "check"]);
         let said = stdout(&out);
         assert!(out.status.success(), "{stack}: {said}");
-        assert_eq!(
-            said.contains(&format!(
-                "the direction of imports is not checked: Rotproof does not read the imports of a {stack} project yet"
-            )),
-            stack == "rust",
+        // Every stack with layers checks the direction
+        assert!(
+            !said.contains("the direction of imports is not checked"),
             "{stack}: {said}"
         );
         assert_eq!(

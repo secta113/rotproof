@@ -100,10 +100,8 @@ pub struct Layout {
     /// Where code outside the layers goes in this stack, said in the finding for it
     #[serde(default)]
     pub where_code_goes: Option<String>,
-    /// The language Rotproof reads the code as. `None` when it reads none of this stack: the checks that read code say
-    /// they did not run
-    #[serde(default)]
-    pub language: Option<Language>,
+    /// The language Rotproof reads the code as
+    pub language: Language,
 }
 
 /// A language Rotproof reads: the imports for the direction check, and the comments for the marker check.
@@ -114,9 +112,12 @@ pub enum Language {
     Python,
     /// TypeScript and JavaScript, with oxc (`typescript.rs`)
     TypeScript,
+    /// The dependencies each crate declares in its `Cargo.toml` (`cargo.rs`). Its comments are not read yet
+    Rust,
 }
 
-/// Why a check that reads code did not run for a stack whose layout names no language: `what` is what it would read.
+/// Why a check that reads code did not run for a stack whose language Rotproof does not read that part of: `what` is
+/// what it would read.
 pub fn not_read(stack: &str, what: &str) -> String {
     format!("Rotproof does not read the {what} of a {stack} project yet")
 }
@@ -530,8 +531,15 @@ mod tests {
             }
             // The Python reader names a module after its `.py` file, and the marker check reads every code file of a
             // Python layout without asking
-            if layout.language == Some(Language::Python) {
+            if layout.language == Language::Python {
                 assert_eq!(layout.code, "*.py", "{stack}: code a Python layout reads");
+            }
+            // The direction check of a Rust layout reads the code files as manifests
+            if layout.language == Language::Rust {
+                assert_eq!(
+                    layout.code, "Cargo.toml",
+                    "{stack}: code a Rust layout reads"
+                );
             }
             let places = layout.places(&table);
             assert!(places.len() >= 5, "{stack} makes {} places", places.len());

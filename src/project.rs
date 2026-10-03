@@ -12,7 +12,7 @@
 //! The texts are in `project/`, built into the binary. Each is named after the file it becomes, without a leading dot
 //! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
 
-use crate::layers::{Declared, Layout, listed, table};
+use crate::layers::{Declared, Language, Layout, listed, table};
 
 /// Rotproof's guide, from the root
 pub const GUIDE: &str = ".rotproof/AGENTS.md";
@@ -20,6 +20,9 @@ pub const GUIDE: &str = ".rotproof/AGENTS.md";
 const GUIDE_TEXT: &str = include_str!("../project/rotproof/AGENTS.md.in");
 const LAYERS_TEXT: &str = include_str!("../project/rotproof/layers.md.in");
 const UI_TEXT: &str = include_str!("../project/rotproof/ui.md.in");
+/// How the direction is read: the imports of a source file, or the dependencies of a crate
+const DIRECTION_IMPORTS: &str = include_str!("../project/rotproof/direction-imports.md.in");
+const DIRECTION_CARGO: &str = include_str!("../project/rotproof/direction-cargo.md.in");
 
 const AGENTS_TEXT: &str = include_str!("../project/AGENTS.md.in");
 const CLAUDE_TEXT: &str = include_str!("../project/CLAUDE.md.in");
@@ -211,7 +214,12 @@ fn layers_section(layout: &Layout) -> String {
         )
     };
     let ui = if has(&"ui".to_string()) { UI_TEXT } else { "" };
+    let direction = match layout.language {
+        Language::Python | Language::TypeScript => DIRECTION_IMPORTS,
+        Language::Rust => DIRECTION_CARGO,
+    };
     LAYERS_TEXT
+        .replace("{direction}\n", direction)
         .replace("{not_layers}", &not_layers)
         .replace("{table}", &format!("{}\n", rows.join("\n")))
         .replace("{ui}", ui)
@@ -239,6 +247,7 @@ mod tests {
                 "{not_layers}",
                 "{table}",
                 "{ui}",
+                "{direction}",
             ] {
                 assert!(
                     !text.contains(placeholder),

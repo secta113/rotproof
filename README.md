@@ -28,9 +28,8 @@ two structures:
 - **Whoever picks up the work next reads one index, not every file.** The index files are generated, never written by
   hand.
 
-Rotproof makes the layer directories, checks that they are where the project declares them, and reads the imports to
-check their direction: in Python and TypeScript now, with Rust to follow. For Rust, `rotproof check` says that it did
-not check the direction.
+Rotproof makes the layer directories, checks that they are where the project declares them, and checks their
+direction: from the imports in Python and TypeScript, and from the dependencies each crate declares in Rust.
 
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 (its `SPEC.md` as of commit `ad30107`): every document has YAML frontmatter with a `type`, `index.md` and `log.md` are
@@ -288,6 +287,16 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   cannot be read, or a `paths` entry with more than one `*`, fails rather than leaving its aliases unjudged. Two
   limits: only the first target of a `paths` entry is used, and a config extended from a package is not read, so an
   alias defined only there is taken for a package.
+- **The layers import only what the table allows** (Rust): a crate is compiled only against the crates its
+  `Cargo.toml` declares, so the declarations are read instead of `use`: every dependency in `[dependencies]` and
+  `[build-dependencies]` (and `build_dependencies`), under `[target.<cfg>]` too, of the `Cargo.toml` files in the
+  layers. The place of a dependency is the path it comes from: its `path` from the crate, or with `workspace = true`
+  the `path` of its entry in `[workspace.dependencies]` from the workspace, which is the directory `[package]
+  workspace` names, or the nearest one up to the root that declares `[workspace]`. A renamed dependency (`package`)
+  is placed by its path all the same, and case does not count, as Windows reads paths. `[dev-dependencies]` serve the
+  tests and are not judged; dependencies from a registry or git are not judged. A `Cargo.toml` that is not UTF-8 or
+  TOML fails, and so does a dependency taken from a workspace that does not declare it. Not seen: `[patch]` and
+  `[replace]`, and source files taken from another crate's directory (`#[path]`, `include!`, `[lib] path`).
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`** (Python, TypeScript): in upper case, as whole words,
   in any code file outside `unchecked`, `tests/` included; in TypeScript, the `//` and `/* */` comments of the
   source files in `src/`, JSX text not counted. Work left to do belongs in the backlog, where it is listed and closed,
