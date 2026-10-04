@@ -9,6 +9,8 @@ use chrono::Local;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use rotproof::bundle::{Bundle, backlog, stale};
 use rotproof::disk::Disk;
+use rotproof::git::Git;
+use rotproof::hook::Changes;
 use rotproof::markers::{MARKERS, either};
 use rotproof::tree::Writer;
 
@@ -191,7 +193,7 @@ fn create(root: &Path) -> Result<(), String> {
 
 /// Print every broken rule under the check that found it. `true` when there are none.
 fn check(root: &Path) -> Result<bool, String> {
-    let report = rotproof::check::check(root).map_err(|e| e.to_string())?;
+    let report = rotproof::check::check(&Disk::new(root)).map_err(|e| e.to_string())?;
     for why in &report.skipped {
         println!("{why}");
     }
@@ -221,7 +223,11 @@ fn stop_hook(root: &Path) -> ExitCode {
     let answer = std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|e| format!("the hook input could not be read: {e}"))
-        .and_then(|_| rotproof::hook::run(root, &input));
+        .and_then(|_| {
+            // git runs only when the decision asks for it
+            let git = rotproof::disk::project_root(root).map(|root| Git::new(&root));
+            rotproof::hook::run(&input, git.as_ref().map(|git| git as &dyn Changes))
+        });
     match answer {
         Ok(Some(out)) => {
             println!("{out}");

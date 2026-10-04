@@ -51,7 +51,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
 | `source.rs` | The paths and lines in messages, and whether a path sits in another |
 | `tree.rs` | The ports to a project's files (`Tree` to read them, `Writer` to write them), and the rules on how a path names a file: names compared exactly, and the code files of a directory |
-| `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, and the project's name |
+| `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, the project's name, and the project a directory sits in |
+| `git.rs` | `Changes` (the port in `hook.rs`) with `git status` |
 
 ## How this repository differs from what Rotproof keeps
 

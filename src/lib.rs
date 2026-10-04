@@ -7,6 +7,7 @@ pub mod create;
 pub mod direction;
 pub mod disk;
 pub mod frontmatter;
+pub mod git;
 pub mod hook;
 pub mod init;
 pub mod layers;

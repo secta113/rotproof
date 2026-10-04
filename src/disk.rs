@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::layers::DECLARATION;
 use crate::source::{relative_path, within};
 use crate::tree::{Tree, Writer};
 
@@ -110,6 +111,15 @@ impl Disk {
             |name| name.to_string_lossy().into_owned(),
         ))
     }
+}
+
+/// The project `start` sits in: the nearest directory from it upwards that holds the declaration.
+pub fn project_root(start: &Path) -> Option<PathBuf> {
+    let start = start.canonicalize().ok()?;
+    start
+        .ancestors()
+        .find(|dir| dir.join(DECLARATION).is_file())
+        .map(Path::to_path_buf)
 }
 
 #[cfg(test)]

@@ -13,14 +13,10 @@
 //!
 //! An input from another hook, or a `git` that fails, is an error: the agent shows it, and stops.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde_json::{Value, json};
-
-use crate::layers::DECLARATION;
 
 /// The event of the hook this answers, in `hook_event_name`
 const EVENT: &str = "Stop";
@@ -75,11 +71,17 @@ pub const PHRASES: [&str; 14] = [
     "follow-up",
 ];
 
-/// What the hook prints for `input` (the JSON the agent writes on stdin), run from `start`. `None` lets the agent
-/// stop, with nothing printed.
-pub fn run(start: &Path, input: &str) -> Result<Option<String>, String> {
-    decide(input, || match project_root(start) {
-        Some(root) => docs_changed(&root),
+/// The changes a project's version control shows: the port the hook asks whether anything was recorded.
+pub trait Changes {
+    /// Whether anything in `dir` (from the root) is changed, staged or new.
+    fn changed(&self, dir: &str) -> Result<bool, String>;
+}
+
+/// What the hook prints for `input` (the JSON the agent writes on stdin). `changes` is the project's, or `None` outside
+/// a project. `None` lets the agent stop, with nothing printed.
+pub fn run(input: &str, changes: Option<&dyn Changes>) -> Result<Option<String>, String> {
+    decide(input, || match changes {
+        Some(changes) => changes.changed("docs"),
         // Outside a project there is nothing to record into
         None => Ok(true),
     })
@@ -145,36 +147,30 @@ fn open_phrases(message: &str) -> Vec<&'static str> {
         .collect()
 }
 
-/// The nearest directory from `start` upwards that holds the declaration.
-fn project_root(start: &Path) -> Option<PathBuf> {
-    let start = start.canonicalize().ok()?;
-    start
-        .ancestors()
-        .find(|dir| dir.join(DECLARATION).is_file())
-        .map(Path::to_path_buf)
-}
-
-/// Whether `git status` shows any change in `docs/` of `root`: changed, staged or new.
-fn docs_changed(root: &Path) -> Result<bool, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["status", "--porcelain", "--", "docs"])
-        .output()
-        .map_err(|e| format!("git could not run: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git status failed in {}: {}",
-            root.display(),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(!out.stdout.iter().all(u8::is_ascii_whitespace))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Changes in memory: whether each directory changed, and every directory asked about
+    struct Fake(bool, std::cell::RefCell<Vec<String>>);
+
+    impl Changes for Fake {
+        fn changed(&self, dir: &str) -> Result<bool, String> {
+            self.1.borrow_mut().push(dir.to_string());
+            Ok(self.0)
+        }
+    }
+
+    #[test]
+    fn the_project_is_asked_about_docs_and_outside_one_nothing_is_asked() {
+        let unchanged = Fake(false, Default::default());
+        let said = run(&input("未確認のまま", false), Some(&unchanged)).unwrap();
+        assert!(said.is_some_and(|out| out.contains("nothing in docs/ changed")));
+        assert_eq!(*unchanged.1.borrow(), ["docs"]);
+        let changed = Fake(true, Default::default());
+        assert_eq!(run(&input("未確認のまま", false), Some(&changed)), Ok(None));
+        assert_eq!(run(&input("未確認のまま", false), None), Ok(None));
+    }
 
     fn input(message: &str, active: bool) -> String {
         json!({

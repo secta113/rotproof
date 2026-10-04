@@ -24,7 +24,6 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io;
-use std::path::Path;
 use std::sync::LazyLock;
 
 use chrono::NaiveDate;
@@ -33,7 +32,7 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use crate::bundle::{Bundle, DOCS, Docs, RESERVED, backlog, in_docs};
-use crate::disk::Disk;
+
 use crate::frontmatter::split;
 use crate::layers::{DECLARATION, area_problems, areas};
 use crate::markdown::{broken, heading, links, visible};
@@ -89,10 +88,9 @@ pub struct Report {
     pub layers_checked: bool,
 }
 
-/// Every broken rule in the repository at `root`. An error is a file that could not be read at all.
-pub fn check(root: &Path) -> io::Result<Report> {
-    let disk = Disk::new(root);
-    let structure = crate::structure::problems(&disk)?;
+/// Every broken rule in the repository `tree` holds. An error is a file that could not be read at all.
+pub fn check(tree: &dyn Tree) -> io::Result<Report> {
+    let structure = crate::structure::problems(tree)?;
     let mut findings: Vec<Finding> = structure
         .found
         .into_iter()
@@ -105,21 +103,21 @@ pub fn check(root: &Path) -> io::Result<Report> {
     let mut layers_checked = false;
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
-        let direction = crate::direction::problems(&disk, declared)?;
+        let direction = crate::direction::problems(tree, declared)?;
         findings.extend(direction.into_iter().map(|detail| Finding {
             check: "the layers import only what layers/table.toml allows".into(),
             detail,
         }));
-        let markers = crate::markers::problems(&disk, declared)?;
+        let markers = crate::markers::problems(tree, declared)?;
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {
             check: heading.clone().into(),
             detail,
         }));
         let guide = crate::project::guide(&declared.declaration.stack, declared.layout.as_ref());
-        let found = exactly(&disk, GUIDE)
+        let found = exactly(tree, GUIDE)
             .ok()
-            .and_then(|(path, _)| read_text(&disk, &path).ok());
+            .and_then(|(path, _)| read_text(tree, &path).ok());
         if found.as_ref() != Some(&guide) {
             findings.push(Finding {
                 check: "Rotproof's guide is up to date".into(),
@@ -134,7 +132,7 @@ pub fn check(root: &Path) -> io::Result<Report> {
             });
         }
     }
-    findings.extend(records(&disk)?);
+    findings.extend(records(tree)?);
     Ok(Report {
         findings,
         skipped,
@@ -627,6 +625,7 @@ mod tests {
     use std::fs;
 
     use super::*;
+    use crate::disk::Disk;
 
     #[test]
     fn the_hash_is_the_first_8_hex_digits_of_sha_256() {
