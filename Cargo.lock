@@ -380,6 +380,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "domain"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "percent-encoding",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+ "toml_edit",
+ "utils",
+ "yaml-rust2",
+]
+
+[[package]]
 name = "dragonbox_ecma"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1323,24 +1339,19 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "domain",
  "ignore",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
  "oxc_parser",
  "oxc_span",
- "percent-encoding",
- "regex",
  "ruff_python_ast",
  "ruff_python_parser",
- "serde",
  "serde_json",
- "sha2",
  "tempfile",
- "toml",
  "toml_edit",
  "utils",
- "yaml-rust2",
 ]
 
 [[package]]
@@ -1835,7 +1846,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utils"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "pulldown-cmark",
  "regex",

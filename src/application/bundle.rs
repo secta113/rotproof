@@ -3,12 +3,12 @@
 use std::io;
 
 use crate::application::tree::read_text;
-use crate::domain::bundle::{
+use domain::bundle::{
     Docs, KnowledgeFolder, Problems, Specs, expected, in_docs, is_document, knowledge_with_rules,
     specs_with_rules,
 };
-use crate::domain::schema::SPEC_FOLDERS;
-use crate::domain::tree::Tree;
+use domain::schema::SPEC_FOLDERS;
+use domain::tree::Tree;
 
 /// The bundle of one repository, `docs/` in its tree, and the areas its records are grouped by.
 pub struct Bundle<'a> {

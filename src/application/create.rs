@@ -26,13 +26,11 @@ use std::collections::BTreeSet;
 use crate::application::bundle::Bundle;
 use crate::application::layers::declaration;
 use crate::application::tree::{exactly, read_text};
-use crate::domain::bundle::{LOG, in_docs, record_tags as tags_in};
-use crate::domain::hook::SETTINGS;
-use crate::domain::layers::{
-    DECLARATION, Declared, MISSING, completed, lacking, parse_declaration,
-};
-use crate::domain::project::{GUIDE, guide, project_files};
-use crate::domain::tree::{Tree, Writer};
+use domain::bundle::{LOG, in_docs, record_tags as tags_in};
+use domain::hook::SETTINGS;
+use domain::layers::{DECLARATION, Declared, MISSING, completed, lacking, parse_declaration};
+use domain::project::{GUIDE, guide, project_files};
+use domain::tree::{Tree, Writer};
 
 /// What `rotproof create` did.
 #[derive(Debug, Default)]
@@ -111,7 +109,7 @@ pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, Str
     Ok(made)
 }
 
-/// The declaration with every field of [`ADDED`](crate::domain::layers::ADDED) it lacks, each under its comment, and
+/// The declaration with every field of [`ADDED`](domain::layers::ADDED) it lacks, each under its comment, and
 /// the fields added as `name = value`. `None` when it lacks none, or is not TOML: then its own error stands.
 fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     let Ok((path, _)) = exactly(tree, DECLARATION) else {

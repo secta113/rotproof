@@ -20,8 +20,8 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
 
-use crate::domain::code::{Alias, Aliases, Source, join, parent};
-use crate::domain::tree::{Tree, with_lf};
+use domain::code::{Alias, Aliases, Source, join, parent};
+use domain::tree::{Tree, with_lf};
 use utils::source::line_of;
 
 /// Read one file, whose path from the root says how: `.tsx` with JSX, `.d.ts` as declarations.
@@ -363,8 +363,8 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::domain::code::Landing;
     use crate::infrastructure::disk::Disk;
+    use domain::code::Landing;
 
     #[test]
     fn every_form_of_import_is_read() {

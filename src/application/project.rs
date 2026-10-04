@@ -1,9 +1,9 @@
 //! `rotproof guide`: the guide for a stack, named or declared.
 
 use crate::application::layers::declaration;
-use crate::domain::layers::{DECLARATION, known_stacks};
-use crate::domain::project::guide_named;
-use crate::domain::tree::Tree;
+use domain::layers::{DECLARATION, known_stacks};
+use domain::project::guide_named;
+use domain::tree::Tree;
 
 /// The guide `rotproof guide` prints: for `stack` when it is named, otherwise for the stack the project in `tree`
 /// declares. `Err` when the stack is unknown, or none is named and the declaration cannot be read.

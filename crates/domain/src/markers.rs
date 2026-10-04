@@ -21,8 +21,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::domain::code::is_source;
-use crate::domain::layers::{Declared, Language, Layout};
+use crate::code::is_source;
+use crate::layers::{Declared, Language, Layout};
 use utils::source::{line_of, within};
 
 /// The words that fail in a comment.
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn a_file_in_a_path_listed_in_unchecked_is_skipped() {
         let declared = Declared::new(
-            crate::domain::layers::parse_declaration(
+            crate::layers::parse_declaration(
                 "stack = \"python\"\nareas = []\nunchecked = [\"scripts/\", \"gen\"]\n",
             )
             .unwrap(),
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn nothing_read_fails_by_the_floor() {
         let declared = Declared::new(
-            crate::domain::layers::parse_declaration("stack = \"python\"\nareas = []\n").unwrap(),
+            crate::layers::parse_declaration("stack = \"python\"\nareas = []\n").unwrap(),
         )
         .unwrap();
         let none = markers(&declared, Vec::new(), BTreeSet::new(), 0);

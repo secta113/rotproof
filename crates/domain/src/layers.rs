@@ -17,12 +17,15 @@ pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotpro
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
 
-const TABLE: &str = include_str!("../../layers/table.toml");
+const TABLE: &str = include_str!("../../../layers/table.toml");
 /// Stack -> its layout
 pub const STACKS: [(&str, &str); 3] = [
-    ("python", include_str!("../../layers/python.toml")),
-    ("typescript", include_str!("../../layers/typescript.toml")),
-    ("rust", include_str!("../../layers/rust.toml")),
+    ("python", include_str!("../../../layers/python.toml")),
+    (
+        "typescript",
+        include_str!("../../../layers/typescript.toml"),
+    ),
+    ("rust", include_str!("../../../layers/rust.toml")),
 ];
 
 /// One layer, or one atomic level of `ui`, as the table describes it.

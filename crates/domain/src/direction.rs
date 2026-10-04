@@ -18,7 +18,7 @@
 //!
 //! The rules here judge an import once it is resolved to a place; `application` reads the code and resolves it.
 
-use crate::domain::layers::{Place, listed};
+use crate::layers::{Place, listed};
 
 /// The finding for an import from `from` that lands in `to`, or `None` when the table allows it. `what` says what
 /// was imported, as "imports x" or "depends on x".
@@ -120,7 +120,7 @@ fn what_it_may_import(place: &Place) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::layers::{layout, table};
+    use crate::layers::{layout, table};
 
     fn python_places() -> Vec<Place> {
         layout("python").unwrap().places(&table())

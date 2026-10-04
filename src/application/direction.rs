@@ -6,10 +6,10 @@ use std::io;
 
 use crate::application::code::lands;
 use crate::application::tree::{code_files, exactly, read_code};
-use crate::domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
-use crate::domain::direction::{in_dir, judged, parent, place_of, workspace_dirs};
-use crate::domain::layers::{Declared, Language, Layout, Place};
-use crate::domain::tree::Tree;
+use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
+use domain::direction::{in_dir, judged, parent, place_of, workspace_dirs};
+use domain::layers::{Declared, Language, Layout, Place};
+use domain::tree::Tree;
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
 /// error is a directory that could not be walked.

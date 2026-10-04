@@ -2,13 +2,13 @@
 //! and judged by the rules in `domain`.
 
 use crate::application::tree::{Lookup, lookup, read_text};
-use crate::domain::code::Parsers;
-use crate::domain::links::{Target, missing, target as pointed, to_definition, to_heading};
-use crate::domain::tree::Tree;
+use domain::code::Parsers;
+use domain::links::{Target, missing, target as pointed, to_definition, to_heading};
+use domain::tree::Tree;
 
 /// Why the link with `text` to `target` does not resolve, or `None` when it does. `here` is the directory of the
 /// document that holds it, and `bundle_root` the directory a target starting with `/` is from (see
-/// [`crate::domain::links::target`]).
+/// [`domain::links::target`]).
 pub fn broken(
     tree: &dyn Tree,
     parsers: &dyn Parsers,

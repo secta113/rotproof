@@ -3,8 +3,8 @@
 //! It writes only the declaration, so the project declares the layers it does not have before `rotproof create` makes
 //! anything. The declaration is the project's from then on: `rotproof init` never overwrites it.
 
-use crate::domain::layers::{DECLARATION, declaration_text, known_stacks};
-use crate::domain::tree::{Tree, Writer};
+use domain::layers::{DECLARATION, declaration_text, known_stacks};
+use domain::tree::{Tree, Writer};
 
 /// Write the declaration for `stack` into `tree` through `out`, and return its path. `Err` when the stack is unknown,
 /// the declaration exists, or it cannot be written.

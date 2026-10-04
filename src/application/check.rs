@@ -29,15 +29,15 @@ use crate::application::bundle::Bundle;
 use crate::application::layers::areas;
 use crate::application::links::broken;
 use crate::application::tree::{exactly, read_text};
-use crate::domain::bundle::{DOCS, Docs, backlog, in_docs, is_document};
-use crate::domain::code::Parsers;
-use crate::domain::layers::{DECLARATION, area_problems};
-use crate::domain::project::GUIDE;
-use crate::domain::records::{
+use domain::bundle::{DOCS, Docs, backlog, in_docs, is_document};
+use domain::code::Parsers;
+use domain::layers::{DECLARATION, area_problems};
+use domain::project::GUIDE;
+use domain::records::{
     dangling_backlog_refs, file_name, floor, knowledge_refs, log_problems, misplaced, root_specs,
     unlogged, unread_paths,
 };
-use crate::domain::tree::Tree;
+use domain::tree::Tree;
 use utils::markdown::links;
 
 /// One broken rule: which check found it, and what is wrong.
@@ -84,8 +84,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
             check: heading.clone().into(),
             detail,
         }));
-        let guide =
-            crate::domain::project::guide(&declared.declaration.stack, declared.layout.as_ref());
+        let guide = domain::project::guide(&declared.declaration.stack, declared.layout.as_ref());
         let found = exactly(tree, GUIDE)
             .ok()
             .and_then(|(path, _)| read_text(tree, &path).ok());

@@ -5,9 +5,9 @@ use std::io;
 
 use crate::application::layers::declaration;
 use crate::application::tree::{code_files, exactly};
-use crate::domain::layers::{DECLARATION, Declared, MISSING};
-use crate::domain::structure::{Seen, listed, named, problems as judged};
-use crate::domain::tree::Tree;
+use domain::layers::{DECLARATION, Declared, MISSING};
+use domain::structure::{Seen, listed, named, problems as judged};
+use domain::tree::Tree;
 
 /// What the structure check found.
 #[derive(Debug, Default)]

@@ -7,13 +7,13 @@ use std::process::ExitCode;
 
 use chrono::Local;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use domain::bundle::{backlog, stale};
+use domain::hook::Changes;
+use domain::layers::{DECLARATION, RECORDS_ONLY};
+use domain::markers::{MARKERS, either};
+use domain::tree::Writer;
 use rotproof::application;
 use rotproof::application::bundle::Bundle;
-use rotproof::domain::bundle::{backlog, stale};
-use rotproof::domain::hook::Changes;
-use rotproof::domain::layers::{DECLARATION, RECORDS_ONLY};
-use rotproof::domain::markers::{MARKERS, either};
-use rotproof::domain::tree::Writer;
 use rotproof::infrastructure::disk::{Disk, project_root};
 use rotproof::infrastructure::git::Git;
 use rotproof::infrastructure::readers::Readers;

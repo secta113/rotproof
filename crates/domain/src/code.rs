@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
-use crate::domain::tree::Tree;
+use crate::tree::Tree;
 
 /// The readers of code: the port the checks read code through.
 pub trait Parsers {

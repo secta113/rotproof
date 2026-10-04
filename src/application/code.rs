@@ -1,7 +1,7 @@
 //! Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl`.
 
-use crate::domain::code::{Aliases, Landing, module_files};
-use crate::domain::tree::Tree;
+use domain::code::{Aliases, Landing, module_files};
+use domain::tree::Tree;
 
 /// Where `specifier`, imported by the file at `file` (from the root), lands: a path from the root, or `None` for a
 /// package, or a path above the root.

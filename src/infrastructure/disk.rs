@@ -4,8 +4,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::domain::layers::DECLARATION;
-use crate::domain::tree::{Tree, Writer};
+use domain::layers::DECLARATION;
+use domain::tree::{Tree, Writer};
 use utils::source::{relative_path, within};
 
 /// A project's files, from its root directory.

@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use crate::domain::code::{Aliases, Manifest, Parsers, Source};
-use crate::domain::tree::Tree;
+use domain::code::{Aliases, Manifest, Parsers, Source};
+use domain::tree::Tree;
 
 /// Every reader Rotproof has.
 #[derive(Debug, Default, Clone, Copy)]

@@ -10,7 +10,7 @@ use percent_encoding::percent_decode_str;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-use crate::domain::bundle::Docs;
+use crate::bundle::Docs;
 use utils::frontmatter::split;
 use utils::markdown::{heading, visible};
 

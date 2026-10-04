@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::layers::{DECLARATION, Declared, Layout, Place};
+use crate::layers::{DECLARATION, Declared, Layout, Place};
 use utils::source::within;
 
 /// What the structure check reads from the tree.
@@ -266,7 +266,7 @@ fn where_ui_parts_go(places: &[Place]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::layers::parse_declaration;
+    use crate::layers::parse_declaration;
 
     fn declared(text: &str) -> Declared {
         Declared::new(parse_declaration(text).unwrap()).unwrap()

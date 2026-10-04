@@ -1,0 +1,19 @@
+[package]
+name = "domain"
+version.workspace = true
+edition = "2024"
+license = "MIT OR Apache-2.0"
+# A layer of Rotproof, built into its binary: never published on its own, and not listed among the third-party crates
+publish = false
+
+[dependencies]
+chrono = "0.4.45"
+percent-encoding = "2.3.2"
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+toml = "1.1.6"
+toml_edit = { version = "0.25.15", default-features = false, features = ["parse", "display"] }
+utils = { path = "../utils" }
+yaml-rust2 = "0.13.0"

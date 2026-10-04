@@ -5,10 +5,10 @@ use std::collections::BTreeSet;
 use std::io;
 
 use crate::application::tree::{code_files, read_code};
-use crate::domain::code::Parsers;
-use crate::domain::layers::{Declared, Language};
-use crate::domain::markers::{Markers, has_comments, in_file, is_unchecked, markers};
-use crate::domain::tree::Tree;
+use domain::code::Parsers;
+use domain::layers::{Declared, Language};
+use domain::markers::{Markers, has_comments, in_file, is_unchecked, markers};
+use domain::tree::Tree;
 
 /// Every marker in a comment of the code of `declared`. An error is a directory that could not be walked.
 pub fn problems(
@@ -59,8 +59,8 @@ fn comments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::markers::MARKERS;
     use crate::infrastructure::readers::Readers;
+    use domain::markers::MARKERS;
 
     /// The lines of a source with a marker in a comment, as the reader of `language` finds its comments, and the
     /// markers on them in order

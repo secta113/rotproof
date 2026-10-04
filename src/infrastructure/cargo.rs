@@ -16,7 +16,7 @@
 
 use toml_edit::{Document, Item, TableLike};
 
-use crate::domain::code::{Dependency, Manifest, Origin};
+use domain::code::{Dependency, Manifest, Origin};
 use utils::source::line_of;
 
 /// The tables of dependencies that are read, at the top or under `[target.<cfg>]`.

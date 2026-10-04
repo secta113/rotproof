@@ -3,7 +3,7 @@
 
 use std::io;
 
-use crate::domain::tree::{Tree, as_windows_reads, with_lf};
+use domain::tree::{Tree, as_windows_reads, with_lf};
 
 /// The text of the file at `path`, as Rotproof reads it ([`with_lf`]).
 pub fn read_text(tree: &dyn Tree, path: &str) -> io::Result<String> {
@@ -128,14 +128,14 @@ pub fn code_files(
 }
 
 /// A tree in memory, for the tests: files by their path, and the directories their paths make or
-/// [`Writer`](crate::domain::tree::Writer) made.
+/// [`Writer`](domain::tree::Writer) made.
 #[cfg(test)]
 pub mod fake {
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
     use std::io;
 
-    use crate::domain::tree::{Tree, Writer};
+    use domain::tree::{Tree, Writer};
 
     #[derive(Debug, Default)]
     pub struct Fake {

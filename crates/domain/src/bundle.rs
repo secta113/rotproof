@@ -6,8 +6,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::layers::DECLARATION;
-use crate::domain::schema::{
+use crate::layers::DECLARATION;
+use crate::schema::{
     BacklogDoc, CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, SPEC_FOLDERS,
     Spec, Status, Time, backlog_doc, guide_doc, knowledge_doc, spec,
 };
@@ -21,15 +21,15 @@ pub const GENERATED: &str = "<!-- Generated from the frontmatter by `rotproof in
                              fails when this file differs from what `rotproof index` writes. -->";
 /// The backlog rules. Rotproof writes them like an index file, so the rules a project reads are the rules its Rotproof
 /// checks
-pub const RULES: &str = include_str!("../../records/rules.md");
+pub const RULES: &str = include_str!("../../../records/rules.md");
 /// The spec rules, written like the backlog rules
-pub const SPEC_RULES: &str = include_str!("../../records/spec-rules.md");
+pub const SPEC_RULES: &str = include_str!("../../../records/spec-rules.md");
 /// The knowledge rules, written like the backlog rules
-pub const KNOWLEDGE_RULES: &str = include_str!("../../records/knowledge-rules.md");
+pub const KNOWLEDGE_RULES: &str = include_str!("../../../records/knowledge-rules.md");
 /// The one directory of specs that holds guides: the spec rules, and any a project adds
 const GUIDES_AMONG_SPECS: &str = "specs";
 /// The log as `rotproof create` makes it. From then on it is the project's
-pub const LOG: &str = include_str!("../../records/log.md");
+pub const LOG: &str = include_str!("../../../records/log.md");
 /// The bundle-root index links to these, in this order
 const ROOT_ENTRIES: [(&str, &str, &str); 4] = [
     ("Backlog", "backlog/", "Open problems and postponed work."),
@@ -775,10 +775,7 @@ Not yet. Measured by hand.
             ("ops.md".to_string(), doc("Ops", "operations")),
             (
                 "old.md".to_string(),
-                crate::domain::schema::closed_record(
-                    &doc("Old", "billing"),
-                    "Replaced by the API. More.",
-                ),
+                crate::schema::closed_record(&doc("Old", "billing"), "Replaced by the API. More."),
             ),
             ("rules.md".to_string(), KNOWLEDGE_RULES.to_string()),
         ]
@@ -807,7 +804,7 @@ Not yet. Measured by hand.
 
     #[test]
     fn a_closed_item_leaves_the_open_list() {
-        let closed = crate::domain::schema::closed_record(GOOD, "Fixed.");
+        let closed = crate::schema::closed_record(GOOD, "Fixed.");
         let index = render_backlog(
             &parsed(&[("closed.md", closed)]).items,
             &BTreeMap::new(),

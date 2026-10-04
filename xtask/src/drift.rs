@@ -168,17 +168,19 @@ pub fn toolchain_problems(toolchain: &str, dockerfile: &str, ci: &str) -> Vec<St
 /// README is the page on PyPI, so a version left behind would tell every reader to install an old Rotproof. A README
 /// that names no version is a problem too.
 pub fn install_problems(cargo_toml: &str, readme: &str) -> Vec<String> {
-    let mut in_package = false;
+    // The version every crate of the workspace takes, written once under [workspace.package]
+    let mut in_workspace_package = false;
     let version = cargo_toml.lines().find_map(|l| {
         if l.starts_with('[') {
-            in_package = l.trim() == "[package]";
+            in_workspace_package = l.trim() == "[workspace.package]";
             return None;
         }
         let (key, value) = l.split_once('=')?;
-        (in_package && key.trim() == "version").then(|| value.trim().trim_matches('"').to_string())
+        (in_workspace_package && key.trim() == "version")
+            .then(|| value.trim().trim_matches('"').to_string())
     });
     let Some(version) = version else {
-        return vec!["Cargo.toml names no version under [package]".into()];
+        return vec!["Cargo.toml names no version under [workspace.package]".into()];
     };
     let installed: Vec<&str> = readme
         .split("pip install rotproof==")
@@ -410,7 +412,8 @@ Also tracked: `c`.
         );
     }
 
-    const CARGO: &str = "[package]\nname = \"rotproof\"\nversion = \"0.2.0\"\n\n[dependencies]\nfoo = { version = \"1\" }\n";
+    const CARGO: &str = "[package]\nname = \"rotproof\"\nversion.workspace = true\n\n[dependencies]\nfoo = { version = \
+                         \"1\" }\n\n[workspace.package]\nversion = \"0.2.0\"\n";
 
     #[test]
     fn the_version_the_readme_installs_is_the_one_in_cargo_toml() {
@@ -434,11 +437,12 @@ Also tracked: `c`.
             ["README.md installs no version (pip install rotproof==<version>)"]
         );
         assert_eq!(
+            // A version of the package alone, or one under [workspace], is not the one every crate takes
             install_problems(
-                "[workspace]\nversion = \"1\"\n",
+                "[package]\nversion = \"1\"\n\n[workspace]\nversion = \"1\"\n",
                 "pip install rotproof==1\n"
             ),
-            ["Cargo.toml names no version under [package]"]
+            ["Cargo.toml names no version under [workspace.package]"]
         );
     }
 }

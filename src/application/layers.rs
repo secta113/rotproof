@@ -3,8 +3,8 @@
 use std::io;
 
 use crate::application::tree::{Lookup, exactly, lookup};
-use crate::domain::layers::{DECLARATION, Declaration, MISSING, parse_declaration};
-use crate::domain::tree::Tree;
+use domain::layers::{DECLARATION, Declaration, MISSING, parse_declaration};
+use domain::tree::Tree;
 
 /// The areas a project declares, or why the declaration cannot be read.
 pub fn areas(tree: &dyn Tree) -> io::Result<Result<Vec<String>, String>> {

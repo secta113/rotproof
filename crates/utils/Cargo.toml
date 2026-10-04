@@ -1,6 +1,6 @@
 [package]
 name = "utils"
-version = "0.0.0"
+version.workspace = true
 edition = "2024"
 license = "MIT OR Apache-2.0"
 # A layer of Rotproof, built into its binary: never published on its own, and not listed among the third-party crates
