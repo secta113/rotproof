@@ -5,6 +5,7 @@
 //! what it decides. Imports `utils` only.
 
 pub mod code;
+pub mod direction;
 pub mod hook;
 pub mod layers;
 pub mod project;

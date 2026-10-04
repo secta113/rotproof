@@ -34,7 +34,6 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `main.rs` | The command line, which is the `handler`: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof guide`, `rotproof index` and `rotproof stop-hook`, and the help that leads from one to the next. It alone builds the adapters in `infrastructure` |
 | `lib.rs` | The library the command line calls: the layers, and the modules not sorted into one yet |
 | `check.rs` | Every rule `rotproof check` runs, each with its floor |
-| `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust) |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust) |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks |
 | `links.rs` | Whether a link in a record resolves: by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
@@ -46,6 +45,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `mod.rs` | The layer's role, and its modules |
 | `tree.rs` | The ports to a project's files (`Tree` to read them, `Writer` to write them), and how Rotproof reads a file's text and how Windows reads a name |
 | `code.rs` | What the readers give, as plain values, and the port to them (`Parsers`): the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
+| `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; and where Cargo looks for a workspace |
 | `layers.rs` | The layer definitions in `layers/`, and what a project's `.config/rotproof.toml` says |
 | `hook.rs` | What `rotproof stop-hook` finds open in the agent's last message and what it answers, the port to the project's changes (`Changes`), and the settings file that `rotproof create` writes for the hook |
 | `project.rs` | The files Rotproof writes outside `docs/`: the guide `.rotproof/AGENTS.md`, and the project's files, once |
@@ -56,6 +56,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `mod.rs` | The layer's role, and its modules |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, the code files of a directory, and the text of a file |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
+| `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `hook.rs` | `rotproof stop-hook`, the hook Claude Code runs when the agent stops |
 | `init.rs` | `rotproof init`: writing a project's declaration, once |

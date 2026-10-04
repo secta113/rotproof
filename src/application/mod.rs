@@ -4,6 +4,7 @@
 //! Imports `domain` and `utils`, never `infrastructure`.
 
 pub mod code;
+pub mod direction;
 pub mod hook;
 pub mod init;
 pub mod layers;

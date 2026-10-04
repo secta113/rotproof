@@ -10,7 +10,6 @@ pub mod infrastructure;
 pub mod bundle;
 pub mod check;
 pub mod create;
-pub mod direction;
 pub mod links;
 pub mod markers;
 pub mod schema;

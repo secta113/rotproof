@@ -107,7 +107,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
     let mut layers_checked = false;
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
-        let direction = crate::direction::problems(tree, parsers, declared)?;
+        let direction = crate::application::direction::problems(tree, parsers, declared)?;
         findings.extend(direction.into_iter().map(|detail| Finding {
             check: "the layers import only what layers/table.toml allows".into(),
             detail,
