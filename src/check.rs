@@ -33,6 +33,8 @@ use percent_encoding::percent_decode_str;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
+use crate::disk::Disk;
+
 use crate::bundle::{Bundle, Docs, RESERVED, backlog};
 use crate::frontmatter::split;
 use crate::layers::{DECLARATION, area_problems, areas};
@@ -91,7 +93,7 @@ pub struct Report {
 
 /// Every broken rule in the repository at `root`. An error is a file that could not be read at all.
 pub fn check(root: &Path) -> io::Result<Report> {
-    let structure = crate::structure::problems(root)?;
+    let structure = crate::structure::problems(&Disk::new(root))?;
     let mut findings: Vec<Finding> = structure
         .found
         .into_iter()
@@ -152,7 +154,7 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
     };
     // Every record names an area, so nothing below can be judged without them. The structure check names what is
     // wrong with the declaration; this says that the records were not checked because of it
-    let areas = match areas(root)? {
+    let areas = match areas(&Disk::new(root))? {
         Ok(areas) => areas,
         Err(_) => {
             add(

@@ -235,7 +235,8 @@ fn stop_hook(root: &Path) -> ExitCode {
 
 /// Write every index file, then list what was left out of them and the items to measure again.
 fn index(root: &Path) -> Result<(), String> {
-    let areas = rotproof::layers::areas(root).map_err(|e| e.to_string())??;
+    let areas =
+        rotproof::layers::areas(&rotproof::disk::Disk::new(root)).map_err(|e| e.to_string())??;
     let bundle = Bundle::new(root, areas);
     let (files, problems) = bundle.expected().map_err(|e| e.to_string())?;
     for (path, text) in files {

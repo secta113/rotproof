@@ -13,10 +13,10 @@
 
 use std::collections::BTreeSet;
 use std::io;
-use std::path::Path;
 
 use crate::layers::{DECLARATION, Declared, Layout, MISSING, Place, declaration};
-use crate::source::{code_files, exactly, within};
+use crate::source::within;
+use crate::tree::{Tree, code_files, exactly};
 
 /// What the structure check found.
 #[derive(Debug, Default)]
@@ -29,8 +29,8 @@ pub struct Structure {
     pub declared: Option<Declared>,
 }
 
-/// Every way the tree at `root` differs from its declaration. An error is a file or directory that could not be read.
-pub fn problems(root: &Path) -> io::Result<Structure> {
+/// Every way `tree` differs from its declaration. An error is a file or directory that could not be read.
+pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
     let failed = |found: Vec<String>| {
         Ok(Structure {
             found,
@@ -38,7 +38,7 @@ pub fn problems(root: &Path) -> io::Result<Structure> {
             declared: None,
         })
     };
-    let declared = match declaration(root)? {
+    let declared = match declaration(tree)? {
         None => return failed(vec![MISSING.into()]),
         Some(Err(why)) => return failed(vec![format!("{DECLARATION}: {why}")]),
         Some(Ok(declaration)) => match Declared::new(declaration) {
@@ -57,7 +57,7 @@ pub fn problems(root: &Path) -> io::Result<Structure> {
     };
     let mut found = Vec::new();
     // By the exact name: `Domain/` is `domain/` on Windows, and a directory of its own on Linux and GitHub
-    let present = |path: &str| exactly(root, path).is_ok();
+    let present = |path: &str| exactly(tree, path).is_ok();
 
     let mut any = false;
     for place in &declared.places {
@@ -74,7 +74,7 @@ pub fn problems(root: &Path) -> io::Result<Structure> {
                 "{} is declared absent, but {}/ exists: remove one or the other",
                 place.name, place.path
             )),
-            (false, false) => found.push(match exactly(root, &place.path) {
+            (false, false) => found.push(match exactly(tree, &place.path) {
                 // A directory in another case: `rotproof create` would write into it on Windows, and fix nothing
                 Err(why) if why.contains(" is there") => format!("{} is {why}", place.name),
                 _ => format!(
@@ -148,7 +148,7 @@ pub fn problems(root: &Path) -> io::Result<Structure> {
         .where_code_goes
         .as_ref()
         .map_or(",".to_string(), |goes| format!(": {goes};"));
-    for outside in outside(root, layout, &places, &skipped)? {
+    for outside in outside(tree, layout, &places, &skipped)? {
         found.push(format!(
             "code outside the layers: {outside} (move it into a layer{goes} or list it in unchecked in {DECLARATION})"
         ));
@@ -162,7 +162,7 @@ pub fn problems(root: &Path) -> io::Result<Structure> {
         if levels.is_empty() || declared.is_absent(layer) || !present(&layer.path) {
             continue;
         }
-        for beside in beside_levels(root, layout, layer, &levels)? {
+        for beside in beside_levels(tree, layout, layer, &levels)? {
             found.push(format!(
                 "code in {} outside its levels: {beside} (move it into a level or a layer: {})",
                 layer.name,
@@ -181,14 +181,14 @@ pub fn problems(root: &Path) -> io::Result<Structure> {
 /// in the scope that holds it. Files the project's `.gitignore` files exclude, and hidden ones, are not looked at: see
 /// [`code_files`].
 fn outside(
-    root: &Path,
+    tree: &dyn Tree,
     layout: &Layout,
     places: &[&str],
     skipped: &[&str],
 ) -> io::Result<BTreeSet<String>> {
     let scope = &layout.scope;
     let mut found = BTreeSet::new();
-    for path in code_files(root, scope, |name| layout.is_code(name))? {
+    for path in code_files(tree, scope, |name| layout.is_code(name))? {
         if places.iter().chain(skipped).any(|p| within(&path, p)) {
             continue;
         }
@@ -217,13 +217,13 @@ fn first_entry(path: &str, dir: &str) -> String {
 /// own files (`ui/__init__.py`) are not counted. Every level counts as a level here, absent or not: an absent level
 /// that exists has a finding of its own.
 fn beside_levels(
-    root: &Path,
+    tree: &dyn Tree,
     layout: &Layout,
     layer: &Place,
     levels: &[&Place],
 ) -> io::Result<BTreeSet<String>> {
     let mut found = BTreeSet::new();
-    for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
+    for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
         if layer.files.iter().any(|(own, _)| *own == path)
             || levels.iter().any(|level| within(&path, &level.path))
         {
@@ -253,4 +253,37 @@ fn where_ui_parts_go(places: &[Place]) -> String {
         path("ui.pages"),
         path("utils"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::fake::Fake;
+
+    #[test]
+    fn the_tree_is_read_through_the_port_alone() {
+        // No file system: a declaration, two layers, one in another case, and code outside the layers
+        let tree = Fake::new(&[
+            (
+                ".config/rotproof.toml",
+                "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\", \"handler\", \"application\"]\n",
+            ),
+            ("domain/__init__.py", ""),
+            ("Infrastructure/__init__.py", ""),
+            ("utils/__init__.py", ""),
+            ("scripts/run.py", ""),
+        ]);
+        let found = problems(&tree).unwrap().found;
+        assert_eq!(
+            found,
+            [
+                "infrastructure is missing: infrastructure (Infrastructure is there: names are compared exactly, as \
+                 Linux and GitHub compare them)",
+                "code outside the layers: Infrastructure (move it into a layer, or list it in unchecked in \
+                 .config/rotproof.toml)",
+                "code outside the layers: scripts (move it into a layer, or list it in unchecked in \
+                 .config/rotproof.toml)",
+            ]
+        );
+    }
 }

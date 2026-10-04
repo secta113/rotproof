@@ -131,7 +131,9 @@ pub fn guide_for(root: &std::path::Path, stack: Option<&str>) -> Result<String, 
     let stacks = crate::layers::known_stacks().join(", ");
     let stack = match stack {
         Some(stack) => stack.to_string(),
-        None => match crate::layers::declaration(root).map_err(|e| e.to_string())? {
+        None => match crate::layers::declaration(&crate::disk::Disk::new(root))
+            .map_err(|e| e.to_string())?
+        {
             Some(Ok(declaration)) => declaration.stack,
             None => {
                 return Err(format!(

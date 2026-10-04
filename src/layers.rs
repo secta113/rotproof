@@ -5,11 +5,11 @@
 //! one file.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
-use std::path::Path;
 
 use serde::Deserialize;
+
+use crate::tree::{Lookup, Tree, exactly, lookup};
 
 /// Where a project declares its structure, from the root
 pub const DECLARATION: &str = ".config/rotproof.toml";
@@ -298,8 +298,8 @@ pub struct Declaration {
 }
 
 /// The areas a project declares, or why the declaration cannot be read.
-pub fn areas(root: &Path) -> io::Result<Result<Vec<String>, String>> {
-    Ok(match declaration(root)? {
+pub fn areas(tree: &dyn Tree) -> io::Result<Result<Vec<String>, String>> {
+    Ok(match declaration(tree)? {
         None => Err(MISSING.into()),
         Some(Err(why)) => Err(format!("{DECLARATION}: {why}")),
         Some(Ok(declaration)) => Ok(declaration.areas),
@@ -336,19 +336,20 @@ pub fn area_problems(areas: &[String]) -> Vec<String> {
 }
 
 /// The declaration, or why it cannot be read. `Ok(None)` when the file does not exist.
-pub fn declaration(root: &Path) -> io::Result<Option<Result<Declaration, String>>> {
+pub fn declaration(tree: &dyn Tree) -> io::Result<Option<Result<Declaration, String>>> {
     // By the exact name, before anything asks the operating system: `.config/Rotproof.toml` opens as the declaration on
     // Windows, and is not there on Linux, where asking first would say only that the declaration is missing
-    let path = match crate::source::lookup(root, DECLARATION) {
-        crate::source::Lookup::Found(path) => path,
-        crate::source::Lookup::Missing => return Ok(None),
-        crate::source::Lookup::Spelled(_) => {
+    let path = match lookup(tree, "", DECLARATION) {
+        Lookup::Found { path, .. } => path,
+        Lookup::Missing => return Ok(None),
+        Lookup::Spelled(_) => {
             return Ok(Some(Err(
-                crate::source::exactly(root, DECLARATION).expect_err("spelled otherwise")
+                exactly(tree, DECLARATION).expect_err("spelled otherwise")
             )));
         }
     };
-    let text = fs::read_to_string(&path)
+    let text = tree
+        .read(&path)
         .map_err(|e| io::Error::new(e.kind(), format!("{DECLARATION}: {e}")))?;
     Ok(Some(toml::from_str(&text).map_err(|e| {
         let why = e.message().to_string();

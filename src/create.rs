@@ -29,6 +29,7 @@ use toml_edit::{Array, DocumentMut, Item, Value};
 use yaml_rust2::Yaml;
 
 use crate::bundle::{Bundle, LOG};
+use crate::disk::Disk;
 use crate::frontmatter::split;
 use crate::hook::SETTINGS;
 use crate::layers::{ADDED, DECLARATION, Declaration, Declared, MISSING, declaration};
@@ -51,7 +52,7 @@ pub struct Made {
 /// Make what is missing at `root`. `Err` is a declaration that cannot be read, or a file that cannot be written.
 pub fn create(root: &Path) -> Result<Made, String> {
     let mut made = Made::default();
-    let declared = match declaration(root).map_err(|e| e.to_string())? {
+    let declared = match declaration(&Disk::new(root)).map_err(|e| e.to_string())? {
         None => return Err(MISSING.into()),
         Some(Err(why)) => match complete(root)? {
             // Written only once the completed declaration reads and fits its stack, so a declaration that fails for
