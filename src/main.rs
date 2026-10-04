@@ -7,13 +7,15 @@ use std::process::ExitCode;
 
 use chrono::Local;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use rotproof::application;
 use rotproof::bundle::{Bundle, backlog, stale};
-use rotproof::disk::Disk;
-use rotproof::git::Git;
-use rotproof::hook::Changes;
+use rotproof::domain::hook::Changes;
+use rotproof::domain::layers::{DECLARATION, RECORDS_ONLY};
+use rotproof::domain::tree::Writer;
+use rotproof::infrastructure::disk::{Disk, project_root};
+use rotproof::infrastructure::git::Git;
+use rotproof::infrastructure::readers::Readers;
 use rotproof::markers::{MARKERS, either};
-use rotproof::readers::Readers;
-use rotproof::tree::Writer;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -130,7 +132,7 @@ fn main() -> ExitCode {
         Command::Create => create(&cli.root).map(|()| true),
         Command::Check => check(&cli.root),
         Command::Guide { stack } => {
-            rotproof::project::guide_for(&Disk::new(&cli.root), stack.as_deref()).map(|text| {
+            application::project::guide_for(&Disk::new(&cli.root), stack.as_deref()).map(|text| {
                 print!("{text}");
                 true
             })
@@ -152,9 +154,9 @@ fn main() -> ExitCode {
 /// Write the declaration, and say what to do next.
 fn init(root: &Path, stack: &str) -> Result<(), String> {
     let disk = Disk::new(root);
-    let path = rotproof::init::init(&disk, &disk, stack)?;
+    let path = application::init::init(&disk, &disk, stack)?;
     println!("wrote {path}");
-    if stack == rotproof::layers::RECORDS_ONLY {
+    if stack == RECORDS_ONLY {
         println!("next: run `rotproof create` to make docs/");
     } else {
         println!(
@@ -172,12 +174,12 @@ fn create(root: &Path) -> Result<(), String> {
         println!("wrote {path}");
     }
     for field in &made.added {
-        println!("added to {}: {field}", rotproof::layers::DECLARATION);
+        println!("added to {DECLARATION}: {field}");
     }
     if made.written.is_empty() {
         println!(
             "nothing to make: the tree has what {} declares",
-            rotproof::layers::DECLARATION
+            DECLARATION
         );
     }
     if let Some(why) = &made.not_written {
@@ -226,8 +228,8 @@ fn stop_hook(root: &Path) -> ExitCode {
         .map_err(|e| format!("the hook input could not be read: {e}"))
         .and_then(|_| {
             // git runs only when the decision asks for it
-            let git = rotproof::disk::project_root(root).map(|root| Git::new(&root));
-            rotproof::hook::run(&input, git.as_ref().map(|git| git as &dyn Changes))
+            let git = project_root(root).map(|root| Git::new(&root));
+            application::hook::run(&input, git.as_ref().map(|git| git as &dyn Changes))
         });
     match answer {
         Ok(Some(out)) => {
@@ -245,7 +247,7 @@ fn stop_hook(root: &Path) -> ExitCode {
 /// Write every index file, then list what was left out of them and the items to measure again.
 fn index(root: &Path) -> Result<(), String> {
     let disk = Disk::new(root);
-    let areas = rotproof::layers::areas(&disk).map_err(|e| e.to_string())??;
+    let areas = application::layers::areas(&disk).map_err(|e| e.to_string())??;
     let bundle = Bundle::new(&disk, areas);
     let (files, problems) = bundle.expected().map_err(|e| e.to_string())?;
     for (path, text) in files {

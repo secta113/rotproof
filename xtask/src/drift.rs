@@ -12,7 +12,7 @@ pub struct Map {
     /// Top-level paths: the first column of the path table, and the names in the prose under it
     pub paths: BTreeSet<String>,
     /// Source directory -> its modules: the first column of each table whose header names a source directory (`src/`,
-    /// or a crate's, `crates/<name>/src/`)
+    /// a crate's `crates/<name>/src/`, or a directory of modules below either, `src/domain/`)
     pub modules: BTreeMap<String, BTreeSet<String>>,
     /// Table rows read, headers and separators excluded
     pub rows: usize,
@@ -64,13 +64,17 @@ pub fn read_map(agents_md: &str) -> Map {
     map
 }
 
-/// Whether a directory holds the modules of a crate: `src`, or `crates/<name>/src`.
+/// Whether a directory holds modules of a crate: `src` or `crates/<name>/src`, or a directory of modules below either
+/// (`src/domain`), which has a table of its own.
 fn is_source_dir(dir: &str) -> bool {
-    dir == "src"
-        || dir
-            .strip_prefix("crates/")
-            .and_then(|rest| rest.strip_suffix("/src"))
-            .is_some_and(|name| !name.is_empty() && !name.contains('/'))
+    let in_crate = match dir.strip_prefix("crates/") {
+        Some(rest) => match rest.split_once('/') {
+            Some((name, in_crate)) if !name.is_empty() => in_crate,
+            _ => return false,
+        },
+        None => dir,
+    };
+    in_crate == "src" || in_crate.starts_with("src/")
 }
 
 /// Where the map and the tracked files (`git ls-files`, `/`-separated) disagree.
@@ -316,6 +320,42 @@ Also tracked: `c`.
             [
                 "crates/domain/src/lib.rs is tracked but not in the module table in AGENTS.md",
                 "crates/utils/src/new.rs is tracked but not in the module table in AGENTS.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_directory_of_modules_has_a_table_of_its_own() {
+        let agents = AGENTS.replace(
+            "\n## Rules",
+            "\n| Module of `src/domain/` | Content |\n|---|---|\n| `mod.rs` | The rules |\n\n## Rules",
+        );
+        let domain = &["src/domain/mod.rs"];
+        assert_eq!(
+            problems(&agents, &[TREE, domain].concat()),
+            Vec::<String>::new()
+        );
+        // Neither in the table of `src/` nor unchecked: deeper too, and in a crate
+        let found = problems(
+            &agents,
+            &[
+                TREE,
+                domain,
+                &[
+                    "src/domain/tree.rs",
+                    "src/application/mod.rs",
+                    "crates/utils/src/text/mod.rs",
+                ],
+            ]
+            .concat(),
+        );
+        assert_eq!(
+            found,
+            [
+                "crates is tracked but not in the map in AGENTS.md",
+                "crates/utils/src/text/mod.rs is tracked but not in the module table in AGENTS.md",
+                "src/application/mod.rs is tracked but not in the module table in AGENTS.md",
+                "src/domain/tree.rs is tracked but not in the module table in AGENTS.md",
             ]
         );
     }

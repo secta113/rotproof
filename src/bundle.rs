@@ -6,12 +6,13 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use crate::layers::DECLARATION;
+use crate::application::tree::read_text;
+use crate::domain::layers::DECLARATION;
+use crate::domain::tree::Tree;
 use crate::schema::{
     BacklogDoc, CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, SPEC_FOLDERS,
     Spec, Status, Time, backlog_doc, guide_doc, knowledge_doc, spec,
 };
-use crate::tree::{Tree, read_text};
 use utils::frontmatter::Sections;
 
 /// File names OKF reserves. Never used for a document

@@ -7,8 +7,9 @@ use std::sync::LazyLock;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
 
-use crate::code::Parsers;
-use crate::tree::{Lookup, Tree, lookup, read_text};
+use crate::application::tree::{Lookup, lookup, read_text};
+use crate::domain::code::Parsers;
+use crate::domain::tree::Tree;
 use utils::markdown::anchors;
 
 // A URL scheme. RFC 3986 allows `.` in one, but no scheme in use has it, while a file name with a line number
@@ -187,13 +188,13 @@ mod tests {
     }
 
     fn reasons(root: &Path, cases: &[(&str, &str)]) -> Vec<Option<String>> {
-        let tree = crate::disk::Disk::new(root);
+        let tree = crate::infrastructure::disk::Disk::new(root);
         cases
             .iter()
             .map(|(text, target)| {
                 broken(
                     &tree,
-                    &crate::readers::Readers,
+                    &crate::infrastructure::readers::Readers,
                     text,
                     target,
                     "docs/backlog",

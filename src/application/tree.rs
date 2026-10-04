@@ -1,46 +1,13 @@
-//! The tree a check reads: the port to a project's files, and the rules Rotproof keeps on how a path names a file.
-//!
-//! A check never asks the operating system itself: it takes a [`Tree`], which `disk.rs` implements on the file system
-//! and the tests implement in memory. Paths are from the root, with `/`, and "" is the root.
+//! Reading a project's files through the [`Tree`] port: a path read name by name, the code files of a directory, and
+//! the text of a file as the checks read it.
 
 use std::io;
 
-/// The files of a project, as a check reads them.
-pub trait Tree {
-    /// The text of the file at `path`, as it is stored. `InvalidData` when it is not UTF-8.
-    fn read(&self, path: &str) -> io::Result<String>;
-    /// The entries of the directory `dir`: each name, and whether it is a directory. An error when `dir` cannot be
-    /// read as a directory.
-    fn entries(&self, dir: &str) -> io::Result<Vec<(String, bool)>>;
-    /// Every file in `dir` and below, except the ones the project's own `.gitignore` files exclude and hidden ones.
-    ///
-    /// Only the `.gitignore` files inside the project count. A global excludes file, `.git/info/exclude` and a
-    /// `.gitignore` above the root differ from one machine to another, and would hide code on one machine that fails on
-    /// another.
-    fn files(&self, dir: &str) -> io::Result<Vec<String>>;
-    /// Where the path `rel`, named from the directory `dir`, lands as the operating system resolves it: from the root,
-    /// or `None` when it lands nowhere or outside the root. On Windows, another case, dots and spaces at the end and
-    /// short names land too; links are followed everywhere.
-    fn landed(&self, dir: &str, rel: &str) -> Option<String>;
-    /// What the operating system finds at `path`, as it reads names (on Windows, in any case): `Some(true)` for a
-    /// directory, `Some(false)` for a file, `None` for nothing.
-    fn found(&self, path: &str) -> Option<bool>;
-}
+use crate::domain::tree::{Tree, as_windows_reads, with_lf};
 
-/// The files a command writes into a project.
-pub trait Writer {
-    /// Write `text` to the file at `path`, making the directories it sits in.
-    fn write(&self, path: &str, text: &str) -> io::Result<()>;
-    /// Make the directory `dir`, and the ones it sits in.
-    fn make_dir(&self, dir: &str) -> io::Result<()>;
-}
-
-/// The text of the file at `path`, with every line ending as `\n`.
-///
-/// Line endings are normalized as Python's text mode does, which the original checks read with: a file checked out with
-/// CRLF would otherwise keep `\r` at the end of each heading, and its anchors would differ.
+/// The text of the file at `path`, as Rotproof reads it ([`with_lf`]).
 pub fn read_text(tree: &dyn Tree, path: &str) -> io::Result<String> {
-    Ok(tree.read(path)?.replace("\r\n", "\n").replace('\r', "\n"))
+    Ok(with_lf(&tree.read(path)?))
 }
 
 /// Read a code file for a check: `None`, with a finding that its `what` are not checked, when it is not UTF-8. An
@@ -114,11 +81,9 @@ pub fn lookup(tree: &dyn Tree, start: &str, rel: &str) -> Lookup {
             is_dir = *dir;
             continue;
         }
-        // How Windows reads a name: case does not count, and dots and spaces at the end are dropped
-        let windows = |name: &str| name.trim_end_matches(['.', ' ']).to_lowercase();
         return match entries
             .iter()
-            .find(|(name, _)| windows(name) == windows(part))
+            .find(|(name, _)| as_windows_reads(name) == as_windows_reads(part))
         {
             Some((name, _)) => {
                 spelled.push(name.clone());
@@ -162,14 +127,15 @@ pub fn code_files(
         .collect())
 }
 
-/// A tree in memory, for the tests: files by their path, and the directories their paths make or [`Writer`] made.
+/// A tree in memory, for the tests: files by their path, and the directories their paths make or
+/// [`Writer`](crate::domain::tree::Writer) made.
 #[cfg(test)]
 pub mod fake {
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
     use std::io;
 
-    use super::{Tree, Writer};
+    use crate::domain::tree::{Tree, Writer};
 
     #[derive(Debug, Default)]
     pub struct Fake {
@@ -349,5 +315,35 @@ mod tests {
             code_files(&tree, "", py).unwrap(),
             ["domain/a.py", "domains/c.py"]
         );
+    }
+
+    #[test]
+    fn a_path_on_the_disk_is_found_only_by_its_exact_names() {
+        // On Windows the operating system would open README.md by each of these; the listing has only its own name
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("docs/backlog")).unwrap();
+        std::fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
+        let disk = crate::infrastructure::disk::Disk::new(dir.path());
+        assert_eq!(
+            lookup(&disk, "docs/backlog", "../../README.md"),
+            Lookup::Found {
+                path: "README.md".into(),
+                is_dir: false
+            }
+        );
+        for (rel, on_disk) in [
+            ("../../readme.md", "../../README.md"),
+            ("../../README.md.", "../../README.md"),
+            ("../../Docs/backlog", "../../docs"),
+        ] {
+            assert_eq!(
+                lookup(&disk, "docs/backlog", rel),
+                Lookup::Spelled(on_disk.into()),
+                "{rel}"
+            );
+        }
+        for rel in ["../../README.md:secret", "../../README~1.MD", "CON"] {
+            assert_eq!(lookup(&disk, "docs/backlog", rel), Lookup::Missing, "{rel}");
+        }
     }
 }

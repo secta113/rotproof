@@ -20,8 +20,8 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
 
-use crate::code::{Alias, Aliases, Source, join, parent};
-use crate::tree::{Tree, read_text};
+use crate::domain::code::{Alias, Aliases, Source, join, parent};
+use crate::domain::tree::{Tree, with_lf};
 use utils::source::line_of;
 
 /// Read one file, whose path from the root says how: `.tsx` with JSX, `.d.ts` as declarations.
@@ -224,7 +224,7 @@ fn load_one(
     seen: &mut Vec<String>,
     problems: &mut Vec<String>,
 ) -> io::Result<Option<Options>> {
-    let text = match read_text(tree, name) {
+    let text = match tree.read(name).map(|text| with_lf(&text)) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             problems.push(format!("{name}: extended by {}, and not there", seen[0]));
@@ -363,7 +363,8 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::disk::Disk;
+    use crate::domain::code::Landing;
+    use crate::infrastructure::disk::Disk;
 
     #[test]
     fn every_form_of_import_is_read() {
@@ -445,17 +446,16 @@ export const k = 1;
         let tree = Disk::new(root.path());
         let aliases = aliases(&tree).unwrap();
         assert_eq!(aliases.problems, Vec::<String>::new());
-        let at = |s: &str| aliases.resolve(&tree, "src/ui/pages/home.tsx", s);
-        assert_eq!(at("@/domain/song"), Some("src/domain/song".into()));
-        assert_eq!(at("#theme"), Some("src/ui/atoms/theme".into()));
+        let at = |s: &str| aliases.resolve("src/ui/pages/home.tsx", s);
+        let at_path = |path: &str| Landing::At(Some(path.into()));
+        assert_eq!(at("@/domain/song"), at_path("src/domain/song"));
+        assert_eq!(at("#theme"), at_path("src/ui/atoms/theme"));
+        assert_eq!(at("~/application/play"), at_path("src/application/play"));
+        // Through baseUrl when a module is there, which the caller asks the tree
         assert_eq!(
-            at("~/application/play"),
-            Some("src/application/play".into())
+            at("domain/song"),
+            Landing::UnderBaseUrl(vec!["src/domain/song".into()])
         );
-        // Through baseUrl only when a module is there: a package of the same name otherwise
-        assert_eq!(at("domain/song"), Some("src/domain/song".into()));
-        assert_eq!(at("domain/missing"), None);
-        assert_eq!(at("react"), None);
     }
 
     #[test]

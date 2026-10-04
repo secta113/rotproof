@@ -13,39 +13,41 @@
 //! The texts are in `project/`, built into the binary. Each is named after the file it becomes, without a leading dot
 //! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
 
-use crate::layers::{Declared, Language, Layout, listed, table};
+use crate::domain::layers::{
+    Declared, Language, Layout, RECORDS_ONLY, known_stacks, layout, listed, table,
+};
 
 /// Rotproof's guide, from the root
 pub const GUIDE: &str = ".rotproof/AGENTS.md";
 
-const GUIDE_TEXT: &str = include_str!("../project/rotproof/AGENTS.md.in");
-const LAYERS_TEXT: &str = include_str!("../project/rotproof/layers.md.in");
-const UI_TEXT: &str = include_str!("../project/rotproof/ui.md.in");
+const GUIDE_TEXT: &str = include_str!("../../project/rotproof/AGENTS.md.in");
+const LAYERS_TEXT: &str = include_str!("../../project/rotproof/layers.md.in");
+const UI_TEXT: &str = include_str!("../../project/rotproof/ui.md.in");
 /// How the direction is read: the imports of a source file, or the dependencies of a crate
-const DIRECTION_IMPORTS: &str = include_str!("../project/rotproof/direction-imports.md.in");
-const DIRECTION_CARGO: &str = include_str!("../project/rotproof/direction-cargo.md.in");
+const DIRECTION_IMPORTS: &str = include_str!("../../project/rotproof/direction-imports.md.in");
+const DIRECTION_CARGO: &str = include_str!("../../project/rotproof/direction-cargo.md.in");
 
-const AGENTS_TEXT: &str = include_str!("../project/AGENTS.md.in");
-const CLAUDE_TEXT: &str = include_str!("../project/CLAUDE.md.in");
-const README_TEXT: &str = include_str!("../project/README.md.in");
-const GITATTRIBUTES_TEXT: &str = include_str!("../project/gitattributes.in");
+const AGENTS_TEXT: &str = include_str!("../../project/AGENTS.md.in");
+const CLAUDE_TEXT: &str = include_str!("../../project/CLAUDE.md.in");
+const README_TEXT: &str = include_str!("../../project/README.md.in");
+const GITATTRIBUTES_TEXT: &str = include_str!("../../project/gitattributes.in");
 /// Stack -> its `.gitignore`
 const GITIGNORE: [(&str, &str); 4] = [
-    ("python", include_str!("../project/gitignore/python.in")),
+    ("python", include_str!("../../project/gitignore/python.in")),
     (
         "typescript",
-        include_str!("../project/gitignore/typescript.in"),
+        include_str!("../../project/gitignore/typescript.in"),
     ),
-    ("rust", include_str!("../project/gitignore/rust.in")),
-    ("none", include_str!("../project/gitignore/none.in")),
+    ("rust", include_str!("../../project/gitignore/rust.in")),
+    ("none", include_str!("../../project/gitignore/none.in")),
 ];
 /// The stacks that install Rotproof from PyPI, pinned in `requirements-dev.txt`. How the others pin it is decided
 /// with each stack
 const PYPI: [&str; 2] = ["python", "none"];
-const PYPI_REQUIREMENTS: &str = include_str!("../project/pypi/requirements-dev.txt.in");
-const PYPI_WORKFLOW: &str = include_str!("../project/pypi/ci.yml.in");
-const PYPI_DEVELOPMENT: &str = include_str!("../project/pypi/development.md.in");
-const UNPINNED_DEVELOPMENT: &str = include_str!("../project/unpinned/development.md.in");
+const PYPI_REQUIREMENTS: &str = include_str!("../../project/pypi/requirements-dev.txt.in");
+const PYPI_WORKFLOW: &str = include_str!("../../project/pypi/ci.yml.in");
+const PYPI_DEVELOPMENT: &str = include_str!("../../project/pypi/development.md.in");
+const UNPINNED_DEVELOPMENT: &str = include_str!("../../project/unpinned/development.md.in");
 
 /// The project's files `rotproof create` writes once, for the project named `name` (its directory's name): path from
 /// the root -> text, and what was not written for the stack, and why.
@@ -125,34 +127,17 @@ fn map(declared: &Declared) -> String {
         .collect()
 }
 
-/// The guide `rotproof guide` prints: for `stack` when it is named, otherwise for the stack the project at `root`
-/// declares in `tree`. `Err` when the stack is unknown, or none is named and the declaration cannot be read.
-pub fn guide_for(tree: &dyn crate::tree::Tree, stack: Option<&str>) -> Result<String, String> {
-    let stacks = crate::layers::known_stacks().join(", ");
-    let stack = match stack {
-        Some(stack) => stack.to_string(),
-        None => match crate::layers::declaration(tree).map_err(|e| e.to_string())? {
-            Some(Ok(declaration)) => declaration.stack,
-            None => {
-                return Err(format!(
-                    "no {} here: name a stack with --stack ({stacks})",
-                    crate::layers::DECLARATION
-                ));
-            }
-            Some(Err(why)) => {
-                return Err(format!(
-                    "{}: {why}; or name a stack with --stack ({stacks})",
-                    crate::layers::DECLARATION
-                ));
-            }
-        },
-    };
-    if stack == crate::layers::RECORDS_ONLY {
-        return Ok(guide(&stack, None));
+/// The guide for the stack named `stack`. `Err` when the stack is unknown.
+pub fn guide_named(stack: &str) -> Result<String, String> {
+    if stack == RECORDS_ONLY {
+        return Ok(guide(stack, None));
     }
-    match crate::layers::layout(&stack) {
-        Some(layout) => Ok(guide(&stack, Some(&layout))),
-        None => Err(format!("unknown stack {stack:?} (known: {stacks})")),
+    match layout(stack) {
+        Some(layout) => Ok(guide(stack, Some(&layout))),
+        None => Err(format!(
+            "unknown stack {stack:?} (known: {})",
+            known_stacks().join(", ")
+        )),
     }
 }
 
@@ -238,7 +223,7 @@ fn layers_section(layout: &Layout) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layers::{RECORDS_ONLY, STACKS, layout};
+    use crate::domain::layers::STACKS;
 
     #[test]
     fn every_stack_has_a_guide_with_every_placeholder_filled() {
@@ -293,7 +278,7 @@ mod tests {
         // never included would be edited in vain
         let source = include_str!("project.rs");
         let included: std::collections::BTreeSet<String> = source
-            .match_indices("include_str!(\"../project/")
+            .match_indices("include_str!(\"../../project/")
             .map(|(at, prefix)| {
                 let rest = &source[at + prefix.len()..];
                 rest[..rest.find('"').unwrap()].to_string()
@@ -320,7 +305,7 @@ mod tests {
 
     #[test]
     fn every_stack_has_its_project_files() {
-        use crate::layers::{Declaration, known_stacks};
+        use crate::domain::layers::Declaration;
         for stack in known_stacks() {
             let declared = Declared::new(Declaration {
                 stack: stack.to_string(),

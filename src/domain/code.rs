@@ -9,12 +9,13 @@
 //! an import is its directory. A relative specifier resolves against the file's directory, and one that starts with
 //! `/` against the root, as Vite reads it. Another resolves through the aliases (`compilerOptions.paths`), then
 //! through a `baseUrl` when a module is there; otherwise it names a package, which no layer is. A query
-//! (`./logo.svg?url`) is not part of the path.
+//! (`./logo.svg?url`) is not part of the path. Whether a module is under a `baseUrl` is the one question asked of the
+//! tree: [`Aliases::resolve`] gives the paths to ask about, and the caller asks.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
-use crate::tree::Tree;
+use crate::domain::tree::Tree;
 
 /// The readers of code: the port the checks read code through.
 pub trait Parsers {
@@ -99,20 +100,29 @@ pub struct Aliases {
     pub problems: Vec<String>,
 }
 
+/// Where a specifier lands, as far as the aliases say.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Landing {
+    /// A path from the root, or `None` for a package, or a path above the root
+    At(Option<String>),
+    /// The first of these paths (from the root, under each `baseUrl` in turn) where a module is, by
+    /// [`module_files`]; a package when there is none
+    UnderBaseUrl(Vec<String>),
+}
+
 impl Aliases {
-    /// Where `specifier`, imported by the file at `file` (from the root), lands: a path from the root, or `None` for a
-    /// package, or a path above the root.
-    pub fn resolve(&self, tree: &dyn Tree, file: &str, specifier: &str) -> Option<String> {
+    /// Where `specifier`, imported by the file at `file` (from the root), lands.
+    pub fn resolve(&self, file: &str, specifier: &str) -> Landing {
         let specifier = specifier.split('?').next().unwrap_or(specifier);
         if specifier == "."
             || specifier == ".."
             || specifier.starts_with("./")
             || specifier.starts_with("../")
         {
-            return normalize(&format!("{}/{specifier}", parent(file)));
+            return Landing::At(normalize(&format!("{}/{specifier}", parent(file))));
         }
         if let Some(from_root) = specifier.strip_prefix('/') {
-            return normalize(from_root);
+            return Landing::At(normalize(from_root));
         }
         let matched = self
             .paths
@@ -130,22 +140,26 @@ impl Aliases {
             // The longest prefix wins, as in TypeScript
             .max_by_key(|(length, _)| *length);
         if let Some((_, target)) = matched {
-            return normalize(&target);
+            return Landing::At(normalize(&target));
         }
-        self.base_urls.iter().find_map(|base| {
-            let path = normalize(&join(base, specifier))?;
-            is_module(tree, &path).then_some(path)
-        })
+        Landing::UnderBaseUrl(
+            self.base_urls
+                .iter()
+                .filter_map(|base| normalize(&join(base, specifier)))
+                .collect(),
+        )
     }
 }
 
-/// Whether a module is at `path` (from the root): the file itself, with one of [`EXTENSIONS`], or an `index` in it.
-fn is_module(tree: &dyn Tree, path: &str) -> bool {
-    tree.found(path) == Some(false)
-        || EXTENSIONS.iter().any(|extension| {
-            tree.found(&format!("{path}.{extension}")) == Some(false)
-                || tree.found(&format!("{path}/index.{extension}")) == Some(false)
-        })
+/// The files that make a module at `path` (from the root), any one of them enough: the file itself, with one of
+/// [`EXTENSIONS`], or an `index` in it.
+pub fn module_files(path: &str) -> Vec<String> {
+    let mut files = vec![path.to_string()];
+    for extension in EXTENSIONS {
+        files.push(format!("{path}.{extension}"));
+        files.push(format!("{path}/index.{extension}"));
+    }
+    files
 }
 
 /// The directory of a path from the root: "" for a file at the root.
@@ -214,13 +228,14 @@ pub struct Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::fake::Fake;
 
     #[test]
     fn a_relative_or_rooted_specifier_resolves_against_the_file() {
         let aliases = Aliases::default();
-        let tree = Fake::default();
-        let at = |s: &str| aliases.resolve(&tree, "src/ui/atoms/button.tsx", s);
+        let at = |s: &str| match aliases.resolve("src/ui/atoms/button.tsx", s) {
+            Landing::At(path) => path,
+            other => panic!("{s}: {other:?}"),
+        };
         assert_eq!(at("../molecules/row"), Some("src/ui/molecules/row".into()));
         assert_eq!(
             at("./theme.css?inline"),
@@ -229,7 +244,28 @@ mod tests {
         assert_eq!(at("../../domain"), Some("src/domain".into()));
         assert_eq!(at("/src/utils/x"), Some("src/utils/x".into()));
         assert_eq!(at("../../../../../out"), None);
-        assert_eq!(at("react"), None);
+        // Without a baseUrl, nothing to ask about: a package
+        assert_eq!(
+            aliases.resolve("src/a.ts", "react"),
+            Landing::UnderBaseUrl(Vec::new())
+        );
+    }
+
+    #[test]
+    fn under_a_base_url_a_specifier_is_each_path_it_names_in_turn() {
+        let aliases = Aliases {
+            base_urls: ["src".to_string(), "lib".to_string()].into(),
+            ..Aliases::default()
+        };
+        assert_eq!(
+            aliases.resolve("src/a.ts", "domain/song?raw"),
+            Landing::UnderBaseUrl(vec!["lib/domain/song".into(), "src/domain/song".into()])
+        );
+        let files = module_files("src/domain/song");
+        assert_eq!(files.len(), 1 + 2 * EXTENSIONS.len());
+        assert!(files.contains(&"src/domain/song".into()));
+        assert!(files.contains(&"src/domain/song.tsx".into()));
+        assert!(files.contains(&"src/domain/song/index.mjs".into()));
     }
 
     #[test]

@@ -20,9 +20,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::code::{Parsers, is_source};
-use crate::layers::{Declared, Language};
-use crate::tree::{Tree, code_files, read_code};
+use crate::application::tree::{code_files, read_code};
+use crate::domain::code::{Parsers, is_source};
+use crate::domain::layers::{Declared, Language};
+use crate::domain::tree::Tree;
 use utils::source::{line_of, within};
 
 /// The words that fail in a comment.
@@ -157,7 +158,7 @@ mod tests {
     fn words(source: &str) -> Vec<(usize, Vec<&'static str>)> {
         named(in_comments(
             source,
-            &crate::python::read(source, "x.py").comments,
+            &crate::infrastructure::python::read(source, "x.py").comments,
         ))
     }
 
@@ -223,7 +224,7 @@ note = Status.TODO  # todo in lower case, TODOS and NOTES, NOTE_X and XXXL are o
     fn typescript_words(source: &str) -> Vec<(usize, Vec<&'static str>)> {
         named(in_comments(
             source,
-            &crate::typescript::read(source, "src/a.tsx").comments,
+            &crate::infrastructure::typescript::read(source, "src/a.tsx").comments,
         ))
     }
 

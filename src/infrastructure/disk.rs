@@ -4,8 +4,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::layers::DECLARATION;
-use crate::tree::{Tree, Writer};
+use crate::domain::layers::DECLARATION;
+use crate::domain::tree::{Tree, Writer};
 use utils::source::{relative_path, within};
 
 /// A project's files, from its root directory.
@@ -125,36 +125,25 @@ pub fn project_root(start: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::{Lookup, lookup};
 
     #[test]
     fn the_disk_lists_names_as_they_are_spelled() {
-        // On Windows the operating system would open README.md by each of these; the listing has only its own name
+        // On Windows the operating system would open README.md as readme.md too; the listing has only its own name
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join("docs/backlog")).unwrap();
         fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
         let disk = Disk::new(dir.path());
+        let mut root = disk.entries("").unwrap();
+        root.sort();
         assert_eq!(
-            lookup(&disk, "docs/backlog", "../../README.md"),
-            Lookup::Found {
-                path: "README.md".into(),
-                is_dir: false
-            }
+            root,
+            [("README.md".to_string(), false), ("docs".to_string(), true)]
         );
-        for (rel, on_disk) in [
-            ("../../readme.md", "../../README.md"),
-            ("../../README.md.", "../../README.md"),
-            ("../../Docs/backlog", "../../docs"),
-        ] {
-            assert_eq!(
-                lookup(&disk, "docs/backlog", rel),
-                Lookup::Spelled(on_disk.into()),
-                "{rel}"
-            );
-        }
-        for rel in ["../../README.md:secret", "../../README~1.MD", "CON"] {
-            assert_eq!(lookup(&disk, "docs/backlog", rel), Lookup::Missing, "{rel}");
-        }
+        assert_eq!(
+            disk.entries("docs").unwrap(),
+            [("backlog".to_string(), true)]
+        );
+        assert!(disk.entries("README.md").is_err());
     }
 
     #[test]

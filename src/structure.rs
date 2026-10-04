@@ -14,8 +14,10 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use crate::layers::{DECLARATION, Declared, Layout, MISSING, Place, declaration};
-use crate::tree::{Tree, code_files, exactly};
+use crate::application::layers::declaration;
+use crate::application::tree::{code_files, exactly};
+use crate::domain::layers::{DECLARATION, Declared, Layout, MISSING, Place};
+use crate::domain::tree::Tree;
 use utils::source::within;
 
 /// What the structure check found.
@@ -258,7 +260,7 @@ fn where_ui_parts_go(places: &[Place]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::fake::Fake;
+    use crate::application::tree::fake::Fake;
 
     #[test]
     fn the_tree_is_read_through_the_port_alone() {

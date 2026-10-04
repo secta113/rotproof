@@ -19,9 +19,11 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use crate::code::{Manifest, Origin, Parsers, is_source, module_parts};
-use crate::layers::{Declared, Language, Layout, Place, listed};
-use crate::tree::{Tree, code_files, exactly, read_code};
+use crate::application::code::lands;
+use crate::application::tree::{code_files, exactly, read_code};
+use crate::domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
+use crate::domain::layers::{Declared, Language, Layout, Place, listed};
+use crate::domain::tree::Tree;
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
 /// error is a directory that could not be walked.
@@ -270,7 +272,7 @@ fn typescript(
             ));
         }
         for (line, specifier) in read.imports {
-            let Some(target) = aliases.resolve(tree, &path, &specifier) else {
+            let Some(target) = lands(tree, &aliases, &path, &specifier) else {
                 continue;
             };
             let Some(to) = place_of(&parts(&target), places) else {
@@ -387,7 +389,7 @@ fn what_it_may_import(place: &Place) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layers::{layout, table};
+    use crate::domain::layers::{layout, table};
 
     fn python_places() -> Vec<Place> {
         layout("python").unwrap().places(&table())

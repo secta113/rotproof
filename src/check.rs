@@ -32,12 +32,14 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use crate::bundle::{Bundle, DOCS, Docs, RESERVED, backlog, in_docs};
-use crate::code::Parsers;
+use crate::domain::code::Parsers;
 
-use crate::layers::{DECLARATION, area_problems, areas};
+use crate::application::layers::areas;
+use crate::application::tree::{exactly, read_text};
+use crate::domain::layers::{DECLARATION, area_problems};
+use crate::domain::project::GUIDE;
+use crate::domain::tree::Tree;
 use crate::links::broken;
-use crate::project::GUIDE;
-use crate::tree::{Tree, exactly, read_text};
 use utils::frontmatter::split;
 use utils::markdown::{heading, links, visible};
 
@@ -116,7 +118,8 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
             check: heading.clone().into(),
             detail,
         }));
-        let guide = crate::project::guide(&declared.declaration.stack, declared.layout.as_ref());
+        let guide =
+            crate::domain::project::guide(&declared.declaration.stack, declared.layout.as_ref());
         let found = exactly(tree, GUIDE)
             .ok()
             .and_then(|(path, _)| read_text(tree, &path).ok());
@@ -631,8 +634,8 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::disk::Disk;
-    use crate::readers::Readers;
+    use crate::infrastructure::disk::Disk;
+    use crate::infrastructure::readers::Readers;
 
     #[test]
     fn the_hash_is_the_first_8_hex_digits_of_sha_256() {

@@ -77,21 +77,13 @@ pub trait Changes {
     fn changed(&self, dir: &str) -> Result<bool, String>;
 }
 
-/// What the hook prints for `input` (the JSON the agent writes on stdin). `changes` is the project's, or `None` outside
-/// a project. `None` lets the agent stop, with nothing printed.
-pub fn run(input: &str, changes: Option<&dyn Changes>) -> Result<Option<String>, String> {
-    decide(input, || match changes {
-        Some(changes) => changes.changed("docs"),
-        // Outside a project there is nothing to record into
-        None => Ok(true),
-    })
-}
+/// The directory whose changes say that a finding was recorded, from the root
+pub const RECORDS_DIR: &str = "docs";
 
-/// The decision, with `recorded` saying whether `docs/` changed. It is asked only when a phrase is found.
-fn decide(
-    input: &str,
-    recorded: impl FnOnce() -> Result<bool, String>,
-) -> Result<Option<String>, String> {
+/// What the hook reads in `input` (the JSON the agent writes on stdin): the phrases of [`PHRASES`] the agent's last
+/// message leaves open, in the order of the list. None while the agent is already continuing because of a stop hook.
+/// Only when some are found does the hook ask whether [`RECORDS_DIR`] changed.
+pub fn open_in(input: &str) -> Result<Vec<&'static str>, String> {
     let input: Value =
         serde_json::from_str(input).map_err(|e| format!("the hook input is not JSON: {e}"))?;
     let event = input
@@ -104,18 +96,18 @@ fn decide(
         ));
     }
     if input.get("stop_hook_active").and_then(Value::as_bool) == Some(true) {
-        return Ok(None);
+        return Ok(Vec::new());
     }
-    let message = match input.get(MESSAGE) {
-        Some(Value::String(message)) => message.as_str(),
+    match input.get(MESSAGE) {
+        Some(Value::String(message)) => Ok(open_phrases(message)),
         // A turn that ended without text
-        Some(Value::Null) => "",
-        _ => return Err(format!("the {event} hook input has no {MESSAGE}")),
-    };
-    let found = open_phrases(message);
-    if found.is_empty() || recorded()? {
-        return Ok(None);
+        Some(Value::Null) => Ok(Vec::new()),
+        _ => Err(format!("the {event} hook input has no {MESSAGE}")),
     }
+}
+
+/// What the hook prints to send the agent back, for the phrases `found` while nothing in [`RECORDS_DIR`] changed.
+pub fn send_back(found: &[&str]) -> String {
     let quoted: Vec<String> = found.iter().map(|phrase| format!("\"{phrase}\"")).collect();
     let text = format!(
         "Your last message says {} and nothing in docs/ changed. If it leaves a finding open, record it now: an \
@@ -129,7 +121,7 @@ fn decide(
             "additionalContext": text,
         }
     });
-    Ok(Some(answer.to_string()))
+    answer.to_string()
 }
 
 /// The phrases of [`PHRASES`] that `message` holds, in the order of the list. A line that points at the records is
@@ -151,27 +143,6 @@ fn open_phrases(message: &str) -> Vec<&'static str> {
 mod tests {
     use super::*;
 
-    /// Changes in memory: whether each directory changed, and every directory asked about
-    struct Fake(bool, std::cell::RefCell<Vec<String>>);
-
-    impl Changes for Fake {
-        fn changed(&self, dir: &str) -> Result<bool, String> {
-            self.1.borrow_mut().push(dir.to_string());
-            Ok(self.0)
-        }
-    }
-
-    #[test]
-    fn the_project_is_asked_about_docs_and_outside_one_nothing_is_asked() {
-        let unchanged = Fake(false, Default::default());
-        let said = run(&input("未確認のまま", false), Some(&unchanged)).unwrap();
-        assert!(said.is_some_and(|out| out.contains("nothing in docs/ changed")));
-        assert_eq!(*unchanged.1.borrow(), ["docs"]);
-        let changed = Fake(true, Default::default());
-        assert_eq!(run(&input("未確認のまま", false), Some(&changed)), Ok(None));
-        assert_eq!(run(&input("未確認のまま", false), None), Ok(None));
-    }
-
     fn input(message: &str, active: bool) -> String {
         json!({
             "hook_event_name": "Stop",
@@ -182,18 +153,15 @@ mod tests {
     }
 
     #[test]
-    fn a_phrase_with_no_change_in_docs_sends_the_agent_back() {
-        let out = decide(
-            &input("Done. The Windows path is not checked.", false),
-            || Ok(false),
-        )
-        .unwrap()
-        .expect("sent back");
-        let out: Value = serde_json::from_str(&out).unwrap();
+    fn a_phrase_found_is_named_in_what_sends_the_agent_back() {
+        let found = open_in(&input("Done. The Windows path is not checked.", false)).unwrap();
+        assert_eq!(found, ["not checked"]);
+        let out: Value = serde_json::from_str(&send_back(&found)).unwrap();
         let context = out["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
         assert!(context.contains("\"not checked\""), "{context}");
+        assert!(context.contains("nothing in docs/ changed"), "{context}");
         assert_eq!(out["hookSpecificOutput"]["hookEventName"], "Stop");
     }
 
@@ -225,35 +193,23 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_stops_when_docs_changed_or_no_phrase_or_already_sent_back() {
-        assert_eq!(decide(&input("未確認のまま", false), || Ok(true)), Ok(None));
-        assert_eq!(
-            decide(&input("All done.", false), || panic!("not asked")),
-            Ok(None)
-        );
-        assert_eq!(
-            decide(&input("未確認のまま", true), || panic!("not asked")),
-            Ok(None)
-        );
+    fn nothing_is_open_without_a_phrase_or_once_already_sent_back() {
+        assert_eq!(open_in(&input("All done.", false)), Ok(Vec::new()));
+        assert_eq!(open_in(&input("未確認のまま", true)), Ok(Vec::new()));
         let null = json!({"hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": null});
-        assert_eq!(decide(&null.to_string(), || panic!("not asked")), Ok(None));
+        assert_eq!(open_in(&null.to_string()), Ok(Vec::new()));
     }
 
     #[test]
     fn an_input_from_another_hook_fails() {
-        assert!(decide("not json", || Ok(false)).is_err());
-        assert!(decide("{}", || Ok(false)).is_err());
+        assert!(open_in("not json").is_err());
+        assert!(open_in("{}").is_err());
         let other = json!({"hook_event_name": "PreToolUse", "last_assistant_message": "未確認"});
-        assert!(decide(&other.to_string(), || Ok(false)).is_err());
+        assert!(open_in(&other.to_string()).is_err());
         // Gemini CLI's event is no longer answered
         let gemini = json!({"hook_event_name": "AfterAgent", "prompt_response": "未確認"});
-        assert!(decide(&gemini.to_string(), || Ok(false)).is_err());
+        assert!(open_in(&gemini.to_string()).is_err());
         let empty = json!({"hook_event_name": "Stop"});
-        assert!(decide(&empty.to_string(), || Ok(false)).is_err());
-    }
-
-    #[test]
-    fn a_failing_git_is_an_error() {
-        assert!(decide(&input("未決", false), || Err("git".into())).is_err());
+        assert!(open_in(&empty.to_string()).is_err());
     }
 }

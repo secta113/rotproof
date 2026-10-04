@@ -5,11 +5,8 @@
 //! one file.
 
 use std::collections::BTreeMap;
-use std::io;
 
 use serde::Deserialize;
-
-use crate::tree::{Lookup, Tree, exactly, lookup};
 
 /// Where a project declares its structure, from the root
 pub const DECLARATION: &str = ".config/rotproof.toml";
@@ -19,12 +16,12 @@ pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotpro
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
 
-const TABLE: &str = include_str!("../layers/table.toml");
+const TABLE: &str = include_str!("../../layers/table.toml");
 /// Stack -> its layout
 pub const STACKS: [(&str, &str); 3] = [
-    ("python", include_str!("../layers/python.toml")),
-    ("typescript", include_str!("../layers/typescript.toml")),
-    ("rust", include_str!("../layers/rust.toml")),
+    ("python", include_str!("../../layers/python.toml")),
+    ("typescript", include_str!("../../layers/typescript.toml")),
+    ("rust", include_str!("../../layers/rust.toml")),
 ];
 
 /// One layer, or one atomic level of `ui`, as the table describes it.
@@ -297,15 +294,6 @@ pub struct Declaration {
     pub unchecked: Vec<String>,
 }
 
-/// The areas a project declares, or why the declaration cannot be read.
-pub fn areas(tree: &dyn Tree) -> io::Result<Result<Vec<String>, String>> {
-    Ok(match declaration(tree)? {
-        None => Err(MISSING.into()),
-        Some(Err(why)) => Err(format!("{DECLARATION}: {why}")),
-        Some(Ok(declaration)) => Ok(declaration.areas),
-    })
-}
-
 /// What is wrong with a list of areas. An area becomes a heading, so it has text, no space at either end, and no other
 /// area differs from it only in case.
 pub fn area_problems(areas: &[String]) -> Vec<String> {
@@ -335,23 +323,9 @@ pub fn area_problems(areas: &[String]) -> Vec<String> {
     found
 }
 
-/// The declaration, or why it cannot be read. `Ok(None)` when the file does not exist.
-pub fn declaration(tree: &dyn Tree) -> io::Result<Option<Result<Declaration, String>>> {
-    // By the exact name, before anything asks the operating system: `.config/Rotproof.toml` opens as the declaration on
-    // Windows, and is not there on Linux, where asking first would say only that the declaration is missing
-    let path = match lookup(tree, "", DECLARATION) {
-        Lookup::Found { path, .. } => path,
-        Lookup::Missing => return Ok(None),
-        Lookup::Spelled(_) => {
-            return Ok(Some(Err(
-                exactly(tree, DECLARATION).expect_err("spelled otherwise")
-            )));
-        }
-    };
-    let text = tree
-        .read(&path)
-        .map_err(|e| io::Error::new(e.kind(), format!("{DECLARATION}: {e}")))?;
-    Ok(Some(toml::from_str(&text).map_err(|e| {
+/// The declaration `text` holds, or why it cannot be read.
+pub fn parse_declaration(text: &str) -> Result<Declaration, String> {
+    toml::from_str(text).map_err(|e| {
         let why = e.message().to_string();
         // A field a newer Rotproof requires: the upgrade is to run `rotproof create`, not to look the field up
         match ADDED
@@ -361,7 +335,7 @@ pub fn declaration(tree: &dyn Tree) -> io::Result<Option<Result<Declaration, Str
             Some(_) => format!("{why}: run `rotproof create`, which adds it"),
             None => why,
         }
-    })))
+    })
 }
 
 /// What `areas` is, as the declaration says it above the field.
@@ -628,11 +602,23 @@ mod tests {
     #[test]
     fn the_declaration_init_writes_reads_back() {
         for stack in known_stacks() {
-            let declaration: Declaration =
-                toml::from_str(&declaration_text(stack)).unwrap_or_else(|e| panic!("{stack}: {e}"));
+            let declaration: Declaration = parse_declaration(&declaration_text(stack))
+                .unwrap_or_else(|e| panic!("{stack}: {e}"));
             assert_eq!(declaration.stack, stack);
             assert!(Declared::new(declaration).is_ok(), "{stack}");
         }
+    }
+
+    #[test]
+    fn a_field_create_adds_is_named_with_the_command_that_adds_it() {
+        assert_eq!(
+            parse_declaration("stack = \"none\"\n").unwrap_err(),
+            "missing field `areas`: run `rotproof create`, which adds it"
+        );
+        assert_eq!(
+            parse_declaration("areas = []\n").unwrap_err(),
+            "missing field `stack`"
+        );
     }
 
     #[test]
