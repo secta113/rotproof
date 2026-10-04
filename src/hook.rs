@@ -56,8 +56,8 @@ static RECORDS: LazyLock<Regex> = LazyLock::new(|| {
 
 /// What in a report leaves something open, matched in any case. Words common in plain prose ("later") are left out:
 /// a hook that fires on every message is answered without reading. So is "todo" for now: while the marker check is
-/// being built and talked about, it names that check more often than it leaves work open, and a `TODO` in code fails
-/// the marker check anyway.
+/// being built and talked about, it names that check more often than it leaves work open, and the word in a comment
+/// in the code fails the marker check anyway.
 pub const PHRASES: [&str; 14] = [
     "未確認",
     "後で",

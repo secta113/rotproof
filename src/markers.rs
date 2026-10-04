@@ -1,9 +1,9 @@
-//! The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`.
+//! The marker check: no comment in the code holds a marker, one of the words in [`MARKERS`].
 //!
-//! - A `TODO` (and `FIXME`, `XXX`, `HACK`) is work left to do that no record holds: nothing lists it, and nothing
-//!   asks when it is done. A `NOTE` is knowledge kept where nothing can filter or link it.
-//! - The words count in upper case, as whole words, and only in comments: `Status.TODO` in a task board and
-//!   `"XXX-XXXX"` in a phone format are not markers. Docstrings are strings, so they are not read.
+//! - The first four mark work left to do that no record holds: nothing lists it, and nothing asks when it is done.
+//!   The last marks knowledge kept where nothing can filter or link it.
+//! - The words count in upper case, as whole words, and only in comments: a task board's status named after one, or
+//!   a phone format written with the letter X, is not a marker. Docstrings are strings, so they are not read.
 //! - Every code file of the layout is read, `tests/` and the other paths that are not layers included, except the
 //!   paths the project lists in `unchecked` (generated code is written by a tool the project does not edit).
 //!

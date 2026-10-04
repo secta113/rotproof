@@ -4,8 +4,8 @@
 //!   sits outside them (`structure.rs`).
 //! - **The layers import only what the table allows** (`direction.rs`): the imports of `python` and `typescript`, and
 //!   the dependencies each crate of `rust` declares.
-//! - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`** (`markers.rs`): work left to do belongs in the
-//!   backlog, where it is listed and closed.
+//! - **No comment holds a marker**, one of the words in `markers::MARKERS` (`markers.rs`): work left to do belongs in
+//!   the backlog, where it is listed and closed.
 //! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
 //!   this version of Rotproof (`project.rs`).
 //! - **The backlog works as a backlog**: every document keeps the format, every link in `# Details` resolves, and every
