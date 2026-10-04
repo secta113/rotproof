@@ -31,7 +31,8 @@ use percent_encoding::percent_decode_str;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-use crate::bundle::{Bundle, DOCS, Docs, RESERVED, backlog, in_docs};
+use crate::application::bundle::Bundle;
+use crate::domain::bundle::{DOCS, Docs, RESERVED, backlog, in_docs};
 use crate::domain::code::Parsers;
 
 use crate::application::layers::areas;

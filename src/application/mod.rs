@@ -3,6 +3,7 @@
 //!
 //! Imports `domain` and `utils`, never `infrastructure`.
 
+pub mod bundle;
 pub mod code;
 pub mod direction;
 pub mod hook;

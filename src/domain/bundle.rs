@@ -1,15 +1,13 @@
-//! `docs/` as one OKF 0.2 bundle: reading its documents, and the index file each directory should contain.
+//! `docs/` as one OKF 0.2 bundle: sorting out its documents once they are read, and the index file each directory
+//! should contain.
 //!
 //! Every `.md` under `docs/` except the reserved names is a document with frontmatter. The index files are never
 //! written by hand: `rotproof index` writes them, and `rotproof check` fails when one differs from what it would write.
 
 use std::collections::BTreeMap;
-use std::io;
 
-use crate::application::tree::read_text;
 use crate::domain::layers::DECLARATION;
-use crate::domain::tree::Tree;
-use crate::schema::{
+use crate::domain::schema::{
     BacklogDoc, CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, SPEC_FOLDERS,
     Spec, Status, Time, backlog_doc, guide_doc, knowledge_doc, spec,
 };
@@ -22,15 +20,15 @@ pub const GENERATED: &str = "<!-- Generated from the frontmatter by `rotproof in
                              fails when this file differs from what `rotproof index` writes. -->";
 /// The backlog rules. Rotproof writes them like an index file, so the rules a project reads are the rules its Rotproof
 /// checks
-pub const RULES: &str = include_str!("../records/rules.md");
+pub const RULES: &str = include_str!("../../records/rules.md");
 /// The spec rules, written like the backlog rules
-pub const SPEC_RULES: &str = include_str!("../records/spec-rules.md");
+pub const SPEC_RULES: &str = include_str!("../../records/spec-rules.md");
 /// The knowledge rules, written like the backlog rules
-pub const KNOWLEDGE_RULES: &str = include_str!("../records/knowledge-rules.md");
+pub const KNOWLEDGE_RULES: &str = include_str!("../../records/knowledge-rules.md");
 /// The one directory of specs that holds guides: the spec rules, and any a project adds
 const GUIDES_AMONG_SPECS: &str = "specs";
 /// The log as `rotproof create` makes it. From then on it is the project's
-pub const LOG: &str = include_str!("../records/log.md");
+pub const LOG: &str = include_str!("../../records/log.md");
 /// The bundle-root index links to these, in this order
 const ROOT_ENTRIES: [(&str, &str, &str); 4] = [
     ("Backlog", "backlog/", "Open problems and postponed work."),
@@ -263,105 +261,81 @@ fn undeclared(tag: &str, areas: &[String]) -> String {
 /// Where the bundle sits, from the root of the repository.
 pub const DOCS: &str = "docs";
 
-/// The bundle of one repository, `docs/` in its tree, and the areas its records are grouped by.
-pub struct Bundle<'a> {
-    tree: &'a dyn Tree,
-    /// In the order the index files list them
-    pub areas: Vec<String>,
-}
-
 /// The path of `rest` in the bundle, from the root of the repository.
 pub fn in_docs(rest: &str) -> String {
     format!("{DOCS}/{rest}")
 }
 
-impl<'a> Bundle<'a> {
-    pub fn new(tree: &'a dyn Tree, areas: Vec<String>) -> Self {
-        Bundle { tree, areas }
-    }
-
-    /// The documents directly in `docs/<folder>/`, except reserved names: file name -> text.
-    pub fn read_folder(&self, folder: &str) -> io::Result<Docs> {
-        let dir = in_docs(folder);
-        let mut docs = Docs::new();
-        for (name, is_dir) in self.tree.entries(&dir).map_err(|e| with_path(e, &dir))? {
-            if name.ends_with(".md") && !RESERVED.contains(&name.as_str()) && !is_dir {
-                let path = format!("{dir}/{name}");
-                let text = read_text(self.tree, &path).map_err(|e| with_path(e, &path))?;
-                docs.insert(name, text);
-            }
-        }
-        Ok(docs)
-    }
-
-    /// Every file Rotproof generates in the bundle (the index files and the backlog rules) -> what it should contain
-    /// now, and the documents left out of the index files.
-    pub fn expected(&self) -> io::Result<(Vec<(String, String)>, Problems)> {
-        // The rules as they are about to be written, so the backlog index lists them on the run that writes them
-        let mut docs = self.read_folder("backlog")?;
-        docs.insert("rules.md".into(), RULES.into());
-        let backlog = backlog(&docs, &self.areas);
-        let mut files = vec![
-            (in_docs("backlog/rules.md"), RULES.into()),
-            (in_docs("index.md"), render_root()),
-            (
-                in_docs("backlog/index.md"),
-                render_backlog(&backlog.items, &backlog.guides, &self.areas),
-            ),
-        ];
-        files.push((
-            in_docs(&format!("{GUIDES_AMONG_SPECS}/rules.md")),
-            SPEC_RULES.into(),
-        ));
-        let mut problems = backlog.problems;
-        let specs = self.read_specs()?;
-        for (folder, _) in SPEC_FOLDERS {
-            files.push((
-                in_docs(&format!("{folder}/index.md")),
-                render_specs(folder, &specs, &self.areas),
-            ));
-        }
-        problems.extend(specs.problems);
-        let read = self.read_knowledge()?;
-        files.push((in_docs("knowledge/rules.md"), KNOWLEDGE_RULES.into()));
-        files.push((
-            in_docs("knowledge/index.md"),
-            render_knowledge(&read.documents, &read.guides, &self.areas),
-        ));
-        problems.extend(
-            read.problems
-                .into_iter()
-                .map(|(name, why)| (format!("knowledge/{name}"), why)),
-        );
-        Ok((files, problems))
-    }
-
-    /// The documents of `docs/knowledge/`, with the knowledge rules read as Rotproof writes them, so the index lists
-    /// them on the run that writes them.
-    pub fn read_knowledge(&self) -> io::Result<KnowledgeFolder> {
-        let mut docs = self.read_folder("knowledge")?;
-        docs.insert("rules.md".into(), KNOWLEDGE_RULES.into());
-        Ok(knowledge(&docs, &self.areas))
-    }
-
-    /// Every spec of `docs/specs/`, checked one by one and against each other. The spec rules are read
-    /// as Rotproof writes them, so the index lists them on the run that writes them.
-    pub fn read_specs(&self) -> io::Result<Specs> {
-        let mut folders = SPEC_FOLDERS
-            .iter()
-            .map(|(folder, _)| Ok((*folder, self.read_folder(folder)?)))
-            .collect::<io::Result<Vec<_>>>()?;
-        for (folder, docs) in &mut folders {
-            if *folder == GUIDES_AMONG_SPECS {
-                docs.insert("rules.md".into(), SPEC_RULES.into());
-            }
-        }
-        Ok(all_specs(&folders, &self.areas))
-    }
+/// Whether the entry `name` of a directory of the bundle is a document: a `.md` file with a name OKF does not reserve.
+pub fn is_document(name: &str, is_dir: bool) -> bool {
+    name.ends_with(".md") && !RESERVED.contains(&name) && !is_dir
 }
 
-fn with_path(e: io::Error, path: &str) -> io::Error {
-    io::Error::new(e.kind(), format!("{path}: {e}"))
+/// Every file Rotproof generates in the bundle (the index files and the rules) -> what it should contain now, and the
+/// documents left out of the index files, from the documents read in `docs/backlog/`, in each directory of
+/// [`SPEC_FOLDERS`] (`specs`, in that order) and in `docs/knowledge/`.
+pub fn expected(
+    backlog_docs: &Docs,
+    spec_folders: Vec<(&'static str, Docs)>,
+    knowledge_docs: &Docs,
+    areas: &[String],
+) -> (Vec<(String, String)>, Problems) {
+    // The rules as they are about to be written, so the backlog index lists them on the run that writes them
+    let mut docs = backlog_docs.clone();
+    docs.insert("rules.md".into(), RULES.into());
+    let backlog = backlog(&docs, areas);
+    let mut files = vec![
+        (in_docs("backlog/rules.md"), RULES.into()),
+        (in_docs("index.md"), render_root()),
+        (
+            in_docs("backlog/index.md"),
+            render_backlog(&backlog.items, &backlog.guides, areas),
+        ),
+    ];
+    files.push((
+        in_docs(&format!("{GUIDES_AMONG_SPECS}/rules.md")),
+        SPEC_RULES.into(),
+    ));
+    let mut problems = backlog.problems;
+    let specs = specs_with_rules(spec_folders, areas);
+    for (folder, _) in SPEC_FOLDERS {
+        files.push((
+            in_docs(&format!("{folder}/index.md")),
+            render_specs(folder, &specs, areas),
+        ));
+    }
+    problems.extend(specs.problems);
+    let read = knowledge_with_rules(knowledge_docs, areas);
+    files.push((in_docs("knowledge/rules.md"), KNOWLEDGE_RULES.into()));
+    files.push((
+        in_docs("knowledge/index.md"),
+        render_knowledge(&read.documents, &read.guides, areas),
+    ));
+    problems.extend(
+        read.problems
+            .into_iter()
+            .map(|(name, why)| (format!("knowledge/{name}"), why)),
+    );
+    (files, problems)
+}
+
+/// The documents of `docs/knowledge/`, from those read there, with the knowledge rules read as Rotproof writes them, so
+/// the index lists them on the run that writes them.
+pub fn knowledge_with_rules(docs: &Docs, areas: &[String]) -> KnowledgeFolder {
+    let mut docs = docs.clone();
+    docs.insert("rules.md".into(), KNOWLEDGE_RULES.into());
+    knowledge(&docs, areas)
+}
+
+/// Every spec, from the documents read in each directory of [`SPEC_FOLDERS`], checked one by one and against each
+/// other. The spec rules are read as Rotproof writes them, so the index lists them on the run that writes them.
+pub fn specs_with_rules(mut folders: Vec<(&'static str, Docs)>, areas: &[String]) -> Specs {
+    for (folder, docs) in &mut folders {
+        if *folder == GUIDES_AMONG_SPECS {
+            docs.insert("rules.md".into(), SPEC_RULES.into());
+        }
+    }
+    all_specs(&folders, areas)
 }
 
 /// A title as the text of a link in the index. `[`, `]` and `\` are escaped, so a title with brackets stays the text
@@ -773,7 +747,10 @@ Not yet. Measured by hand.
             ("ops.md".to_string(), doc("Ops", "operations")),
             (
                 "old.md".to_string(),
-                crate::schema::closed_record(&doc("Old", "billing"), "Replaced by the API. More."),
+                crate::domain::schema::closed_record(
+                    &doc("Old", "billing"),
+                    "Replaced by the API. More.",
+                ),
             ),
             ("rules.md".to_string(), KNOWLEDGE_RULES.to_string()),
         ]
@@ -802,7 +779,7 @@ Not yet. Measured by hand.
 
     #[test]
     fn a_closed_item_leaves_the_open_list() {
-        let closed = crate::schema::closed_record(GOOD, "Fixed.");
+        let closed = crate::domain::schema::closed_record(GOOD, "Fixed.");
         let index = render_backlog(
             &parsed(&[("closed.md", closed)]).items,
             &BTreeMap::new(),
@@ -821,6 +798,42 @@ Not yet. Measured by hand.
     /// The areas the tests declare: not in alphabetical order, so an index sorted by name would differ
     fn areas() -> Vec<String> {
         ["operations", "billing", "unused"].map(String::from).into()
+    }
+
+    #[test]
+    fn every_generated_file_is_expected_with_the_rules_listed() {
+        let none = Docs::new();
+        let specs = SPEC_FOLDERS
+            .iter()
+            .map(|(folder, _)| (*folder, Docs::new()))
+            .collect();
+        let (files, problems) = expected(&none, specs, &none, &areas());
+        let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "docs/backlog/rules.md",
+                "docs/index.md",
+                "docs/backlog/index.md",
+                "docs/specs/rules.md",
+                "docs/specs/index.md",
+                "docs/knowledge/rules.md",
+                "docs/knowledge/index.md",
+            ]
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        // The rules are listed on the run that writes them
+        let index = |path: &str| &files.iter().find(|(p, _)| p == path).unwrap().1;
+        for (path, rules) in [
+            ("docs/backlog/index.md", "rules.md"),
+            ("docs/specs/index.md", "rules.md"),
+            ("docs/knowledge/index.md", "rules.md"),
+        ] {
+            assert!(index(path).contains(rules), "{path}");
+        }
+        assert!(is_document("a.md", false));
+        assert!(!is_document("index.md", false) && !is_document("log.md", false));
+        assert!(!is_document("a.md", true) && !is_document("a.txt", false));
     }
 
     /// The headings and the targets of an index, in order.

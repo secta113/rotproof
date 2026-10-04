@@ -26,7 +26,8 @@ use std::collections::BTreeSet;
 use toml_edit::{Array, DocumentMut, Item, Value};
 use yaml_rust2::Yaml;
 
-use crate::bundle::{Bundle, LOG, in_docs};
+use crate::application::bundle::Bundle;
+use crate::domain::bundle::{LOG, in_docs};
 
 use crate::application::layers::declaration;
 use crate::application::tree::{exactly, read_text};
