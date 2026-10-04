@@ -1193,14 +1193,15 @@ fn every_form_of_rust_dependency_is_judged() {
              serde = {{ workspace = true }}\n\
              application.workspace = true\n\
              utils = {{ path = \"../utils\" }}\n\
-             infra = {{ path = \"../Infrastructure\", package = \"infrastructure\" }}\n\
+             infra = {{ path = \"../infrastructure\", package = \"infrastructure\" }}\n\
              regex = \"1\"\n\
              missing = {{ workspace = true }}\n\
              \n[build-dependencies]\nhandler = {{ path = \"../handler\" }}\n\
              \n[dev-dependencies]\nhandler = {{ path = \"../handler\" }}\n\
              \n[target.'cfg(windows)'.dependencies]\n\
-             app = {{ path = \"..\\\\..\\\\crates\\\\application\\\\\", package = \"application\" }}\n\
-             outside = {{ path = \"../../../elsewhere\" }}\n",
+             app = {{ path = \"../../crates/./application/\", package = \"application\" }}\n\
+             outside = {{ path = \"../../..\" }}\n\
+             nowhere = {{ path = \"../nowhere\" }}\n",
             package("domain")
         ),
     );
@@ -1227,7 +1228,7 @@ fn every_form_of_rust_dependency_is_judged() {
     for line in [
         "crates/domain/Cargo.toml:8: depends on application (crates/application, from the workspace), in application; \
          domain may import `utils`",
-        "crates/domain/Cargo.toml:10: depends on infra (crates/Infrastructure), in infrastructure; ",
+        "crates/domain/Cargo.toml:10: depends on infra (crates/infrastructure), in infrastructure; ",
         "crates/domain/Cargo.toml:12: missing comes from the workspace, and Cargo.toml has no missing in \
          [workspace.dependencies], so it is not checked",
         "crates/domain/Cargo.toml:15: depends on handler (crates/handler), in handler; ",
@@ -1246,6 +1247,62 @@ fn every_form_of_rust_dependency_is_judged() {
         2,
         "{said}"
     );
+}
+
+/// Make the domain crate of the Rust project at `r` depend on each of `paths`, one line each from line 7, as `d0`,
+/// `d1` and so on, and say what check says.
+fn check_depending_on(r: &Path, paths: &[String]) -> String {
+    let lines: String = paths
+        .iter()
+        .enumerate()
+        .map(|(i, path)| format!("d{i} = {{ path = {path:?}, package = \"application\" }}\n"))
+        .collect();
+    fs::write(
+        r.join("crates/domain/Cargo.toml"),
+        format!(
+            "[package]\nname = \"domain\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\n{lines}"
+        ),
+    )
+    .unwrap();
+    stdout(&run(&["--root", &root_arg(r), "check"]))
+}
+
+/// Whether check says that `d<i>` lands in application, on line `7 + i`.
+fn lands_in_application(said: &str, i: usize) -> bool {
+    said.contains(&format!(
+        "crates/domain/Cargo.toml:{}: depends on d{i} (crates/application), in application; ",
+        i + 7
+    ))
+}
+
+#[cfg(windows)]
+#[test]
+fn a_rust_path_lands_where_windows_resolves_it() {
+    // Cargo builds each of these on Windows, outside a workspace, against crates/application
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let paths: Vec<String> = vec![
+        "../Application".into(),
+        "../application.".into(),
+        "../application ".into(),
+        "..\\application".into(),
+        format!("{}\\crates\\application", r.display()).to_uppercase(),
+    ];
+    let said = check_depending_on(r, &paths);
+    for (i, path) in paths.iter().enumerate() {
+        assert!(lands_in_application(&said, i), "{path}:\n{said}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_rust_path_through_a_link_lands_where_the_link_points() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    fs::create_dir(r.join("vendor")).unwrap();
+    std::os::unix::fs::symlink("../crates/application", r.join("vendor/app")).unwrap();
+    let said = check_depending_on(r, &["../../vendor/app".into()]);
+    assert!(lands_in_application(&said, 0), "{said}");
 }
 
 #[test]

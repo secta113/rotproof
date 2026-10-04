@@ -12,10 +12,12 @@
 //! (`python.rs`), and sits in the place its parts start with. For `typescript`, an import is resolved to a path
 //! (`typescript.rs`), and sits in the place that path starts with. For `rust`, a crate's code file is its
 //! `Cargo.toml`, and each dependency it declares (`cargo.rs`) is resolved to the path it names, directly or through
-//! its workspace, and sits in the place that path starts with, case not counting: Windows finds `../Domain` for
-//! `../domain`. Cargo compiles a crate only against the crates it declares, so the declarations are its imports.
+//! its workspace, as the operating system resolves it (on Windows, another case, dots and spaces at the end and short
+//! names too), and sits in the place it lands in. Cargo compiles a crate only against the crates it declares, so the
+//! declarations are its imports.
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::io;
 use std::path::Path;
 
@@ -61,6 +63,8 @@ fn judged(at: &str, what: &str, from: &Place, to: &Place) -> Option<String> {
 fn rust(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
     let mut found = Vec::new();
     let mut manifests = Manifests::default();
+    // The root as the operating system spells it, which every path a manifest names is resolved against
+    let real = fs::canonicalize(root)?;
     let parts = |path: &str| -> Vec<String> { path.split('/').map(String::from).collect() };
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
@@ -75,10 +79,10 @@ fn rust(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<Strin
                 let at = format!("{path}:{}", dependency.line);
                 let name = &dependency.name;
                 let (target, through) = match &dependency.origin {
-                    Origin::Path(rel) => (joined(root, dir, rel), ""),
+                    Origin::Path(rel) => (landed(root, &real, dir, rel), ""),
                     Origin::Workspace => {
                         let Some((workspace, entry)) =
-                            manifests.workspace(root, dir, &manifest, &mut found)?
+                            manifests.workspace(root, &real, dir, &manifest, &mut found)?
                         else {
                             let looked = match &manifest.workspace {
                                 Some(rel) => format!(
@@ -105,14 +109,13 @@ fn rust(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<Strin
                         let Some(rel) = rel else {
                             continue;
                         };
-                        (joined(root, &workspace, rel), ", from the workspace")
+                        (landed(root, &real, &workspace, rel), ", from the workspace")
                     }
                 };
                 let Some(target) = target else {
                     continue;
                 };
-                let Some(to) = place_where(&parts(&target), places, str::eq_ignore_ascii_case)
-                else {
+                let Some(to) = place_of(&parts(&target), places) else {
                     continue;
                 };
                 found.extend(judged(
@@ -161,16 +164,17 @@ impl Manifests {
 
     /// The workspace of the manifest in `dir`, as Cargo finds it: the directory its `[package] workspace` names, or
     /// the first directory from `dir` up to the root whose `Cargo.toml` declares `[workspace]`. Its directory from the
-    /// root and its manifest, or `None` when there is none in the project.
+    /// root and its manifest, or `None` when there is none in the project. `real` is the root as [`landed`] takes it.
     fn workspace(
         &mut self,
         root: &Path,
+        real: &Path,
         dir: &str,
         manifest: &Manifest,
         found: &mut Vec<String>,
     ) -> io::Result<Option<(String, Manifest)>> {
         let mut at = match &manifest.workspace {
-            Some(rel) => match joined(root, dir, rel) {
+            Some(rel) => match landed(root, real, dir, rel) {
                 Some(workspace) => workspace,
                 None => return Ok(None),
             },
@@ -207,27 +211,14 @@ fn in_dir(dir: &str, name: &str) -> String {
     }
 }
 
-/// The path `rel` names from `dir` (from the root), from the root with `/`, or `None` when it leaves the root. `\`
-/// separates parts too, as Windows reads it, and an absolute path counts when it is inside the root.
-fn joined(root: &Path, dir: &str, rel: &str) -> Option<String> {
-    let (start, rel) = if Path::new(rel).is_absolute() {
-        let root = std::path::absolute(root).ok()?;
-        let inside = Path::new(rel).strip_prefix(&root).ok()?;
-        (String::new(), relative_path(inside, Path::new("")))
-    } else {
-        (dir.to_string(), rel.to_string())
-    };
-    let mut parts: Vec<&str> = start.split('/').filter(|p| !p.is_empty()).collect();
-    for part in rel.split(['/', '\\']) {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            _ => parts.push(part),
-        }
-    }
-    Some(parts.join("/"))
+/// Where the path `rel`, which a manifest in `dir` (from the root) names, lands: from the root with `/`, as the
+/// operating system of the machine that runs the check resolves it, the way Cargo does there. On Windows, `../Domain`,
+/// `../domain.`, `../domain ` and a short name such as `../DOMAIN~1` all land in `domain`, as does an absolute path
+/// spelled in another case; links are followed everywhere. `real` is the root as `fs::canonicalize` spells it. `None`
+/// when it lands outside the root, or nowhere, where Cargo fails too.
+fn landed(root: &Path, real: &Path, dir: &str, rel: &str) -> Option<String> {
+    let full = fs::canonicalize(root.join(dir).join(rel)).ok()?;
+    Some(relative_path(full.strip_prefix(real).ok()?, Path::new("")))
 }
 
 /// The direction check of a TypeScript project: every import of a source file in a layer, resolved to a path
@@ -324,21 +315,12 @@ fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<Str
 
 /// The place a module sits in: the one whose path is the longest prefix of the module's parts.
 fn place_of<'a>(module: &[String], places: &[&'a Place]) -> Option<&'a Place> {
-    place_where(module, places, |a, b| a == b)
-}
-
-/// The place a module sits in, its parts compared with `same`.
-fn place_where<'a>(
-    module: &[String],
-    places: &[&'a Place],
-    same: impl Fn(&str, &str) -> bool,
-) -> Option<&'a Place> {
     places
         .iter()
         .copied()
         .filter(|place| {
             let parts: Vec<&str> = place.path.split('/').collect();
-            module.len() >= parts.len() && parts.iter().zip(module).all(|(a, b)| same(a, b))
+            module.len() >= parts.len() && parts.iter().zip(module).all(|(a, b)| a == b)
         })
         .max_by_key(|place| place.path.len())
 }

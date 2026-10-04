@@ -290,11 +290,14 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
 - **The layers import only what the table allows** (Rust): a crate is compiled only against the crates its
   `Cargo.toml` declares, so the declarations are read instead of `use`: every dependency in `[dependencies]` and
   `[build-dependencies]` (and `build_dependencies`), under `[target.<cfg>]` too, of the `Cargo.toml` files in the
-  layers. The place of a dependency is the path it comes from: its `path` from the crate, or with `workspace = true`
-  the `path` of its entry in `[workspace.dependencies]` from the workspace, which is the directory `[package]
-  workspace` names, or the nearest one up to the root that declares `[workspace]`. A renamed dependency (`package`)
-  is placed by its path all the same, and case does not count, as Windows reads paths. `[dev-dependencies]` serve the
-  tests and are not judged; dependencies from a registry or git are not judged. A `Cargo.toml` that is not UTF-8 or
+  layers. The place of a dependency is where the path it comes from lands: its `path` from the crate, or with
+  `workspace = true` the `path` of its entry in `[workspace.dependencies]` from the workspace, which is the directory
+  `[package] workspace` names, or the nearest one up to the root that declares `[workspace]`. A path lands where the
+  operating system that runs the check resolves it, as Cargo's does: on Windows, a path in another case, with dots or
+  spaces at its end or with a short name (`DOMAIN~1`) lands in `domain`, and links are followed everywhere. A path
+  that lands nowhere, where Cargo fails too, or outside the root is not judged. A renamed dependency (`package`) is
+  placed by its path all the same. `[dev-dependencies]` serve the tests and are not judged; dependencies from a
+  registry or git are not judged. A `Cargo.toml` that is not UTF-8 or
   TOML fails, and so does a dependency taken from a workspace that does not declare it. Not seen: `[patch]` and
   `[replace]`, and source files taken from another crate's directory (`#[path]`, `include!`, `[lib] path`).
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`** (Python, TypeScript): in upper case, as whole words,
