@@ -1655,6 +1655,17 @@ fn only_the_projects_own_gitignore_hides_code() {
 }
 
 #[test]
+fn the_command_is_named_rotproof_whatever_its_crate_is_named() {
+    // The crate is the handler layer; what a user types and reads is rotproof
+    assert_eq!(
+        stdout(&run(&["--version"])),
+        format!("rotproof {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    let help = stdout(&run(&["--help"]));
+    assert!(!help.contains("handler"), "{help}");
+}
+
+#[test]
 fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     // Each step follows only what the step before printed, as an agent without the README would
     let root = tempfile::tempdir().unwrap();

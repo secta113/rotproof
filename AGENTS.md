@@ -7,19 +7,17 @@ and why, is in `README.md`.
 
 | Path | Content |
 |---|---|
-| `src/` | The tool's command line, `main.rs` (below) |
-| `crates/` | The layers that are crates of their own, each with its modules (below): `application`, `domain`, `infrastructure` and `utils` |
+| `crates/` | The tool, one crate per layer, each with its modules (below): `handler` (the command line: the package and the binary `rotproof`, named for what it ships, and in `tests/cli.rs` the tests that run it as a user runs it), `application`, `domain`, `infrastructure` and `utils` |
 | `layers/` | The layer definitions, built into the binary: `table.toml` (what the layers are, in every stack) and one layout per stack (`python.toml`, `typescript.toml`, `rust.toml`: where each layer lives, the files that make it, and the files its toolchain needs at the root) |
 | `records/` | The records skeleton, built into the binary: `rules.md`, `spec-rules.md` and `knowledge-rules.md` (the backlog, spec and knowledge rules Rotproof writes into every project), and `log.md` (the log `rotproof create` starts) |
 | `project/` | What Rotproof writes into a project outside `docs/`, built into the binary. Each file is named after the one it becomes, without a leading dot and with `.in` added, so no agent here reads a project's `AGENTS.md` as its own: the project's files at the top (`AGENTS.md.in`, `CLAUDE.md.in`, `README.md.in`, `gitattributes.in`), `gitignore/` (one per stack), `pypi/` (the pin, the workflow and the README's instructions for the stacks that install Rotproof from PyPI), `unpinned/` (the README's instructions for the others), and `rotproof/` (the parts of `.rotproof/AGENTS.md`, the guide Rotproof generates for each stack) |
-| `tests/` | Tests that run the built binary as a user runs it (`cli.rs`) |
 | `xtask/` | The CI entry point (`cargo xtask ci`), and `cargo xtask licenses`, which writes `THIRD-PARTY-LICENSES.txt` (`--check`: checks it) |
 | `.cargo/` | The `cargo xtask` alias |
 | `.github/` | GitHub Actions: `ci.yml` runs `cargo xtask ci` in the container, and builds and installs the wheels on Linux and Windows; `licenses.yml` checks `THIRD-PARTY-LICENSES.txt` with cargo-about; `release.yml` releases a pushed tag to PyPI and GitHub Releases, after running each wheel through `smoke.sh` |
-| `Cargo.toml` | The package and the workspace, and the one place that names Rotproof's version (`[workspace.package]`: every crate takes it, and maturin takes the wheel version from it) |
+| `Cargo.toml` | The workspace of the crates, and the one place that names Rotproof's version (`[workspace.package]`: every crate takes it, and maturin takes the wheel version from it) |
 | `rust-toolchain.toml` | The one place that names the toolchain. The Dockerfile and CI install from it |
 | `Dockerfile`, `compose.yaml` | The development container: the Linux of CI, with the packaging tools and cargo-about |
-| `pyproject.toml` | The pip package: a wheel that carries only the binary and the licenses (maturin, `bindings = "bin"`) |
+| `pyproject.toml` | The pip package: a wheel that carries only the binary and the licenses (maturin, `bindings = "bin"`, built from `crates/handler/Cargo.toml`) |
 | `requirements-build.txt` | The one place that names the packaging tools (maturin, cargo-xwin). The Dockerfile and CI install from it |
 | `THIRD-PARTY-LICENSES.txt` | The licenses of every crate the binary links, which go with the binary: in the wheel next to Rotproof's own. Generated, never edited by hand |
 | `about.toml`, `about.hbs` | What cargo-about writes `THIRD-PARTY-LICENSES.txt` from: the licenses Rotproof may ship, and the file's template |
@@ -29,7 +27,7 @@ and why, is in `README.md`.
 Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lock`, `AGENTS.md`, and `CLAUDE.md`
 (which only imports `AGENTS.md`).
 
-| Module of `src/` | Content |
+| Module of `crates/handler/src/` | Content |
 |---|---|
 | `main.rs` | The command line, which is the `handler`: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof guide`, `rotproof index` and `rotproof stop-hook`, and the help that leads from one to the next. It alone builds the adapters in `infrastructure` |
 
@@ -88,9 +86,9 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 ## How this repository differs from what Rotproof keeps
 
 - **No `docs/` here.** Rotproof's own backlog, specs and log are kept outside this repository.
-- **Partly in layers, and no `.config/rotproof.toml`.** `application`, `domain`, `infrastructure` and `utils` are crates
-  of their own in `crates/`, as in the Rust layout Rotproof keeps (README). `src/main.rs` is the `handler` until it
-  becomes a crate. `domain` calls no port: a rule takes the values `application` has read. Nothing checks that yet.
+- **In layers, and no `.config/rotproof.toml`.** Every layer of the Rust layout Rotproof keeps (README) is a crate of
+  its own in `crates/`, `handler` among them, and `ui` is left out as that layout leaves it out.
+  `domain` calls no port: a rule takes the values `application` has read. Nothing checks that yet.
 
 ## Rules for every change
 

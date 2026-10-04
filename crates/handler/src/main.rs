@@ -43,7 +43,7 @@ a rule is broken, 2 when a file cannot be read.";
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
 /// import which) and the records an agent works from (backlog, specs, knowledge and log in docs/).
 #[derive(Parser)]
-#[command(version, about, after_help = START)]
+#[command(name = "rotproof", version, about, after_help = START)]
 struct Cli {
     /// The repository root; the records are in `<root>/docs`
     #[arg(long, default_value = ".")]

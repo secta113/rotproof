@@ -377,7 +377,7 @@ heading may be indented by up to 3 spaces, and a closing run of `#` (`## Notes #
 ## Development
 
 `cargo xtask ci` runs format, lint and tests, the same checks as CI. It also fails when the map in `AGENTS.md`
-misses a tracked top-level path or a module of `src/` or of a crate in `crates/` (or names one that is gone), when
+misses a tracked top-level path or a module of a crate in `crates/` (or names one that is gone), when
 `rust-toolchain.toml`, the `Dockerfile` and the CI workflow name different toolchain versions, and when
 `THIRD-PARTY-LICENSES.txt` does not list the crates the binary links (below). On Windows the host needs Visual
 Studio's C++ tools and the Windows SDK. Everything also runs in the container (`compose.yaml`), where the host needs

@@ -19,3 +19,5 @@ Repository = "https://github.com/secta113/rotproof"
 
 [tool.maturin]
 bindings = "bin"
+# The binary is the handler's: the workspace at the root has no package of its own
+manifest-path = "crates/handler/Cargo.toml"

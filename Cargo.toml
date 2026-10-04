@@ -1,23 +1,15 @@
-[package]
-name = "rotproof"
-version.workspace = true
-edition = "2024"
-license = "MIT OR Apache-2.0"
-
-[dependencies]
-application = { path = "crates/application" }
-chrono = "0.4.45"
-clap = { version = "4.6.7", features = ["derive"] }
-domain = { path = "crates/domain" }
-infrastructure = { path = "crates/infrastructure" }
-
 [workspace]
-members = ["xtask", "crates/application", "crates/domain", "crates/infrastructure", "crates/utils"]
+members = [
+    "xtask",
+    "crates/application",
+    "crates/domain",
+    "crates/handler",
+    "crates/infrastructure",
+    "crates/utils",
+]
+resolver = "3"
 
 # Rotproof's version, the one place that names it: every crate of the workspace takes it, and maturin takes the
-# wheel's from the package
+# wheel's from the handler
 [workspace.package]
 version = "0.1.0"
-
-[dev-dependencies]
-tempfile = "3.27.0"
