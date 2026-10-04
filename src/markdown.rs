@@ -9,6 +9,7 @@ use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use regex::Regex;
 use unicode_general_category::{GeneralCategory, get_general_category};
 
+use crate::code::Parsers;
 use crate::tree::{Lookup, Tree, lookup, read_text};
 
 // The target of a link in HTML, which GitHub renders as a link too: in double quotes, or in single quotes
@@ -241,6 +242,7 @@ pub fn links(text: &str) -> Vec<(String, String)> {
 /// A link to a `.py` file names in its text a function or class that the file defines.
 pub fn broken(
     tree: &dyn Tree,
+    parsers: &dyn Parsers,
     text: &str,
     target: &str,
     here: &str,
@@ -306,7 +308,7 @@ pub fn broken(
         }
         // The name has to be defined, not only mentioned: a call, a comment or a string can keep a name after the
         // definition was renamed
-        let defined = crate::python::definitions(&source);
+        let defined = parsers.python_definitions(&source);
         if !defined.contains(name) {
             return Some(format!(
                 "no def or class named {name} in {target}; {}",
@@ -556,7 +558,16 @@ Text <!-- one line --> and text <!--
         let tree = crate::disk::Disk::new(root);
         cases
             .iter()
-            .map(|(text, target)| broken(&tree, text, target, "docs/backlog", "docs"))
+            .map(|(text, target)| {
+                broken(
+                    &tree,
+                    &crate::readers::Readers,
+                    text,
+                    target,
+                    "docs/backlog",
+                    "docs",
+                )
+            })
             .collect()
     }
 

@@ -14,47 +14,13 @@
 //! Not read: `[patch]` and `[replace]`, which can point a dependency from a registry to a path, and source files
 //! taken from another crate's directory (`#[path]`, `include!`, `[lib] path`).
 
-use std::collections::BTreeMap;
-
 use toml_edit::{Document, Item, TableLike};
 
+use crate::code::{Dependency, Manifest, Origin};
 use crate::source::line_of;
 
 /// The tables of dependencies that are read, at the top or under `[target.<cfg>]`.
 const READ: [&str; 3] = ["dependencies", "build-dependencies", "build_dependencies"];
-
-/// Where a dependency comes from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Origin {
-    /// A path, from the manifest's directory, as written
-    Path(String),
-    /// The entry of the same name in its workspace's `[workspace.dependencies]`
-    Workspace,
-}
-
-/// A dependency that can name a path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Dependency {
-    /// The line (from 1) of its name
-    pub line: usize,
-    /// Its name in the manifest (with `package`, the name the crate is used by)
-    pub name: String,
-    pub origin: Origin,
-}
-
-/// What one manifest holds.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Manifest {
-    /// Every dependency read that comes from a path or from the workspace, in the order written
-    pub dependencies: Vec<Dependency>,
-    /// `[package] workspace`: the workspace's directory, from the manifest's directory
-    pub workspace: Option<String>,
-    /// Whether the manifest declares a workspace
-    pub is_workspace: bool,
-    /// `[workspace.dependencies]`: name -> its path from the manifest's directory, or `None` for one from a registry
-    /// or git
-    pub workspace_dependencies: BTreeMap<String, Option<String>>,
-}
 
 /// Read one manifest, or `Err` with the line of the first error and what the parser says.
 pub fn read(source: &str) -> Result<Manifest, (usize, String)> {
@@ -131,6 +97,8 @@ fn origin(item: &Item) -> Option<Origin> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     fn read_names(source: &str) -> Vec<(usize, String, Origin)> {

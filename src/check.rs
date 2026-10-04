@@ -32,6 +32,7 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use crate::bundle::{Bundle, DOCS, Docs, RESERVED, backlog, in_docs};
+use crate::code::Parsers;
 
 use crate::frontmatter::split;
 use crate::layers::{DECLARATION, area_problems, areas};
@@ -89,7 +90,7 @@ pub struct Report {
 }
 
 /// Every broken rule in the repository `tree` holds. An error is a file that could not be read at all.
-pub fn check(tree: &dyn Tree) -> io::Result<Report> {
+pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
     let structure = crate::structure::problems(tree)?;
     let mut findings: Vec<Finding> = structure
         .found
@@ -103,12 +104,12 @@ pub fn check(tree: &dyn Tree) -> io::Result<Report> {
     let mut layers_checked = false;
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
-        let direction = crate::direction::problems(tree, declared)?;
+        let direction = crate::direction::problems(tree, parsers, declared)?;
         findings.extend(direction.into_iter().map(|detail| Finding {
             check: "the layers import only what layers/table.toml allows".into(),
             detail,
         }));
-        let markers = crate::markers::problems(tree, declared)?;
+        let markers = crate::markers::problems(tree, parsers, declared)?;
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {
             check: heading.clone().into(),
@@ -132,7 +133,7 @@ pub fn check(tree: &dyn Tree) -> io::Result<Report> {
             });
         }
     }
-    findings.extend(records(tree)?);
+    findings.extend(records(tree, parsers)?);
     Ok(Report {
         findings,
         skipped,
@@ -141,7 +142,7 @@ pub fn check(tree: &dyn Tree) -> io::Result<Report> {
 }
 
 /// Every broken rule of the records.
-fn records(tree: &dyn Tree) -> io::Result<Vec<Finding>> {
+fn records(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Vec<Finding>> {
     let mut found = Vec::new();
     let mut add = |check: &'static str, details: Vec<String>| {
         found.extend(details.into_iter().map(|detail| Finding {
@@ -201,7 +202,7 @@ fn records(tree: &dyn Tree) -> io::Result<Vec<Finding>> {
         .collect();
     add(
         "every link in # Details resolves",
-        pairs(&unresolved(&details, tree)),
+        pairs(&unresolved(&details, tree, parsers)),
     );
 
     let log_path = exactly(tree, "docs/log.md").and_then(|(path, is_dir)| {
@@ -309,7 +310,11 @@ fn pairs(problems: &BTreeMap<String, String>) -> Vec<String> {
 ///
 /// Details sit in a backlog item (`docs/backlog/<slug>.md`), so relative links resolve from there and links starting
 /// with `/` from the bundle root (`docs/`).
-pub fn unresolved(details: &BTreeMap<String, String>, tree: &dyn Tree) -> BTreeMap<String, String> {
+pub fn unresolved(
+    details: &BTreeMap<String, String>,
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+) -> BTreeMap<String, String> {
     let bundle_root = DOCS;
     let here = in_docs("backlog");
     let mut bad = BTreeMap::new();
@@ -321,7 +326,7 @@ pub fn unresolved(details: &BTreeMap<String, String>, tree: &dyn Tree) -> BTreeM
         }
         let reasons: Vec<String> = found
             .iter()
-            .filter_map(|(text, target)| broken(tree, text, target, &here, bundle_root))
+            .filter_map(|(text, target)| broken(tree, parsers, text, target, &here, bundle_root))
             .collect();
         if !reasons.is_empty() {
             bad.insert(
@@ -626,6 +631,7 @@ mod tests {
 
     use super::*;
     use crate::disk::Disk;
+    use crate::readers::Readers;
 
     #[test]
     fn the_hash_is_the_first_8_hex_digits_of_sha_256() {
@@ -709,7 +715,7 @@ mod tests {
                 "[a](/log.md), [b](/no_such_file.md)",
             ),
         ]);
-        let bad = unresolved(&details, &Disk::new(root.path()));
+        let bad = unresolved(&details, &Disk::new(root.path()), &Readers);
         assert_eq!(
             bad.keys().collect::<Vec<_>>(),
             [
@@ -734,7 +740,7 @@ mod tests {
             "<a href=\"/log.md\">log</a>",
         ];
         for detail in resolving {
-            let bad = unresolved(&map(&[("x.md", detail)]), &Disk::new(root.path()));
+            let bad = unresolved(&map(&[("x.md", detail)]), &Disk::new(root.path()), &Readers);
             assert!(bad.is_empty(), "{detail}: {bad:?}");
         }
         // Next to a link that resolves, a broken one in each form is still found
@@ -748,7 +754,11 @@ mod tests {
         ];
         for form in dangling {
             let detail = format!("{good} {form}");
-            let bad = unresolved(&map(&[("x.md", &detail)]), &Disk::new(root.path()));
+            let bad = unresolved(
+                &map(&[("x.md", &detail)]),
+                &Disk::new(root.path()),
+                &Readers,
+            );
             assert!(bad.contains_key("x.md"), "{form} passed");
         }
     }

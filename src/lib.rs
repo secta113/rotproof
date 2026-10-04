@@ -3,6 +3,7 @@
 pub mod bundle;
 pub mod cargo;
 pub mod check;
+pub mod code;
 pub mod create;
 pub mod direction;
 pub mod disk;
@@ -15,6 +16,7 @@ pub mod markdown;
 pub mod markers;
 pub mod project;
 pub mod python;
+pub mod readers;
 pub mod rust;
 pub mod schema;
 pub mod source;

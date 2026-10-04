@@ -1,16 +1,13 @@
-//! Reading TypeScript and JavaScript with oxc: what a file imports and where each import lands, and its comments.
+//! Reading TypeScript and JavaScript with oxc: what a file imports and its comments, and the aliases of the project.
 //!
 //! - **What a file imports:** `import` (`import type` too), `export ... from`, `import("...")` and `require("...")`
 //!   with a literal string, `import x = require("...")`, and `import("...")` in a type. A specifier built at run time
 //!   is not seen.
-//! - **Where an import lands,** as a path from the root, without asking whether a file is there: the place of an
-//!   import is its directory. A relative specifier resolves against the file's directory, and one that starts with
-//!   `/` against the root, as Vite reads it. Another resolves through `compilerOptions.paths` of the `tsconfig*.json`
-//!   files at the root and the local files they extend, then through their `baseUrl` when a module is there; otherwise
-//!   it names a package, which no layer is. A query (`./logo.svg?url`) is not part of the path.
+//! - **The aliases an import resolves through** ([`aliases`]): `compilerOptions.paths` and `baseUrl` of the
+//!   `tsconfig*.json` files at the root and the local files they extend. Where an import lands through them is the
+//!   rule of `code.rs` ([`Aliases::resolve`]).
 //! - **Its comments,** `//` and `/* */`. JSX text is not a comment.
 
-use std::collections::BTreeSet;
 use std::io;
 
 use oxc_allocator::Allocator;
@@ -23,32 +20,12 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
 
+use crate::code::{Alias, Aliases, Source, join, parent};
 use crate::source::line_of;
 use crate::tree::{Tree, read_text};
 
-/// The extensions read as source, in lower case
-pub const EXTENSIONS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
-
-/// Whether a file is TypeScript or JavaScript source, by its extension in any case.
-pub fn is_source(path: &str) -> bool {
-    path.rsplit_once('.')
-        .is_some_and(|(_, extension)| EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
-}
-
-/// What one file holds.
-#[derive(Debug, Default)]
-pub struct Source {
-    /// Every specifier the file imports, with its line (from 1)
-    pub imports: Vec<(usize, String)>,
-    /// Every comment: its byte offset in the source, and its text with its delimiters
-    pub comments: Vec<(usize, String)>,
-    /// The first syntax error, if any: its line and what the parser says. The parser recovers, but what follows may be
-    /// misread
-    pub error: Option<(usize, String)>,
-}
-
 /// Read one file, whose path from the root says how: `.tsx` with JSX, `.d.ts` as declarations.
-pub fn read(source: &str, path: &str) -> Source {
+pub fn read(source: &str, path: &str) -> Source<String> {
     let allocator = Allocator::default();
     // The extension in lower case: Windows reads `App.TSX` as the same file
     let source_type =
@@ -149,29 +126,6 @@ fn literal<'b>(expression: &'b Expression) -> Option<&'b str> {
             .map(|cooked| cooked.as_str()),
         _ => None,
     }
-}
-
-/// One entry of `compilerOptions.paths`: a pattern with at most one `*`, and the first of its targets.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Alias {
-    /// Before the `*`, or the whole pattern
-    prefix: String,
-    /// After the `*`; `None` for a pattern without one, which matches only itself
-    suffix: Option<String>,
-    /// The target, with `*` where the matched text goes, from the root
-    target: String,
-    /// The config that maps it, for the message
-    config: String,
-}
-
-/// How a specifier that is not relative resolves in this project, from the `tsconfig*.json` files at the root.
-#[derive(Debug, Default)]
-pub struct Aliases {
-    paths: Vec<Alias>,
-    /// The `baseUrl` directories, from the root
-    base_urls: BTreeSet<String>,
-    /// What could not be read, each with the config it is in: the aliases it would give are not known
-    pub problems: Vec<String>,
 }
 
 /// What one config says, its `extends` followed.
@@ -335,85 +289,6 @@ fn load_one(
     Ok(Some(options))
 }
 
-impl Aliases {
-    /// Where `specifier`, imported by the file at `file` (from the root), lands: a path from the root, or `None` for a
-    /// package, or a path above the root.
-    pub fn resolve(&self, tree: &dyn Tree, file: &str, specifier: &str) -> Option<String> {
-        let specifier = specifier.split('?').next().unwrap_or(specifier);
-        if specifier == "."
-            || specifier == ".."
-            || specifier.starts_with("./")
-            || specifier.starts_with("../")
-        {
-            return normalize(&format!("{}/{specifier}", parent(file)));
-        }
-        if let Some(from_root) = specifier.strip_prefix('/') {
-            return normalize(from_root);
-        }
-        let matched = self
-            .paths
-            .iter()
-            .filter_map(|alias| {
-                let rest = specifier.strip_prefix(&alias.prefix)?;
-                match &alias.suffix {
-                    None => rest.is_empty().then(|| alias.target.clone()),
-                    Some(suffix) => rest
-                        .strip_suffix(suffix.as_str())
-                        .map(|star| alias.target.replacen('*', star, 1)),
-                }
-                .map(|target| (alias.prefix.len(), target))
-            })
-            // The longest prefix wins, as in TypeScript
-            .max_by_key(|(length, _)| *length);
-        if let Some((_, target)) = matched {
-            return normalize(&target);
-        }
-        self.base_urls.iter().find_map(|base| {
-            let path = normalize(&join(base, specifier))?;
-            is_module(tree, &path).then_some(path)
-        })
-    }
-}
-
-/// Whether a module is at `path` (from the root): the file itself, with one of [`EXTENSIONS`], or an `index` in it.
-fn is_module(tree: &dyn Tree, path: &str) -> bool {
-    tree.found(path) == Some(false)
-        || EXTENSIONS.iter().any(|extension| {
-            tree.found(&format!("{path}.{extension}")) == Some(false)
-                || tree.found(&format!("{path}/index.{extension}")) == Some(false)
-        })
-}
-
-/// The directory of a path from the root: "" for a file at the root.
-fn parent(path: &str) -> String {
-    path.rsplit_once('/')
-        .map_or(String::new(), |(dir, _)| dir.to_string())
-}
-
-/// `path` from the directory `dir` (from the root), not yet normalized.
-fn join(dir: &str, path: &str) -> String {
-    if dir.is_empty() {
-        path.to_string()
-    } else {
-        format!("{dir}/{path}")
-    }
-}
-
-/// A path from the root without `.`, `..` or empty parts. `None` when it climbs above the root.
-fn normalize(path: &str) -> Option<String> {
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            part => parts.push(part),
-        }
-    }
-    Some(parts.join("/"))
-}
-
 /// JSON with comments, as tsconfig files are written, made into JSON: `//` and `/* */` comments and the commas before
 /// a closing bracket go, and strings are kept as they are.
 fn strip_jsonc(text: &str) -> String {
@@ -538,22 +413,6 @@ export const k = 1;
     fn a_syntax_error_is_named_with_its_line() {
         let read = read("import a from './a';\nconst = ;\n", "src/x.ts");
         assert_eq!(read.error.map(|(line, _)| line), Some(2));
-    }
-
-    #[test]
-    fn a_relative_or_rooted_specifier_resolves_against_the_file() {
-        let aliases = Aliases::default();
-        let tree = crate::tree::fake::Fake::default();
-        let at = |s: &str| aliases.resolve(&tree, "src/ui/atoms/button.tsx", s);
-        assert_eq!(at("../molecules/row"), Some("src/ui/molecules/row".into()));
-        assert_eq!(
-            at("./theme.css?inline"),
-            Some("src/ui/atoms/theme.css".into())
-        );
-        assert_eq!(at("../../domain"), Some("src/domain".into()));
-        assert_eq!(at("/src/utils/x"), Some("src/utils/x".into()));
-        assert_eq!(at("../../../../../out"), None);
-        assert_eq!(at("react"), None);
     }
 
     fn project(files: &[(&str, &str)]) -> tempfile::TempDir {

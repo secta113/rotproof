@@ -19,14 +19,17 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use crate::cargo::{Manifest, Origin};
+use crate::code::{Manifest, Origin, Parsers, is_source, module_parts};
 use crate::layers::{Declared, Language, Layout, Place, listed};
-use crate::python::module_parts;
 use crate::tree::{Tree, code_files, exactly, read_code};
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
 /// error is a directory that could not be walked.
-pub fn problems(tree: &dyn Tree, declared: &Declared) -> io::Result<Vec<String>> {
+pub fn problems(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    declared: &Declared,
+) -> io::Result<Vec<String>> {
     let Some(layout) = &declared.layout else {
         // A repository of records only: the structure check already says that the layers were not checked
         return Ok(Vec::new());
@@ -38,9 +41,9 @@ pub fn problems(tree: &dyn Tree, declared: &Declared) -> io::Result<Vec<String>>
         .filter(|p| !declared.is_absent(p) && exactly(tree, &p.path).is_ok())
         .collect();
     match layout.language {
-        Language::Python => python(tree, layout, &places),
-        Language::TypeScript => typescript(tree, layout, &places),
-        Language::Rust => rust(tree, layout, &places),
+        Language::Python => python(tree, parsers, layout, &places),
+        Language::TypeScript => typescript(tree, parsers, layout, &places),
+        Language::Rust => rust(tree, parsers, layout, &places),
     }
 }
 
@@ -58,9 +61,14 @@ fn judged(at: &str, what: &str, from: &Place, to: &Place) -> Option<String> {
 
 /// The direction check of a Rust project: every dependency the manifest of a crate in a layer declares, judged by the
 /// place the path it comes from sits in.
-fn rust(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
+fn rust(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    layout: &Layout,
+    places: &[&Place],
+) -> io::Result<Vec<String>> {
     let mut found = Vec::new();
-    let mut manifests = Manifests::default();
+    let mut manifests = Manifests::new(parsers);
     let parts = |path: &str| -> Vec<String> { path.split('/').map(String::from).collect() };
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
@@ -128,10 +136,19 @@ fn rust(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result<Vec<S
 
 /// Every manifest read by the Rust check, by its path from the root, so a workspace is read once for all its members
 /// and a manifest that cannot be read is said once.
-#[derive(Default)]
-struct Manifests(BTreeMap<String, Option<Manifest>>);
+struct Manifests<'p> {
+    parsers: &'p dyn Parsers,
+    read: BTreeMap<String, Option<Manifest>>,
+}
 
-impl Manifests {
+impl<'p> Manifests<'p> {
+    fn new(parsers: &'p dyn Parsers) -> Self {
+        Manifests {
+            parsers,
+            read: BTreeMap::new(),
+        }
+    }
+
     /// The manifest at `path`, from the root: `None`, with a finding, when it cannot be read as TOML or UTF-8.
     fn read(
         &mut self,
@@ -139,12 +156,12 @@ impl Manifests {
         path: &str,
         found: &mut Vec<String>,
     ) -> io::Result<Option<Manifest>> {
-        if let Some(manifest) = self.0.get(path) {
+        if let Some(manifest) = self.read.get(path) {
             return Ok(manifest.clone());
         }
         let manifest = match read_code(tree, path, "dependencies", found)? {
             None => None,
-            Some(source) => match crate::cargo::read(&source) {
+            Some(source) => match self.parsers.manifest(&source) {
                 Ok(manifest) => Some(manifest),
                 Err((line, why)) => {
                     found.push(format!(
@@ -154,7 +171,7 @@ impl Manifests {
                 }
             },
         };
-        self.0.insert(path.to_string(), manifest.clone());
+        self.read.insert(path.to_string(), manifest.clone());
         Ok(manifest)
     }
 
@@ -208,8 +225,13 @@ fn in_dir(dir: &str, name: &str) -> String {
 
 /// The direction check of a TypeScript project: every import of a source file in a layer, resolved to a path
 /// (`typescript.rs`), judged by the place that path sits in.
-fn typescript(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
-    let aliases = crate::typescript::aliases(tree)?;
+fn typescript(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    layout: &Layout,
+    places: &[&Place],
+) -> io::Result<Vec<String>> {
+    let aliases = parsers.typescript_aliases(tree)?;
     let mut found: Vec<String> = aliases
         .problems
         .iter()
@@ -235,13 +257,13 @@ fn typescript(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result
         }
     }
     for (path, from) in files {
-        if !crate::typescript::is_source(&path) {
+        if !is_source(&path) {
             continue;
         }
         let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
             continue;
         };
-        let read = crate::typescript::read(&source, &path);
+        let read = parsers.typescript(&source, &path);
         if let Some((line, why)) = read.error {
             found.push(format!(
                 "{path}:{line}: cannot be read as TypeScript ({why}), so the imports after it may be misread"
@@ -266,7 +288,12 @@ fn typescript(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result
 }
 
 /// The direction check of a Python project: every import of a `.py` file in a layer, as the module it names.
-fn python(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
+fn python(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    layout: &Layout,
+    places: &[&Place],
+) -> io::Result<Vec<String>> {
     let mut found = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
@@ -276,7 +303,7 @@ fn python(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result<Vec
             let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
                 continue;
             };
-            let read = crate::python::read(&source, &path);
+            let read = parsers.python(&source, &path);
             if let Some((line, why)) = read.error {
                 found.push(format!(
                     "{path}:{line}: cannot be read as Python ({why}), so the imports after it may be misread"

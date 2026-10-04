@@ -15,23 +15,11 @@ use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
 use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::{PySourceType, Stmt};
 
+use crate::code::{Source, module_parts};
 use crate::source::line_of;
 
-/// What one file holds.
-#[derive(Debug, Default)]
-pub struct Source {
-    /// Every module the file imports, as parts, with the line (from 1) of the name that imports it
-    pub imports: Vec<(usize, Vec<String>)>,
-    /// Every comment: its byte offset in the source, and its text with its `#`. The lexer reads comments past a syntax
-    /// error too
-    pub comments: Vec<(usize, String)>,
-    /// The first syntax error, if any: its line and what the parser says. The parser recovers, but what follows may be
-    /// misread
-    pub error: Option<(usize, String)>,
-}
-
 /// Read one file, whose path from the root names the package its relative imports start from.
-pub fn read(source: &str, path: &str) -> Source {
+pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
     let parsed = ruff_python_parser::parse_unchecked_source(source, PySourceType::Python);
     let package = package(path);
     let mut imports = Imports {
@@ -112,18 +100,6 @@ impl<'a> StatementVisitor<'a> for Imports<'_> {
         }
         walk_stmt(self, stmt);
     }
-}
-
-/// The module a file is, as parts: `ui/pages/home.py` is `ui.pages.home`, and `ui/pages/__init__.py` is `ui.pages`.
-pub fn module_parts(path: &str) -> Vec<String> {
-    let mut parts: Vec<String> = path.split('/').map(String::from).collect();
-    let last = parts.pop().unwrap_or_default();
-    // `.PY` too: Windows runs it with Python
-    let stem = &last[..last.len() - ".py".len()];
-    if !stem.eq_ignore_ascii_case("__init__") {
-        parts.push(stem.to_string());
-    }
-    parts
 }
 
 /// The package a file's relative imports start from: the module itself for `__init__.py`, its parent otherwise.

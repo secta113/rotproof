@@ -12,6 +12,7 @@ use rotproof::disk::Disk;
 use rotproof::git::Git;
 use rotproof::hook::Changes;
 use rotproof::markers::{MARKERS, either};
+use rotproof::readers::Readers;
 use rotproof::tree::Writer;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
@@ -193,7 +194,7 @@ fn create(root: &Path) -> Result<(), String> {
 
 /// Print every broken rule under the check that found it. `true` when there are none.
 fn check(root: &Path) -> Result<bool, String> {
-    let report = rotproof::check::check(&Disk::new(root)).map_err(|e| e.to_string())?;
+    let report = rotproof::check::check(&Disk::new(root), &Readers).map_err(|e| e.to_string())?;
     for why in &report.skipped {
         println!("{why}");
     }

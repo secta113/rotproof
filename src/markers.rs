@@ -20,6 +20,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::code::{Parsers, is_source};
 use crate::layers::{Declared, Language};
 use crate::source::{line_of, within};
 use crate::tree::{Tree, code_files, read_code};
@@ -67,7 +68,11 @@ pub fn either(words: &[&str]) -> String {
 }
 
 /// Every marker in a comment of the code of `declared`. An error is a directory that could not be walked.
-pub fn problems(tree: &dyn Tree, declared: &Declared) -> io::Result<Markers> {
+pub fn problems(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    declared: &Declared,
+) -> io::Result<Markers> {
     let Some(layout) = &declared.layout else {
         // A repository of records only has no code to read
         return Ok(Markers::default());
@@ -77,13 +82,13 @@ pub fn problems(tree: &dyn Tree, declared: &Declared) -> io::Result<Markers> {
         // Every code file of a Python layout is a `.py` file: a test reads every layout
         Language::Python => layout.is_code(name),
         // Every file in `src/` is code in the layout; only source has comments to read
-        Language::TypeScript => layout.is_code(name) && crate::typescript::is_source(name),
+        Language::TypeScript => layout.is_code(name) && is_source(name),
         // The code files of a Rust layout are its crates' manifests; the comments are in the `.rs` files beside them
         Language::Rust => crate::rust::is_source(name),
     };
     let comments = |source: &str, path: &str| match layout.language {
-        Language::Python => crate::python::read(source, path).comments,
-        Language::TypeScript => crate::typescript::read(source, path).comments,
+        Language::Python => parsers.python(source, path).comments,
+        Language::TypeScript => parsers.typescript(source, path).comments,
         Language::Rust => crate::rust::comments(source),
     };
     let unchecked: Vec<&str> = declared
