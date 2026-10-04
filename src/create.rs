@@ -22,19 +22,17 @@
 //! check instead of coming back.
 
 use std::collections::BTreeSet;
-use std::fs;
-use std::path::Path;
 
 use toml_edit::{Array, DocumentMut, Item, Value};
 use yaml_rust2::Yaml;
 
 use crate::bundle::{Bundle, LOG, in_docs};
-use crate::disk::Disk;
+
 use crate::frontmatter::split;
 use crate::hook::SETTINGS;
 use crate::layers::{ADDED, DECLARATION, Declaration, Declared, MISSING, declaration};
 use crate::project::{GUIDE, guide, project_files};
-use crate::source::{exactly, read_source};
+use crate::tree::{Tree, Writer, exactly, read_text};
 
 /// What `rotproof create` did.
 #[derive(Debug, Default)]
@@ -49,19 +47,20 @@ pub struct Made {
     pub not_written: Option<String>,
 }
 
-/// Make what is missing at `root`. `Err` is a declaration that cannot be read, or a file that cannot be written.
-pub fn create(root: &Path) -> Result<Made, String> {
+/// Make what is missing in `tree`, writing through `out`, for the project named `name` (its root directory's). `Err`
+/// is a declaration that cannot be read, or a file that cannot be written.
+pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, String> {
     let mut made = Made::default();
-    let declared = match declaration(&Disk::new(root)).map_err(|e| e.to_string())? {
+    let declared = match declaration(tree).map_err(|e| e.to_string())? {
         None => return Err(MISSING.into()),
-        Some(Err(why)) => match complete(root)? {
+        Some(Err(why)) => match complete(tree)? {
             // Written only once the completed declaration reads and fits its stack, so a declaration that fails for
             // another reason is left as it was
             Some((text, added)) => {
                 let declaration: Declaration =
                     toml::from_str(&text).map_err(|e| format!("{DECLARATION}: {}", e.message()))?;
                 let declared = Declared::new(declaration).map_err(|found| found.join("\n"))?;
-                write(root, DECLARATION, &text, &mut made)?;
+                write(out, DECLARATION, &text, &mut made)?;
                 made.added = added;
                 declared
             }
@@ -71,43 +70,41 @@ pub fn create(root: &Path) -> Result<Made, String> {
     };
     for place in &declared.places {
         // A level whose layer is declared absent is absent too. Otherwise its layer was made just before it
-        if declared.is_absent(place) || root.join(&place.path).exists() {
+        if declared.is_absent(place) || tree.found(&place.path).is_some() {
             continue;
         }
         for (path, text) in &place.files {
-            write(root, path, text, &mut made)?;
+            write(out, path, text, &mut made)?;
         }
     }
 
-    let disk = Disk::new(root);
-    let bundle = Bundle::new(&disk, declared.declaration.areas.clone());
+    let bundle = Bundle::new(tree, declared.declaration.areas.clone());
     for folder in ["backlog", "specs", "knowledge"] {
-        let dir = root.join(in_docs(folder));
-        fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let dir = in_docs(folder);
+        out.make_dir(&dir).map_err(|e| format!("{dir}: {e}"))?;
     }
-    if !root.join(in_docs("log.md")).exists() {
-        write(root, "docs/log.md", LOG, &mut made)?;
+    if tree.found(&in_docs("log.md")).is_none() {
+        write(out, "docs/log.md", LOG, &mut made)?;
     }
     let guide = guide(&declared.declaration.stack, declared.layout.as_ref());
-    if read_source(&root.join(GUIDE)).ok().as_ref() != Some(&guide) {
-        write(root, GUIDE, &guide, &mut made)?;
+    if read_text(tree, GUIDE).ok().as_ref() != Some(&guide) {
+        write(out, GUIDE, &guide, &mut made)?;
     }
-    let name = project_name(root)?;
-    let (files, not_written) = project_files(&declared, &name);
+    let (files, not_written) = project_files(&declared, name);
     let once = SETTINGS
         .iter()
         .map(|(path, text)| (*path, text.to_string()))
         .chain(files);
     for (path, text) in once {
-        if !root.join(path).exists() {
-            write(root, path, &text, &mut made)?;
+        if tree.found(path).is_none() {
+            write(out, path, &text, &mut made)?;
         }
     }
     made.not_written = not_written;
     let (files, problems) = bundle.expected().map_err(|e| e.to_string())?;
     for (path, text) in files {
-        if read_source(&root.join(&path)).ok().as_ref() != Some(&text) {
-            write(root, &path, &text, &mut made)?;
+        if read_text(tree, &path).ok().as_ref() != Some(&text) {
+            write(out, &path, &text, &mut made)?;
         }
     }
     made.left_out = problems.into_iter().collect();
@@ -118,11 +115,11 @@ pub fn create(root: &Path) -> Result<Made, String> {
 /// `name = value`. `None` when it lacks none, or is not TOML: then its own error stands.
 ///
 /// The comments and the values already there are kept. A value that is present is never changed.
-fn complete(root: &Path) -> Result<Option<(String, Vec<String>)>, String> {
-    let Ok(path) = exactly(root, DECLARATION) else {
+fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
+    let Ok((path, _)) = exactly(tree, DECLARATION) else {
         return Ok(None);
     };
-    let text = read_source(&path).map_err(|e| format!("{DECLARATION}: {e}"))?;
+    let text = read_text(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
     let Ok(mut document) = text.parse::<DocumentMut>() else {
         return Ok(None);
     };
@@ -132,7 +129,7 @@ fn complete(root: &Path) -> Result<Option<(String, Vec<String>)>, String> {
             continue;
         }
         let value = match field.name {
-            "areas" => record_tags(root)?,
+            "areas" => record_tags(tree)?,
             name => {
                 unreachable!("every field Rotproof adds has a rule for its first value: {name}")
             }
@@ -150,9 +147,11 @@ fn complete(root: &Path) -> Result<Option<(String, Vec<String>)>, String> {
     if added.is_empty() {
         return Ok(None);
     }
-    // In the line endings the project wrote: `read_source` gave every line `\n`, and a declaration checked out with
+    // In the line endings the project wrote: `read_text` gave every line `\n`, and a declaration checked out with
     // CRLF would otherwise change on every line, not only where a field was added
-    let raw = fs::read_to_string(&path).map_err(|e| format!("{DECLARATION}: {e}"))?;
+    let raw = tree
+        .read(&path)
+        .map_err(|e| format!("{DECLARATION}: {e}"))?;
     let text = document.to_string();
     Ok(Some((
         if raw.contains("\r\n") {
@@ -166,12 +165,11 @@ fn complete(root: &Path) -> Result<Option<(String, Vec<String>)>, String> {
 
 /// Every tag the backlog items and specs use, sorted by name: the first value of `areas`, so the records that fit their
 /// one-area rule keep fitting once the field exists. A document that cannot be read is left to `rotproof check`.
-fn record_tags(root: &Path) -> Result<Vec<String>, String> {
-    let disk = Disk::new(root);
-    let bundle = Bundle::new(&disk, Vec::new());
+fn record_tags(tree: &dyn Tree) -> Result<Vec<String>, String> {
+    let bundle = Bundle::new(tree, Vec::new());
     let mut tags = BTreeSet::new();
     for folder in ["backlog", "specs", "knowledge"] {
-        if !root.join(in_docs(folder)).is_dir() {
+        if tree.found(&in_docs(folder)) != Some(true) {
             continue;
         }
         let docs = bundle.read_folder(folder).map_err(|e| e.to_string())?;
@@ -199,24 +197,8 @@ fn record_tags(root: &Path) -> Result<Vec<String>, String> {
     Ok(tags.into_iter().collect())
 }
 
-/// The project's name: the name of its root directory, which `--root .` gives only once resolved.
-fn project_name(root: &Path) -> Result<String, String> {
-    let full = root
-        .canonicalize()
-        .map_err(|e| format!("{}: {e}", root.display()))?;
-    Ok(full.file_name().map_or_else(
-        // The root of a drive has no name of its own
-        || "project".to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    ))
-}
-
-fn write(root: &Path, path: &str, text: &str, made: &mut Made) -> Result<(), String> {
-    let full = root.join(path);
-    if let Some(dir) = full.parent() {
-        fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    }
-    fs::write(&full, text).map_err(|e| format!("{path}: {e}"))?;
+fn write(out: &dyn Writer, path: &str, text: &str, made: &mut Made) -> Result<(), String> {
+    out.write(path, text).map_err(|e| format!("{path}: {e}"))?;
     made.written.push(path.to_string());
     Ok(())
 }

@@ -377,10 +377,10 @@ impl Aliases {
 
 /// Whether a module is at `path` (from the root): the file itself, with one of [`EXTENSIONS`], or an `index` in it.
 fn is_module(tree: &dyn Tree, path: &str) -> bool {
-    tree.is_file(path)
+    tree.found(path) == Some(false)
         || EXTENSIONS.iter().any(|extension| {
-            tree.is_file(&format!("{path}.{extension}"))
-                || tree.is_file(&format!("{path}/index.{extension}"))
+            tree.found(&format!("{path}.{extension}")) == Some(false)
+                || tree.found(&format!("{path}/index.{extension}")) == Some(false)
         })
 }
 

@@ -22,8 +22,17 @@ pub trait Tree {
     /// or `None` when it lands nowhere or outside the root. On Windows, another case, dots and spaces at the end and
     /// short names land too; links are followed everywhere.
     fn landed(&self, dir: &str, rel: &str) -> Option<String>;
-    /// Whether the operating system finds a file at `path`, as it reads names (on Windows, in any case).
-    fn is_file(&self, path: &str) -> bool;
+    /// What the operating system finds at `path`, as it reads names (on Windows, in any case): `Some(true)` for a
+    /// directory, `Some(false)` for a file, `None` for nothing.
+    fn found(&self, path: &str) -> Option<bool>;
+}
+
+/// The files a command writes into a project.
+pub trait Writer {
+    /// Write `text` to the file at `path`, making the directories it sits in.
+    fn write(&self, path: &str, text: &str) -> io::Result<()>;
+    /// Make the directory `dir`, and the ones it sits in.
+    fn make_dir(&self, dir: &str) -> io::Result<()>;
 }
 
 /// The text of the file at `path`, with every line ending as `\n`.
@@ -153,60 +162,73 @@ pub fn code_files(
         .collect())
 }
 
-/// A tree in memory, for the tests: files by their path, every directory made by the paths of its files.
+/// A tree in memory, for the tests: files by their path, and the directories their paths make or [`Writer`] made.
 #[cfg(test)]
 pub mod fake {
+    use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
     use std::io;
 
-    use super::Tree;
+    use super::{Tree, Writer};
 
     #[derive(Debug, Default)]
-    pub struct Fake(pub BTreeMap<String, String>);
+    pub struct Fake {
+        files: RefCell<BTreeMap<String, String>>,
+        dirs: RefCell<BTreeSet<String>>,
+    }
 
     impl Fake {
         pub fn new(files: &[(&str, &str)]) -> Self {
-            Fake(
-                files
-                    .iter()
-                    .map(|(path, text)| (path.to_string(), text.to_string()))
-                    .collect(),
-            )
+            let fake = Fake::default();
+            for (path, text) in files {
+                fake.write(path, text).unwrap();
+            }
+            fake
+        }
+
+        /// The text of a file, for a test to compare
+        pub fn text(&self, path: &str) -> Option<String> {
+            self.files.borrow().get(path).cloned()
         }
     }
 
     impl Tree for Fake {
         fn read(&self, path: &str) -> io::Result<String> {
-            self.0
-                .get(path)
-                .cloned()
+            self.text(path)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.to_string()))
         }
 
         fn entries(&self, dir: &str) -> io::Result<Vec<(String, bool)>> {
+            if !dir.is_empty() && !self.dirs.borrow().contains(dir) {
+                return Err(io::Error::new(io::ErrorKind::NotFound, dir.to_string()));
+            }
             let prefix = if dir.is_empty() {
                 String::new()
             } else {
                 format!("{dir}/")
             };
+            let files = self.files.borrow();
+            let dirs = self.dirs.borrow();
             let mut found = BTreeSet::new();
-            for path in self.0.keys() {
+            for (path, is_dir) in files
+                .keys()
+                .map(|p| (p, false))
+                .chain(dirs.iter().map(|d| (d, true)))
+            {
                 if let Some(rest) = path.strip_prefix(&prefix) {
                     match rest.split_once('/') {
                         Some((name, _)) => found.insert((name.to_string(), true)),
-                        None => found.insert((rest.to_string(), false)),
+                        None => found.insert((rest.to_string(), is_dir)),
                     };
                 }
-            }
-            if found.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::NotFound, dir.to_string()));
             }
             Ok(found.into_iter().collect())
         }
 
         fn files(&self, dir: &str) -> io::Result<Vec<String>> {
             Ok(self
-                .0
+                .files
+                .borrow()
                 .keys()
                 .filter(|path| dir.is_empty() || path.starts_with(&format!("{dir}/")))
                 .cloned()
@@ -221,8 +243,36 @@ pub mod fake {
             }
         }
 
-        fn is_file(&self, path: &str) -> bool {
-            self.0.contains_key(path)
+        fn found(&self, path: &str) -> Option<bool> {
+            if self.files.borrow().contains_key(path) {
+                Some(false)
+            } else {
+                self.dirs.borrow().contains(path).then_some(true)
+            }
+        }
+    }
+
+    impl Writer for Fake {
+        fn write(&self, path: &str, text: &str) -> io::Result<()> {
+            if let Some((dir, _)) = path.rsplit_once('/') {
+                self.make_dir(dir)?;
+            }
+            self.files
+                .borrow_mut()
+                .insert(path.to_string(), text.to_string());
+            Ok(())
+        }
+
+        fn make_dir(&self, dir: &str) -> io::Result<()> {
+            let mut at = String::new();
+            for part in dir.split('/') {
+                if !at.is_empty() {
+                    at.push('/');
+                }
+                at.push_str(part);
+                self.dirs.borrow_mut().insert(at.clone());
+            }
+            Ok(())
         }
     }
 }
@@ -276,6 +326,12 @@ mod tests {
                 .unwrap_err()
                 .contains("README.md is there")
         );
+    }
+
+    #[test]
+    fn line_endings_become_lf() {
+        let tree = Fake::new(&[("a.md", "# A\r\nb\rc\n")]);
+        assert_eq!(read_text(&tree, "a.md").unwrap(), "# A\nb\nc\n");
     }
 
     #[test]

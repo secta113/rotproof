@@ -126,14 +126,12 @@ fn map(declared: &Declared) -> String {
 }
 
 /// The guide `rotproof guide` prints: for `stack` when it is named, otherwise for the stack the project at `root`
-/// declares. `Err` when the stack is unknown, or none is named and the declaration cannot be read.
-pub fn guide_for(root: &std::path::Path, stack: Option<&str>) -> Result<String, String> {
+/// declares in `tree`. `Err` when the stack is unknown, or none is named and the declaration cannot be read.
+pub fn guide_for(tree: &dyn crate::tree::Tree, stack: Option<&str>) -> Result<String, String> {
     let stacks = crate::layers::known_stacks().join(", ");
     let stack = match stack {
         Some(stack) => stack.to_string(),
-        None => match crate::layers::declaration(&crate::disk::Disk::new(root))
-            .map_err(|e| e.to_string())?
-        {
+        None => match crate::layers::declaration(tree).map_err(|e| e.to_string())? {
             Some(Ok(declaration)) => declaration.stack,
             None => {
                 return Err(format!(

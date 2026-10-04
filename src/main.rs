@@ -1,7 +1,6 @@
 //! Keeps a project's structure: makes and checks its layers (as `.config/rotproof.toml` declares them) and the records
 //! an agent works from (backlog, specs and log in `docs/`, written in OKF 0.2), and writes their index files.
 
-use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -9,7 +8,9 @@ use std::process::ExitCode;
 use chrono::Local;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use rotproof::bundle::{Bundle, backlog, stale};
+use rotproof::disk::Disk;
 use rotproof::markers::{MARKERS, either};
+use rotproof::tree::Writer;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -126,7 +127,7 @@ fn main() -> ExitCode {
         Command::Create => create(&cli.root).map(|()| true),
         Command::Check => check(&cli.root),
         Command::Guide { stack } => {
-            rotproof::project::guide_for(&cli.root, stack.as_deref()).map(|text| {
+            rotproof::project::guide_for(&Disk::new(&cli.root), stack.as_deref()).map(|text| {
                 print!("{text}");
                 true
             })
@@ -147,7 +148,8 @@ fn main() -> ExitCode {
 
 /// Write the declaration, and say what to do next.
 fn init(root: &Path, stack: &str) -> Result<(), String> {
-    let path = rotproof::init::init(root, stack)?;
+    let disk = Disk::new(root);
+    let path = rotproof::init::init(&disk, &disk, stack)?;
     println!("wrote {path}");
     if stack == rotproof::layers::RECORDS_ONLY {
         println!("next: run `rotproof create` to make docs/");
@@ -161,7 +163,8 @@ fn init(root: &Path, stack: &str) -> Result<(), String> {
 
 /// Make what is missing, and say what was written. A second run with nothing changed writes nothing.
 fn create(root: &Path) -> Result<(), String> {
-    let made = rotproof::create::create(root)?;
+    let disk = Disk::new(root);
+    let made = rotproof::create::create(&disk, &disk, &disk.name()?)?;
     for path in &made.written {
         println!("wrote {path}");
     }
@@ -234,12 +237,13 @@ fn stop_hook(root: &Path) -> ExitCode {
 
 /// Write every index file, then list what was left out of them and the items to measure again.
 fn index(root: &Path) -> Result<(), String> {
-    let disk = rotproof::disk::Disk::new(root);
+    let disk = Disk::new(root);
     let areas = rotproof::layers::areas(&disk).map_err(|e| e.to_string())??;
     let bundle = Bundle::new(&disk, areas);
     let (files, problems) = bundle.expected().map_err(|e| e.to_string())?;
     for (path, text) in files {
-        fs::write(root.join(&path), text).map_err(|e| format!("{path}: {e}"))?;
+        disk.write(&path, &text)
+            .map_err(|e| format!("{path}: {e}"))?;
         println!("wrote {path}");
     }
     for (name, why) in problems {

@@ -1,19 +1,6 @@
-//! Reading files the checks look at outside the tree port (a file as UTF-8, names compared exactly), and the paths and
-//! lines in messages.
+//! The paths and lines in messages, and the one rule on paths every check shares.
 
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-
-/// Read a file as UTF-8, with every line ending as `\n`.
-///
-/// Line endings are normalized as Python's text mode does, which the original checks read with: a file checked out with
-/// CRLF would otherwise keep `\r` at the end of each heading, and its anchors would differ.
-pub fn read_source(path: &Path) -> io::Result<String> {
-    Ok(fs::read_to_string(path)?
-        .replace("\r\n", "\n")
-        .replace('\r', "\n"))
-}
+use std::path::Path;
 
 /// The line (from 1) at a byte offset.
 pub fn line_of(source: &str, at: usize) -> usize {
@@ -38,118 +25,9 @@ pub fn relative_path(path: &Path, root: &Path) -> String {
         .join("/")
 }
 
-/// What a path names on disk, read name by name.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Lookup {
-    /// Every part is the exact name of an entry: the path, from where the lookup started
-    Found(PathBuf),
-    /// A part names an entry only as Windows reads names: in another case, or with dots or spaces at its end. The
-    /// path up to that part as the disk spells it
-    Spelled(String),
-    Missing,
-}
-
-/// The entry `rel` (parts separated by `/`, `.` and `..` allowed) names from `start`, compared with the names the
-/// directories hold, exactly.
-///
-/// Asking the operating system would answer as the machine reads names: Windows finds `README.md` for `readme.md`,
-/// `README.md.` and `README.md ` too, a stream such as `README.md:secret`, and a short name such as `README~1.MD`.
-/// Linux and GitHub find none of them, so a link or a file that passes here would be missing there. Reading the
-/// directories gives the same answer on every machine.
-pub fn lookup(start: &Path, rel: &str) -> Lookup {
-    let mut at = start.to_path_buf();
-    let mut spelled: Vec<String> = Vec::new();
-    for part in rel.split('/') {
-        match part {
-            "" | "." => continue,
-            ".." => {
-                if !at.pop() {
-                    return Lookup::Missing;
-                }
-                spelled.push(part.to_string());
-                continue;
-            }
-            _ => {}
-        }
-        let Ok(entries) = fs::read_dir(&at) else {
-            return Lookup::Missing;
-        };
-        let names: Vec<String> = entries
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .collect();
-        if names.iter().any(|name| name == part) {
-            at.push(part);
-            spelled.push(part.to_string());
-            continue;
-        }
-        // How Windows reads a name: case does not count, and dots and spaces at the end are dropped
-        let windows = |name: &str| name.trim_end_matches(['.', ' ']).to_lowercase();
-        return match names.iter().find(|name| windows(name) == windows(part)) {
-            Some(name) => {
-                spelled.push(name.clone());
-                Lookup::Spelled(spelled.join("/"))
-            }
-            None => Lookup::Missing,
-        };
-    }
-    Lookup::Found(at)
-}
-
-/// Whether `rel` (from `root`, with `/`) names an entry exactly, or `Err` with what to say when it does not.
-pub fn exactly(root: &Path, rel: &str) -> Result<PathBuf, String> {
-    match lookup(root, rel) {
-        Lookup::Found(path) => Ok(path),
-        Lookup::Spelled(on_disk) => Err(format!(
-            "missing: {rel} ({on_disk} is there: names are compared exactly, as Linux and GitHub compare them)"
-        )),
-        Lookup::Missing => Err(format!("missing: {rel}")),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_path_is_found_only_by_its_exact_names() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join("docs/backlog")).unwrap();
-        fs::write(root.join("README.md"), "# Readme\n").unwrap();
-        let here = root.join("docs/backlog");
-        assert_eq!(
-            lookup(&here, "../../README.md"),
-            Lookup::Found(root.join("README.md"))
-        );
-        assert_eq!(
-            lookup(root, "./docs//backlog/"),
-            Lookup::Found(root.join("docs/backlog"))
-        );
-        // Each of these opens README.md on Windows, and nothing on Linux or GitHub
-        for (rel, on_disk) in [
-            ("../../readme.md", "../../README.md"),
-            ("../../README.md.", "../../README.md"),
-            ("../../README.md ", "../../README.md"),
-            ("../../Docs/backlog", "../../docs"),
-            ("../../docs./backlog", "../../docs"),
-        ] {
-            assert_eq!(lookup(&here, rel), Lookup::Spelled(on_disk.into()), "{rel}");
-        }
-        for rel in [
-            "../../README.md:secret",
-            "../../README~1.MD",
-            "CON",
-            "../../nothing.md",
-        ] {
-            assert_eq!(lookup(&here, rel), Lookup::Missing, "{rel}");
-        }
-        assert!(
-            exactly(root, "readme.md")
-                .unwrap_err()
-                .contains("README.md is there")
-        );
-    }
 
     #[test]
     fn within_compares_whole_names() {
@@ -166,13 +44,5 @@ mod tests {
             relative_path(&root.join("docs").join("backlog").join("index.md"), root),
             "docs/backlog/index.md"
         );
-    }
-
-    #[test]
-    fn line_endings_become_lf() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.md");
-        fs::write(&path, "# A\r\nb\rc\n").unwrap();
-        assert_eq!(read_source(&path).unwrap(), "# A\nb\nc\n");
     }
 }

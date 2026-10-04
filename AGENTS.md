@@ -49,9 +49,9 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `schema.rs` | The frontmatter of each document type |
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
 | `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
-| `source.rs` | Reading files outside the tree port (a file as UTF-8, names compared exactly), and the paths and lines in messages |
-| `tree.rs` | The port to a project's files (`Tree`), and the rules on how a path names a file: names compared exactly, and the code files of a directory |
-| `disk.rs` | `Tree` on the file system, the project's `.gitignore` files kept |
+| `source.rs` | The paths and lines in messages, and whether a path sits in another |
+| `tree.rs` | The ports to a project's files (`Tree` to read them, `Writer` to write them), and the rules on how a path names a file: names compared exactly, and the code files of a directory |
+| `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, and the project's name |
 
 ## How this repository differs from what Rotproof keeps
 

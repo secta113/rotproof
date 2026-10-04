@@ -5,7 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::source::{relative_path, within};
-use crate::tree::Tree;
+use crate::tree::{Tree, Writer};
 
 /// A project's files, from its root directory.
 #[derive(Debug, Clone)]
@@ -73,7 +73,88 @@ impl Tree for Disk {
         Some(relative_path(full.strip_prefix(real).ok()?, Path::new("")))
     }
 
-    fn is_file(&self, path: &str) -> bool {
-        self.root.join(path).is_file()
+    fn found(&self, path: &str) -> Option<bool> {
+        let full = self.root.join(path);
+        if full.is_dir() {
+            Some(true)
+        } else {
+            full.exists().then_some(false)
+        }
+    }
+}
+
+impl Writer for Disk {
+    fn write(&self, path: &str, text: &str) -> io::Result<()> {
+        let full = self.root.join(path);
+        if let Some(dir) = full.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        fs::write(full, text)
+    }
+
+    fn make_dir(&self, dir: &str) -> io::Result<()> {
+        fs::create_dir_all(self.root.join(dir))
+    }
+}
+
+impl Disk {
+    /// The project's name: the name of its root directory, which `--root .` gives only once resolved.
+    pub fn name(&self) -> Result<String, String> {
+        let full = self
+            .root
+            .canonicalize()
+            .map_err(|e| format!("{}: {e}", self.root.display()))?;
+        Ok(full.file_name().map_or_else(
+            // The root of a drive has no name of its own
+            || "project".to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::{Lookup, lookup};
+
+    #[test]
+    fn the_disk_lists_names_as_they_are_spelled() {
+        // On Windows the operating system would open README.md by each of these; the listing has only its own name
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("docs/backlog")).unwrap();
+        fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
+        let disk = Disk::new(dir.path());
+        assert_eq!(
+            lookup(&disk, "docs/backlog", "../../README.md"),
+            Lookup::Found {
+                path: "README.md".into(),
+                is_dir: false
+            }
+        );
+        for (rel, on_disk) in [
+            ("../../readme.md", "../../README.md"),
+            ("../../README.md.", "../../README.md"),
+            ("../../Docs/backlog", "../../docs"),
+        ] {
+            assert_eq!(
+                lookup(&disk, "docs/backlog", rel),
+                Lookup::Spelled(on_disk.into()),
+                "{rel}"
+            );
+        }
+        for rel in ["../../README.md:secret", "../../README~1.MD", "CON"] {
+            assert_eq!(lookup(&disk, "docs/backlog", rel), Lookup::Missing, "{rel}");
+        }
+    }
+
+    #[test]
+    fn what_is_written_is_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = Disk::new(dir.path());
+        disk.write("a/b/c.md", "text\n").unwrap();
+        assert_eq!(disk.read("a/b/c.md").unwrap(), "text\n");
+        assert_eq!(disk.found("a/b"), Some(true));
+        assert_eq!(disk.found("a/b/c.md"), Some(false));
+        assert_eq!(disk.found("a/x"), None);
     }
 }
