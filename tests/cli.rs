@@ -1549,8 +1549,8 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
 }
 
 #[test]
-fn what_a_stack_does_not_check_is_said() {
-    for stack in ["typescript", "rust"] {
+fn every_stack_with_layers_checks_everything() {
+    for stack in ["python", "typescript", "rust"] {
         let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
         let arg = root_arg(root.path());
         assert!(run(&["--root", &arg, "create"]).status.success());
@@ -1561,27 +1561,11 @@ fn what_a_stack_does_not_check_is_said() {
         .unwrap();
         let out = run(&["--root", &arg, "check"]);
         let said = stdout(&out);
-        assert!(out.status.success(), "{stack}: {said}");
-        // Every stack with layers checks the direction
-        assert!(
-            !said.contains("the direction of imports is not checked"),
-            "{stack}: {said}"
-        );
+        // Nothing is skipped: the one line says that the layers, their direction and comments included, kept the rules
         assert_eq!(
-            said.contains(&format!(
-                "comments are not checked for TODO, FIXME, XXX, HACK, NOTE: Rotproof does not read the comments of a \
-                 {stack} project yet"
-            )),
-            stack == "rust",
-            "{stack}: {said}"
+            said, "the layers and every record keep the rules\n",
+            "{stack}"
         );
-        // A stack with nothing skipped says that everything kept the rules
-        let closing = if stack == "rust" {
-            "what was checked of the layers, and every record, keep the rules"
-        } else {
-            "the layers and every record keep the rules"
-        };
-        assert!(said.contains(closing), "{stack}: {said}");
     }
 }
 
@@ -1931,6 +1915,81 @@ fn a_marker_in_a_typescript_comment_fails() {
         "src/domain/song.ts",
         "export const x = 1;\n// Split this when it grows\n",
     );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn a_marker_in_a_rust_comment_fails() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let write = |path: &str, text: &str| {
+        let full = r.join(path);
+        fs::create_dir_all(full.parent().unwrap()).unwrap();
+        fs::write(full, text).unwrap();
+    };
+    write(
+        "crates/domain/src/song.rs",
+        "pub fn f() {}\n// TODO: split this\n",
+    );
+    // A crate's tests and build script are read too
+    write(
+        "crates/domain/tests/song.rs",
+        "/* FIXME\n   and HACK */\n#[test]\nfn t() {}\n",
+    );
+    write(
+        "crates/handler/build.rs",
+        "/// NOTE on the build\nfn main() {}\n",
+    );
+    // A string, a character, a lifetime, a manifest's comment, code outside `crates/`, and a path the project lists:
+    // not read as comments
+    write(
+        "crates/domain/src/text.rs",
+        "pub const S: &str = \"// TODO\";\npub const R: &str = r#\"/* FIXME */\"#;\npub fn f<'a>(x: &'a str) -> \
+         &'a str { x } // a plain comment\n",
+    );
+    write(
+        "crates/utils/Cargo.toml",
+        "# TODO in a manifest\n[package]\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    );
+    write(
+        "xtask/src/main.rs",
+        "// TODO outside the crates\nfn main() {}\n",
+    );
+    write(
+        "crates/generated/Cargo.toml",
+        "[package]\nname = \"generated\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    );
+    write("crates/generated/src/lib.rs", "// XXX generated\n");
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        "stack = \"rust\"\nareas = [\"a\"]\nabsent = []\nunchecked = [\"crates/generated\"]\n",
+    )
+    .unwrap();
+    let arg = root_arg(r);
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains("no comment holds TODO, FIXME, HACK or NOTE (work left to do"),
+        "{said}"
+    );
+    for found in [
+        "  crates/domain/src/song.rs:2\n    // TODO: split this\n",
+        "  crates/domain/tests/song.rs:1\n    /* FIXME\n",
+        "  crates/domain/tests/song.rs:2\n    and HACK */\n",
+        "  crates/handler/build.rs:1\n    /// NOTE on the build\n",
+    ] {
+        assert!(said.contains(found), "{found}:\n{said}");
+    }
+    assert_eq!(said.matches("\n  crates/").count(), 4, "{said}");
+    for path in [
+        "crates/domain/src/song.rs",
+        "crates/domain/tests/song.rs",
+        "crates/handler/build.rs",
+    ] {
+        write(path, "// A plain comment\n");
+    }
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 }

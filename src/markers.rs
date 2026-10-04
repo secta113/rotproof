@@ -9,8 +9,10 @@
 //!
 //! The layout's `language` says how the code is read: a Python file's `#` comments with Ruff's parser (`python.rs`), a
 //! TypeScript or JavaScript file's `//` and `/* */` comments with oxc (`typescript.rs`), where JSX text is not a
-//! comment. For `rust`, whose code files are the crates' manifests, the check says that it did not run. The floor:
-//! at least one source file is read, or the check fails instead of passing with nothing read.
+//! comment, and a Rust file's `//` and `/* */` comments, doc comments included, with Rotproof's own scanner
+//! (`rust.rs`): the code files of a Rust layout are its crates' manifests, so its `.rs` files are read wherever the
+//! layout looks for code (`crates/`), a crate's `tests/` and `build.rs` included. The floor: at least one source file
+//! is read, or the check fails instead of passing with nothing read.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -19,7 +21,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::layers::{Declared, Language, not_read};
+use crate::layers::{Declared, Language};
 use crate::source::{code_files, line_of, read_code, within};
 
 /// The words that fail in a comment.
@@ -36,8 +38,6 @@ pub struct Markers {
     pub found: Vec<String>,
     /// The markers found, in the order of [`MARKERS`], each once
     pub words: Vec<&'static str>,
-    /// What was not checked, and why
-    pub skipped: Option<String>,
 }
 
 impl Markers {
@@ -67,29 +67,19 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         // A repository of records only has no code to read
         return Ok(Markers::default());
     };
-    // Which code files have comments to read, and how to read them
-    type Comments = fn(&str, &str) -> Vec<(usize, String)>;
-    let (is_source, comments): (fn(&str) -> bool, Comments) = match layout.language {
+    // Which files, by name, have comments to read
+    let is_source = |name: &str| match layout.language {
         // Every code file of a Python layout is a `.py` file: a test reads every layout
-        Language::Python => (
-            |_| true,
-            |source, path| crate::python::read(source, path).comments,
-        ),
+        Language::Python => layout.is_code(name),
         // Every file in `src/` is code in the layout; only source has comments to read
-        Language::TypeScript => (crate::typescript::is_source, |source, path| {
-            crate::typescript::read(source, path).comments
-        }),
-        // The code files of a Rust layout are its manifests, and the comments of `.rs` files are not read yet
-        Language::Rust => {
-            return Ok(Markers {
-                skipped: Some(format!(
-                    "comments are not checked for {}: {}",
-                    MARKERS.join(", "),
-                    not_read(&declared.declaration.stack, "comments")
-                )),
-                ..Markers::default()
-            });
-        }
+        Language::TypeScript => layout.is_code(name) && crate::typescript::is_source(name),
+        // The code files of a Rust layout are its crates' manifests; the comments are in the `.rs` files beside them
+        Language::Rust => crate::rust::is_source(name),
+    };
+    let comments = |source: &str, path: &str| match layout.language {
+        Language::Python => crate::python::read(source, path).comments,
+        Language::TypeScript => crate::typescript::read(source, path).comments,
+        Language::Rust => crate::rust::comments(source),
     };
     let unchecked: Vec<&str> = declared
         .declaration
@@ -100,11 +90,8 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
     let mut found = Vec::new();
     let mut words = BTreeSet::new();
     let mut read = 0;
-    for path in code_files(root, &layout.scope, |name| layout.is_code(name))? {
+    for path in code_files(root, &layout.scope, |name| is_source(name))? {
         if unchecked.iter().any(|skip| within(&path, skip)) {
-            continue;
-        }
-        if !is_source(&path) {
             continue;
         }
         let Some(source) = read_code(root, &path, "comments", &mut found)? else {
@@ -127,7 +114,6 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
         found,
         // In the order of MARKERS: a set of their positions
         words: words.into_iter().map(|i| MARKERS[i]).collect(),
-        skipped: None,
     })
 }
 

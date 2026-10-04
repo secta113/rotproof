@@ -300,12 +300,14 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   registry or git are not judged. A `Cargo.toml` that is not UTF-8 or
   TOML fails, and so does a dependency taken from a workspace that does not declare it. Not seen: `[patch]` and
   `[replace]`, and source files taken from another crate's directory (`#[path]`, `include!`, `[lib] path`).
-- **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`** (Python, TypeScript): in upper case, as whole words,
-  in any code file outside `unchecked`, `tests/` included; in TypeScript, the `//` and `/* */` comments of the
-  source files in `src/`, JSX text not counted. Work left to do belongs in the backlog, where it is listed and closed,
-  and a decision with its reason in the spec or the log entry of the change; a comment that explains how to read the
-  code stays, without the word. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings
-  are strings. For `rust`, the check says that it did not run.
+- **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
+  outside `unchecked`, `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
+  JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
+  a crate's `tests/` and `build.rs` included, read by Rotproof's own scanner, which skips strings, raw strings and
+  character literals as Rust's lexer does. Work left to do belongs in the backlog, where it is listed and closed, and
+  a decision with its reason in the spec or the log entry of the change; a comment that explains how to read the code
+  stays, without the word. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
+  strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
 
 - **The bundle is there:** `docs/`, `docs/index.md`, `docs/backlog/`, `docs/backlog/rules.md`, `docs/specs/`,
   `docs/specs/rules.md`, `docs/knowledge/` and `docs/knowledge/rules.md` exist, and the declaration with its `areas`

@@ -4,8 +4,8 @@
 //!   sits outside them (`structure.rs`).
 //! - **The layers import only what the table allows** (`direction.rs`): the imports of `python` and `typescript`, and
 //!   the dependencies each crate of `rust` declares.
-//! - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`** (`markers.rs`), for `python` and `typescript`:
-//!   work left to do belongs in the backlog, where it is listed and closed.
+//! - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`** (`markers.rs`): work left to do belongs in the
+//!   backlog, where it is listed and closed.
 //! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
 //!   this version of Rotproof (`project.rs`).
 //! - **The backlog works as a backlog**: every document keeps the format, every link in `# Details` resolves, and every
@@ -100,7 +100,7 @@ pub fn check(root: &Path) -> io::Result<Report> {
             detail,
         })
         .collect();
-    let mut skipped: Vec<String> = structure.skipped.into_iter().collect();
+    let skipped: Vec<String> = structure.skipped.into_iter().collect();
     let mut layers_checked = false;
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
@@ -115,7 +115,6 @@ pub fn check(root: &Path) -> io::Result<Report> {
             check: heading.clone().into(),
             detail,
         }));
-        skipped.extend(markers.skipped);
         let guide = crate::project::guide(&declared.declaration.stack, declared.layout.as_ref());
         let found = exactly(root, GUIDE)
             .ok()

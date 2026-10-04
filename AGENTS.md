@@ -39,7 +39,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, and the functions and classes a file defines |
 | `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports, where each lands (through `tsconfig*.json`), and comments |
 | `cargo.rs` | Reading a crate's `Cargo.toml` with toml_edit: the dependencies it declares on a path or its workspace, and its workspace |
-| `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript) |
+| `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals |
+| `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust) |
 | `hook.rs` | `rotproof stop-hook`, the hook Claude Code runs when the agent stops, and the settings file that `rotproof create` writes for it |
 | `init.rs` | `rotproof init`: writing a project's declaration, once |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks |

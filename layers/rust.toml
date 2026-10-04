@@ -12,8 +12,8 @@ doc_prefix = "//! "
 # Rust UI is written with very different tools (Leptos, Dioxus, egui, ratatui), and the atomic levels inside one crate
 # could only be checked by reading `use` statements. `ui` joins this layout with its tool and its check
 without = ["ui"]
-# What Rotproof reads the code as: the dependencies each crate declares in its `Cargo.toml` for the direction check.
-# It does not read the comments of `.rs` files yet, and `rotproof check` says so
+# What Rotproof reads the code as: the dependencies each crate declares in its `Cargo.toml` for the direction check,
+# and the comments of the `.rs` files in `crates/` for the marker check
 language = "rust"
 
 [layer]

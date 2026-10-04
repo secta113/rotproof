@@ -112,14 +112,9 @@ pub enum Language {
     Python,
     /// TypeScript and JavaScript, with oxc (`typescript.rs`)
     TypeScript,
-    /// The dependencies each crate declares in its `Cargo.toml` (`cargo.rs`). Its comments are not read yet
+    /// The dependencies each crate declares in its `Cargo.toml` (`cargo.rs`), and the comments of `.rs` files with
+    /// Rotproof's own scanner (`rust.rs`)
     Rust,
-}
-
-/// Why a check that reads code did not run for a stack whose language Rotproof does not read that part of: `what` is
-/// what it would read.
-pub fn not_read(stack: &str, what: &str) -> String {
-    format!("Rotproof does not read the {what} of a {stack} project yet")
 }
 
 /// One place in the tree a layout makes: a layer (`domain`) or a level of `ui` (`ui.pages`).
