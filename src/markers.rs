@@ -49,15 +49,20 @@ impl Markers {
         } else {
             &self.words[..]
         };
-        let listed = match words {
-            [one] => one.to_string(),
-            [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
-            [] => unreachable!("MARKERS is not empty"),
-        };
         format!(
-            "no comment holds {listed} (work left to do goes in docs/backlog/, a decision and its reason in the spec \
-             or the log entry of the change, how to read the code in a plain comment without the word)"
+            "no comment holds {} (work left to do goes in docs/backlog/, a decision and its reason in the spec or the \
+             log entry of the change, how to read the code in a plain comment without the word)",
+            either(words)
         )
+    }
+}
+
+/// Markers as a sentence says any of them: the words joined with commas, and the last with "or".
+pub fn either(words: &[&str]) -> String {
+    match words {
+        [one] => one.to_string(),
+        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+        [] => unreachable!("MARKERS is not empty, and a finding has a word"),
     }
 }
 

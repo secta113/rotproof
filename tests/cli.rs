@@ -1994,6 +1994,20 @@ fn a_marker_in_a_rust_comment_fails() {
     assert!(out.status.success(), "{}", stdout(&out));
 }
 
+#[test]
+fn the_help_of_check_names_the_markers_of_the_check() {
+    // Built from the check's own list, in both forms of asking for it
+    let sentence = rotproof::markers::either(&rotproof::markers::MARKERS);
+    assert_eq!(sentence, "TODO, FIXME, XXX, HACK or NOTE");
+    for args in [&["check", "--help"][..], &["help", "check"]] {
+        let said = stdout(&run(args));
+        assert!(
+            said.contains(&format!("that no comment holds {sentence}, that")),
+            "{args:?}: {said}"
+        );
+    }
+}
+
 /// Run the stop hook from `root` with `input` on stdin.
 fn stop_hook(root: &Path, input: &str) -> Output {
     use std::io::Write;

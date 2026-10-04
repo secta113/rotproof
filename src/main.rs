@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use chrono::Local;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use rotproof::bundle::{Bundle, backlog, stale};
+use rotproof::markers::{MARKERS, either};
 use rotproof::source::relative_path;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
@@ -25,6 +26,17 @@ prints them before. `rotproof <command> --help` says what a command reads, write
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
 when a file cannot be read or written, or the command line is wrong.";
+
+/// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
+/// written here, they would be a comment that holds them, and a list that could drift from the check.
+const CHECK_HELP: &str = "\
+Check the layers and the records, and exit non-zero when one breaks the rules
+
+Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
+layers), that each layer imports only what the layer table allows, that no comment holds {markers}, that \
+.rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the rules.md of each directory). \
+Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
+a rule is broken, 2 when a file cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
 /// import which) and the records an agent works from (backlog, specs, knowledge and log in docs/).
@@ -62,12 +74,7 @@ enum Command {
     /// upgrading Rotproof. Exits 2 when the declaration cannot be read or a file cannot be written.
     Create,
     /// Check the layers and the records, and exit non-zero when one breaks the rules
-    ///
-    /// Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside
-    /// the layers), that each layer imports only what the layer table allows, that no comment holds TODO, FIXME, XXX,
-    /// HACK or NOTE, that .rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the
-    /// rules.md of each directory). Prints every broken rule under the check that found it, and what was not checked
-    /// and why. Writes nothing. Exits 1 when a rule is broken, 2 when a file cannot be read.
+    // Its long help is CHECK_HELP, which `command` puts in
     Check,
     /// Print the rules Rotproof keeps for a stack, the text of .rotproof/AGENTS.md, writing nothing
     ///
@@ -97,8 +104,15 @@ enum Command {
     StopHook,
 }
 
+/// The command line as clap reads it, with the long help of `rotproof check` naming the markers of the check.
+fn command() -> clap::Command {
+    Cli::command().mut_subcommand("check", |check| {
+        check.long_about(CHECK_HELP.replace("{markers}", &either(&MARKERS)))
+    })
+}
+
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::from_arg_matches(&command().get_matches()).unwrap_or_else(|e| e.exit());
     // A root that does not exist fails here. Read as an empty tree, it would pass every check with nothing checked
     if !cli.root.is_dir() {
         eprintln!("the root is not a directory: {}", cli.root.display());
