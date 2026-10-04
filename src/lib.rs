@@ -14,4 +14,3 @@ pub mod direction;
 pub mod links;
 pub mod markers;
 pub mod schema;
-pub mod structure;

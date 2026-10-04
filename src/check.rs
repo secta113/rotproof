@@ -94,7 +94,7 @@ pub struct Report {
 
 /// Every broken rule in the repository `tree` holds. An error is a file that could not be read at all.
 pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
-    let structure = crate::structure::problems(tree)?;
+    let structure = crate::application::structure::problems(tree)?;
     let mut findings: Vec<Finding> = structure
         .found
         .into_iter()

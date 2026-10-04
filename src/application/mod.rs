@@ -8,4 +8,5 @@ pub mod hook;
 pub mod init;
 pub mod layers;
 pub mod project;
+pub mod structure;
 pub mod tree;

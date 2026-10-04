@@ -34,7 +34,6 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `main.rs` | The command line, which is the `handler`: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof guide`, `rotproof index` and `rotproof stop-hook`, and the help that leads from one to the next. It alone builds the adapters in `infrastructure` |
 | `lib.rs` | The library the command line calls: the layers, and the modules not sorted into one yet |
 | `check.rs` | Every rule `rotproof check` runs, each with its floor |
-| `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust) |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust) |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks |
@@ -50,6 +49,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `layers.rs` | The layer definitions in `layers/`, and what a project's `.config/rotproof.toml` says |
 | `hook.rs` | What `rotproof stop-hook` finds open in the agent's last message and what it answers, the port to the project's changes (`Changes`), and the settings file that `rotproof create` writes for the hook |
 | `project.rs` | The files Rotproof writes outside `docs/`: the guide `.rotproof/AGENTS.md`, and the project's files, once |
+| `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way, judged from the paths it names and the code files of the directories it lists |
 
 | Module of `src/application/` | Content |
 |---|---|
@@ -60,6 +60,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `hook.rs` | `rotproof stop-hook`, the hook Claude Code runs when the agent stops |
 | `init.rs` | `rotproof init`: writing a project's declaration, once |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
+| `structure.rs` | The structure check, read from the tree |
 
 | Module of `src/infrastructure/` | Content |
 |---|---|
