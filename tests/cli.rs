@@ -2027,7 +2027,7 @@ fn a_marker_in_a_rust_comment_fails() {
 #[test]
 fn the_help_of_check_names_the_markers_of_the_check() {
     // Built from the check's own list, in both forms of asking for it
-    let sentence = rotproof::markers::either(&rotproof::markers::MARKERS);
+    let sentence = rotproof::domain::markers::either(&rotproof::domain::markers::MARKERS);
     assert_eq!(sentence, "TODO, FIXME, XXX, HACK or NOTE");
     for args in [&["check", "--help"][..], &["help", "check"]] {
         let said = stdout(&run(args));

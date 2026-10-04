@@ -35,11 +35,11 @@ use crate::bundle::{Bundle, DOCS, Docs, RESERVED, backlog, in_docs};
 use crate::domain::code::Parsers;
 
 use crate::application::layers::areas;
+use crate::application::links::broken;
 use crate::application::tree::{exactly, read_text};
 use crate::domain::layers::{DECLARATION, area_problems};
 use crate::domain::project::GUIDE;
 use crate::domain::tree::Tree;
-use crate::links::broken;
 use utils::frontmatter::split;
 use utils::markdown::{heading, links, visible};
 
@@ -112,7 +112,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
             check: "the layers import only what layers/table.toml allows".into(),
             detail,
         }));
-        let markers = crate::markers::problems(tree, parsers, declared)?;
+        let markers = crate::application::markers::problems(tree, parsers, declared)?;
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {
             check: heading.clone().into(),

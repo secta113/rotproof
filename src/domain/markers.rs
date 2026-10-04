@@ -13,17 +13,16 @@
 //! (`rust.rs`): the code files of a Rust layout are its crates' manifests, so its `.rs` files are read wherever the
 //! layout looks for code (`crates/`), a crate's `tests/` and `build.rs` included. The floor: at least one source file
 //! is read, or the check fails instead of passing with nothing read.
+//!
+//! The rules here judge the comments of a file once they are read; `application` walks the files and reads them.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io;
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::application::tree::{code_files, read_code};
-use crate::domain::code::{Parsers, is_source};
-use crate::domain::layers::{Declared, Language};
-use crate::domain::tree::Tree;
+use crate::domain::code::is_source;
+use crate::domain::layers::{Declared, Language, Layout};
 use utils::source::{line_of, within};
 
 /// The words that fail in a comment.
@@ -68,64 +67,64 @@ pub fn either(words: &[&str]) -> String {
     }
 }
 
-/// Every marker in a comment of the code of `declared`. An error is a directory that could not be walked.
-pub fn problems(
-    tree: &dyn Tree,
-    parsers: &dyn Parsers,
-    declared: &Declared,
-) -> io::Result<Markers> {
-    let Some(layout) = &declared.layout else {
-        // A repository of records only has no code to read
-        return Ok(Markers::default());
-    };
-    // Which files, by name, have comments to read
-    let is_source = |name: &str| match layout.language {
+/// Whether the file named `name`, in a project of `layout`, has comments to read.
+pub fn has_comments(layout: &Layout, name: &str) -> bool {
+    match layout.language {
         // Every code file of a Python layout is a `.py` file: a test reads every layout
         Language::Python => layout.is_code(name),
         // Every file in `src/` is code in the layout; only source has comments to read
         Language::TypeScript => layout.is_code(name) && is_source(name),
         // The code files of a Rust layout are its crates' manifests; the comments are in the `.rs` files beside them
         Language::Rust => utils::rust::is_source(name),
-    };
-    let comments = |source: &str, path: &str| match layout.language {
-        Language::Python => parsers.python(source, path).comments,
-        Language::TypeScript => parsers.typescript(source, path).comments,
-        Language::Rust => utils::rust::comments(source),
-    };
-    let unchecked: Vec<&str> = declared
+    }
+}
+
+/// Whether the file at `path` sits in a path the project lists in `unchecked`.
+pub fn is_unchecked(declared: &Declared, path: &str) -> bool {
+    declared
         .declaration
         .unchecked
         .iter()
-        .map(|path| path.trim_end_matches('/'))
-        .collect();
+        .any(|skip| within(path, skip.trim_end_matches('/')))
+}
+
+/// The findings in the file at `path`, whose text is `source` and whose reader found `comments` (byte offset, text):
+/// each line whose comments hold a marker, as `path:line` and the line, and the markers on them as positions in
+/// [`MARKERS`].
+pub fn in_file(
+    path: &str,
+    source: &str,
+    comments: &[(usize, String)],
+) -> (Vec<String>, Vec<usize>) {
+    let lines: Vec<&str> = source.lines().collect();
     let mut found = Vec::new();
-    let mut words = BTreeSet::new();
-    let mut read = 0;
-    for path in code_files(tree, &layout.scope, |name| is_source(name))? {
-        if unchecked.iter().any(|skip| within(&path, skip)) {
-            continue;
-        }
-        let Some(source) = read_code(tree, &path, "comments", &mut found)? else {
-            continue;
-        };
-        read += 1;
-        let lines: Vec<&str> = source.lines().collect();
-        for (line, in_comment) in in_comments(&source, &comments(&source, &path)) {
-            found.push(format!("{path}:{line}\n{}", lines[line - 1].trim()));
-            words.extend(in_comment);
-        }
+    let mut words = Vec::new();
+    for (line, in_comment) in in_comments(source, comments) {
+        found.push(format!("{path}:{line}\n{}", lines[line - 1].trim()));
+        words.extend(in_comment);
     }
+    (found, words)
+}
+
+/// What the marker check found in a project of `declared`, from the findings and the positions of the markers in
+/// them, with its floor: `read` files read, of which at least one.
+pub fn markers(
+    declared: &Declared,
+    mut found: Vec<String>,
+    words: BTreeSet<usize>,
+    read: usize,
+) -> Markers {
     if read == 0 {
         found.push(format!(
             "no code file was read: the {} layout finds none in the tree",
             declared.declaration.stack
         ));
     }
-    Ok(Markers {
+    Markers {
         found,
         // In the order of MARKERS: a set of their positions
         words: words.into_iter().map(|i| MARKERS[i]).collect(),
-    })
+    }
 }
 
 /// Every line of a source whose comments hold a marker, and the markers on it as positions in [`MARKERS`], from the
@@ -148,34 +147,58 @@ fn in_comments(source: &str, comments: &[(usize, String)]) -> Vec<(usize, Vec<us
 mod tests {
     use super::*;
 
-    fn named(found: Vec<(usize, Vec<usize>)>) -> Vec<(usize, Vec<&'static str>)> {
-        found
-            .into_iter()
-            .map(|(line, at)| (line, at.into_iter().map(|i| MARKERS[i]).collect()))
-            .collect()
-    }
-
-    fn words(source: &str) -> Vec<(usize, Vec<&'static str>)> {
-        named(in_comments(
-            source,
-            &crate::infrastructure::python::read(source, "x.py").comments,
-        ))
+    #[test]
+    fn a_marker_is_named_at_its_line_in_the_comments_given() {
+        let source = "x = 1  # TODO(me) and NOTE\ny = 2\n\"\"\"\nFIXME in a string\n\"\"\"\n# a plain\n# HACK\n";
+        // As a reader gives them: the docstring is no comment
+        let comments = [
+            (7, "# TODO(me) and NOTE".to_string()),
+            (59, "# a plain".into()),
+            (69, "# HACK".into()),
+        ];
+        let (found, words) = in_file("x.py", source, &comments);
+        assert_eq!(
+            found,
+            ["x.py:1\nx = 1  # TODO(me) and NOTE", "x.py:7\n# HACK"]
+        );
+        assert_eq!(words, [0, 4, 3]);
+        // Upper case and whole words only
+        let other = [(0, "# todo, TODOS, NOTES, NOTE_X, XXXL".to_string())];
+        assert_eq!(
+            in_file("x.py", "# todo, TODOS, NOTES, NOTE_X, XXXL\n", &other).0,
+            Vec::<String>::new()
+        );
     }
 
     #[test]
-    fn every_marker_fails_in_a_comment() {
-        for marker in MARKERS {
-            assert_eq!(
-                words(&format!("x = 1\n# {marker}: later\n")),
-                [(2, vec![marker])],
-                "{marker}"
-            );
-        }
-        // One comment, one finding, with every marker in it
+    fn a_file_in_a_path_listed_in_unchecked_is_skipped() {
+        let declared = Declared::new(
+            crate::domain::layers::parse_declaration(
+                "stack = \"python\"\nareas = []\nunchecked = [\"scripts/\", \"gen\"]\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(is_unchecked(&declared, "scripts/run.py"));
+        assert!(is_unchecked(&declared, "gen/a/b.py"));
+        assert!(!is_unchecked(&declared, "generated/a.py"));
+        assert!(!is_unchecked(&declared, "domain/scripts/x.py"));
+    }
+
+    #[test]
+    fn nothing_read_fails_by_the_floor() {
+        let declared = Declared::new(
+            crate::domain::layers::parse_declaration("stack = \"python\"\nareas = []\n").unwrap(),
+        )
+        .unwrap();
+        let none = markers(&declared, Vec::new(), BTreeSet::new(), 0);
         assert_eq!(
-            words("x = 1  # TODO(me) and NOTE\n"),
-            [(1, vec!["TODO", "NOTE"])]
+            none.found,
+            ["no code file was read: the python layout finds none in the tree"]
         );
+        let some = markers(&declared, Vec::new(), [4, 0].into(), 1);
+        assert!(some.found.is_empty());
+        assert_eq!(some.words, ["TODO", "NOTE"]);
     }
 
     #[test]
@@ -201,52 +224,6 @@ mod tests {
         assert_eq!(
             heading(Vec::new()),
             "no comment holds TODO, FIXME, XXX, HACK or NOTE"
-        );
-    }
-
-    #[test]
-    fn a_marker_outside_a_comment_or_in_another_word_passes() {
-        let source = "\
-class Status:
-    TODO = 1
-    \"\"\"TODO in a docstring is a string.\"\"\"
-phone = \"XXX-XXXX\"
-note = Status.TODO  # todo in lower case, TODOS and NOTES, NOTE_X and XXXL are other words
-";
-        assert_eq!(words(source), []);
-    }
-
-    #[test]
-    fn comments_after_a_syntax_error_are_read() {
-        assert_eq!(words("def f(:\n    pass\n# FIXME\n"), [(3, vec!["FIXME"])]);
-    }
-
-    fn typescript_words(source: &str) -> Vec<(usize, Vec<&'static str>)> {
-        named(in_comments(
-            source,
-            &crate::infrastructure::typescript::read(source, "src/a.tsx").comments,
-        ))
-    }
-
-    #[test]
-    fn typescript_comments_are_read_and_jsx_text_and_strings_are_not() {
-        let source = "\
-const status = 'TODO';
-// TODO: one
-const view = <p>NOTE in text, // HACK in text</p>;
-/* FIXME
-   and XXX on the next line */
-const done = Status.TODO; // a plain comment
-const empty = <div>{/* NOTE in a JSX comment */}</div>;
-";
-        assert_eq!(
-            typescript_words(source),
-            [
-                (2, vec!["TODO"]),
-                (4, vec!["FIXME"]),
-                (5, vec!["XXX"]),
-                (7, vec!["NOTE"]),
-            ]
         );
     }
 }
