@@ -14,7 +14,7 @@ use regex::Regex;
 use yaml_rust2::Yaml;
 use yaml_rust2::yaml::Hash;
 
-use crate::frontmatter::{Sections, first_heading, split};
+use utils::frontmatter::{Sections, first_heading, split};
 
 /// A datetime with a time zone, as OKF writes every timestamp.
 pub type Time = DateTime<FixedOffset>;

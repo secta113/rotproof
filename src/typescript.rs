@@ -21,8 +21,8 @@ use oxc_span::SourceType;
 use serde_json::Value;
 
 use crate::code::{Alias, Aliases, Source, join, parent};
-use crate::source::line_of;
 use crate::tree::{Tree, read_text};
+use utils::source::line_of;
 
 /// Read one file, whose path from the root says how: `.tsx` with JSX, `.d.ts` as declarations.
 pub fn read(source: &str, path: &str) -> Source<String> {

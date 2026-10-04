@@ -17,7 +17,7 @@
 use toml_edit::{Document, Item, TableLike};
 
 use crate::code::{Dependency, Manifest, Origin};
-use crate::source::line_of;
+use utils::source::line_of;
 
 /// The tables of dependencies that are read, at the top or under `[target.<cfg>]`.
 const READ: [&str; 3] = ["dependencies", "build-dependencies", "build_dependencies"];

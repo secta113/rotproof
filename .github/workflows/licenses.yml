@@ -10,6 +10,7 @@ on:
     paths: &paths
       - Cargo.lock
       - Cargo.toml
+      - crates/*/Cargo.toml
       - about.toml
       - about.hbs
       - THIRD-PARTY-LICENSES.txt

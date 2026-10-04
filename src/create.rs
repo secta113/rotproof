@@ -28,11 +28,11 @@ use yaml_rust2::Yaml;
 
 use crate::bundle::{Bundle, LOG, in_docs};
 
-use crate::frontmatter::split;
 use crate::hook::SETTINGS;
 use crate::layers::{ADDED, DECLARATION, Declaration, Declared, MISSING, declaration};
 use crate::project::{GUIDE, guide, project_files};
 use crate::tree::{Tree, Writer, exactly, read_text};
+use utils::frontmatter::split;
 
 /// What `rotproof create` did.
 #[derive(Debug, Default)]

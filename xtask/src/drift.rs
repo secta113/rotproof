@@ -1,7 +1,7 @@
 //! Checks that what the repository says about itself agrees with the repository. Both drifted silently before: the map
 //! in `AGENTS.md` once named 6 of the tracked top-level paths, and the toolchain version is written in three files.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Fewer table rows than this means the map's format changed and nothing was read, not that the repository shrank
 pub const MIN_ROWS: usize = 10;
@@ -11,8 +11,9 @@ pub const MIN_ROWS: usize = 10;
 pub struct Map {
     /// Top-level paths: the first column of the path table, and the names in the prose under it
     pub paths: BTreeSet<String>,
-    /// Modules of `src/`: the first column of the table whose header names `src/`
-    pub modules: BTreeSet<String>,
+    /// Source directory -> its modules: the first column of each table whose header names a source directory (`src/`,
+    /// or a crate's, `crates/<name>/src/`)
+    pub modules: BTreeMap<String, BTreeSet<String>>,
     /// Table rows read, headers and separators excluded
     pub rows: usize,
 }
@@ -26,7 +27,8 @@ fn backticked(s: &str) -> impl Iterator<Item = String> + '_ {
 
 pub fn read_map(agents_md: &str) -> Map {
     let mut map = Map::default();
-    let (mut in_map, mut header, mut modules_table) = (false, true, false);
+    let (mut in_map, mut header) = (false, true);
+    let mut modules_table: Option<String> = None;
     for line in agents_md.lines() {
         if let Some(heading) = line.strip_prefix("## ") {
             in_map = heading.trim() == "Map";
@@ -45,18 +47,30 @@ pub fn read_map(agents_md: &str) -> Map {
             continue;
         }
         if header {
-            modules_table = backticked(first).any(|n| n == "src");
+            modules_table = backticked(first).find(|n| is_source_dir(n));
             header = false;
             continue;
         }
         map.rows += 1;
-        if modules_table {
-            map.modules.extend(backticked(first));
+        if let Some(dir) = &modules_table {
+            map.modules
+                .entry(dir.clone())
+                .or_default()
+                .extend(backticked(first));
         } else {
             map.paths.extend(backticked(first));
         }
     }
     map
+}
+
+/// Whether a directory holds the modules of a crate: `src`, or `crates/<name>/src`.
+fn is_source_dir(dir: &str) -> bool {
+    dir == "src"
+        || dir
+            .strip_prefix("crates/")
+            .and_then(|rest| rest.strip_suffix("/src"))
+            .is_some_and(|name| !name.is_empty() && !name.contains('/'))
 }
 
 /// Where the map and the tracked files (`git ls-files`, `/`-separated) disagree.
@@ -66,12 +80,18 @@ pub fn map_problems(map: &Map, tracked: &[String]) -> Vec<String> {
         .filter_map(|f| f.split('/').next())
         .map(str::to_string)
         .collect();
-    let modules: BTreeSet<String> = tracked
-        .iter()
-        .filter_map(|f| f.strip_prefix("src/"))
-        .filter(|f| !f.contains('/') && f.ends_with(".rs"))
-        .map(str::to_string)
-        .collect();
+    let mut modules: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for file in tracked {
+        if let Some((dir, name)) = file.rsplit_once('/')
+            && is_source_dir(dir)
+            && name.ends_with(".rs")
+        {
+            modules
+                .entry(dir.to_string())
+                .or_default()
+                .insert(name.to_string());
+        }
+    }
     let mut found = Vec::new();
     if map.rows < MIN_ROWS {
         found.push(format!(
@@ -85,15 +105,23 @@ pub fn map_problems(map: &Map, tracked: &[String]) -> Vec<String> {
     for p in map.paths.difference(&top) {
         found.push(format!("{p} is in the map in AGENTS.md but not tracked"));
     }
-    for m in modules.difference(&map.modules) {
-        found.push(format!(
-            "src/{m} is tracked but not in the module table in AGENTS.md"
-        ));
-    }
-    for m in map.modules.difference(&modules) {
-        found.push(format!(
-            "src/{m} is in the module table in AGENTS.md but not tracked"
-        ));
+    let none = BTreeSet::new();
+    let dirs: BTreeSet<&String> = modules.keys().chain(map.modules.keys()).collect();
+    for dir in dirs {
+        let (tracked, mapped) = (
+            modules.get(dir).unwrap_or(&none),
+            map.modules.get(dir).unwrap_or(&none),
+        );
+        for m in tracked.difference(mapped) {
+            found.push(format!(
+                "{dir}/{m} is tracked but not in the module table in AGENTS.md"
+            ));
+        }
+        for m in mapped.difference(tracked) {
+            found.push(format!(
+                "{dir}/{m} is in the module table in AGENTS.md but not tracked"
+            ));
+        }
     }
     found
 }
@@ -213,7 +241,13 @@ Also tracked: `c`.
             map.paths,
             ["a.toml", "b.toml", "c", "src"].map(String::from).into()
         );
-        assert_eq!(map.modules, ["lib.rs", "main.rs"].map(String::from).into());
+        assert_eq!(
+            map.modules,
+            BTreeMap::from([(
+                "src".to_string(),
+                ["lib.rs", "main.rs"].map(String::from).into()
+            )])
+        );
         assert_eq!(map.rows, 4);
     }
 
@@ -248,6 +282,40 @@ Also tracked: `c`.
             [
                 "src/new.rs is tracked but not in the module table in AGENTS.md",
                 "src/lib.rs is in the module table in AGENTS.md but not tracked",
+            ]
+        );
+    }
+
+    #[test]
+    fn each_crate_has_a_module_table_of_its_own() {
+        let agents = AGENTS.replace(
+            "\n## Rules",
+            "\n| Module of `crates/utils/src/` | Content |\n|---|---|\n| `lib.rs` | The parts |\n\n## Rules",
+        )
+        .replace(
+            "| `a.toml`, `b.toml` | Two files |",
+            "| `a.toml`, `b.toml` | Two files |\n| `crates/` | The layers |",
+        );
+        let crates = &["crates/utils/src/lib.rs", "crates/utils/Cargo.toml"];
+        assert_eq!(
+            problems(&agents, &[TREE, crates].concat()),
+            Vec::<String>::new()
+        );
+        // A module of a crate is not a top-level path, and a crate without a table fails
+        let found = problems(
+            &agents,
+            &[
+                TREE,
+                crates,
+                &["crates/utils/src/new.rs", "crates/domain/src/lib.rs"],
+            ]
+            .concat(),
+        );
+        assert_eq!(
+            found,
+            [
+                "crates/domain/src/lib.rs is tracked but not in the module table in AGENTS.md",
+                "crates/utils/src/new.rs is tracked but not in the module table in AGENTS.md",
             ]
         );
     }

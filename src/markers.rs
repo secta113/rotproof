@@ -22,8 +22,8 @@ use regex::Regex;
 
 use crate::code::{Parsers, is_source};
 use crate::layers::{Declared, Language};
-use crate::source::{line_of, within};
 use crate::tree::{Tree, code_files, read_code};
+use utils::source::{line_of, within};
 
 /// The words that fail in a comment.
 pub const MARKERS: [&str; 5] = ["TODO", "FIXME", "XXX", "HACK", "NOTE"];
@@ -84,12 +84,12 @@ pub fn problems(
         // Every file in `src/` is code in the layout; only source has comments to read
         Language::TypeScript => layout.is_code(name) && is_source(name),
         // The code files of a Rust layout are its crates' manifests; the comments are in the `.rs` files beside them
-        Language::Rust => crate::rust::is_source(name),
+        Language::Rust => utils::rust::is_source(name),
     };
     let comments = |source: &str, path: &str| match layout.language {
         Language::Python => parsers.python(source, path).comments,
         Language::TypeScript => parsers.typescript(source, path).comments,
-        Language::Rust => crate::rust::comments(source),
+        Language::Rust => utils::rust::comments(source),
     };
     let unchecked: Vec<&str> = declared
         .declaration

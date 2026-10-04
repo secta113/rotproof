@@ -3,6 +3,8 @@
 # platform cannot leave a crate out. Build and dev dependencies are not linked into the binary.
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
+# Rotproof's own layers (`crates/`, `publish = false`) are Rotproof, not a third party
+private = { ignore = true }
 
 # The licenses Rotproof may ship, in the order cargo-about picks among the choices a crate offers (MIT for a crate that
 # is MIT OR Apache-2.0). A crate whose license cannot be met from this list fails the generation, so a new license is

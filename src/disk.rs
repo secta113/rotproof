@@ -5,8 +5,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::layers::DECLARATION;
-use crate::source::{relative_path, within};
 use crate::tree::{Tree, Writer};
+use utils::source::{relative_path, within};
 
 /// A project's files, from its root directory.
 #[derive(Debug, Clone)]

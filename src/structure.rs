@@ -15,8 +15,8 @@ use std::collections::BTreeSet;
 use std::io;
 
 use crate::layers::{DECLARATION, Declared, Layout, MISSING, Place, declaration};
-use crate::source::within;
 use crate::tree::{Tree, code_files, exactly};
+use utils::source::within;
 
 /// What the structure check found.
 #[derive(Debug, Default)]

@@ -34,11 +34,12 @@ use sha2::{Digest, Sha256};
 use crate::bundle::{Bundle, DOCS, Docs, RESERVED, backlog, in_docs};
 use crate::code::Parsers;
 
-use crate::frontmatter::split;
 use crate::layers::{DECLARATION, area_problems, areas};
-use crate::markdown::{broken, heading, links, visible};
+use crate::links::broken;
 use crate::project::GUIDE;
 use crate::tree::{Tree, exactly, read_text};
+use utils::frontmatter::split;
+use utils::markdown::{heading, links, visible};
 
 /// Directory (relative to docs/, "" for the root) -> the document types allowed in it
 const TYPES: [(&str, &[&str]); 4] = [

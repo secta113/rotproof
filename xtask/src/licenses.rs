@@ -19,8 +19,10 @@ pub const WORKFLOW: &str = ".github/workflows/licenses.yml";
 /// Fewer crates than this means the output of `cargo tree` was not read, not that Rotproof lost its dependencies
 pub const MIN_CRATES: usize = 10;
 
-/// `name version` of every crate in the output of `cargo tree --prefix none --format {p}`, except the first line,
-/// which is the root crate itself. A crate shown again (`(*)`) counts once.
+/// `name version` of every crate in the output of `cargo tree --prefix none --format {p}`, except Rotproof's own: the
+/// first line, which is the root crate itself, and its layers, which come from a path on this machine
+/// (`utils v0.0.0 (/work/crates/utils)`). A crate from git is not Rotproof's and counts. A crate shown again (`(*)`)
+/// counts once.
 pub fn tree_crates(cargo_tree: &str) -> BTreeSet<String> {
     cargo_tree
         .lines()
@@ -29,9 +31,19 @@ pub fn tree_crates(cargo_tree: &str) -> BTreeSet<String> {
             let mut words = l.split_whitespace();
             let name = words.next()?;
             let version = words.next()?.strip_prefix('v')?;
-            Some(format!("{name} {version}"))
+            let source = words.next().unwrap_or_default();
+            (!is_local_path(source)).then(|| format!("{name} {version}"))
         })
         .collect()
+}
+
+/// Whether the source `cargo tree` writes after a version is a path on this machine: `(/work/...)` or `(D:\...)`.
+fn is_local_path(source: &str) -> bool {
+    let Some(path) = source.strip_prefix('(') else {
+        return false;
+    };
+    let bytes = path.as_bytes();
+    path.starts_with('/') || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
 }
 
 /// `name version` of every crate the notices list: the `- name version (repository)` lines under each `Used by:`,
@@ -132,7 +144,15 @@ chrono v0.4.45
 libc v0.2.189
 clap v4.6.7
 libc v0.2.189 (*)
+utils v0.0.0 (/work/crates/utils)
+domain v0.0.0 (D:\\work\\crates\\domain)
 ";
+
+    #[test]
+    fn a_crate_from_git_counts_and_one_of_rotproofs_layers_does_not() {
+        let tree = "rotproof v0.1.0 (/work)\nforked v1.0.0 (https://github.com/x/forked#abc)\nutils v0.0.0 (/work/crates/utils)\n";
+        assert_eq!(tree_crates(tree), set(&["forked 1.0.0"]));
+    }
 
     const NOTICES: &str = "\
 Third-party licenses of Rotproof

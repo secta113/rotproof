@@ -6,13 +6,13 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use crate::frontmatter::Sections;
 use crate::layers::DECLARATION;
 use crate::schema::{
     BacklogDoc, CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, SPEC_FOLDERS,
     Spec, Status, Time, backlog_doc, guide_doc, knowledge_doc, spec,
 };
 use crate::tree::{Tree, read_text};
+use utils::frontmatter::Sections;
 
 /// File names OKF reserves. Never used for a document
 pub const RESERVED: [&str; 2] = ["index.md", "log.md"];
@@ -726,7 +726,7 @@ Not yet. Measured by hand.
             "{line}"
         );
         // Read back as a reader reads it, the entry is one link to its own document, with the title as its text
-        let found = crate::markdown::links(line);
+        let found = utils::markdown::links(line);
         assert_eq!(
             found,
             [(
