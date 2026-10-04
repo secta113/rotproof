@@ -197,7 +197,8 @@ fn create(root: &Path) -> Result<(), String> {
 
 /// Print every broken rule under the check that found it. `true` when there are none.
 fn check(root: &Path) -> Result<bool, String> {
-    let report = rotproof::check::check(&Disk::new(root), &Readers).map_err(|e| e.to_string())?;
+    let report =
+        application::check::check(&Disk::new(root), &Readers).map_err(|e| e.to_string())?;
     for why in &report.skipped {
         println!("{why}");
     }

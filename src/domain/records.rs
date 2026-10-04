@@ -1,29 +1,8 @@
-//! `rotproof check`: every rule of the structure and the records, run against one repository.
-//!
-//! - **The tree matches `.config/rotproof.toml`**: the layers of the stack are present or declared absent, and no code
-//!   sits outside them (`structure.rs`).
-//! - **The layers import only what the table allows** (`direction.rs`): the imports of `python` and `typescript`, and
-//!   the dependencies each crate of `rust` declares.
-//! - **No comment holds a marker**, one of the words in `markers::MARKERS` (`markers.rs`): work left to do belongs in
-//!   the backlog, where it is listed and closed.
-//! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
-//!   this version of Rotproof (`project.rs`).
-//! - **The backlog works as a backlog**: every document keeps the format, every link in `# Details` resolves, and every
-//!   backlog item the log points to exists.
-//! - **Every record has one declared area**: the areas in `.config/rotproof.toml` are distinct headings, and the one
-//!   tag of every backlog item and spec is one of them.
-//! - **An epic closes after its parts**: a part's `epic` names another spec, one level deep, and no closed epic has
-//!   an open part.
-//! - **`docs/` is one OKF bundle**: every document is a known type in the directory for its type, every file Rotproof
-//!   generates (the index files and the rules) equals what `rotproof index` writes, and no spec sits at the root.
-//! - **The log keeps the OKF log structure**: every second-level heading is a date, newest first, and the entries
-//!   are a flat list of list items under those dates.
-//!
-//! Each check has a floor: when the scan finds nothing at all, it fails instead of passing with nothing checked.
+//! The rules of the records that `rotproof check` runs on what it has read: the types of documents and where each
+//! belongs, the files under `docs/` Rotproof would not read, the log's structure and what it points at, the hash
+//! the log names a knowledge document by, and the specs at the repository root.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::io;
 use std::sync::LazyLock;
 
 use chrono::NaiveDate;
@@ -31,18 +10,9 @@ use percent_encoding::percent_decode_str;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-use crate::application::bundle::Bundle;
-use crate::domain::bundle::{DOCS, Docs, RESERVED, backlog, in_docs};
-use crate::domain::code::Parsers;
-
-use crate::application::layers::areas;
-use crate::application::links::broken;
-use crate::application::tree::{exactly, read_text};
-use crate::domain::layers::{DECLARATION, area_problems};
-use crate::domain::project::GUIDE;
-use crate::domain::tree::Tree;
+use crate::domain::bundle::Docs;
 use utils::frontmatter::split;
-use utils::markdown::{heading, links, visible};
+use utils::markdown::{heading, visible};
 
 /// Directory (relative to docs/, "" for the root) -> the document types allowed in it
 const TYPES: [(&str, &[&str]); 4] = [
@@ -74,274 +44,6 @@ static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$
 // A bullet list item, indented by up to 3 spaces as GFM allows
 static LIST_ITEM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^ {0,3}[*+-](?:[ \t]|$)").unwrap());
-
-/// One broken rule: which check found it, and what is wrong.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Finding {
-    /// The heading the finding is printed under. Fixed for most checks; built for those that name what they found
-    pub check: Cow<'static, str>,
-    pub detail: String,
-}
-
-/// What `rotproof check` found.
-#[derive(Debug, Default)]
-pub struct Report {
-    pub findings: Vec<Finding>,
-    /// Checks that did not run, and why
-    pub skipped: Vec<String>,
-    /// Whether the tree was checked against a stack's layers (not for `stack = "none"`)
-    pub layers_checked: bool,
-}
-
-/// Every broken rule in the repository `tree` holds. An error is a file that could not be read at all.
-pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
-    let structure = crate::application::structure::problems(tree)?;
-    let mut findings: Vec<Finding> = structure
-        .found
-        .into_iter()
-        .map(|detail| Finding {
-            check: "the tree matches .config/rotproof.toml".into(),
-            detail,
-        })
-        .collect();
-    let skipped: Vec<String> = structure.skipped.into_iter().collect();
-    let mut layers_checked = false;
-    if let Some(declared) = &structure.declared {
-        layers_checked = declared.layout.is_some();
-        let direction = crate::application::direction::problems(tree, parsers, declared)?;
-        findings.extend(direction.into_iter().map(|detail| Finding {
-            check: "the layers import only what layers/table.toml allows".into(),
-            detail,
-        }));
-        let markers = crate::application::markers::problems(tree, parsers, declared)?;
-        let heading = markers.heading();
-        findings.extend(markers.found.into_iter().map(|detail| Finding {
-            check: heading.clone().into(),
-            detail,
-        }));
-        let guide =
-            crate::domain::project::guide(&declared.declaration.stack, declared.layout.as_ref());
-        let found = exactly(tree, GUIDE)
-            .ok()
-            .and_then(|(path, _)| read_text(tree, &path).ok());
-        if found.as_ref() != Some(&guide) {
-            findings.push(Finding {
-                check: "Rotproof's guide is up to date".into(),
-                detail: format!(
-                    "{}, run `rotproof create`: {GUIDE}",
-                    if found.is_some() {
-                        "out of date"
-                    } else {
-                        "missing"
-                    }
-                ),
-            });
-        }
-    }
-    findings.extend(records(tree, parsers)?);
-    Ok(Report {
-        findings,
-        skipped,
-        layers_checked,
-    })
-}
-
-/// Every broken rule of the records.
-fn records(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Vec<Finding>> {
-    let mut found = Vec::new();
-    let mut add = |check: &'static str, details: Vec<String>| {
-        found.extend(details.into_iter().map(|detail| Finding {
-            check: check.into(),
-            detail,
-        }));
-    };
-    // Every record names an area, so nothing below can be judged without them. The structure check names what is
-    // wrong with the declaration; this says that the records were not checked because of it
-    let areas = match areas(tree)? {
-        Ok(areas) => areas,
-        Err(_) => {
-            add(
-                "the bundle is seen",
-                vec![format!(
-                    "the records are not checked: they are grouped by the areas in {DECLARATION}, which cannot be read"
-                )],
-            );
-            return Ok(found);
-        }
-    };
-    add("the areas are distinct headings", area_problems(&areas));
-    let bundle = Bundle::new(tree, areas);
-
-    // The floor: the directories and the root index exist, and the backlog rules are found as a document. If a move
-    // or a rename makes the scan come back empty, the checks below see nothing and pass. Each is found by its exact
-    // name: `Rules.md` is found as `rules.md` on Windows, and missing on Linux and GitHub
-    let missing: Vec<String> = TYPES
-        .iter()
-        .map(|(folder, _)| format!("docs/{folder}"))
-        .chain(
-            [
-                "docs/index.md",
-                "docs/backlog/rules.md",
-                "docs/specs/rules.md",
-                "docs/knowledge/rules.md",
-            ]
-            .map(String::from),
-        )
-        .filter_map(|rel| exactly(tree, rel.trim_end_matches('/')).err())
-        .collect();
-    if !missing.is_empty() {
-        add("the bundle is seen", missing);
-        return Ok(found);
-    }
-
-    let docs = bundle.read_folder("backlog")?;
-    let parsed = backlog(&docs, &bundle.areas);
-    add(
-        "every backlog document keeps the format",
-        pairs(&parsed.problems),
-    );
-    let details: BTreeMap<String, String> = parsed
-        .items
-        .iter()
-        .map(|(name, (_, sections))| (name.clone(), sections["Details"].clone()))
-        .collect();
-    add(
-        "every link in # Details resolves",
-        pairs(&unresolved(&details, tree, parsers)),
-    );
-
-    let log_path = exactly(tree, "docs/log.md").and_then(|(path, is_dir)| {
-        if !is_dir {
-            Ok(path)
-        } else {
-            Err("docs/log.md is not a file".into())
-        }
-    });
-    if let Ok(log_path) = log_path {
-        let log = read_text(tree, &log_path)?;
-        let names = file_names(tree, &in_docs("backlog"))?;
-        let dangling = dangling_backlog_refs(&log, &names);
-        add(
-            "the log points only at real backlog items",
-            dangling
-                .into_iter()
-                .map(|name| format!("no such item: docs/backlog/{name}"))
-                .collect(),
-        );
-        add("the log keeps its structure", log_problems(&log));
-
-        let refs = knowledge_refs(&log);
-        let knowledge = bundle.read_knowledge()?;
-        let mut documents = BTreeMap::new();
-        for name in knowledge.documents.keys() {
-            let path = in_docs(&format!("knowledge/{name}"));
-            documents.insert(name.clone(), read_text(tree, &path)?);
-        }
-        add(
-            "the log names every knowledge document as it is now",
-            unlogged(&documents, &refs),
-        );
-        let names = file_names(tree, &in_docs("knowledge"))?;
-        let mut dangling: Vec<String> = refs
-            .iter()
-            .filter(|(name, _)| !names.contains(name))
-            .map(|(name, _)| format!("no such document: docs/knowledge/{name}"))
-            .collect();
-        dangling.dedup();
-        add("the log points only at real knowledge documents", dangling);
-    } else if let Err(why) = log_path {
-        add("the log keeps its structure", vec![why]);
-    }
-
-    let mut out_of_place = misplaced(&concepts(tree, DOCS)?);
-    out_of_place.extend(unread(tree, DOCS)?);
-    add(
-        "every document is a known type in its place",
-        pairs(&out_of_place),
-    );
-    let specs = bundle.read_specs()?;
-    add("every spec keeps the format", pairs(&specs.problems));
-    add(
-        "every knowledge document keeps the format",
-        pairs(&bundle.read_knowledge()?.problems),
-    );
-    add(
-        "an epic closes after its parts",
-        specs.closed_before_its_parts(),
-    );
-    let (files, _) = bundle.expected()?;
-    let stale: Vec<String> = files
-        .into_iter()
-        // Compared by the exact name, as the floor is: a `Rules.md` holding the rules is not `rules.md`
-        .filter(|(path, text)| {
-            let found = exactly(tree, path).ok();
-            found
-                .and_then(|(path, _)| read_text(tree, &path).ok())
-                .as_ref()
-                != Some(text)
-        })
-        .map(|(path, _)| format!("out of date, run `rotproof index`: {path}"))
-        .collect();
-    add("every generated file is up to date", stale);
-    let names = file_names(tree, "")?;
-    add(
-        "no spec sits at the repository root",
-        root_specs(&names)
-            .into_iter()
-            .map(|name| format!("specs go in docs/specs/: {name}"))
-            .collect(),
-    );
-    Ok(found)
-}
-
-/// Every name in a directory: files, directories and the rest.
-fn file_names(tree: &dyn Tree, dir: &str) -> io::Result<Vec<String>> {
-    Ok(tree
-        .entries(dir)?
-        .into_iter()
-        .map(|(name, _)| name)
-        .collect())
-}
-
-fn pairs(problems: &BTreeMap<String, String>) -> Vec<String> {
-    problems
-        .iter()
-        .map(|(name, why)| format!("{name}: {why}"))
-        .collect()
-}
-
-/// Item -> why, for the Details sections with no link or with a link that does not resolve, in the repository's
-/// `tree`.
-///
-/// Details sit in a backlog item (`docs/backlog/<slug>.md`), so relative links resolve from there and links starting
-/// with `/` from the bundle root (`docs/`).
-pub fn unresolved(
-    details: &BTreeMap<String, String>,
-    tree: &dyn Tree,
-    parsers: &dyn Parsers,
-) -> BTreeMap<String, String> {
-    let bundle_root = DOCS;
-    let here = in_docs("backlog");
-    let mut bad = BTreeMap::new();
-    for (name, detail) in details {
-        let found = links(detail);
-        if found.is_empty() {
-            bad.insert(name.clone(), format!("no markdown link: {detail}"));
-            continue;
-        }
-        let reasons: Vec<String> = found
-            .iter()
-            .filter_map(|(text, target)| broken(tree, parsers, text, target, &here, bundle_root))
-            .collect();
-        if !reasons.is_empty() {
-            bad.insert(
-                name.clone(),
-                format!("links that do not resolve: {reasons:?}"),
-            );
-        }
-    }
-    bad
-}
 
 /// The hash the log names a knowledge document by: the first 8 hex digits of SHA-256 of its text, as `read_text`
 /// reads it (every line ending as `\n`, so a checkout with CRLF has the same hash).
@@ -496,28 +198,22 @@ pub fn log_problems(text: &str) -> Vec<String> {
     found
 }
 
-/// Every document under the directory `docs`: path relative to it (with `/`) -> text.
-pub fn concepts(tree: &dyn Tree, docs: &str) -> io::Result<Docs> {
-    let mut out = Docs::new();
-    for (path, full) in files(tree, docs)? {
-        let name = file_name(&path);
-        if name.ends_with(".md") && !RESERVED.contains(&name) {
-            out.insert(path, read_text(tree, &full)?);
-        }
-    }
-    Ok(out)
+/// The name a path ends with.
+pub fn file_name(path: &str) -> &str {
+    path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
 
-/// Path -> why, for the files under `docs/` that a reader takes for part of the bundle and Rotproof would not read.
+/// Path -> why, for the files under `docs/` (paths relative to it) that a reader takes for part of the bundle and Rotproof
+/// would not read.
 ///
 /// A reserved name (OKF 0.2, section 3.1) is read only where Rotproof writes or reads it: an `index.md` in a directory
 /// that holds documents, and `log.md` at the root. Anywhere else, OKF says it follows the structure of an index or a
 /// log, and nothing would check that. A markdown file whose extension is not `.md` in lowercase (`.MD`) is shown by
 /// GitHub, but not read as a document, so a broken one would pass.
-pub fn unread(tree: &dyn Tree, docs: &str) -> io::Result<BTreeMap<String, String>> {
+pub fn unread_paths(paths: &[String]) -> BTreeMap<String, String> {
     let mut bad = BTreeMap::new();
-    for (path, _) in files(tree, docs)? {
-        let name = file_name(&path);
+    for path in paths {
+        let name = file_name(path);
         let folder = path.rsplit_once('/').map_or("", |(folder, _)| folder);
         let read = match name {
             "index.md" => TYPES.iter().any(|(known, _)| *known == folder),
@@ -526,7 +222,7 @@ pub fn unread(tree: &dyn Tree, docs: &str) -> io::Result<BTreeMap<String, String
         };
         if !read {
             bad.insert(
-                path,
+                path.clone(),
                 "a reserved name outside the places Rotproof writes and reads (index.md in docs/ and in each directory \
                  of documents, log.md in docs/)"
                     .into(),
@@ -537,46 +233,30 @@ pub fn unread(tree: &dyn Tree, docs: &str) -> io::Result<BTreeMap<String, String
                 .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("md"))
         {
             bad.insert(
-                path,
+                path.clone(),
                 "a markdown file is named with .md, in lowercase".into(),
             );
         }
     }
-    Ok(bad)
+    bad
 }
 
-fn file_name(path: &str) -> &str {
-    path.rsplit_once('/').map_or(path, |(_, name)| name)
-}
-
-/// Every file under `dir`: path relative to `dir` (with `/`) -> path from the root. Every file counts, hidden ones and
-/// the ones `.gitignore` excludes too: the records are what the repository holds.
-fn files(tree: &dyn Tree, dir: &str) -> io::Result<Vec<(String, String)>> {
-    let mut out = Vec::new();
-    walk(tree, dir, "", &mut out)?;
-    Ok(out)
-}
-
-fn walk(
-    tree: &dyn Tree,
-    dir: &str,
-    prefix: &str,
-    out: &mut Vec<(String, String)>,
-) -> io::Result<()> {
-    for (name, is_dir) in tree.entries(dir)? {
-        let path = format!("{prefix}{name}");
-        let full = if dir.is_empty() {
-            name.clone()
-        } else {
-            format!("{dir}/{name}")
-        };
-        if is_dir {
-            walk(tree, &full, &format!("{path}/"), out)?;
-        } else {
-            out.push((path, full));
-        }
-    }
-    Ok(())
+/// The directories and files `docs/` has to hold for the checks of the records to see anything (paths from the root):
+/// if a move or a rename makes the scan come back empty, the checks see nothing and pass.
+pub fn floor() -> Vec<String> {
+    TYPES
+        .iter()
+        .map(|(folder, _)| format!("docs/{folder}"))
+        .chain(
+            [
+                "docs/index.md",
+                "docs/backlog/rules.md",
+                "docs/specs/rules.md",
+                "docs/knowledge/rules.md",
+            ]
+            .map(String::from),
+        )
+        .collect()
 }
 
 /// Path -> why the document is not a known type in its directory.
@@ -632,11 +312,7 @@ pub fn root_specs(names: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use super::*;
-    use crate::infrastructure::disk::Disk;
-    use crate::infrastructure::readers::Readers;
 
     #[test]
     fn the_hash_is_the_first_8_hex_digits_of_sha_256() {
@@ -705,67 +381,6 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
-    }
-
-    #[test]
-    fn a_details_section_without_a_link_is_caught() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("docs/backlog")).unwrap();
-        fs::write(root.path().join("docs/log.md"), "# Log\n").unwrap();
-        let details = map(&[
-            ("linked.md", "[log](/log.md)"),
-            ("no link (the old form).md", "docs/log.md「somewhere」"),
-            (
-                "only the second link is broken.md",
-                "[a](/log.md), [b](/no_such_file.md)",
-            ),
-        ]);
-        let bad = unresolved(&details, &Disk::new(root.path()), &Readers);
-        assert_eq!(
-            bad.keys().collect::<Vec<_>>(),
-            [
-                "no link (the old form).md",
-                "only the second link is broken.md"
-            ]
-        );
-    }
-
-    #[test]
-    fn a_link_in_any_form_is_resolved() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("docs/backlog")).unwrap();
-        fs::write(root.path().join("docs/log.md"), "# Log\n").unwrap();
-        fs::write(root.path().join("docs/backlog/a (1).md"), "# A\n").unwrap();
-        let good = "[log](/log.md)";
-        let resolving = [
-            "[log](/log.md \"the log\")",
-            "[log](</log.md>)",
-            "[a](<a (1).md>)",
-            "[log][ref]\n\n[ref]: /log.md",
-            "<a href=\"/log.md\">log</a>",
-        ];
-        for detail in resolving {
-            let bad = unresolved(&map(&[("x.md", detail)]), &Disk::new(root.path()), &Readers);
-            assert!(bad.is_empty(), "{detail}: {bad:?}");
-        }
-        // Next to a link that resolves, a broken one in each form is still found
-        let dangling = [
-            "[gone](gone.md \"title\")",
-            "[gone](gone.md 'title')",
-            "[gone](<gone file.md>)",
-            "[gone][ref]\n\n[ref]: gone.md",
-            "[gone][]\n\n[gone]: gone.md",
-            "<a href=\"gone.md\">gone</a>",
-        ];
-        for form in dangling {
-            let detail = format!("{good} {form}");
-            let bad = unresolved(
-                &map(&[("x.md", &detail)]),
-                &Disk::new(root.path()),
-                &Readers,
-            );
-            assert!(bad.contains_key("x.md"), "{form} passed");
-        }
     }
 
     #[test]
@@ -886,53 +501,42 @@ mod tests {
         );
     }
 
-    /// A `docs/` with the given files, each empty.
-    fn docs_with(paths: &[&str]) -> tempfile::TempDir {
-        let root = tempfile::tempdir().unwrap();
-        for path in paths {
-            let full = root.path().join(path);
-            fs::create_dir_all(full.parent().unwrap()).unwrap();
-            fs::write(full, "").unwrap();
-        }
-        root
-    }
-
     #[test]
-    fn the_files_rotproof_reads_pass() {
-        let docs = docs_with(&[
+    fn a_reserved_name_or_a_capital_extension_is_not_read() {
+        let paths: Vec<String> = [
             "index.md",
             "log.md",
             "backlog/index.md",
-            "backlog/item.md",
-            "specs/index.md",
-            "assets/diagram.png",
-        ]);
+            "backlog/a.md",
+            "extra/index.md",
+            "backlog/log.md",
+            "backlog/b.MD",
+            "notes.txt",
+        ]
+        .map(String::from)
+        .into();
+        let found = unread_paths(&paths);
         assert_eq!(
-            unread(&Disk::new(docs.path()), "").unwrap(),
-            BTreeMap::new()
+            found.keys().collect::<Vec<_>>(),
+            ["backlog/b.MD", "backlog/log.md", "extra/index.md"]
         );
     }
 
     #[test]
-    fn a_file_rotproof_would_not_read_is_caught() {
-        let bad = [
-            // Reserved names where Rotproof neither writes nor reads them
-            "extra/index.md",
-            "specs/deeper/index.md",
-            // docs/done/ is no longer read: closed specs stay in docs/specs/
-            "done/index.md",
-            "backlog/log.md",
-            // Markdown that is not named .md
-            "backlog/item.MD",
-            "notes.Md",
-        ];
-        let docs = docs_with(&bad);
-        let found = unread(&Disk::new(docs.path()), "").unwrap();
-        assert_eq!(found.keys().collect::<Vec<_>>(), {
-            let mut sorted = bad.to_vec();
-            sorted.sort();
-            sorted
-        });
+    fn the_floor_is_every_directory_of_documents_and_the_rules() {
+        let floor = floor();
+        for path in [
+            "docs/",
+            "docs/backlog",
+            "docs/specs",
+            "docs/knowledge",
+            "docs/index.md",
+            "docs/backlog/rules.md",
+            "docs/specs/rules.md",
+            "docs/knowledge/rules.md",
+        ] {
+            assert!(floor.contains(&path.to_string()), "{path}");
+        }
     }
 
     #[test]
