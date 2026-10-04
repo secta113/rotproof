@@ -63,6 +63,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
 | `markers.rs` | The marker check, read from the tree: every code file walked, and its comments read by the reader of its language |
 | `hook.rs` | `rotproof stop-hook`, the hook Claude Code runs when the agent stops |
+| `index.rs` | `rotproof index`: every index file written from the frontmatter, and the open items to measure again |
 | `init.rs` | `rotproof init`: writing a project's declaration, once |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
 | `structure.rs` | The structure check, read from the tree |

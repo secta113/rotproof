@@ -9,6 +9,7 @@ pub mod code;
 pub mod create;
 pub mod direction;
 pub mod hook;
+pub mod index;
 pub mod init;
 pub mod layers;
 pub mod links;

@@ -7,16 +7,13 @@ use std::process::ExitCode;
 
 use chrono::Local;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use domain::bundle::{backlog, stale};
 use domain::hook::Changes;
 use domain::layers::{DECLARATION, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
-use domain::tree::Writer;
 use infrastructure::disk::{Disk, project_root};
 use infrastructure::git::Git;
 use infrastructure::readers::Readers;
 use rotproof::application;
-use rotproof::application::bundle::Bundle;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -249,21 +246,14 @@ fn stop_hook(root: &Path) -> ExitCode {
 /// Write every index file, then list what was left out of them and the items to measure again.
 fn index(root: &Path) -> Result<(), String> {
     let disk = Disk::new(root);
-    let areas = application::layers::areas(&disk).map_err(|e| e.to_string())??;
-    let bundle = Bundle::new(&disk, areas);
-    let (files, problems) = bundle.expected().map_err(|e| e.to_string())?;
-    for (path, text) in files {
-        disk.write(&path, &text)
-            .map_err(|e| format!("{path}: {e}"))?;
+    let indexed = application::index::index(&disk, &disk, Local::now().fixed_offset())?;
+    for path in indexed.written {
         println!("wrote {path}");
     }
-    for (name, why) in problems {
+    for (name, why) in indexed.left_out {
         println!("left out of the index, fix it: {name}: {why}");
     }
-    let docs = bundle.read_folder("backlog").map_err(|e| e.to_string())?;
-    let parsed = backlog(&docs, &bundle.areas);
-    for name in stale(&parsed.items, Local::now().fixed_offset()) {
-        let at = parsed.items[&name].0.stale_after.unwrap();
+    for (name, at) in indexed.stale {
         println!("past stale_after, measure the state again: {name} ({at})");
     }
     Ok(())
