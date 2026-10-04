@@ -721,6 +721,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "infrastructure"
+version = "0.1.0"
+dependencies = [
+ "domain",
+ "ignore",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_span",
+ "ruff_python_ast",
+ "ruff_python_parser",
+ "serde_json",
+ "tempfile",
+ "toml_edit",
+ "utils",
+]
+
+[[package]]
 name = "interpolator"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1340,17 +1359,9 @@ dependencies = [
  "chrono",
  "clap",
  "domain",
- "ignore",
- "oxc_allocator",
- "oxc_ast",
- "oxc_ast_visit",
- "oxc_parser",
- "oxc_span",
- "ruff_python_ast",
- "ruff_python_parser",
+ "infrastructure",
  "serde_json",
  "tempfile",
- "toml_edit",
  "utils",
 ]
 

@@ -363,7 +363,7 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::infrastructure::disk::Disk;
+    use crate::disk::Disk;
     use domain::code::Landing;
 
     #[test]

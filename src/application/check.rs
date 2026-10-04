@@ -352,8 +352,8 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::infrastructure::disk::Disk;
-    use crate::infrastructure::readers::Readers;
+    use infrastructure::disk::Disk;
+    use infrastructure::readers::Readers;
 
     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs

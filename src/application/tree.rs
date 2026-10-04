@@ -323,7 +323,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("docs/backlog")).unwrap();
         std::fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
-        let disk = crate::infrastructure::disk::Disk::new(dir.path());
+        let disk = infrastructure::disk::Disk::new(dir.path());
         assert_eq!(
             lookup(&disk, "docs/backlog", "../../README.md"),
             Lookup::Found {

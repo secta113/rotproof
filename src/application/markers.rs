@@ -59,8 +59,8 @@ fn comments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infrastructure::readers::Readers;
     use domain::markers::MARKERS;
+    use infrastructure::readers::Readers;
 
     /// The lines of a source with a marker in a comment, as the reader of `language` finds its comments, and the
     /// markers on them in order

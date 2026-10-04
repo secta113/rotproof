@@ -102,13 +102,13 @@ mod tests {
     }
 
     fn reasons(root: &Path, cases: &[(&str, &str)]) -> Vec<Option<String>> {
-        let tree = crate::infrastructure::disk::Disk::new(root);
+        let tree = infrastructure::disk::Disk::new(root);
         cases
             .iter()
             .map(|(text, target)| {
                 broken(
                     &tree,
-                    &crate::infrastructure::readers::Readers,
+                    &infrastructure::readers::Readers,
                     text,
                     target,
                     "docs/backlog",

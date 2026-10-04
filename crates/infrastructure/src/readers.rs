@@ -12,22 +12,22 @@ pub struct Readers;
 
 impl Parsers for Readers {
     fn python(&self, source: &str, path: &str) -> Source<Vec<String>> {
-        crate::infrastructure::python::read(source, path)
+        crate::python::read(source, path)
     }
 
     fn python_definitions(&self, source: &str) -> BTreeSet<String> {
-        crate::infrastructure::python::definitions(source)
+        crate::python::definitions(source)
     }
 
     fn typescript(&self, source: &str, path: &str) -> Source<String> {
-        crate::infrastructure::typescript::read(source, path)
+        crate::typescript::read(source, path)
     }
 
     fn typescript_aliases(&self, tree: &dyn Tree) -> io::Result<Aliases> {
-        crate::infrastructure::typescript::aliases(tree)
+        crate::typescript::aliases(tree)
     }
 
     fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)> {
-        crate::infrastructure::cargo::read(source)
+        crate::cargo::read(source)
     }
 }

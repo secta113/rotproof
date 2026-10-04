@@ -12,11 +12,11 @@ use domain::hook::Changes;
 use domain::layers::{DECLARATION, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
 use domain::tree::Writer;
+use infrastructure::disk::{Disk, project_root};
+use infrastructure::git::Git;
+use infrastructure::readers::Readers;
 use rotproof::application;
 use rotproof::application::bundle::Bundle;
-use rotproof::infrastructure::disk::{Disk, project_root};
-use rotproof::infrastructure::git::Git;
-use rotproof::infrastructure::readers::Readers;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.

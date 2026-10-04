@@ -8,22 +8,11 @@ license = "MIT OR Apache-2.0"
 chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive"] }
 domain = { path = "crates/domain" }
-ignore = "0.4.33"
-# Pinned exactly, and together: oxc's API changes between minor versions
-oxc_allocator = "=0.152.0"
-oxc_ast = "=0.152.0"
-oxc_ast_visit = "=0.152.0"
-oxc_parser = "=0.152.0"
-oxc_span = "=0.152.0"
-# Pinned exactly: an internal crate of Ruff, whose API changes between any two versions
-ruff_python_ast = "=0.0.16"
-ruff_python_parser = "=0.0.16"
-serde_json = "1.0.151"
-toml_edit = { version = "0.25.15", default-features = false, features = ["parse", "display"] }
+infrastructure = { path = "crates/infrastructure" }
 utils = { path = "crates/utils" }
 
 [workspace]
-members = ["xtask", "crates/domain", "crates/utils"]
+members = ["xtask", "crates/domain", "crates/infrastructure", "crates/utils"]
 
 # Rotproof's version, the one place that names it: every crate of the workspace takes it, and maturin takes the
 # wheel's from the package
@@ -31,4 +20,5 @@ members = ["xtask", "crates/domain", "crates/utils"]
 version = "0.1.0"
 
 [dev-dependencies]
+serde_json = "1.0.151"
 tempfile = "3.27.0"
