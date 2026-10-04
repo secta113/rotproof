@@ -28,13 +28,13 @@ use std::path::Path;
 use toml_edit::{Array, DocumentMut, Item, Value};
 use yaml_rust2::Yaml;
 
-use crate::bundle::{Bundle, LOG};
+use crate::bundle::{Bundle, LOG, in_docs};
 use crate::disk::Disk;
 use crate::frontmatter::split;
 use crate::hook::SETTINGS;
 use crate::layers::{ADDED, DECLARATION, Declaration, Declared, MISSING, declaration};
 use crate::project::{GUIDE, guide, project_files};
-use crate::source::{exactly, read_source, relative_path};
+use crate::source::{exactly, read_source};
 
 /// What `rotproof create` did.
 #[derive(Debug, Default)]
@@ -79,12 +79,13 @@ pub fn create(root: &Path) -> Result<Made, String> {
         }
     }
 
-    let bundle = Bundle::new(root, declared.declaration.areas.clone());
+    let disk = Disk::new(root);
+    let bundle = Bundle::new(&disk, declared.declaration.areas.clone());
     for folder in ["backlog", "specs", "knowledge"] {
-        let dir = bundle.docs.join(folder);
+        let dir = root.join(in_docs(folder));
         fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    if !bundle.docs.join("log.md").exists() {
+    if !root.join(in_docs("log.md")).exists() {
         write(root, "docs/log.md", LOG, &mut made)?;
     }
     let guide = guide(&declared.declaration.stack, declared.layout.as_ref());
@@ -105,8 +106,8 @@ pub fn create(root: &Path) -> Result<Made, String> {
     made.not_written = not_written;
     let (files, problems) = bundle.expected().map_err(|e| e.to_string())?;
     for (path, text) in files {
-        if read_source(&path).ok().as_ref() != Some(&text) {
-            write(root, &relative_path(&path, root), &text, &mut made)?;
+        if read_source(&root.join(&path)).ok().as_ref() != Some(&text) {
+            write(root, &path, &text, &mut made)?;
         }
     }
     made.left_out = problems.into_iter().collect();
@@ -166,10 +167,11 @@ fn complete(root: &Path) -> Result<Option<(String, Vec<String>)>, String> {
 /// Every tag the backlog items and specs use, sorted by name: the first value of `areas`, so the records that fit their
 /// one-area rule keep fitting once the field exists. A document that cannot be read is left to `rotproof check`.
 fn record_tags(root: &Path) -> Result<Vec<String>, String> {
-    let bundle = Bundle::new(root, Vec::new());
+    let disk = Disk::new(root);
+    let bundle = Bundle::new(&disk, Vec::new());
     let mut tags = BTreeSet::new();
     for folder in ["backlog", "specs", "knowledge"] {
-        if !bundle.docs.join(folder).is_dir() {
+        if !root.join(in_docs(folder)).is_dir() {
             continue;
         }
         let docs = bundle.read_folder(folder).map_err(|e| e.to_string())?;

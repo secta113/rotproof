@@ -23,9 +23,8 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::LazyLock;
 
 use chrono::NaiveDate;
@@ -33,14 +32,13 @@ use percent_encoding::percent_decode_str;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
+use crate::bundle::{Bundle, DOCS, Docs, RESERVED, backlog, in_docs};
 use crate::disk::Disk;
-
-use crate::bundle::{Bundle, Docs, RESERVED, backlog};
 use crate::frontmatter::split;
 use crate::layers::{DECLARATION, area_problems, areas};
 use crate::markdown::{broken, heading, links, visible};
 use crate::project::GUIDE;
-use crate::source::{exactly, read_source, relative_path};
+use crate::tree::{Tree, exactly, read_text};
 
 /// Directory (relative to docs/, "" for the root) -> the document types allowed in it
 const TYPES: [(&str, &[&str]); 4] = [
@@ -119,9 +117,9 @@ pub fn check(root: &Path) -> io::Result<Report> {
             detail,
         }));
         let guide = crate::project::guide(&declared.declaration.stack, declared.layout.as_ref());
-        let found = exactly(root, GUIDE)
+        let found = exactly(&disk, GUIDE)
             .ok()
-            .and_then(|path| read_source(&path).ok());
+            .and_then(|(path, _)| read_text(&disk, &path).ok());
         if found.as_ref() != Some(&guide) {
             findings.push(Finding {
                 check: "Rotproof's guide is up to date".into(),
@@ -136,7 +134,7 @@ pub fn check(root: &Path) -> io::Result<Report> {
             });
         }
     }
-    findings.extend(records(root)?);
+    findings.extend(records(&disk)?);
     Ok(Report {
         findings,
         skipped,
@@ -145,7 +143,7 @@ pub fn check(root: &Path) -> io::Result<Report> {
 }
 
 /// Every broken rule of the records.
-fn records(root: &Path) -> io::Result<Vec<Finding>> {
+fn records(tree: &dyn Tree) -> io::Result<Vec<Finding>> {
     let mut found = Vec::new();
     let mut add = |check: &'static str, details: Vec<String>| {
         found.extend(details.into_iter().map(|detail| Finding {
@@ -155,7 +153,7 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
     };
     // Every record names an area, so nothing below can be judged without them. The structure check names what is
     // wrong with the declaration; this says that the records were not checked because of it
-    let areas = match areas(&Disk::new(root))? {
+    let areas = match areas(tree)? {
         Ok(areas) => areas,
         Err(_) => {
             add(
@@ -168,7 +166,7 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
         }
     };
     add("the areas are distinct headings", area_problems(&areas));
-    let bundle = Bundle::new(root, areas);
+    let bundle = Bundle::new(tree, areas);
 
     // The floor: the directories and the root index exist, and the backlog rules are found as a document. If a move
     // or a rename makes the scan come back empty, the checks below see nothing and pass. Each is found by its exact
@@ -185,7 +183,7 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
             ]
             .map(String::from),
         )
-        .filter_map(|rel| exactly(root, rel.trim_end_matches('/')).err())
+        .filter_map(|rel| exactly(tree, rel.trim_end_matches('/')).err())
         .collect();
     if !missing.is_empty() {
         add("the bundle is seen", missing);
@@ -205,19 +203,19 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
         .collect();
     add(
         "every link in # Details resolves",
-        pairs(&unresolved(&details, root)),
+        pairs(&unresolved(&details, tree)),
     );
 
-    let log_path = exactly(root, "docs/log.md").and_then(|path| {
-        if path.is_file() {
+    let log_path = exactly(tree, "docs/log.md").and_then(|(path, is_dir)| {
+        if !is_dir {
             Ok(path)
         } else {
             Err("docs/log.md is not a file".into())
         }
     });
     if let Ok(log_path) = log_path {
-        let log = read_source(&log_path)?;
-        let names = file_names(&bundle.docs.join("backlog"))?;
+        let log = read_text(tree, &log_path)?;
+        let names = file_names(tree, &in_docs("backlog"))?;
         let dangling = dangling_backlog_refs(&log, &names);
         add(
             "the log points only at real backlog items",
@@ -232,14 +230,14 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
         let knowledge = bundle.read_knowledge()?;
         let mut documents = BTreeMap::new();
         for name in knowledge.documents.keys() {
-            let path = bundle.docs.join("knowledge").join(name);
-            documents.insert(name.clone(), read_source(&path)?);
+            let path = in_docs(&format!("knowledge/{name}"));
+            documents.insert(name.clone(), read_text(tree, &path)?);
         }
         add(
             "the log names every knowledge document as it is now",
             unlogged(&documents, &refs),
         );
-        let names = file_names(&bundle.docs.join("knowledge"))?;
+        let names = file_names(tree, &in_docs("knowledge"))?;
         let mut dangling: Vec<String> = refs
             .iter()
             .filter(|(name, _)| !names.contains(name))
@@ -251,8 +249,8 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
         add("the log keeps its structure", vec![why]);
     }
 
-    let mut out_of_place = misplaced(&concepts(&bundle.docs)?);
-    out_of_place.extend(unread(&bundle.docs)?);
+    let mut out_of_place = misplaced(&concepts(tree, DOCS)?);
+    out_of_place.extend(unread(tree, DOCS)?);
     add(
         "every document is a known type in its place",
         pairs(&out_of_place),
@@ -272,18 +270,16 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
         .into_iter()
         // Compared by the exact name, as the floor is: a `Rules.md` holding the rules is not `rules.md`
         .filter(|(path, text)| {
-            let found = exactly(root, &relative_path(path, root)).ok();
-            found.and_then(|path| read_source(&path).ok()).as_ref() != Some(text)
+            let found = exactly(tree, path).ok();
+            found
+                .and_then(|(path, _)| read_text(tree, &path).ok())
+                .as_ref()
+                != Some(text)
         })
-        .map(|(path, _)| {
-            format!(
-                "out of date, run `rotproof index`: {}",
-                relative_path(&path, root)
-            )
-        })
+        .map(|(path, _)| format!("out of date, run `rotproof index`: {path}"))
         .collect();
     add("every generated file is up to date", stale);
-    let names = file_names(root)?;
+    let names = file_names(tree, "")?;
     add(
         "no spec sits at the repository root",
         root_specs(&names)
@@ -295,10 +291,12 @@ fn records(root: &Path) -> io::Result<Vec<Finding>> {
 }
 
 /// Every name in a directory: files, directories and the rest.
-fn file_names(dir: &Path) -> io::Result<Vec<String>> {
-    fs::read_dir(dir)?
-        .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
-        .collect()
+fn file_names(tree: &dyn Tree, dir: &str) -> io::Result<Vec<String>> {
+    Ok(tree
+        .entries(dir)?
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect())
 }
 
 fn pairs(problems: &BTreeMap<String, String>) -> Vec<String> {
@@ -308,14 +306,14 @@ fn pairs(problems: &BTreeMap<String, String>) -> Vec<String> {
         .collect()
 }
 
-/// Item -> why, for the Details sections with no link or with a link that does not resolve. `root` is the root of the
-/// repository.
+/// Item -> why, for the Details sections with no link or with a link that does not resolve, in the repository's
+/// `tree`.
 ///
 /// Details sit in a backlog item (`docs/backlog/<slug>.md`), so relative links resolve from there and links starting
 /// with `/` from the bundle root (`docs/`).
-pub fn unresolved(details: &BTreeMap<String, String>, root: &Path) -> BTreeMap<String, String> {
-    let bundle_root = root.join("docs");
-    let here = bundle_root.join("backlog");
+pub fn unresolved(details: &BTreeMap<String, String>, tree: &dyn Tree) -> BTreeMap<String, String> {
+    let bundle_root = DOCS;
+    let here = in_docs("backlog");
     let mut bad = BTreeMap::new();
     for (name, detail) in details {
         let found = links(detail);
@@ -325,7 +323,7 @@ pub fn unresolved(details: &BTreeMap<String, String>, root: &Path) -> BTreeMap<S
         }
         let reasons: Vec<String> = found
             .iter()
-            .filter_map(|(text, target)| broken(text, target, &here, &bundle_root))
+            .filter_map(|(text, target)| broken(tree, text, target, &here, bundle_root))
             .collect();
         if !reasons.is_empty() {
             bad.insert(
@@ -337,7 +335,7 @@ pub fn unresolved(details: &BTreeMap<String, String>, root: &Path) -> BTreeMap<S
     bad
 }
 
-/// The hash the log names a knowledge document by: the first 8 hex digits of SHA-256 of its text, as `read_source`
+/// The hash the log names a knowledge document by: the first 8 hex digits of SHA-256 of its text, as `read_text`
 /// reads it (every line ending as `\n`, so a checkout with CRLF has the same hash).
 pub fn content_hash(text: &str) -> String {
     Sha256::digest(text.as_bytes())
@@ -490,13 +488,13 @@ pub fn log_problems(text: &str) -> Vec<String> {
     found
 }
 
-/// Every document under `docs/`: path relative to `docs/` (with `/`) -> text.
-pub fn concepts(docs: &Path) -> io::Result<Docs> {
+/// Every document under the directory `docs`: path relative to it (with `/`) -> text.
+pub fn concepts(tree: &dyn Tree, docs: &str) -> io::Result<Docs> {
     let mut out = Docs::new();
-    for (path, full) in files(docs)? {
+    for (path, full) in files(tree, docs)? {
         let name = file_name(&path);
         if name.ends_with(".md") && !RESERVED.contains(&name) {
-            out.insert(path, read_source(&full)?);
+            out.insert(path, read_text(tree, &full)?);
         }
     }
     Ok(out)
@@ -508,9 +506,9 @@ pub fn concepts(docs: &Path) -> io::Result<Docs> {
 /// that holds documents, and `log.md` at the root. Anywhere else, OKF says it follows the structure of an index or a
 /// log, and nothing would check that. A markdown file whose extension is not `.md` in lowercase (`.MD`) is shown by
 /// GitHub, but not read as a document, so a broken one would pass.
-pub fn unread(docs: &Path) -> io::Result<BTreeMap<String, String>> {
+pub fn unread(tree: &dyn Tree, docs: &str) -> io::Result<BTreeMap<String, String>> {
     let mut bad = BTreeMap::new();
-    for (path, _) in files(docs)? {
+    for (path, _) in files(tree, docs)? {
         let name = file_name(&path);
         let folder = path.rsplit_once('/').map_or("", |(folder, _)| folder);
         let read = match name {
@@ -543,22 +541,31 @@ fn file_name(path: &str) -> &str {
     path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
 
-/// Every file under `dir`: path relative to `dir` (with `/`) -> full path.
-fn files(dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
+/// Every file under `dir`: path relative to `dir` (with `/`) -> path from the root. Every file counts, hidden ones and
+/// the ones `.gitignore` excludes too: the records are what the repository holds.
+fn files(tree: &dyn Tree, dir: &str) -> io::Result<Vec<(String, String)>> {
     let mut out = Vec::new();
-    walk(dir, "", &mut out)?;
+    walk(tree, dir, "", &mut out)?;
     Ok(out)
 }
 
-fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
+fn walk(
+    tree: &dyn Tree,
+    dir: &str,
+    prefix: &str,
+    out: &mut Vec<(String, String)>,
+) -> io::Result<()> {
+    for (name, is_dir) in tree.entries(dir)? {
         let path = format!("{prefix}{name}");
-        if entry.file_type()?.is_dir() {
-            walk(&entry.path(), &format!("{path}/"), out)?;
+        let full = if dir.is_empty() {
+            name.clone()
         } else {
-            out.push((path, entry.path()));
+            format!("{dir}/{name}")
+        };
+        if is_dir {
+            walk(tree, &full, &format!("{path}/"), out)?;
+        } else {
+            out.push((path, full));
         }
     }
     Ok(())
@@ -617,6 +624,8 @@ pub fn root_specs(names: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
@@ -701,7 +710,7 @@ mod tests {
                 "[a](/log.md), [b](/no_such_file.md)",
             ),
         ]);
-        let bad = unresolved(&details, root.path());
+        let bad = unresolved(&details, &Disk::new(root.path()));
         assert_eq!(
             bad.keys().collect::<Vec<_>>(),
             [
@@ -726,7 +735,7 @@ mod tests {
             "<a href=\"/log.md\">log</a>",
         ];
         for detail in resolving {
-            let bad = unresolved(&map(&[("x.md", detail)]), root.path());
+            let bad = unresolved(&map(&[("x.md", detail)]), &Disk::new(root.path()));
             assert!(bad.is_empty(), "{detail}: {bad:?}");
         }
         // Next to a link that resolves, a broken one in each form is still found
@@ -740,7 +749,7 @@ mod tests {
         ];
         for form in dangling {
             let detail = format!("{good} {form}");
-            let bad = unresolved(&map(&[("x.md", &detail)]), root.path());
+            let bad = unresolved(&map(&[("x.md", &detail)]), &Disk::new(root.path()));
             assert!(bad.contains_key("x.md"), "{form} passed");
         }
     }
@@ -884,7 +893,10 @@ mod tests {
             "specs/index.md",
             "assets/diagram.png",
         ]);
-        assert_eq!(unread(docs.path()).unwrap(), BTreeMap::new());
+        assert_eq!(
+            unread(&Disk::new(docs.path()), "").unwrap(),
+            BTreeMap::new()
+        );
     }
 
     #[test]
@@ -901,7 +913,7 @@ mod tests {
             "notes.Md",
         ];
         let docs = docs_with(&bad);
-        let found = unread(docs.path()).unwrap();
+        let found = unread(&Disk::new(docs.path()), "").unwrap();
         assert_eq!(found.keys().collect::<Vec<_>>(), {
             let mut sorted = bad.to_vec();
             sorted.sort();

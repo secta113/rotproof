@@ -4,9 +4,7 @@
 //! written by hand: `rotproof index` writes them, and `rotproof check` fails when one differs from what it would write.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
 
 use crate::frontmatter::Sections;
 use crate::layers::DECLARATION;
@@ -14,7 +12,7 @@ use crate::schema::{
     BacklogDoc, CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, SPEC_FOLDERS,
     Spec, Status, Time, backlog_doc, guide_doc, knowledge_doc, spec,
 };
-use crate::source::read_source;
+use crate::tree::{Tree, read_text};
 
 /// File names OKF reserves. Never used for a document
 pub const RESERVED: [&str; 2] = ["index.md", "log.md"];
@@ -261,33 +259,34 @@ fn undeclared(tag: &str, areas: &[String]) -> String {
     format!("tags: {tag:?} is not an area declared in {DECLARATION} ({declared})")
 }
 
-/// The bundle of one repository: `<root>/docs`, and the areas its records are grouped by.
-pub struct Bundle {
-    pub docs: PathBuf,
+/// Where the bundle sits, from the root of the repository.
+pub const DOCS: &str = "docs";
+
+/// The bundle of one repository, `docs/` in its tree, and the areas its records are grouped by.
+pub struct Bundle<'a> {
+    tree: &'a dyn Tree,
     /// In the order the index files list them
     pub areas: Vec<String>,
 }
 
-impl Bundle {
-    pub fn new(root: &Path, areas: Vec<String>) -> Self {
-        Bundle {
-            docs: root.join("docs"),
-            areas,
-        }
+/// The path of `rest` in the bundle, from the root of the repository.
+pub fn in_docs(rest: &str) -> String {
+    format!("{DOCS}/{rest}")
+}
+
+impl<'a> Bundle<'a> {
+    pub fn new(tree: &'a dyn Tree, areas: Vec<String>) -> Self {
+        Bundle { tree, areas }
     }
 
     /// The documents directly in `docs/<folder>/`, except reserved names: file name -> text.
     pub fn read_folder(&self, folder: &str) -> io::Result<Docs> {
-        let path = self.docs.join(folder);
+        let dir = in_docs(folder);
         let mut docs = Docs::new();
-        for entry in fs::read_dir(&path).map_err(|e| with_path(e, &path))? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.ends_with(".md")
-                && !RESERVED.contains(&name.as_str())
-                && entry.file_type()?.is_file()
-            {
-                let text = read_source(&entry.path()).map_err(|e| with_path(e, &entry.path()))?;
+        for (name, is_dir) in self.tree.entries(&dir).map_err(|e| with_path(e, &dir))? {
+            if name.ends_with(".md") && !RESERVED.contains(&name.as_str()) && !is_dir {
+                let path = format!("{dir}/{name}");
+                let text = read_text(self.tree, &path).map_err(|e| with_path(e, &path))?;
                 docs.insert(name, text);
             }
         }
@@ -296,39 +295,36 @@ impl Bundle {
 
     /// Every file Rotproof generates in the bundle (the index files and the backlog rules) -> what it should contain
     /// now, and the documents left out of the index files.
-    pub fn expected(&self) -> io::Result<(Vec<(PathBuf, String)>, Problems)> {
+    pub fn expected(&self) -> io::Result<(Vec<(String, String)>, Problems)> {
         // The rules as they are about to be written, so the backlog index lists them on the run that writes them
         let mut docs = self.read_folder("backlog")?;
         docs.insert("rules.md".into(), RULES.into());
         let backlog = backlog(&docs, &self.areas);
         let mut files = vec![
-            (self.docs.join("backlog").join("rules.md"), RULES.into()),
-            (self.docs.join("index.md"), render_root()),
+            (in_docs("backlog/rules.md"), RULES.into()),
+            (in_docs("index.md"), render_root()),
             (
-                self.docs.join("backlog").join("index.md"),
+                in_docs("backlog/index.md"),
                 render_backlog(&backlog.items, &backlog.guides, &self.areas),
             ),
         ];
         files.push((
-            self.docs.join(GUIDES_AMONG_SPECS).join("rules.md"),
+            in_docs(&format!("{GUIDES_AMONG_SPECS}/rules.md")),
             SPEC_RULES.into(),
         ));
         let mut problems = backlog.problems;
         let specs = self.read_specs()?;
         for (folder, _) in SPEC_FOLDERS {
             files.push((
-                self.docs.join(folder).join("index.md"),
+                in_docs(&format!("{folder}/index.md")),
                 render_specs(folder, &specs, &self.areas),
             ));
         }
         problems.extend(specs.problems);
         let read = self.read_knowledge()?;
+        files.push((in_docs("knowledge/rules.md"), KNOWLEDGE_RULES.into()));
         files.push((
-            self.docs.join("knowledge").join("rules.md"),
-            KNOWLEDGE_RULES.into(),
-        ));
-        files.push((
-            self.docs.join("knowledge").join("index.md"),
+            in_docs("knowledge/index.md"),
             render_knowledge(&read.documents, &read.guides, &self.areas),
         ));
         problems.extend(
@@ -363,8 +359,8 @@ impl Bundle {
     }
 }
 
-fn with_path(e: io::Error, path: &Path) -> io::Error {
-    io::Error::new(e.kind(), format!("{}: {e}", path.display()))
+fn with_path(e: io::Error, path: &str) -> io::Error {
+    io::Error::new(e.kind(), format!("{path}: {e}"))
 }
 
 /// A title as the text of a link in the index. `[`, `]` and `\` are escaped, so a title with brackets stays the text

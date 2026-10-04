@@ -10,7 +10,6 @@ use chrono::Local;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use rotproof::bundle::{Bundle, backlog, stale};
 use rotproof::markers::{MARKERS, either};
-use rotproof::source::relative_path;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -235,13 +234,13 @@ fn stop_hook(root: &Path) -> ExitCode {
 
 /// Write every index file, then list what was left out of them and the items to measure again.
 fn index(root: &Path) -> Result<(), String> {
-    let areas =
-        rotproof::layers::areas(&rotproof::disk::Disk::new(root)).map_err(|e| e.to_string())??;
-    let bundle = Bundle::new(root, areas);
+    let disk = rotproof::disk::Disk::new(root);
+    let areas = rotproof::layers::areas(&disk).map_err(|e| e.to_string())??;
+    let bundle = Bundle::new(&disk, areas);
     let (files, problems) = bundle.expected().map_err(|e| e.to_string())?;
     for (path, text) in files {
-        fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-        println!("wrote {}", relative_path(&path, root));
+        fs::write(root.join(&path), text).map_err(|e| format!("{path}: {e}"))?;
+        println!("wrote {path}");
     }
     for (name, why) in problems {
         println!("left out of the index, fix it: {name}: {why}");

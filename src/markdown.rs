@@ -2,7 +2,6 @@
 //! standard markdown links (OKF 0.2, section 6.1), and a link to a heading uses GitHub's anchor for that heading.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::Path;
 use std::sync::LazyLock;
 
 use percent_encoding::percent_decode_str;
@@ -10,7 +9,7 @@ use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use regex::Regex;
 use unicode_general_category::{GeneralCategory, get_general_category};
 
-use crate::source::{Lookup, lookup, read_source};
+use crate::tree::{Lookup, Tree, lookup, read_text};
 
 // The target of a link in HTML, which GitHub renders as a link too: in double quotes, or in single quotes
 static HREF: LazyLock<Regex> =
@@ -238,9 +237,15 @@ pub fn links(text: &str) -> Vec<(String, String)> {
 /// relative to `bundle_root`. A URL is not checked. A path with a drive letter (`C:/...`) or a `file:` URL fails: it
 /// names a file on one machine, which no other checkout and no reader on GitHub can follow. A path with `\` fails: only
 /// Windows reads it as a separator, so the same link would resolve on one machine and not on another. For the same
-/// reason the file is found by its exact name (`source::lookup`), and a path that climbs above the repository fails.
+/// reason the file is found by its exact name (`tree::lookup`), and a path that climbs above the repository fails.
 /// A link to a `.py` file names in its text a function or class that the file defines.
-pub fn broken(text: &str, target: &str, here: &Path, bundle_root: &Path) -> Option<String> {
+pub fn broken(
+    tree: &dyn Tree,
+    text: &str,
+    target: &str,
+    here: &str,
+    bundle_root: &str,
+) -> Option<String> {
     // A file: URL names a file on one machine as surely as a drive letter does
     if DRIVE.is_match(target) || FILE_URL.is_match(target) {
         return Some(format!(
@@ -263,10 +268,7 @@ pub fn broken(text: &str, target: &str, here: &Path, bundle_root: &Path) -> Opti
         None => (here, path),
     };
     // GitHub serves the files of the repository only: a path that climbs above its root names nothing there
-    let repository = bundle_root.parent().unwrap_or(bundle_root);
-    let mut depth = start
-        .strip_prefix(repository)
-        .map_or(0, |inside| inside.components().count() as i64);
+    let mut depth = start.split('/').filter(|part| !part.is_empty()).count() as i64;
     for part in rel.split('/') {
         match part {
             "" | "." => {}
@@ -277,8 +279,11 @@ pub fn broken(text: &str, target: &str, here: &Path, bundle_root: &Path) -> Opti
             return Some(format!("a path outside the repository: {target}"));
         }
     }
-    let full = match lookup(start, rel) {
-        Lookup::Found(full) if full.is_file() => full,
+    let full = match lookup(tree, start, rel) {
+        Lookup::Found {
+            path,
+            is_dir: false,
+        } => path,
         Lookup::Spelled(on_disk) => {
             return Some(format!(
                 "no such file: {target} (the disk has {on_disk}: names are compared exactly, as Linux and GitHub \
@@ -287,7 +292,7 @@ pub fn broken(text: &str, target: &str, here: &Path, bundle_root: &Path) -> Opti
         }
         _ => return Some(format!("no such file: {target}")),
     };
-    let source = match read_source(&full) {
+    let source = match read_text(tree, &full) {
         Ok(source) => source,
         Err(e) => return Some(format!("cannot read {target}: {e}")),
     };
@@ -341,6 +346,8 @@ fn how_to_name(name: &str, defined: &BTreeSet<String>) -> String {
 #[cfg(test)]
 mod tests {
     use std::fs;
+
+    use std::path::Path;
 
     use super::*;
 
@@ -546,10 +553,10 @@ Text <!-- one line --> and text <!--
     }
 
     fn reasons(root: &Path, cases: &[(&str, &str)]) -> Vec<Option<String>> {
-        let docs = root.join("docs");
+        let tree = crate::disk::Disk::new(root);
         cases
             .iter()
-            .map(|(text, target)| broken(text, target, &docs.join("backlog"), &docs))
+            .map(|(text, target)| broken(&tree, text, target, "docs/backlog", "docs"))
             .collect()
     }
 
