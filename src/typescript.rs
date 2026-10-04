@@ -11,9 +11,7 @@
 //! - **Its comments,** `//` and `/* */`. JSX text is not a comment.
 
 use std::collections::BTreeSet;
-use std::fs;
 use std::io;
-use std::path::Path;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
@@ -25,7 +23,8 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
 
-use crate::source::{line_of, read_source};
+use crate::source::line_of;
+use crate::tree::{Tree, read_text};
 
 /// The extensions read as source, in lower case
 pub const EXTENSIONS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
@@ -184,13 +183,11 @@ struct Options {
     paths: Option<(Vec<(String, String)>, String)>,
 }
 
-/// The aliases of the project at `root`. An error is a config that cannot be read at all from disk.
-pub fn aliases(root: &Path) -> io::Result<Aliases> {
+/// The aliases of the project in `tree`. An error is a config that cannot be read at all.
+pub fn aliases(tree: &dyn Tree) -> io::Result<Aliases> {
     let mut names: Vec<String> = Vec::new();
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with("tsconfig") && name.ends_with(".json") && entry.file_type()?.is_file() {
+    for (name, is_dir) in tree.entries("")? {
+        if name.starts_with("tsconfig") && name.ends_with(".json") && !is_dir {
             names.push(name);
         }
     }
@@ -198,7 +195,7 @@ pub fn aliases(root: &Path) -> io::Result<Aliases> {
     let mut aliases = Aliases::default();
     for name in &names {
         let mut seen = Vec::new();
-        let Some(options) = load(root, name, &mut seen, &mut aliases.problems)? else {
+        let Some(options) = load(tree, name, &mut seen, &mut aliases.problems)? else {
             continue;
         };
         if let Some(base) = &options.base_url {
@@ -248,7 +245,7 @@ pub fn aliases(root: &Path) -> io::Result<Aliases> {
 /// The options of the config at `name` (from the root), its local `extends` followed: a field it sets wins over the
 /// configs it extends, and a later one in `extends` over an earlier one. `None`, with a problem, when it cannot be read.
 fn load(
-    root: &Path,
+    tree: &dyn Tree,
     name: &str,
     seen: &mut Vec<String>,
     problems: &mut Vec<String>,
@@ -261,19 +258,19 @@ fn load(
         return Ok(None);
     }
     seen.push(name.to_string());
-    let options = load_one(root, name, seen, problems);
+    let options = load_one(tree, name, seen, problems);
     seen.pop();
     options
 }
 
 /// [`load`] for one config, while `seen` holds it and the configs that extend it.
 fn load_one(
-    root: &Path,
+    tree: &dyn Tree,
     name: &str,
     seen: &mut Vec<String>,
     problems: &mut Vec<String>,
 ) -> io::Result<Option<Options>> {
-    let text = match read_source(&root.join(name)) {
+    let text = match read_text(tree, name) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             problems.push(format!("{name}: extended by {}, and not there", seen[0]));
@@ -303,7 +300,7 @@ fn load_one(
         if !path.ends_with(".json") {
             path.push_str(".json");
         }
-        if let Some(parent) = load(root, &path, seen, problems)? {
+        if let Some(parent) = load(tree, &path, seen, problems)? {
             options.base_url = parent.base_url.or(options.base_url);
             options.paths = parent.paths.or(options.paths);
         }
@@ -341,7 +338,7 @@ fn load_one(
 impl Aliases {
     /// Where `specifier`, imported by the file at `file` (from the root), lands: a path from the root, or `None` for a
     /// package, or a path above the root.
-    pub fn resolve(&self, root: &Path, file: &str, specifier: &str) -> Option<String> {
+    pub fn resolve(&self, tree: &dyn Tree, file: &str, specifier: &str) -> Option<String> {
         let specifier = specifier.split('?').next().unwrap_or(specifier);
         if specifier == "."
             || specifier == ".."
@@ -373,17 +370,17 @@ impl Aliases {
         }
         self.base_urls.iter().find_map(|base| {
             let path = normalize(&join(base, specifier))?;
-            is_module(root, &path).then_some(path)
+            is_module(tree, &path).then_some(path)
         })
     }
 }
 
 /// Whether a module is at `path` (from the root): the file itself, with one of [`EXTENSIONS`], or an `index` in it.
-fn is_module(root: &Path, path: &str) -> bool {
-    root.join(path).is_file()
+fn is_module(tree: &dyn Tree, path: &str) -> bool {
+    tree.is_file(path)
         || EXTENSIONS.iter().any(|extension| {
-            root.join(format!("{path}.{extension}")).is_file()
-                || root.join(format!("{path}/index.{extension}")).is_file()
+            tree.is_file(&format!("{path}.{extension}"))
+                || tree.is_file(&format!("{path}/index.{extension}"))
         })
 }
 
@@ -488,7 +485,10 @@ fn next_token(chars: &[char], mut i: usize) -> Option<char> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
+    use crate::disk::Disk;
 
     #[test]
     fn every_form_of_import_is_read() {
@@ -543,8 +543,8 @@ export const k = 1;
     #[test]
     fn a_relative_or_rooted_specifier_resolves_against_the_file() {
         let aliases = Aliases::default();
-        let root = Path::new(".");
-        let at = |s: &str| aliases.resolve(root, "src/ui/atoms/button.tsx", s);
+        let tree = crate::tree::fake::Fake::default();
+        let at = |s: &str| aliases.resolve(&tree, "src/ui/atoms/button.tsx", s);
         assert_eq!(at("../molecules/row"), Some("src/ui/molecules/row".into()));
         assert_eq!(
             at("./theme.css?inline"),
@@ -583,9 +583,10 @@ export const k = 1;
             ),
             ("src/domain/song.ts", ""),
         ]);
-        let aliases = aliases(root.path()).unwrap();
+        let tree = Disk::new(root.path());
+        let aliases = aliases(&tree).unwrap();
         assert_eq!(aliases.problems, Vec::<String>::new());
-        let at = |s: &str| aliases.resolve(root.path(), "src/ui/pages/home.tsx", s);
+        let at = |s: &str| aliases.resolve(&tree, "src/ui/pages/home.tsx", s);
         assert_eq!(at("@/domain/song"), Some("src/domain/song".into()));
         assert_eq!(at("#theme"), Some("src/ui/atoms/theme".into()));
         assert_eq!(
@@ -608,7 +609,7 @@ export const k = 1;
             ("tsconfig.node.json", "{ not json"),
             ("tsconfig.app.json", "{ \"extends\": \"./missing.json\" }"),
         ]);
-        let problems = aliases(root.path()).unwrap().problems;
+        let problems = aliases(&Disk::new(root.path())).unwrap().problems;
         assert_eq!(problems.len(), 4, "{problems:#?}");
         assert!(problems.iter().any(|p| p.contains("\"*/*\"")));
         assert!(

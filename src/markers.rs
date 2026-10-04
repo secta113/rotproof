@@ -16,13 +16,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
-use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
 
 use crate::layers::{Declared, Language};
-use crate::source::{code_files, line_of, read_code, within};
+use crate::source::{line_of, within};
+use crate::tree::{Tree, code_files, read_code};
 
 /// The words that fail in a comment.
 pub const MARKERS: [&str; 5] = ["TODO", "FIXME", "XXX", "HACK", "NOTE"];
@@ -67,7 +67,7 @@ pub fn either(words: &[&str]) -> String {
 }
 
 /// Every marker in a comment of the code of `declared`. An error is a directory that could not be walked.
-pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
+pub fn problems(tree: &dyn Tree, declared: &Declared) -> io::Result<Markers> {
     let Some(layout) = &declared.layout else {
         // A repository of records only has no code to read
         return Ok(Markers::default());
@@ -95,11 +95,11 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Markers> {
     let mut found = Vec::new();
     let mut words = BTreeSet::new();
     let mut read = 0;
-    for path in code_files(root, &layout.scope, |name| is_source(name))? {
+    for path in code_files(tree, &layout.scope, |name| is_source(name))? {
         if unchecked.iter().any(|skip| within(&path, skip)) {
             continue;
         }
-        let Some(source) = read_code(root, &path, "comments", &mut found)? else {
+        let Some(source) = read_code(tree, &path, "comments", &mut found)? else {
             continue;
         };
         read += 1;

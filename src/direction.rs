@@ -17,18 +17,16 @@
 //! declarations are its imports.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
-use std::path::Path;
 
 use crate::cargo::{Manifest, Origin};
 use crate::layers::{Declared, Language, Layout, Place, listed};
 use crate::python::module_parts;
-use crate::source::{code_files, exactly, read_code, relative_path};
+use crate::tree::{Tree, code_files, exactly, read_code};
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
 /// error is a directory that could not be walked.
-pub fn problems(root: &Path, declared: &Declared) -> io::Result<Vec<String>> {
+pub fn problems(tree: &dyn Tree, declared: &Declared) -> io::Result<Vec<String>> {
     let Some(layout) = &declared.layout else {
         // A repository of records only: the structure check already says that the layers were not checked
         return Ok(Vec::new());
@@ -37,12 +35,12 @@ pub fn problems(root: &Path, declared: &Declared) -> io::Result<Vec<String>> {
     let places: Vec<&Place> = declared
         .places
         .iter()
-        .filter(|p| !declared.is_absent(p) && crate::source::exactly(root, &p.path).is_ok())
+        .filter(|p| !declared.is_absent(p) && exactly(tree, &p.path).is_ok())
         .collect();
     match layout.language {
-        Language::Python => python(root, layout, &places),
-        Language::TypeScript => typescript(root, layout, &places),
-        Language::Rust => rust(root, layout, &places),
+        Language::Python => python(tree, layout, &places),
+        Language::TypeScript => typescript(tree, layout, &places),
+        Language::Rust => rust(tree, layout, &places),
     }
 }
 
@@ -60,18 +58,16 @@ fn judged(at: &str, what: &str, from: &Place, to: &Place) -> Option<String> {
 
 /// The direction check of a Rust project: every dependency the manifest of a crate in a layer declares, judged by the
 /// place the path it comes from sits in.
-fn rust(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
+fn rust(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
     let mut found = Vec::new();
     let mut manifests = Manifests::default();
-    // The root as the operating system spells it, which every path a manifest names is resolved against
-    let real = fs::canonicalize(root)?;
     let parts = |path: &str| -> Vec<String> { path.split('/').map(String::from).collect() };
     for layer in places.iter().filter(|p| p.parent.is_none()) {
-        for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
+        for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
             let Some(from) = place_of(&parts(&path), places) else {
                 continue;
             };
-            let Some(manifest) = manifests.read(root, &path, &mut found)? else {
+            let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
                 continue;
             };
             let dir = parent(&path);
@@ -79,10 +75,10 @@ fn rust(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<Strin
                 let at = format!("{path}:{}", dependency.line);
                 let name = &dependency.name;
                 let (target, through) = match &dependency.origin {
-                    Origin::Path(rel) => (landed(root, &real, dir, rel), ""),
+                    Origin::Path(rel) => (tree.landed(dir, rel), ""),
                     Origin::Workspace => {
                         let Some((workspace, entry)) =
-                            manifests.workspace(root, &real, dir, &manifest, &mut found)?
+                            manifests.workspace(tree, dir, &manifest, &mut found)?
                         else {
                             let looked = match &manifest.workspace {
                                 Some(rel) => format!(
@@ -109,7 +105,7 @@ fn rust(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<Strin
                         let Some(rel) = rel else {
                             continue;
                         };
-                        (landed(root, &real, &workspace, rel), ", from the workspace")
+                        (tree.landed(&workspace, rel), ", from the workspace")
                     }
                 };
                 let Some(target) = target else {
@@ -139,14 +135,14 @@ impl Manifests {
     /// The manifest at `path`, from the root: `None`, with a finding, when it cannot be read as TOML or UTF-8.
     fn read(
         &mut self,
-        root: &Path,
+        tree: &dyn Tree,
         path: &str,
         found: &mut Vec<String>,
     ) -> io::Result<Option<Manifest>> {
         if let Some(manifest) = self.0.get(path) {
             return Ok(manifest.clone());
         }
-        let manifest = match read_code(root, path, "dependencies", found)? {
+        let manifest = match read_code(tree, path, "dependencies", found)? {
             None => None,
             Some(source) => match crate::cargo::read(&source) {
                 Ok(manifest) => Some(manifest),
@@ -164,17 +160,16 @@ impl Manifests {
 
     /// The workspace of the manifest in `dir`, as Cargo finds it: the directory its `[package] workspace` names, or
     /// the first directory from `dir` up to the root whose `Cargo.toml` declares `[workspace]`. Its directory from the
-    /// root and its manifest, or `None` when there is none in the project. `real` is the root as [`landed`] takes it.
+    /// root and its manifest, or `None` when there is none in the project.
     fn workspace(
         &mut self,
-        root: &Path,
-        real: &Path,
+        tree: &dyn Tree,
         dir: &str,
         manifest: &Manifest,
         found: &mut Vec<String>,
     ) -> io::Result<Option<(String, Manifest)>> {
         let mut at = match &manifest.workspace {
-            Some(rel) => match landed(root, real, dir, rel) {
+            Some(rel) => match tree.landed(dir, rel) {
                 Some(workspace) => workspace,
                 None => return Ok(None),
             },
@@ -182,8 +177,8 @@ impl Manifests {
         };
         loop {
             let path = in_dir(&at, "Cargo.toml");
-            if exactly(root, &path).is_ok_and(|full| full.is_file())
-                && let Some(candidate) = self.read(root, &path, found)?
+            if exactly(tree, &path).is_ok_and(|(_, is_dir)| !is_dir)
+                && let Some(candidate) = self.read(tree, &path, found)?
                 && candidate.is_workspace
             {
                 return Ok(Some((at, candidate)));
@@ -211,20 +206,10 @@ fn in_dir(dir: &str, name: &str) -> String {
     }
 }
 
-/// Where the path `rel`, which a manifest in `dir` (from the root) names, lands: from the root with `/`, as the
-/// operating system of the machine that runs the check resolves it, the way Cargo does there. On Windows, `../Domain`,
-/// `../domain.`, `../domain ` and a short name such as `../DOMAIN~1` all land in `domain`, as does an absolute path
-/// spelled in another case; links are followed everywhere. `real` is the root as `fs::canonicalize` spells it. `None`
-/// when it lands outside the root, or nowhere, where Cargo fails too.
-fn landed(root: &Path, real: &Path, dir: &str, rel: &str) -> Option<String> {
-    let full = fs::canonicalize(root.join(dir).join(rel)).ok()?;
-    Some(relative_path(full.strip_prefix(real).ok()?, Path::new("")))
-}
-
 /// The direction check of a TypeScript project: every import of a source file in a layer, resolved to a path
 /// (`typescript.rs`), judged by the place that path sits in.
-fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
-    let aliases = crate::typescript::aliases(root)?;
+fn typescript(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
+    let aliases = crate::typescript::aliases(tree)?;
     let mut found: Vec<String> = aliases
         .problems
         .iter()
@@ -235,7 +220,7 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec
     // the layer it belongs to, while that layer is there
     let mut files: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
-        for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
+        for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
             if let Some(from) = place_of(&parts(&path), places) {
                 files.push((path, from));
             }
@@ -244,7 +229,7 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec
     for (path, layer) in &layout.belongs {
         let place = places.iter().find(|p| &p.name == layer);
         if let Some(place) = place
-            && crate::source::exactly(root, path).is_ok_and(|full| full.is_file())
+            && exactly(tree, path).is_ok_and(|(_, is_dir)| !is_dir)
         {
             files.push((path.clone(), place));
         }
@@ -253,7 +238,7 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec
         if !crate::typescript::is_source(&path) {
             continue;
         }
-        let Some(source) = read_code(root, &path, "imports", &mut found)? else {
+        let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
             continue;
         };
         let read = crate::typescript::read(&source, &path);
@@ -263,7 +248,7 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec
             ));
         }
         for (line, specifier) in read.imports {
-            let Some(target) = aliases.resolve(root, &path, &specifier) else {
+            let Some(target) = aliases.resolve(tree, &path, &specifier) else {
                 continue;
             };
             let Some(to) = place_of(&parts(&target), places) else {
@@ -281,14 +266,14 @@ fn typescript(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec
 }
 
 /// The direction check of a Python project: every import of a `.py` file in a layer, as the module it names.
-fn python(root: &Path, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
+fn python(tree: &dyn Tree, layout: &Layout, places: &[&Place]) -> io::Result<Vec<String>> {
     let mut found = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
-        for path in code_files(root, &layer.path, |name| layout.is_code(name))? {
+        for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
             let Some(from) = place_of(&module_parts(&path), places) else {
                 continue;
             };
-            let Some(source) = read_code(root, &path, "imports", &mut found)? else {
+            let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
                 continue;
             };
             let read = crate::python::read(&source, &path);

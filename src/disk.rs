@@ -66,4 +66,14 @@ impl Tree for Disk {
         }
         Ok(found)
     }
+
+    fn landed(&self, dir: &str, rel: &str) -> Option<String> {
+        let real = fs::canonicalize(&self.root).ok()?;
+        let full = fs::canonicalize(self.root.join(dir).join(rel)).ok()?;
+        Some(relative_path(full.strip_prefix(real).ok()?, Path::new("")))
+    }
+
+    fn is_file(&self, path: &str) -> bool {
+        self.root.join(path).is_file()
+    }
 }

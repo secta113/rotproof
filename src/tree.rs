@@ -18,6 +18,40 @@ pub trait Tree {
     /// `.gitignore` above the root differ from one machine to another, and would hide code on one machine that fails on
     /// another.
     fn files(&self, dir: &str) -> io::Result<Vec<String>>;
+    /// Where the path `rel`, named from the directory `dir`, lands as the operating system resolves it: from the root,
+    /// or `None` when it lands nowhere or outside the root. On Windows, another case, dots and spaces at the end and
+    /// short names land too; links are followed everywhere.
+    fn landed(&self, dir: &str, rel: &str) -> Option<String>;
+    /// Whether the operating system finds a file at `path`, as it reads names (on Windows, in any case).
+    fn is_file(&self, path: &str) -> bool;
+}
+
+/// The text of the file at `path`, with every line ending as `\n`.
+///
+/// Line endings are normalized as Python's text mode does, which the original checks read with: a file checked out with
+/// CRLF would otherwise keep `\r` at the end of each heading, and its anchors would differ.
+pub fn read_text(tree: &dyn Tree, path: &str) -> io::Result<String> {
+    Ok(tree.read(path)?.replace("\r\n", "\n").replace('\r', "\n"))
+}
+
+/// Read a code file for a check: `None`, with a finding that its `what` are not checked, when it is not UTF-8. An
+/// error is a file that could not be read at all.
+pub fn read_code(
+    tree: &dyn Tree,
+    path: &str,
+    what: &str,
+    found: &mut Vec<String>,
+) -> io::Result<Option<String>> {
+    match read_text(tree, path) {
+        Ok(source) => Ok(Some(source)),
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+            found.push(format!(
+                "{path}: cannot be read as UTF-8, so its {what} are not checked"
+            ));
+            Ok(None)
+        }
+        Err(e) => Err(io::Error::new(e.kind(), format!("{path}: {e}"))),
+    }
 }
 
 /// What a path names in a tree, read name by name.
@@ -177,6 +211,18 @@ pub mod fake {
                 .filter(|path| dir.is_empty() || path.starts_with(&format!("{dir}/")))
                 .cloned()
                 .collect())
+        }
+
+        /// By the exact names only: the fake has no operating system to read names otherwise
+        fn landed(&self, dir: &str, rel: &str) -> Option<String> {
+            match super::lookup(self, dir, rel) {
+                super::Lookup::Found { path, .. } => Some(path),
+                _ => None,
+            }
+        }
+
+        fn is_file(&self, path: &str) -> bool {
+            self.0.contains_key(path)
         }
     }
 }

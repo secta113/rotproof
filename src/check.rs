@@ -93,7 +93,8 @@ pub struct Report {
 
 /// Every broken rule in the repository at `root`. An error is a file that could not be read at all.
 pub fn check(root: &Path) -> io::Result<Report> {
-    let structure = crate::structure::problems(&Disk::new(root))?;
+    let disk = Disk::new(root);
+    let structure = crate::structure::problems(&disk)?;
     let mut findings: Vec<Finding> = structure
         .found
         .into_iter()
@@ -106,12 +107,12 @@ pub fn check(root: &Path) -> io::Result<Report> {
     let mut layers_checked = false;
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
-        let direction = crate::direction::problems(root, declared)?;
+        let direction = crate::direction::problems(&disk, declared)?;
         findings.extend(direction.into_iter().map(|detail| Finding {
             check: "the layers import only what layers/table.toml allows".into(),
             detail,
         }));
-        let markers = crate::markers::problems(root, declared)?;
+        let markers = crate::markers::problems(&disk, declared)?;
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {
             check: heading.clone().into(),
