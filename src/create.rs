@@ -10,8 +10,8 @@
 //!   from the version that runs.
 //! - `.claude/settings.json` with the hook that runs `rotproof stop-hook` when the agent stops (`hook.rs`), when it
 //!   does not exist. A project that has one already adds the hook to it by hand.
-//! - The project's files (`project.rs`: `AGENTS.md`, `README.md`, the pin of Rotproof, the CI workflow and others),
-//!   each when it does not exist. The project's name in them is its root directory's.
+//! - The project's files (`project.rs`: `AGENTS.md`, `README.md`, the pin of Rotproof, the CI workflow, a Rust
+//!   project's workspace and others), each when it does not exist. The project's name in them is its root directory's.
 //!
 //! - The fields the declaration lacks that Rotproof requires (`ADDED` in `layers.rs`): an upgrade of Rotproof that adds
 //!   a field fails `rotproof check` until `rotproof create` runs, and then only on what the new rules find. The

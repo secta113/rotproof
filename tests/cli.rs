@@ -558,6 +558,36 @@ fn create_writes_the_projects_files_once() {
                 stdout(&out)
             );
         }
+        // A Rust project's workspace, which Cargo reads as the crates of the layers present
+        let workspace = root.join("Cargo.toml");
+        assert_eq!(workspace.exists(), stack == "rust", "{stack}");
+        if stack == "rust" {
+            let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+            let out = Command::new(cargo)
+                .args([
+                    "metadata",
+                    "--format-version",
+                    "1",
+                    "--no-deps",
+                    "--offline",
+                ])
+                .current_dir(&root)
+                .output()
+                .unwrap();
+            let metadata = String::from_utf8_lossy(&out.stdout);
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            for crate_name in ["handler", "application", "infrastructure", "domain"] {
+                assert!(
+                    metadata.contains(&format!("\"name\":\"{crate_name}\"")),
+                    "{crate_name}: {metadata}"
+                );
+            }
+            assert!(!metadata.contains("\"name\":\"utils\""), "{metadata}");
+        }
         assert!(run(&["--root", &arg, "check"]).status.success());
 
         // From then on the files are the project's: an edit stays, and only a missing file is written again

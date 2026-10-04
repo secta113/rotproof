@@ -15,6 +15,14 @@ without = ["ui"]
 # What Rotproof reads the code as: the dependencies each crate declares in its `Cargo.toml` for the direction check,
 # and the comments of the `.rs` files in `crates/` for the marker check
 language = "rust"
+# The workspace, written once at the root with the project's files, so `cargo build` builds every crate in `crates/`
+files = [
+    { path = "Cargo.toml", text = '''
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+''' },
+]
 
 [layer]
 path = "crates/{name}"

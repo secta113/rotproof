@@ -67,7 +67,8 @@ enum Command {
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/ and
     /// docs/log.md, and the project's files (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's
-    /// hook settings, and for python and none the pin of Rotproof and a CI workflow), each when it does not exist.
+    /// hook settings, for python and none the pin of Rotproof and a CI workflow, and for rust the workspace's
+    /// Cargo.toml), each when it does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files and rules in
     /// docs/. Adds the fields the declaration lacks, keeping its comments and values. Never overwrites another file,
     /// and never moves or deletes one. Run it when a project starts, after editing the declaration, and after

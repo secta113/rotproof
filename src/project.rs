@@ -5,9 +5,10 @@
 //!   Rotproof, the layers (their table is written from `layers/table.toml`, so the two cannot disagree) and the
 //!   records. It names the version that wrote it, so an upgrade fails `rotproof check` until `rotproof create` has run.
 //! - **The project's files** ([`project_files`]): `AGENTS.md`, `CLAUDE.md`, `README.md`, `.gitignore`,
-//!   `.gitattributes`, and where the stack installs Rotproof from PyPI, `requirements-dev.txt` with Rotproof pinned and
-//!   a GitHub Actions workflow that runs `rotproof check`. `rotproof create` writes each once, when it does not exist,
-//!   and never again: from then on it is the project's.
+//!   `.gitattributes`, where the stack installs Rotproof from PyPI, `requirements-dev.txt` with Rotproof pinned and a
+//!   GitHub Actions workflow that runs `rotproof check`, and the files the stack's layout lists for its toolchain (the
+//!   workspace's `Cargo.toml` for `rust`). `rotproof create` writes each once, when it does not exist, and never again:
+//!   from then on it is the project's.
 //!
 //! The texts are in `project/`, built into the binary. Each is named after the file it becomes, without a leading dot
 //! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
@@ -48,10 +49,10 @@ const UNPINNED_DEVELOPMENT: &str = include_str!("../project/unpinned/development
 
 /// The project's files `rotproof create` writes once, for the project named `name` (its directory's name): path from
 /// the root -> text, and what was not written for the stack, and why.
-pub fn project_files(
-    declared: &Declared,
+pub fn project_files<'a>(
+    declared: &'a Declared,
     name: &str,
-) -> (Vec<(&'static str, String)>, Option<String>) {
+) -> (Vec<(&'a str, String)>, Option<String>) {
     let stack = declared.declaration.stack.as_str();
     let fill = |text: &str| {
         text.replace("{name}", name)
@@ -82,6 +83,15 @@ pub fn project_files(
         (".gitignore", gitignore.to_string()),
         (".gitattributes", GITATTRIBUTES_TEXT.to_string()),
     ];
+    // What the stack's toolchain needs at the root: the workspace of a Rust project
+    if let Some(layout) = &declared.layout {
+        files.extend(
+            layout
+                .files
+                .iter()
+                .map(|file| (file.path.as_str(), file.text.trim_start().to_string())),
+        );
+    }
     if !pypi {
         return (
             files,

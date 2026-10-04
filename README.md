@@ -103,6 +103,7 @@ The project's files are written once, as a starting point, and are the project's
 | `.claude/settings.json` | The stop hook (see "The stop hook") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
+| `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present |
 
 How a `typescript` or `rust` project pins Rotproof is not decided yet, so for those stacks `rotproof create` writes
 neither the pin nor the workflow, and says so.

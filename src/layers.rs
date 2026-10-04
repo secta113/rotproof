@@ -102,6 +102,9 @@ pub struct Layout {
     pub where_code_goes: Option<String>,
     /// The language Rotproof reads the code as
     pub language: Language,
+    /// Files the stack's toolchain needs at the root, written once with the project's files (`project.rs`)
+    #[serde(default)]
+    pub files: Vec<File>,
 }
 
 /// A language Rotproof reads: the imports for the direction check, and the comments for the marker check.
