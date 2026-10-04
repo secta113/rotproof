@@ -1,10 +1,6 @@
-//! The checks and the index generation. `main.rs` is only the command line around them.
-//!
-//! The modules are moving into the layers they belong to (`domain`, `application`, `infrastructure`); the ones at the
-//! top have not been sorted yet.
+//! The checks and the index generation, in the layers they belong to. `main.rs` is the `handler`: the command line
+//! around them, and the one place that builds the adapters of `infrastructure` and passes them to `application`.
 
 pub mod application;
 pub mod domain;
 pub mod infrastructure;
-
-pub mod create;

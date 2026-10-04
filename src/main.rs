@@ -170,7 +170,7 @@ fn init(root: &Path, stack: &str) -> Result<(), String> {
 /// Make what is missing, and say what was written. A second run with nothing changed writes nothing.
 fn create(root: &Path) -> Result<(), String> {
     let disk = Disk::new(root);
-    let made = rotproof::create::create(&disk, &disk, &disk.name()?)?;
+    let made = application::create::create(&disk, &disk, &disk.name()?)?;
     for path in &made.written {
         println!("wrote {path}");
     }

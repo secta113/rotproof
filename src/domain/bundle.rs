@@ -4,14 +4,15 @@
 //! Every `.md` under `docs/` except the reserved names is a document with frontmatter. The index files are never
 //! written by hand: `rotproof index` writes them, and `rotproof check` fails when one differs from what it would write.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::layers::DECLARATION;
 use crate::domain::schema::{
     BacklogDoc, CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, SPEC_FOLDERS,
     Spec, Status, Time, backlog_doc, guide_doc, knowledge_doc, spec,
 };
-use utils::frontmatter::Sections;
+use utils::frontmatter::{Sections, split};
+use yaml_rust2::Yaml;
 
 /// File names OKF reserves. Never used for a document
 pub const RESERVED: [&str; 2] = ["index.md", "log.md"];
@@ -604,6 +605,33 @@ pub fn render_root() -> String {
     out.join("\n") + "\n"
 }
 
+/// Every tag the backlog items, specs and knowledge documents among `docs` use. A document that cannot be read is left
+/// to `rotproof check`.
+pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
+    let mut tags = BTreeSet::new();
+    for text in docs.values() {
+        let Ok((meta, _)) = split(text) else {
+            continue;
+        };
+        let kind = meta
+            .get(&Yaml::String("type".into()))
+            .and_then(Yaml::as_str);
+        if !matches!(kind, Some("Backlog Item" | "Spec" | "Knowledge")) {
+            continue;
+        }
+        match meta.get(&Yaml::String("tags".into())) {
+            Some(Yaml::Array(list)) => {
+                tags.extend(list.iter().filter_map(Yaml::as_str).map(String::from))
+            }
+            Some(Yaml::String(tag)) => {
+                tags.insert(tag.clone());
+            }
+            _ => {}
+        }
+    }
+    tags
+}
+
 /// The open items past `stale_after`. As in OKF, an item is stale when `now >= stale_after`.
 pub fn stale(items: &BTreeMap<String, (Item, Sections)>, now: Time) -> Vec<String> {
     items
@@ -798,6 +826,25 @@ Not yet. Measured by hand.
     /// The areas the tests declare: not in alphabetical order, so an index sorted by name would differ
     fn areas() -> Vec<String> {
         ["operations", "billing", "unused"].map(String::from).into()
+    }
+
+    #[test]
+    fn the_tags_of_the_records_are_collected_and_others_are_not() {
+        let docs: Docs = [
+            (
+                "a.md",
+                "---\ntype: Backlog Item\ntags: [billing, ops]\n---\n",
+            ),
+            ("b.md", "---\ntype: Spec\ntags: records\n---\n"),
+            ("rules.md", "---\ntype: Guide\ntags: [guides]\n---\n"),
+            ("broken.md", "no frontmatter"),
+        ]
+        .map(|(name, text)| (name.to_string(), text.to_string()))
+        .into();
+        assert_eq!(
+            record_tags(&docs).into_iter().collect::<Vec<_>>(),
+            ["billing", "ops", "records"]
+        );
     }
 
     #[test]

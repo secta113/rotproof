@@ -11,8 +11,8 @@
 //! The floor: at least one layer is present. A project with every layer declared absent would check nothing. A
 //! repository that keeps records only declares `stack = "none"`, and the check says that it skipped the layers.
 //!
-//! The rules judge what the tree shows ([`Seen`]): whether each path [`named`] gives is there by its exact name, and the
-//! code files of each directory [`listed`] gives.
+//! The rules judge what the tree shows ([`Seen`]): whether each path [`named`] gives is there by its exact name, and
+//! the code files of each directory [`listed`] gives.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -29,8 +29,8 @@ pub struct Seen {
 }
 
 impl Seen {
-    /// Whether an entry has the exact name `path`. By the exact name: `Domain/` is `domain/` on Windows, and a directory
-    /// of its own on Linux and GitHub
+    /// Whether an entry has the exact name `path`. By the exact name: `Domain/` is `domain/` on Windows, and a
+    /// directory of its own on Linux and GitHub
     fn present(&self, path: &str) -> bool {
         self.named(path).is_ok()
     }
@@ -67,8 +67,8 @@ fn unchecked(declared: &Declared) -> impl Iterator<Item = &str> {
         .map(|path| path.trim_end_matches('/'))
 }
 
-/// Every directory whose code files the rules read, by what `seen` says of the paths [`named`] gives: the layout's scope,
-/// then each present layer that has levels.
+/// Every directory whose code files the rules read, by what `seen` says of the paths [`named`] gives: the layout's
+/// scope, then each present layer that has levels.
 pub fn listed(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> {
     let mut dirs = vec![layout.scope.clone()];
     dirs.extend(

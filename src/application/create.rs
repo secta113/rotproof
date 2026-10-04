@@ -17,25 +17,22 @@
 //!   a field fails `rotproof check` until `rotproof create` runs, and then only on what the new rules find. The
 //!   comments and the values already in the declaration are kept, and a value that is present is never changed.
 //!
-//! It never overwrites a file it does not generate, apart from adding those fields, and never moves or deletes one. It runs when a project starts, and
-//! again when its declaration is changed on purpose; it never runs by itself, so a layer removed by mistake fails the
-//! check instead of coming back.
+//! It never overwrites a file it does not generate, apart from adding those fields, and never moves or deletes one. It
+//! runs when a project starts, and again when its declaration is changed on purpose; it never runs by itself, so a
+//! layer removed by mistake fails the check instead of coming back.
 
 use std::collections::BTreeSet;
 
-use toml_edit::{Array, DocumentMut, Item, Value};
-use yaml_rust2::Yaml;
-
 use crate::application::bundle::Bundle;
-use crate::domain::bundle::{LOG, in_docs};
-
 use crate::application::layers::declaration;
 use crate::application::tree::{exactly, read_text};
+use crate::domain::bundle::{LOG, in_docs, record_tags as tags_in};
 use crate::domain::hook::SETTINGS;
-use crate::domain::layers::{ADDED, DECLARATION, Declaration, Declared, MISSING};
+use crate::domain::layers::{
+    DECLARATION, Declared, MISSING, completed, lacking, parse_declaration,
+};
 use crate::domain::project::{GUIDE, guide, project_files};
 use crate::domain::tree::{Tree, Writer};
-use utils::frontmatter::split;
 
 /// What `rotproof create` did.
 #[derive(Debug, Default)]
@@ -60,8 +57,8 @@ pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, Str
             // Written only once the completed declaration reads and fits its stack, so a declaration that fails for
             // another reason is left as it was
             Some((text, added)) => {
-                let declaration: Declaration =
-                    toml::from_str(&text).map_err(|e| format!("{DECLARATION}: {}", e.message()))?;
+                let declaration =
+                    parse_declaration(&text).map_err(|why| format!("{DECLARATION}: {why}"))?;
                 let declared = Declared::new(declaration).map_err(|found| found.join("\n"))?;
                 write(out, DECLARATION, &text, &mut made)?;
                 made.added = added;
@@ -114,60 +111,39 @@ pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, Str
     Ok(made)
 }
 
-/// The declaration with every field of [`ADDED`] it lacks, each under its comment, and the fields added as
-/// `name = value`. `None` when it lacks none, or is not TOML: then its own error stands.
-///
-/// The comments and the values already there are kept. A value that is present is never changed.
+/// The declaration with every field of [`ADDED`](crate::domain::layers::ADDED) it lacks, each under its comment, and
+/// the fields added as `name = value`. `None` when it lacks none, or is not TOML: then its own error stands.
 fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     let Ok((path, _)) = exactly(tree, DECLARATION) else {
         return Ok(None);
     };
     let text = read_text(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
-    let Ok(mut document) = text.parse::<DocumentMut>() else {
+    let Some(lacking) = lacking(&text) else {
         return Ok(None);
     };
-    let mut added = Vec::new();
-    for field in &ADDED {
-        if document.contains_key(field.name) {
-            continue;
-        }
-        let value = match field.name {
+    if lacking.is_empty() {
+        return Ok(None);
+    }
+    let mut values = Vec::new();
+    for name in lacking {
+        let value = match name {
             "areas" => record_tags(tree)?,
             name => {
                 unreachable!("every field Rotproof adds has a rule for its first value: {name}")
             }
         };
-        let mut array = Array::new();
-        array.extend(value.iter().map(String::as_str));
-        document.insert(field.name, Item::Value(Value::Array(array)));
-        let mut key = document
-            .key_mut(field.name)
-            .expect("the field was inserted just before");
-        key.leaf_decor_mut()
-            .set_prefix(format!("\n{}{}", field.comment, field.first_value));
-        added.push(format!("{} = {}", field.name, document[field.name]));
-    }
-    if added.is_empty() {
-        return Ok(None);
+        values.push((name, value));
     }
     // In the line endings the project wrote: `read_text` gave every line `\n`, and a declaration checked out with
     // CRLF would otherwise change on every line, not only where a field was added
     let raw = tree
         .read(&path)
         .map_err(|e| format!("{DECLARATION}: {e}"))?;
-    let text = document.to_string();
-    Ok(Some((
-        if raw.contains("\r\n") {
-            text.replace('\n', "\r\n")
-        } else {
-            text
-        },
-        added,
-    )))
+    Ok(Some(completed(&text, &values, raw.contains("\r\n"))))
 }
 
-/// Every tag the backlog items and specs use, sorted by name: the first value of `areas`, so the records that fit their
-/// one-area rule keep fitting once the field exists. A document that cannot be read is left to `rotproof check`.
+/// Every tag the backlog items, specs and knowledge documents use, sorted by name: the first value of `areas`, so the
+/// records that fit their one-area rule keep fitting once the field exists.
 fn record_tags(tree: &dyn Tree) -> Result<Vec<String>, String> {
     let bundle = Bundle::new(tree, Vec::new());
     let mut tags = BTreeSet::new();
@@ -176,26 +152,7 @@ fn record_tags(tree: &dyn Tree) -> Result<Vec<String>, String> {
             continue;
         }
         let docs = bundle.read_folder(folder).map_err(|e| e.to_string())?;
-        for text in docs.values() {
-            let Ok((meta, _)) = split(text) else {
-                continue;
-            };
-            let kind = meta
-                .get(&Yaml::String("type".into()))
-                .and_then(Yaml::as_str);
-            if !matches!(kind, Some("Backlog Item" | "Spec" | "Knowledge")) {
-                continue;
-            }
-            match meta.get(&Yaml::String("tags".into())) {
-                Some(Yaml::Array(list)) => {
-                    tags.extend(list.iter().filter_map(Yaml::as_str).map(String::from))
-                }
-                Some(Yaml::String(tag)) => {
-                    tags.insert(tag.clone());
-                }
-                _ => {}
-            }
-        }
+        tags.extend(tags_in(&docs));
     }
     Ok(tags.into_iter().collect())
 }

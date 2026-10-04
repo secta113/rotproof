@@ -203,8 +203,8 @@ pub fn file_name(path: &str) -> &str {
     path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
 
-/// Path -> why, for the files under `docs/` (paths relative to it) that a reader takes for part of the bundle and Rotproof
-/// would not read.
+/// Path -> why, for the files under `docs/` (paths relative to it) that a reader takes for part of the bundle and
+/// Rotproof would not read.
 ///
 /// A reserved name (OKF 0.2, section 3.1) is read only where Rotproof writes or reads it: an `index.md` in a directory
 /// that holds documents, and `log.md` at the root. Anywhere else, OKF says it follows the structure of an index or a

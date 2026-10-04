@@ -7,7 +7,7 @@ and why, is in `README.md`.
 
 | Path | Content |
 |---|---|
-| `src/` | The tool: the command line, and the library in the layers `domain`, `application` and `infrastructure`, each a directory with its modules (below). The modules at the top of the library are not sorted into a layer yet |
+| `src/` | The tool: the command line, and the library in the layers `domain`, `application` and `infrastructure`, each a directory with its modules (below) |
 | `crates/` | The layers that are crates of their own, each with its modules (below): `utils` |
 | `layers/` | The layer definitions, built into the binary: `table.toml` (what the layers are, in every stack) and one layout per stack (`python.toml`, `typescript.toml`, `rust.toml`: where each layer lives, the files that make it, and the files its toolchain needs at the root) |
 | `records/` | The records skeleton, built into the binary: `rules.md`, `spec-rules.md` and `knowledge-rules.md` (the backlog, spec and knowledge rules Rotproof writes into every project), and `log.md` (the log `rotproof create` starts) |
@@ -32,19 +32,18 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `src/` | Content |
 |---|---|
 | `main.rs` | The command line, which is the `handler`: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof guide`, `rotproof index` and `rotproof stop-hook`, and the help that leads from one to the next. It alone builds the adapters in `infrastructure` |
-| `lib.rs` | The library the command line calls: the layers, and the modules not sorted into one yet |
-| `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks |
+| `lib.rs` | The library the command line calls: its layers |
 
 | Module of `src/domain/` | Content |
 |---|---|
 | `mod.rs` | The layer's role, and its modules |
-| `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, and the files Rotproof generates in it (the index files and the rules) |
+| `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, the files Rotproof generates in it (the index files and the rules), and the tags the records use |
 | `schema.rs` | The frontmatter of each document type |
 | `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure and what it points at, the hash of a knowledge document, and the floor of the bundle |
 | `tree.rs` | The ports to a project's files (`Tree` to read them, `Writer` to write them), and how Rotproof reads a file's text and how Windows reads a name |
 | `code.rs` | What the readers give, as plain values, and the port to them (`Parsers`): the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; and where Cargo looks for a workspace |
-| `layers.rs` | The layer definitions in `layers/`, and what a project's `.config/rotproof.toml` says |
+| `layers.rs` | The layer definitions in `layers/`, what a project's `.config/rotproof.toml` says, and the fields `rotproof create` adds to it |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust), judged once the comments of a file are read |
 | `hook.rs` | What `rotproof stop-hook` finds open in the agent's last message and what it answers, the port to the project's changes (`Changes`), and the settings file that `rotproof create` writes for the hook |
@@ -56,6 +55,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `mod.rs` | The layer's role, and its modules |
 | `bundle.rs` | Reading `docs/` from the tree, directory by directory |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
+| `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, the code files of a directory, and the text of a file |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
 | `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
@@ -90,8 +90,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 - **No `docs/` here.** Rotproof's own backlog, specs and log are kept outside this repository.
 - **Partly in layers, and no `.config/rotproof.toml`.** `utils` is a crate of its own in `crates/`, as in the Rust
   layout Rotproof keeps (README). `domain`, `application` and `infrastructure` are directories of `src/` until each
-  becomes a crate, and `main.rs` is the `handler`; the modules left at the top of `src/` are split by concern.
-  `domain` calls no port: a rule takes the values `application` has read. Nothing checks that yet.
+  becomes a crate, and `main.rs` is the `handler`. `domain` calls no port: a rule takes the values `application` has
+  read. Nothing checks that yet.
 
 ## Rules for every change
 

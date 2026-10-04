@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
+use toml_edit::{Array, DocumentMut, Item, Value};
 
 /// Where a project declares its structure, from the root
 pub const DECLARATION: &str = ".config/rotproof.toml";
@@ -360,6 +361,53 @@ pub const ADDED: [Added; 1] = [Added {
                   # the index files should show them\n",
 }];
 
+/// The names of the fields of [`ADDED`] the declaration `text` lacks, in that order. `None` when it is not TOML: then
+/// its own error stands.
+pub fn lacking(text: &str) -> Option<Vec<&'static str>> {
+    let document = text.parse::<DocumentMut>().ok()?;
+    Some(
+        ADDED
+            .iter()
+            .map(|field| field.name)
+            .filter(|name| !document.contains_key(name))
+            .collect(),
+    )
+}
+
+/// The declaration `text` with each field of `values` (a name of [`ADDED`], and its first value) added under its
+/// comment, and the fields added as `name = value`. The comments and the values already there are kept, and the
+/// lines end as in the file the project wrote: with `\r\n` when `crlf`, as `text` was read with `\n`.
+pub fn completed(text: &str, values: &[(&str, Vec<String>)], crlf: bool) -> (String, Vec<String>) {
+    let mut document = text
+        .parse::<DocumentMut>()
+        .expect("lacking read it as TOML");
+    let mut added = Vec::new();
+    for (name, value) in values {
+        let field = ADDED
+            .iter()
+            .find(|field| field.name == *name)
+            .unwrap_or_else(|| panic!("{name} is a field of ADDED"));
+        let mut array = Array::new();
+        array.extend(value.iter().map(String::as_str));
+        document.insert(field.name, Item::Value(Value::Array(array)));
+        let mut key = document
+            .key_mut(field.name)
+            .expect("the field was inserted just before");
+        key.leaf_decor_mut()
+            .set_prefix(format!("\n{}{}", field.comment, field.first_value));
+        added.push(format!("{} = {}", field.name, document[field.name]));
+    }
+    let text = document.to_string();
+    (
+        if crlf {
+            text.replace('\n', "\r\n")
+        } else {
+            text
+        },
+        added,
+    )
+}
+
 /// Every stack a declaration may name, `none` last.
 pub fn known_stacks() -> Vec<&'static str> {
     STACKS
@@ -619,6 +667,22 @@ mod tests {
             parse_declaration("areas = []\n").unwrap_err(),
             "missing field `stack`"
         );
+    }
+
+    #[test]
+    fn a_lacking_field_is_added_under_its_comment_and_the_rest_is_kept() {
+        let old = "# The project's own note\nstack = \"none\"\n";
+        assert_eq!(lacking(old), Some(vec!["areas"]));
+        assert_eq!(lacking("stack = \"none\"\nareas = []\n"), Some(Vec::new()));
+        assert_eq!(lacking("stack = "), None);
+        let tags = vec!["billing".to_string(), "ops".to_string()];
+        let (text, added) = completed(old, &[("areas", tags)], false);
+        assert_eq!(added, ["areas = [\"billing\", \"ops\"]"]);
+        assert!(text.starts_with(old), "{text}");
+        assert!(text.contains(&format!("\n{AREAS_COMMENT}")), "{text}");
+        assert_eq!(parse_declaration(&text).unwrap().areas, ["billing", "ops"]);
+        let (crlf, _) = completed(old, &[("areas", Vec::new())], true);
+        assert!(!crlf.replace("\r\n", "").contains('\n'), "{crlf:?}");
     }
 
     #[test]
