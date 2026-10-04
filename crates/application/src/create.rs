@@ -23,9 +23,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::application::bundle::Bundle;
-use crate::application::layers::declaration;
-use crate::application::tree::{exactly, read_text};
+use crate::bundle::Bundle;
+use crate::layers::declaration;
+use crate::tree::{exactly, read_text};
 use domain::bundle::{LOG, in_docs, record_tags as tags_in};
 use domain::hook::SETTINGS;
 use domain::layers::{DECLARATION, Declared, MISSING, completed, lacking, parse_declaration};

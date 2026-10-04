@@ -3,8 +3,8 @@
 
 use std::io;
 
-use crate::application::layers::declaration;
-use crate::application::tree::{code_files, exactly};
+use crate::layers::declaration;
+use crate::tree::{code_files, exactly};
 use domain::layers::{DECLARATION, Declared, MISSING};
 use domain::structure::{Seen, listed, named, problems as judged};
 use domain::tree::Tree;
@@ -65,7 +65,7 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::tree::fake::Fake;
+    use crate::tree::fake::Fake;
 
     #[test]
     fn the_tree_is_read_through_the_port_alone() {

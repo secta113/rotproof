@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use crate::application::tree::{code_files, read_code};
+use crate::tree::{code_files, read_code};
 use domain::code::Parsers;
 use domain::layers::{Declared, Language};
 use domain::markers::{Markers, has_comments, in_file, is_unchecked, markers};

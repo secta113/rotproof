@@ -2,7 +2,7 @@
 
 use std::io;
 
-use crate::application::tree::read_text;
+use crate::tree::read_text;
 use domain::bundle::{
     Docs, KnowledgeFolder, Problems, Specs, expected, in_docs, is_document, knowledge_with_rules,
     specs_with_rules,

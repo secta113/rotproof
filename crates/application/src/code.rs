@@ -19,7 +19,7 @@ pub fn lands(tree: &dyn Tree, aliases: &Aliases, file: &str, specifier: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::tree::fake::Fake;
+    use crate::tree::fake::Fake;
 
     #[test]
     fn under_a_base_url_a_specifier_lands_only_where_a_module_is() {

@@ -5,14 +5,14 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+application = { path = "crates/application" }
 chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive"] }
 domain = { path = "crates/domain" }
 infrastructure = { path = "crates/infrastructure" }
-utils = { path = "crates/utils" }
 
 [workspace]
-members = ["xtask", "crates/domain", "crates/infrastructure", "crates/utils"]
+members = ["xtask", "crates/application", "crates/domain", "crates/infrastructure", "crates/utils"]
 
 # Rotproof's version, the one place that names it: every crate of the workspace takes it, and maturin takes the
 # wheel's from the package
@@ -20,5 +20,4 @@ members = ["xtask", "crates/domain", "crates/infrastructure", "crates/utils"]
 version = "0.1.0"
 
 [dev-dependencies]
-serde_json = "1.0.151"
 tempfile = "3.27.0"

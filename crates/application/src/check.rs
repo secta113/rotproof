@@ -25,10 +25,10 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io;
 
-use crate::application::bundle::Bundle;
-use crate::application::layers::areas;
-use crate::application::links::broken;
-use crate::application::tree::{exactly, read_text};
+use crate::bundle::Bundle;
+use crate::layers::areas;
+use crate::links::broken;
+use crate::tree::{exactly, read_text};
 use domain::bundle::{DOCS, Docs, backlog, in_docs, is_document};
 use domain::code::Parsers;
 use domain::layers::{DECLARATION, area_problems};
@@ -60,7 +60,7 @@ pub struct Report {
 
 /// Every broken rule in the repository `tree` holds. An error is a file that could not be read at all.
 pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
-    let structure = crate::application::structure::problems(tree)?;
+    let structure = crate::structure::problems(tree)?;
     let mut findings: Vec<Finding> = structure
         .found
         .into_iter()
@@ -73,12 +73,12 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
     let mut layers_checked = false;
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
-        let direction = crate::application::direction::problems(tree, parsers, declared)?;
+        let direction = crate::direction::problems(tree, parsers, declared)?;
         findings.extend(direction.into_iter().map(|detail| Finding {
             check: "the layers import only what layers/table.toml allows".into(),
             detail,
         }));
-        let markers = crate::application::markers::problems(tree, parsers, declared)?;
+        let markers = crate::markers::problems(tree, parsers, declared)?;
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {
             check: heading.clone().into(),

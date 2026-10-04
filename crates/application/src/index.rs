@@ -1,7 +1,7 @@
 //! `rotproof index`: every index file written from the frontmatter, and the open items to measure again.
 
-use crate::application::bundle::Bundle;
-use crate::application::layers::areas;
+use crate::bundle::Bundle;
+use crate::layers::areas;
 use domain::bundle::{backlog, stale};
 use domain::schema::Time;
 use domain::tree::{Tree, Writer};
@@ -45,7 +45,7 @@ pub fn index(tree: &dyn Tree, out: &dyn Writer, now: Time) -> Result<Indexed, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::tree::fake::Fake;
+    use crate::tree::fake::Fake;
 
     #[test]
     fn every_index_file_is_written_through_the_port() {

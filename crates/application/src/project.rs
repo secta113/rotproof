@@ -1,6 +1,6 @@
 //! `rotproof guide`: the guide for a stack, named or declared.
 
-use crate::application::layers::declaration;
+use crate::layers::declaration;
 use domain::layers::{DECLARATION, known_stacks};
 use domain::project::guide_named;
 use domain::tree::Tree;

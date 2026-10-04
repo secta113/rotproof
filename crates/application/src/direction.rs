@@ -4,8 +4,8 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use crate::application::code::lands;
-use crate::application::tree::{code_files, exactly, read_code};
+use crate::code::lands;
+use crate::tree::{code_files, exactly, read_code};
 use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
 use domain::direction::{in_dir, judged, parent, place_of, workspace_dirs};
 use domain::layers::{Declared, Language, Layout, Place};

@@ -2,7 +2,7 @@
 
 use std::io;
 
-use crate::application::tree::{Lookup, exactly, lookup};
+use crate::tree::{Lookup, exactly, lookup};
 use domain::layers::{DECLARATION, Declaration, MISSING, parse_declaration};
 use domain::tree::Tree;
 

@@ -28,7 +28,7 @@ pub fn init(tree: &dyn Tree, out: &dyn Writer, stack: &str) -> Result<&'static s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::tree::fake::Fake;
+    use crate::tree::fake::Fake;
 
     #[test]
     fn the_declaration_is_written_once() {

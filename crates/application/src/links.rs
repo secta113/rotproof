@@ -1,7 +1,7 @@
 //! Whether a link in a record resolves, read from the tree: the file it names looked up by its exact names and read,
 //! and judged by the rules in `domain`.
 
-use crate::application::tree::{Lookup, lookup, read_text};
+use crate::tree::{Lookup, lookup, read_text};
 use domain::code::Parsers;
 use domain::links::{Target, missing, target as pointed, to_definition, to_heading};
 use domain::tree::Tree;

@@ -77,6 +77,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "application"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "domain",
+ "infrastructure",
+ "serde_json",
+ "tempfile",
+ "utils",
+]
+
+[[package]]
 name = "ar_archive_writer"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1356,13 +1368,12 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "rotproof"
 version = "0.1.0"
 dependencies = [
+ "application",
  "chrono",
  "clap",
  "domain",
  "infrastructure",
- "serde_json",
  "tempfile",
- "utils",
 ]
 
 [[package]]

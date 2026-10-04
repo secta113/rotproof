@@ -13,7 +13,6 @@ use domain::markers::{MARKERS, either};
 use infrastructure::disk::{Disk, project_root};
 use infrastructure::git::Git;
 use infrastructure::readers::Readers;
-use rotproof::application;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
