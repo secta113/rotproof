@@ -47,7 +47,7 @@ static LIST_ITEM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^ {0,3}[*+-](?:[ \t]|$)").unwrap());
 
 /// The hash the log names a knowledge document by: the first 8 hex digits of SHA-256 of its text, as `read_text`
-/// reads it (every line ending as `\n`, so a checkout with CRLF has the same hash).
+/// reads it (every line ending as `\n` and no byte order mark, so a checkout with CRLF has the same hash).
 pub fn content_hash(text: &str) -> String {
     Sha256::digest(text.as_bytes())
         .iter()
@@ -120,6 +120,19 @@ pub fn dangling_backlog_refs(log: &str, names: &[String]) -> Vec<String> {
                 .decode_utf8_lossy()
                 .into_owned()
         })
+        .filter(|name| !names.contains(name))
+        .collect();
+    dangling.sort();
+    dangling.dedup();
+    dangling
+}
+
+/// The knowledge documents the log names in `refs` (see [`knowledge_refs`]) that are not among `names` (the file names
+/// in `docs/knowledge/`), each once.
+pub fn dangling_knowledge_refs(refs: &[(String, String)], names: &[String]) -> Vec<String> {
+    let mut dangling: Vec<String> = refs
+        .iter()
+        .map(|(name, _)| name.clone())
         .filter(|name| !names.contains(name))
         .collect();
     dangling.sort();
@@ -390,6 +403,19 @@ mod tests {
         assert_eq!(
             dangling_backlog_refs(log, &names),
             ["no-such-item.md", "written-on-windows.md", "月.md"]
+        );
+    }
+
+    #[test]
+    fn a_missing_knowledge_document_is_named_once() {
+        // Named by entries that are not next to each other in the log, with another missing one between them
+        let log = "## 2026-10-02\n\n* **a**\n  * **Knowledge**: knowledge/gone.md@12345678\n\
+                   * **b**\n  * **Knowledge**: knowledge/other.md@12345678, knowledge/api.md@12345678\n\
+                   * **c**\n  * **Knowledge**: knowledge/gone.md@abcdef01\n";
+        let names = ["api.md", "rules.md"].map(String::from).to_vec();
+        assert_eq!(
+            dangling_knowledge_refs(&knowledge_refs(log), &names),
+            ["gone.md", "other.md"]
         );
     }
 

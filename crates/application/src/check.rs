@@ -34,8 +34,8 @@ use domain::code::Parsers;
 use domain::layers::{DECLARATION, area_problems};
 use domain::project::GUIDE;
 use domain::records::{
-    dangling_backlog_refs, floor, knowledge_refs, log_problems, misplaced, root_specs, unlogged,
-    unread_paths,
+    dangling_backlog_refs, dangling_knowledge_refs, floor, knowledge_refs, log_problems, misplaced,
+    root_specs, unlogged, unread_paths,
 };
 use domain::tree::Tree;
 use utils::markdown::links;
@@ -200,13 +200,13 @@ fn records(
             unlogged(&documents, &refs),
         );
         let names = file_names(tree, &in_docs("knowledge"))?;
-        let mut dangling: Vec<String> = refs
-            .iter()
-            .filter(|(name, _)| !names.contains(name))
-            .map(|(name, _)| format!("no such document: docs/knowledge/{name}"))
-            .collect();
-        dangling.dedup();
-        add("the log points only at real knowledge documents", dangling);
+        add(
+            "the log points only at real knowledge documents",
+            dangling_knowledge_refs(&refs, &names)
+                .into_iter()
+                .map(|name| format!("no such document: docs/knowledge/{name}"))
+                .collect(),
+        );
     } else if let Err(why) = log_path {
         add("the log keeps its structure", vec![why]);
     }

@@ -5,7 +5,7 @@
 # after the role, so the two are written once. A role is written for every stack: a port is "an interface", which a
 # stack writes as a Protocol, an interface or a trait.
 #
-# Order matters: `rotproof init` makes the layers in this order, and the documentation lists the imports in it.
+# Order matters: `rotproof create` makes the layers in this order, and the documentation lists the imports in it.
 
 [[layer]]
 name = "handler"

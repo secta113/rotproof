@@ -66,6 +66,34 @@ fn a_clean_repository_passes() {
 }
 
 #[test]
+fn a_record_with_a_byte_order_mark_passes() {
+    // As PowerShell 5.1 writes UTF-8 with `-Encoding UTF8`
+    let root = clean_repo();
+    let docs = root.path().join("docs");
+    fs::write(
+        docs.join("backlog/x.md"),
+        "\u{feff}---\ntype: Backlog Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\
+         verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
+         # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n",
+    )
+    .unwrap();
+    fs::write(
+        docs.join("log.md"),
+        "\u{feff}# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &root_arg(root.path()), "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        fs::read_to_string(docs.join("backlog/index.md"))
+            .unwrap()
+            .contains("[X](x.md)")
+    );
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
 fn each_broken_rule_fails_under_its_check() {
     let item = |details: &str| {
         format!(

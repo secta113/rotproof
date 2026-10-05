@@ -419,18 +419,16 @@ docker compose run --rm dev maturin build --release --target x86_64-pc-windows-m
 
 Each wheel carries `LICENSE-MIT`, `LICENSE-APACHE` and `THIRD-PARTY-LICENSES.txt` in its `.dist-info/licenses/`
 (`license-files` in `pyproject.toml`). The container's Linux wheel is tagged `manylinux_2_34`, after the container's
-glibc; it serves for trying the wheel, not for release.
+glibc, and its Windows wheel is cross-compiled with cargo-xwin, which downloads the MSVC runtime and the Windows SDK
+under Microsoft's license. Both serve for trying the wheels, not for release.
 
 A release is a pushed tag `v<version>` that matches `Cargo.toml`. `.github/workflows/release.yml` checks the licenses,
 builds the Linux wheel in the manylinux2014 image (glibc 2.17) and the Windows wheel on Windows, installs each into a
 fresh venv on its platform and runs it (`.github/smoke.sh`), and installs the Linux wheel in the manylinux2014 image
 too, so the oldest glibc the tag claims is tested. It then publishes the wheels to PyPI and makes the GitHub Release
 with the wheels, an archive of the binary per platform taken out of the tested wheel, and `SHA256SUMS`. Run by hand
-(`gh workflow run release.yml`), it does everything but publish.
-
-The Windows wheel is cross-compiled with cargo-xwin, which downloads the MSVC runtime and the Windows SDK under
-Microsoft's license. CI builds and tests it natively on Windows. Other platforms (macOS, Linux aarch64) are welcome as
-contributions.
+(`gh workflow run release.yml`), it does everything but publish. CI builds and tests the Windows wheel natively on
+Windows too. Other platforms (macOS, Linux aarch64) are welcome as contributions.
 
 ## License
 
