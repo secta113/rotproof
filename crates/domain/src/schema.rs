@@ -1,10 +1,10 @@
 //! The frontmatter of each record type: backlog items, guides, specs and knowledge documents.
 //!
 //! OKF lets a producer add any key, and tells readers not to reject one they do not know. So an unknown field passes
-//! as an extension, unless it looks like a misspelling of a field the type reads (OKF's or Rotproof's): that one fails,
-//! as a misspelled optional field would otherwise be silently dropped. Every field OKF defines for a concept (sections 4 and 5)
-//! passes as OKF writes it, so a document another OKF tool wrote correctly does not fail. The fields of an Attested
-//! Computation (section 10) do not, as no such document belongs in the records.
+//! as an extension, unless it looks like a misspelling of a field the type reads (OKF's or Rotproof's): that one
+//! fails, as a misspelled optional field would otherwise be silently dropped. Every field OKF defines for a concept
+//! (sections 4 and 5) passes as OKF writes it, so a document another OKF tool wrote correctly does not fail. The
+//! fields of an Attested Computation (section 10) do not, as no such document belongs in the records.
 
 use std::fmt::Display;
 use std::sync::LazyLock;
@@ -222,7 +222,8 @@ pub fn backlog_doc(text: &str) -> Result<BacklogDoc, String> {
     Ok(BacklogDoc::Item(item, sections))
 }
 
-/// For tests: a record closed as it should be, `status: deprecated` and `# Resolution` as the first heading of its body.
+/// For tests: a record closed as it should be, `status: deprecated` and `# Resolution` as the first heading of its
+/// body.
 #[cfg(test)]
 pub(crate) fn closed_record(text: &str, resolution: &str) -> String {
     let text = text.replace("status: stable", "status: deprecated");

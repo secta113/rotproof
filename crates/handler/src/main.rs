@@ -218,7 +218,8 @@ fn check(root: &Path) -> Result<bool, String> {
     Ok(found.is_empty())
 }
 
-/// Answer the agent's stop hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "do not stop", and a broken hook would keep the agent from stopping instead of being shown.
+/// Answer the agent's stop hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "do not
+/// stop", and a broken hook would keep the agent from stopping instead of being shown.
 fn stop_hook(root: &Path) -> ExitCode {
     let mut input = String::new();
     let answer = std::io::stdin()

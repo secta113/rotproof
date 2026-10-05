@@ -10,6 +10,7 @@ mod layers;
 mod licenses;
 mod manifests;
 mod pure;
+mod width;
 
 use std::collections::BTreeSet;
 use std::env;
@@ -225,6 +226,17 @@ fn domain_pure(root: &Path) -> Result<Vec<String>, String> {
     Ok(pure::problems(&files))
 }
 
+/// The lines with a comment over the width, in every tracked `.rs` file
+fn comment_width(root: &Path) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    for path in tracked(root)? {
+        if utils::rust::is_source(&path) {
+            files.push((path.clone(), read(root, &path)?));
+        }
+    }
+    Ok(width::problems(&files))
+}
+
 /// The version of cargo-about the Dockerfile and the licenses workflow install
 fn pinned_about(root: &Path) -> Result<String, String> {
     licenses::pinned_version(&read(root, "Dockerfile")?, &read(root, licenses::WORKFLOW)?)
@@ -379,6 +391,10 @@ fn main() -> ExitCode {
     results.push((
         "Domain calls no port",
         report("Domain calls no port", domain_pure(root)),
+    ));
+    results.push((
+        "Comment width",
+        report("Comment width", comment_width(root)),
     ));
     println!("\n{}", "=".repeat(40));
     for (name, ok) in &results {

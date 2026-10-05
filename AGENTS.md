@@ -11,7 +11,7 @@ and why, is in `README.md`.
 | `layers/` | The layer definitions, built into the binary: `table.toml` (what the layers are, in every stack) and one layout per stack (`python.toml`, `typescript.toml`, `rust.toml`: where each layer lives, the files that make it, and the files its toolchain needs at the root) |
 | `records/` | The records skeleton, built into the binary: `rules.md`, `spec-rules.md` and `knowledge-rules.md` (the backlog, spec and knowledge rules Rotproof writes into every project), and `log.md` (the log `rotproof create` starts) |
 | `project/` | What Rotproof writes into a project outside `docs/`, built into the binary. Each file is named after the one it becomes, without a leading dot and with `.in` added, so no agent here reads a project's `AGENTS.md` as its own: the project's files at the top (`AGENTS.md.in`, `CLAUDE.md.in`, `README.md.in`, `gitattributes.in`), `gitignore/` (one per stack), `pypi/` (the pin, the workflow and the README's instructions for the stacks that install Rotproof from PyPI), `unpinned/` (the README's instructions for the others), and `rotproof/` (the parts of `.rotproof/AGENTS.md`, the guide Rotproof generates for each stack) |
-| `xtask/` | The CI entry point (`cargo xtask ci`), which also checks Rotproof's own layers with its library (`layers.rs`), that every crate takes its dependencies from the workspace (`manifests.rs`) and that `domain` calls no port (`pure.rs`), and `cargo xtask licenses`, which writes `THIRD-PARTY-LICENSES.txt` (`--check`: checks it) |
+| `xtask/` | The CI entry point (`cargo xtask ci`), which also checks Rotproof's own layers with its library (`layers.rs`), that every crate takes its dependencies from the workspace (`manifests.rs`), that `domain` calls no port (`pure.rs`) and the width of comment lines (`width.rs`), and `cargo xtask licenses`, which writes `THIRD-PARTY-LICENSES.txt` (`--check`: checks it) |
 | `.cargo/` | The `cargo xtask` alias |
 | `.github/` | GitHub Actions: `ci.yml` runs `cargo xtask ci` in the container, and builds and installs the wheels on Linux and Windows; `licenses.yml` checks `THIRD-PARTY-LICENSES.txt` with cargo-about; `release.yml` releases a pushed tag to PyPI and GitHub Releases, after running each wheel through `smoke.sh` |
 | `Cargo.toml` | The workspace of the crates, and the one place that names Rotproof's version (`[workspace.package]`: every crate takes it, and maturin takes the wheel version from it) and each dependency's version or path (`[workspace.dependencies]`: every crate takes them with `workspace = true`) |
@@ -106,6 +106,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
   fails.
 - **Write Rotproof where prose names the tool, and `rotproof` for the command, the package, the crate and file
   names,** as Ruff and `ruff` are written. A sentence that starts with the command still writes it in backticks.
+- **Wrap a line that holds a comment at 120 characters.** rustfmt wraps code, not comments; `cargo xtask ci` fails on
+  a longer one in any tracked `.rs` file (`xtask/src/width.rs`).
 
 - **Run CI with `cargo xtask ci`, on the host or in the container (`docker compose run --rm dev cargo xtask ci`).** The
   container is the Linux of CI and needs only Docker. On Windows, the host needs Visual Studio's C++ tools and the

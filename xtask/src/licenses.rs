@@ -5,9 +5,9 @@
 //! - **The list**, in every run of `cargo xtask ci`: the file names every crate `cargo tree` says the binary links, and
 //!   no other. cargo alone answers it. A new or bumped dependency fails here, and the only way to pass is to run
 //!   cargo-about, which fails on a license outside `accepted` in `about.toml`.
-//! - **The text**, in `cargo xtask licenses --check`: the file is what the pinned cargo-about writes now. It catches what
-//!   the list cannot (a file edited by hand, a change to `about.toml` or `about.hbs`), and runs only when those files
-//!   change (`.github/workflows/licenses.yml`) and before a release.
+//! - **The text**, in `cargo xtask licenses --check`: the file is what the pinned cargo-about writes now. It catches
+//!   what the list cannot (a file edited by hand, a change to `about.toml` or `about.hbs`), and runs only when those
+//!   files change (`.github/workflows/licenses.yml`) and before a release.
 
 use std::collections::BTreeSet;
 

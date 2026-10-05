@@ -2,8 +2,8 @@
 //!
 //! - Every layer of the stack's layout is present or declared absent, and no layer declared absent is present.
 //! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`) and the paths the
-//!   project lists in `unchecked`. A path in `unchecked` exists and holds no layer, so a layer cannot be switched off by
-//!   listing it.
+//!   project lists in `unchecked`. A path in `unchecked` exists and holds no layer, so a layer cannot be switched
+//!   off by listing it.
 //! - `ui` holds only its levels: code in it beside them fails, except the files the layout makes for `ui` itself. A
 //!   part there would have no place in the order of levels, and an import through it (`atoms → ui/helpers.py →
 //!   domain`) would pass every direct check of the direction.

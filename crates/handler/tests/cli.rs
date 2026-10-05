@@ -832,7 +832,8 @@ fn create_fails_without_a_declaration_it_can_read() {
             Some("stack = \"python\"\nareas = [\"a\"]\nabsnet = []\n"),
             "unknown field",
         ),
-        // A declaration written before areas existed gets the field instead: create_adds_the_fields_the_declaration_lacks
+        // A declaration written before areas existed gets the field instead:
+        // create_adds_the_fields_the_declaration_lacks
     ];
     for (declaration, said) in cases {
         let root = match declaration {

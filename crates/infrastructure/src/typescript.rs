@@ -198,7 +198,8 @@ pub fn aliases(tree: &dyn Tree) -> io::Result<Aliases> {
 }
 
 /// The options of the config at `name` (from the root), its local `extends` followed: a field it sets wins over the
-/// configs it extends, and a later one in `extends` over an earlier one. `None`, with a problem, when it cannot be read.
+/// configs it extends, and a later one in `extends` over an earlier one. `None`, with a problem, when it cannot be
+/// read.
 fn load(
     tree: &dyn Tree,
     name: &str,
