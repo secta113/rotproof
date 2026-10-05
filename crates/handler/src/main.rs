@@ -195,7 +195,7 @@ fn create(root: &Path) -> Result<(), String> {
 fn check(root: &Path) -> Result<bool, String> {
     let report =
         application::check::check(&Disk::new(root), &Readers).map_err(|e| e.to_string())?;
-    for why in &report.skipped {
+    if let Some(why) = &report.skipped {
         println!("{why}");
     }
     let found = report.findings;

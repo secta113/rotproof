@@ -53,8 +53,8 @@ pub struct Finding {
 #[derive(Debug, Default)]
 pub struct Report {
     pub findings: Vec<Finding>,
-    /// Checks that did not run, and why
-    pub skipped: Vec<String>,
+    /// The check that did not run, and why: the structure check says it of the layers of a repository of records only
+    pub skipped: Option<String>,
     /// Whether the tree was checked against a stack's layers (not for `stack = "none"`)
     pub layers_checked: bool,
 }
@@ -70,7 +70,6 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
             detail,
         })
         .collect();
-    let skipped: Vec<String> = structure.skipped.into_iter().collect();
     let mut layers_checked = false;
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
@@ -106,7 +105,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
     findings.extend(records(tree, parsers, structure.areas)?);
     Ok(Report {
         findings,
-        skipped,
+        skipped: structure.skipped,
         layers_checked,
     })
 }
