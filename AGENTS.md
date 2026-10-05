@@ -132,8 +132,12 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
   internal crates of Ruff, whose API changes between any two versions. Bump them by hand when the toolchain changes
   (a new Ruff may need a newer Rust) and when Python gains syntax Rotproof fails to read.
 - **Try a wheel as a user gets it:** build it (README) and `pip install` it into a fresh venv, outside the build tree.
-- **A change that can fail records that passed before (a new rule, a stricter rule) raises the minor version** while
-  Rotproof is `0.x`. Projects pin the exact version, so they take the change in a commit of their own.
+- **While Rotproof is `0.x`, a release that can make something that worked under the previous version fail or behave
+  otherwise raises the minor version; anything else raises the patch version.** Minor: a new or stricter rule, a
+  command, flag or field removed, renamed or given another meaning, a command line that succeeded and now stops or
+  exits otherwise, a fix that rejects what was wrongly accepted. Patch: a fix that accepts what was wrongly rejected or
+  stops a crash, the words of a message, a new command or optional flag, documentation. When in doubt, minor. Projects
+  pin the exact version, so they take the change in a commit of their own.
 - **Raise the version in `Cargo.toml` and the `pip install rotproof==<version>` in `README.md` together;** `cargo xtask
   ci` fails while they differ (the README is the page on PyPI). Release by pushing the tag `v<version>` of that
   commit. Before the tag, `gh workflow run release.yml` builds and tests the release without publishing it.
