@@ -14,7 +14,7 @@
 //! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
 
 use crate::layers::{
-    Declared, Language, Layout, RECORDS_ONLY, known_stacks, layout, listed, table,
+    Declared, Language, Layout, RECORDS_ONLY, importable, known_stacks, layout, listed, table,
 };
 
 /// Rotproof's guide, from the root
@@ -178,19 +178,19 @@ fn layers_section(layout: &Layout) -> String {
         "|---|---|---|".to_string(),
     ];
     for place in layout.places(&table()) {
-        let imports = if place.parent.is_some() {
-            let below = if place.below.is_empty() {
-                ""
-            } else {
-                "The levels below it, and "
-            };
-            format!("{below}{}", listed(&place.imports))
-        } else if place.name == "ui" {
+        let importable = importable(&place);
+        let imports = if place.name == "ui" {
             "Nothing: it holds only its levels".to_string()
-        } else if place.imports.is_empty() {
+        } else if importable.is_empty() {
             "No other layer".to_string()
         } else {
-            listed(&place.imports)
+            let mut chars = importable.chars();
+            chars
+                .next()
+                .into_iter()
+                .flat_map(char::to_uppercase)
+                .chain(chars)
+                .collect()
         };
         rows.push(format!(
             "| `{}` | `{}/` | {imports} |",
@@ -272,6 +272,21 @@ mod tests {
                 !layout.without.contains(&"ui".to_string()),
                 "{stack}: the rule on ui goes with the layer"
             );
+        }
+    }
+
+    #[test]
+    fn the_table_says_what_each_place_may_import_as_its_documentation_does() {
+        let layout = layout("python").unwrap();
+        let text = guide("python", Some(&layout));
+        for row in [
+            "| `ui` | `ui/` | Nothing: it holds only its levels |",
+            "| `ui.molecules` | `ui/molecules/` | The levels below it, and `utils` |",
+            "| `ui.atoms` | `ui/atoms/` | `utils` |",
+            "| `domain` | `domain/` | `utils` |",
+            "| `utils` | `utils/` | No other layer |",
+        ] {
+            assert!(text.contains(row), "no row {row}:\n{text}");
         }
     }
 

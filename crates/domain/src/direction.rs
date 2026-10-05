@@ -18,7 +18,7 @@
 //!
 //! The rules here judge an import once it is resolved to a place; `application` reads the code and resolves it.
 
-use crate::layers::{Place, listed};
+use crate::layers::{Place, importable};
 use utils::paths::{parent, within};
 
 /// The finding for an import from `from` that lands in `to`, or `None` when the table allows it. `what` says what
@@ -90,15 +90,11 @@ fn described(from: &Place, to: &Place) -> String {
 
 /// What a place may import, for the message.
 fn what_it_may_import(place: &Place) -> String {
-    match (place.below.is_empty(), place.imports.is_empty()) {
-        (true, true) => format!("{} imports no other layer", place.name),
-        (true, false) => format!("{} may import {}", place.name, listed(&place.imports)),
-        (false, true) => format!("{} may import the levels below it", place.name),
-        (false, false) => format!(
-            "{} may import the levels below it and {}",
-            place.name,
-            listed(&place.imports)
-        ),
+    let importable = importable(place);
+    if importable.is_empty() {
+        format!("{} imports no other layer", place.name)
+    } else {
+        format!("{} may import {importable}", place.name)
     }
 }
 
@@ -163,7 +159,7 @@ mod tests {
         assert_eq!(say("ui.atoms"), "ui.atoms may import `utils`");
         assert_eq!(
             say("ui.molecules"),
-            "ui.molecules may import the levels below it and `utils`"
+            "ui.molecules may import the levels below it, and `utils`"
         );
     }
 

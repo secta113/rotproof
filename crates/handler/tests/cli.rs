@@ -1532,7 +1532,7 @@ fn every_form_of_typescript_import_is_judged() {
         "src/domain/song.ts:3: imports @/infrastructure/db (src/infrastructure/db), in infrastructure; ",
         "src/domain/song.ts:4: imports ../handler/main (src/handler/main), in handler; ",
         "src/ui/molecules/Row.tsx:2: imports ../organisms/List (src/ui/organisms/List), in ui.organisms; \
-         ui.molecules may import the levels below it and `utils`",
+         ui.molecules may import the levels below it, and `utils`",
         "src/ui/molecules/Row.tsx:3: imports ../index.css (src/ui/index.css), in ui outside its levels; ",
         "src/ui/molecules/Row.tsx:4: imports ../../domain/logo.svg?url (src/domain/logo.svg), in domain; ",
     ] {
@@ -1692,7 +1692,7 @@ fn every_form_of_import_is_judged() {
     for line in [
         "domain/model.py:5: imports application.play, in application; domain may import `utils`",
         "domain/model.py:7: imports infrastructure.db, in infrastructure; ",
-        "ui/molecules/row.py:1: imports ui.organisms, in ui.organisms; ui.molecules may import the levels below it \
+        "ui/molecules/row.py:1: imports ui.organisms, in ui.organisms; ui.molecules may import the levels below it, \
          and `utils`",
         "ui/molecules/row.py:4: imports ui.pages, in ui.pages; ",
         "ui/molecules/row.py:5: imports ui, in ui outside its levels; ",

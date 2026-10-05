@@ -248,19 +248,24 @@ pub fn listed(names: &[String]) -> String {
     }
 }
 
+/// What a place may import, as one phrase for its documentation, the guide's table and the direction check:
+/// "the levels below it, and `utils`". Empty when it imports no other layer.
+pub fn importable(place: &Place) -> String {
+    match (place.below.is_empty(), place.imports.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => listed(&place.imports),
+        (false, true) => "the levels below it".to_string(),
+        (false, false) => format!("the levels below it, and {}", listed(&place.imports)),
+    }
+}
+
 /// The documentation of a place: its role, then what it may import.
 fn doc(place: &Place) -> String {
-    let imports = if place.parent.is_some() {
-        let below = if place.below.is_empty() {
-            ""
-        } else {
-            "the levels below it, and "
-        };
-        format!("May import {below}{}.", listed(&place.imports))
-    } else if place.imports.is_empty() {
+    let importable = importable(place);
+    let imports = if importable.is_empty() {
         "Imports no other layer.".to_string()
     } else {
-        format!("May import {}.", listed(&place.imports))
+        format!("May import {importable}.")
     };
     format!("{}\n\n{imports}", place.role.trim())
 }
