@@ -8,11 +8,11 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-application = { path = "../application" }
-chrono = "0.4.45"
-clap = { version = "4.6.7", features = ["derive"] }
-domain = { path = "../domain" }
-infrastructure = { path = "../infrastructure" }
+application.workspace = true
+chrono.workspace = true
+clap.workspace = true
+domain.workspace = true
+infrastructure.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true

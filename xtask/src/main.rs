@@ -8,6 +8,7 @@
 mod drift;
 mod layers;
 mod licenses;
+mod manifests;
 
 use std::collections::BTreeSet;
 use std::env;
@@ -191,6 +192,20 @@ fn install_version(root: &Path) -> Result<Vec<String>, String> {
     ))
 }
 
+/// Where a member of the workspace names a dependency's source itself. The floor: at least one member is read
+fn dependencies(root: &Path) -> Result<Vec<String>, String> {
+    let members = manifests::members(&read(root, "Cargo.toml")?)?;
+    if members.is_empty() {
+        return Err("Cargo.toml lists no member, so no crate's dependencies were read".into());
+    }
+    let mut found = Vec::new();
+    for member in members {
+        let path = format!("{member}/Cargo.toml");
+        found.extend(manifests::problems(&path, &read(root, &path)?)?);
+    }
+    Ok(found)
+}
+
 /// The version of cargo-about the Dockerfile and the licenses workflow install
 fn pinned_about(root: &Path) -> Result<String, String> {
     licenses::pinned_version(&read(root, "Dockerfile")?, &read(root, licenses::WORKFLOW)?)
@@ -329,6 +344,10 @@ fn main() -> ExitCode {
     results.push((
         "Install version (README)",
         report("Install version (README)", install_version(root)),
+    ));
+    results.push((
+        "Dependencies (workspace)",
+        report("Dependencies (workspace)", dependencies(root)),
     ));
     results.push((
         "Third-party licenses",

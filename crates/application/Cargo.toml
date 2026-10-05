@@ -7,13 +7,13 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-domain = { path = "../domain" }
-utils = { path = "../utils" }
+domain.workspace = true
+utils.workspace = true
 
 # The tests read real trees with the real readers too: tests may import every layer, and the direction check does not
 # read dev-dependencies
 [dev-dependencies]
-chrono = "0.4.45"
-infrastructure = { path = "../infrastructure" }
-serde_json = "1.0.151"
-tempfile = "3.27.0"
+chrono.workspace = true
+infrastructure.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

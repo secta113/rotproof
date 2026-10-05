@@ -4,12 +4,13 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
-# Rotproof's own layers are checked by its library (layers.rs)
+# Rotproof's own layers are checked by its library (layers.rs), and the manifests read with toml_edit (manifests.rs)
 [dependencies]
-application = { path = "../crates/application" }
-domain = { path = "../crates/domain" }
-infrastructure = { path = "../crates/infrastructure" }
-utils = { path = "../crates/utils" }
+application.workspace = true
+domain.workspace = true
+infrastructure.workspace = true
+toml_edit.workspace = true
+utils.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true

@@ -7,20 +7,18 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-domain = { path = "../domain" }
-ignore = "0.4.33"
-# Pinned exactly, and together: oxc's API changes between minor versions
-oxc_allocator = "=0.152.0"
-oxc_ast = "=0.152.0"
-oxc_ast_visit = "=0.152.0"
-oxc_parser = "=0.152.0"
-oxc_span = "=0.152.0"
-# Pinned exactly: an internal crate of Ruff, whose API changes between any two versions
-ruff_python_ast = "=0.0.16"
-ruff_python_parser = "=0.0.16"
-serde_json = "1.0.151"
-toml_edit = { version = "0.25.15", default-features = false, features = ["parse", "display"] }
-utils = { path = "../utils" }
+domain.workspace = true
+ignore.workspace = true
+oxc_allocator.workspace = true
+oxc_ast.workspace = true
+oxc_ast_visit.workspace = true
+oxc_parser.workspace = true
+oxc_span.workspace = true
+ruff_python_ast.workspace = true
+ruff_python_parser.workspace = true
+serde_json.workspace = true
+toml_edit.workspace = true
+utils.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile.workspace = true

@@ -11,10 +11,10 @@ and why, is in `README.md`.
 | `layers/` | The layer definitions, built into the binary: `table.toml` (what the layers are, in every stack) and one layout per stack (`python.toml`, `typescript.toml`, `rust.toml`: where each layer lives, the files that make it, and the files its toolchain needs at the root) |
 | `records/` | The records skeleton, built into the binary: `rules.md`, `spec-rules.md` and `knowledge-rules.md` (the backlog, spec and knowledge rules Rotproof writes into every project), and `log.md` (the log `rotproof create` starts) |
 | `project/` | What Rotproof writes into a project outside `docs/`, built into the binary. Each file is named after the one it becomes, without a leading dot and with `.in` added, so no agent here reads a project's `AGENTS.md` as its own: the project's files at the top (`AGENTS.md.in`, `CLAUDE.md.in`, `README.md.in`, `gitattributes.in`), `gitignore/` (one per stack), `pypi/` (the pin, the workflow and the README's instructions for the stacks that install Rotproof from PyPI), `unpinned/` (the README's instructions for the others), and `rotproof/` (the parts of `.rotproof/AGENTS.md`, the guide Rotproof generates for each stack) |
-| `xtask/` | The CI entry point (`cargo xtask ci`), which also checks Rotproof's own layers with its library (`layers.rs`), and `cargo xtask licenses`, which writes `THIRD-PARTY-LICENSES.txt` (`--check`: checks it) |
+| `xtask/` | The CI entry point (`cargo xtask ci`), which also checks Rotproof's own layers with its library (`layers.rs`) and that every crate takes its dependencies from the workspace (`manifests.rs`), and `cargo xtask licenses`, which writes `THIRD-PARTY-LICENSES.txt` (`--check`: checks it) |
 | `.cargo/` | The `cargo xtask` alias |
 | `.github/` | GitHub Actions: `ci.yml` runs `cargo xtask ci` in the container, and builds and installs the wheels on Linux and Windows; `licenses.yml` checks `THIRD-PARTY-LICENSES.txt` with cargo-about; `release.yml` releases a pushed tag to PyPI and GitHub Releases, after running each wheel through `smoke.sh` |
-| `Cargo.toml` | The workspace of the crates, and the one place that names Rotproof's version (`[workspace.package]`: every crate takes it, and maturin takes the wheel version from it) |
+| `Cargo.toml` | The workspace of the crates, and the one place that names Rotproof's version (`[workspace.package]`: every crate takes it, and maturin takes the wheel version from it) and each dependency's version or path (`[workspace.dependencies]`: every crate takes them with `workspace = true`) |
 | `rust-toolchain.toml` | The one place that names the toolchain. The Dockerfile and CI install from it |
 | `Dockerfile`, `compose.yaml` | The development container: the Linux of CI, with the packaging tools and cargo-about |
 | `pyproject.toml` | The pip package: a wheel that carries only the binary and the licenses (maturin, `bindings = "bin"`, built from `crates/handler/Cargo.toml`) |
@@ -106,6 +106,9 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
   Windows SDK; without the SDK, linking fails (`kernel32.lib` not found), and Git Bash's own `link` gets in the way.
 - **Change the toolchain version only in `rust-toolchain.toml`,** and the base image (`Dockerfile`, the `container`
   in `.github/workflows/ci.yml`) to the same version. Change the packaging tools only in `requirements-build.txt`.
+- **Add or bump a dependency in `[workspace.dependencies]` of the root `Cargo.toml`,** and take it in a crate with
+  `<name>.workspace = true`. `cargo xtask ci` fails on a crate that names a dependency's version or path itself (in
+  any table of dependencies, under `[target.*]` too), so a dependency two crates use cannot drift to two versions.
 - **After a change to the dependencies, run `cargo xtask licenses` and commit `THIRD-PARTY-LICENSES.txt` with it.**
   It needs cargo-about, at the version the `Dockerfile` installs (the container has it; on the host, the command
   prints how to install it). `cargo xtask ci` fails while the file misses a crate `cargo tree` says the binary links,

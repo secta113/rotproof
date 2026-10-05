@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-pulldown-cmark = { version = "0.13.4", default-features = false }
-regex = "1.13.1"
-unicode-general-category = "1.1.0"
-yaml-rust2 = "0.13.0"
+pulldown-cmark.workspace = true
+regex.workspace = true
+unicode-general-category.workspace = true
+yaml-rust2.workspace = true

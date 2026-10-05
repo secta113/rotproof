@@ -13,3 +13,35 @@ resolver = "3"
 # wheel's from the handler
 [workspace.package]
 version = "0.1.0"
+
+# Every dependency of every crate, the one place that names its version or path: each crate takes it with
+# `workspace = true`, and `cargo xtask ci` fails on one that names its own
+[workspace.dependencies]
+application = { path = "crates/application" }
+domain = { path = "crates/domain" }
+infrastructure = { path = "crates/infrastructure" }
+utils = { path = "crates/utils" }
+
+chrono = "0.4.45"
+clap = { version = "4.6.7", features = ["derive"] }
+ignore = "0.4.33"
+# Pinned exactly, and together: oxc's API changes between minor versions
+oxc_allocator = "=0.152.0"
+oxc_ast = "=0.152.0"
+oxc_ast_visit = "=0.152.0"
+oxc_parser = "=0.152.0"
+oxc_span = "=0.152.0"
+percent-encoding = "2.3.2"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+regex = "1.13.1"
+# Pinned exactly: an internal crate of Ruff, whose API changes between any two versions
+ruff_python_ast = "=0.0.16"
+ruff_python_parser = "=0.0.16"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+tempfile = "3.27.0"
+toml = "1.1.6"
+toml_edit = { version = "0.25.15", default-features = false, features = ["parse", "display"] }
+unicode-general-category = "1.1.0"
+yaml-rust2 = "0.13.0"
