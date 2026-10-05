@@ -2036,6 +2036,7 @@ dependencies = [
  "application",
  "domain",
  "infrastructure",
+ "regex",
  "tempfile",
  "toml_edit",
  "utils",

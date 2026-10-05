@@ -4,11 +4,13 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
-# Rotproof's own layers are checked by its library (layers.rs), and the manifests read with toml_edit (manifests.rs)
+# Rotproof's own layers are checked by its library (layers.rs), the manifests read with toml_edit (manifests.rs),
+# and the code of domain read with regex (pure.rs)
 [dependencies]
 application.workspace = true
 domain.workspace = true
 infrastructure.workspace = true
+regex.workspace = true
 toml_edit.workspace = true
 utils.workspace = true
 

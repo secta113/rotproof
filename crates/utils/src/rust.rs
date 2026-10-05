@@ -1,4 +1,4 @@
-//! Reading Rust source with a small scanner of Rotproof's own: its comments.
+//! Reading Rust source with a small scanner of Rotproof's own: its comments, and the code alone.
 //!
 //! - **Its comments:** `//` to the end of the line, and `/* */`, which nest. Doc comments (`///`, `//!`, `/** */`) are
 //!   comments too: Rust writes them as comments, and the text in them is read as text.
@@ -16,29 +16,68 @@ pub fn is_source(name: &str) -> bool {
 
 /// Every comment of a source: its byte offset, and its text with its delimiters.
 pub fn comments(source: &str) -> Vec<(usize, String)> {
+    spans(source)
+        .into_iter()
+        .filter(|(kind, _, _)| *kind == Kind::Comment)
+        .map(|(_, start, end)| (start, source[start..end].to_string()))
+        .collect()
+}
+
+/// The source with every comment and every string or character literal blanked with spaces, its line breaks kept: the
+/// code alone, at the same byte offsets and on the same lines.
+pub fn code(source: &str) -> String {
+    let mut bytes = source.as_bytes().to_vec();
+    for (_, start, end) in spans(source) {
+        for byte in &mut bytes[start..end] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+    }
+    String::from_utf8(bytes).expect("only whole characters are blanked, each byte with a space")
+}
+
+/// What the scanner sets apart from the code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Comment,
+    /// A string or a character literal, prefixed forms and raw strings included
+    Literal,
+}
+
+/// Every comment and literal of a source, in order: its kind and its byte range.
+fn spans(source: &str) -> Vec<(Kind, usize, usize)> {
     let b = source.as_bytes();
     let mut found = Vec::new();
     let mut i = 0;
     while i < b.len() {
-        match b[i] {
+        let (kind, end) = match b[i] {
             b'/' if b.get(i + 1) == Some(&b'/') => {
                 let end = b[i..]
                     .iter()
                     .position(|&c| c == b'\n')
                     .map_or(b.len(), |n| i + n);
-                found.push((i, source[i..end].to_string()));
-                i = end;
+                (Some(Kind::Comment), end)
             }
-            b'/' if b.get(i + 1) == Some(&b'*') => {
-                let end = block_comment_end(b, i);
-                found.push((i, source[i..end].to_string()));
-                i = end;
+            b'/' if b.get(i + 1) == Some(&b'*') => (Some(Kind::Comment), block_comment_end(b, i)),
+            b'"' => (Some(Kind::Literal), string_end(b, i + 1)),
+            // Only the `'` itself when it starts a lifetime or a label
+            b'\'' => {
+                let end = quote_end(b, i);
+                ((end > i + 1).then_some(Kind::Literal), end)
             }
-            b'"' => i = string_end(b, i + 1),
-            b'\'' => i = quote_end(b, i),
-            c if is_identifier(c) => i = after_identifier(b, i),
-            _ => i += 1,
+            // An identifier, or the prefix of the literal it runs into
+            c if is_identifier(c) => {
+                let end = after_identifier(b, i);
+                let literal = b[i..end].iter().any(|&c| c == b'"' || c == b'\'');
+                (literal.then_some(Kind::Literal), end)
+            }
+            _ => (None, i + 1),
+        };
+        if let Some(kind) = kind {
+            found.push((kind, i, end));
         }
+        i = end;
     }
     found
 }
@@ -220,6 +259,17 @@ let k = '/'; let l = 'é'; let m = '\u{2F}'; // four
         );
         assert_eq!(texts("let s = \"open // not\n"), Vec::<String>::new());
         assert_eq!(texts("let c = '\\"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_code_alone_keeps_its_offsets_and_lines() {
+        let source = "let s = \"{x} é\"; // a {\nlet c = '}'; let l: &'a str = r#\"}\"#; /* b\n */ f(b'{');\n";
+        let code = code(source);
+        assert_eq!(code.len(), source.len());
+        assert_eq!(
+            code,
+            "let s =         ;       \nlet c =    ; let l: &'a str =       ;     \n    f(    );\n"
+        );
     }
 
     #[test]

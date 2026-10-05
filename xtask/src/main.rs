@@ -9,6 +9,7 @@ mod drift;
 mod layers;
 mod licenses;
 mod manifests;
+mod pure;
 
 use std::collections::BTreeSet;
 use std::env;
@@ -206,6 +207,24 @@ fn dependencies(root: &Path) -> Result<Vec<String>, String> {
     Ok(found)
 }
 
+/// Where `domain` takes a port or does I/O, in its `.rs` files
+fn domain_pure(root: &Path) -> Result<Vec<String>, String> {
+    let dir = root.join(pure::DOMAIN);
+    let mut names: Vec<String> = fs::read_dir(&dir)
+        .map_err(|e| format!("cannot read {}: {e}", pure::DOMAIN))?
+        .map(|entry| entry.map(|e| e.file_name().to_string_lossy().into_owned()))
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("cannot read {}: {e}", pure::DOMAIN))?;
+    names.retain(|name| utils::rust::is_source(name));
+    names.sort();
+    let mut files = Vec::new();
+    for name in names {
+        let path = format!("{}/{name}", pure::DOMAIN);
+        files.push((path.clone(), read(root, &path)?));
+    }
+    Ok(pure::problems(&files))
+}
+
 /// The version of cargo-about the Dockerfile and the licenses workflow install
 fn pinned_about(root: &Path) -> Result<String, String> {
     licenses::pinned_version(&read(root, "Dockerfile")?, &read(root, licenses::WORKFLOW)?)
@@ -356,6 +375,10 @@ fn main() -> ExitCode {
     results.push((
         "Layers (Rotproof)",
         report("Layers (Rotproof)", layers::problems(root)),
+    ));
+    results.push((
+        "Domain calls no port",
+        report("Domain calls no port", domain_pure(root)),
     ));
     println!("\n{}", "=".repeat(40));
     for (name, ok) in &results {
