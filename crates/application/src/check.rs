@@ -136,7 +136,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
             findings.push(Finding {
                 check: "Rotproof's guide is up to date".into(),
                 detail: format!(
-                    "{}, run `rotproof create`: {GUIDE}",
+                    "{}, run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise: {GUIDE}",
                     if found.is_some() {
                         "out of date"
                     } else {

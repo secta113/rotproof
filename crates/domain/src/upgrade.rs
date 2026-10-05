@@ -267,13 +267,14 @@ pub fn problems(files: Option<&str>, declined: &[String], running: &str) -> Vec<
             ));
         }
     }
+    let missing = files.is_none();
     let files = files.unwrap_or(FIRST);
     match versions(files, running) {
         Err(why) => found.push(why),
         Ok((from, to)) if from < to => found.push(format!(
             "the project's files are up to {files}{}, and this Rotproof is {running}: run `rotproof init`, which \
              updates them",
-            if files == FIRST { " (no files in the declaration)" } else { "" }
+            if missing { " (no files in the declaration)" } else { "" }
         )),
         Ok(_) => {}
     }
@@ -352,6 +353,9 @@ mod tests {
             "{behind:?}"
         );
         assert!(behind[0].contains("run `rotproof init`"));
+        // Written as the first release, it is not missing
+        let written = problems(Some("0.1.0"), &[], "0.2.0");
+        assert!(written[0].contains("up to 0.1.0, and"), "{written:?}");
         // Behind with no update between: it still fails, so the field never stays behind unseen
         assert_eq!(problems(Some("0.2.0"), &[], "0.2.1").len(), 1);
         let misspelled = problems(Some("0.2.0"), &["claude-deny-approval".into()], "0.2.0");

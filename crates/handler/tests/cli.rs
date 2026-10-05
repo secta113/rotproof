@@ -669,9 +669,12 @@ fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
         for (edit, says) in [
             (
                 Some("edited by hand\n"),
-                "out of date, run `rotproof create`",
+                "out of date, run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise",
             ),
-            (None, "missing, run `rotproof create`"),
+            (
+                None,
+                "missing, run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise",
+            ),
         ] {
             match edit {
                 Some(text) => fs::write(&guide, text).unwrap(),
