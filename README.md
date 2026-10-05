@@ -62,7 +62,7 @@ cargo build --release   # the binary is target/release/rotproof (rotproof.exe on
 
 ```sh
 rotproof --root <repository> init --stack python  # write .config/rotproof.toml, once
-rotproof --root <repository> create  # make the layers .config/rotproof.toml declares, the records skeleton and the guide
+rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write every generated file in docs/ (the index files and the rules)
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
@@ -78,10 +78,15 @@ each command's output names the next step. A test follows that path from an empt
 
 Start a project with `rotproof init --stack <stack>` (`python`, `typescript`, `rust`, or `none` for a repository
 that keeps records only). It writes only the declaration, so you declare in `absent` the layers you do not want before
-anything is made, and it never overwrites a declaration that exists. Then run `rotproof create`.
+anything is made, and it never overwrites a declaration that exists. Then run `rotproof create --yes`.
+
+`rotproof create` makes layers only with `--yes`. Without it, a run that would make one lists the layers, writes
+nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer of the stack, `ui` and its
+five levels in a command-line tool too, and it never deletes them again. A run that makes no layer, as after an
+upgrade, needs no `--yes`.
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
-then `rotproof init --stack typescript` and `rotproof create` in it, which keep what Vite wrote. Vite's entry point,
+then `rotproof init --stack typescript` and `rotproof create --yes` in it, which keep what Vite wrote. Vite's entry point,
 `src/main.tsx`, is `handler`'s where it is (`index.html` loads it); `rotproof check` names the rest of the starter
 (`App.tsx`, the styles, `assets/`) as code outside the layers, with where each goes.
 

@@ -7,7 +7,7 @@ set -euo pipefail
 rotproof --version
 project=$(mktemp -d)
 rotproof --root "$project" init --stack python
-rotproof --root "$project" create
+rotproof --root "$project" create --yes
 rotproof --root "$project" check
 
 echo "import infrastructure" > "$project/domain/rules.py"

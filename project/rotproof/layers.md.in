@@ -3,7 +3,8 @@
 
 - **The structure is declared in `.config/rotproof.toml`, and `rotproof check` fails when the tree differs from it,
   either way.** Delete an unused layer and list it in `absent`; to bring one back, remove it from `absent` and run
-  `rotproof create`, which makes only what is missing. Code outside every layer fails too: move it into a layer, or
+  `rotproof create --yes`, which makes only what is missing (without `--yes`, it lists the layers it would make and
+  writes nothing). Code outside every layer fails too: move it into a layer, or
   list its path in `unchecked` (helper scripts, generated code).{not_layers}
 {direction}
 

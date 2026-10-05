@@ -20,14 +20,16 @@ const START: &str = "\
 Start a project:
   1. rotproof init --stack <stack>   write .config/rotproof.toml (python, typescript, rust, or none for records only)
   2. edit it: list in absent the layers the project does not have
-  3. rotproof create                 make the layers, docs/ and the project's files
+  3. rotproof create --yes           make the layers, docs/ and the project's files (without --yes, it lists the
+                                     layers it would make and writes nothing)
   4. rotproof check                  check them; this is the project's CI
 
 The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has run; `rotproof guide --stack <stack>`
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
-when a file cannot be read or written, or the command line is wrong.";
+when a file cannot be read or written, the command line is wrong, or `rotproof create` would make layers without
+--yes.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -74,8 +76,15 @@ enum Command {
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files and rules in
     /// docs/. Adds the fields the declaration lacks, keeping its comments and values. Never overwrites another file,
     /// and never moves or deletes one. Run it when a project starts, after editing the declaration, and after
-    /// upgrading Rotproof. Exits 2 when the declaration cannot be read or a file cannot be written.
-    Create,
+    /// upgrading Rotproof.
+    /// Makes layers only with --yes: without it, a run that would make one lists them, writes nothing and exits 2, so
+    /// the layers the project does not have are declared absent first. Exits 2 too when the declaration cannot be read
+    /// or a file cannot be written.
+    Create {
+        /// Make the layers that are neither present nor declared absent
+        #[arg(long)]
+        yes: bool,
+    },
     /// Check the layers and the records, and exit non-zero when one breaks the rules
     // Its long help is CHECK_HELP, which `command` puts in
     Check,
@@ -126,7 +135,7 @@ fn main() -> ExitCode {
     }
     let result = match cli.command {
         Command::Init { stack } => init(&cli.root, &stack).map(|()| true),
-        Command::Create => create(&cli.root).map(|()| true),
+        Command::Create { yes } => create(&cli.root, yes).map(|()| true),
         Command::Check => check(&cli.root),
         Command::Guide { stack } => {
             application::project::guide_for(&Disk::new(&cli.root), stack.as_deref()).map(|text| {
@@ -157,16 +166,17 @@ fn init(root: &Path, stack: &str) -> Result<(), String> {
         println!("next: run `rotproof create` to make docs/");
     } else {
         println!(
-            "next: declare in absent the layers this project does not have, then run `rotproof create`"
+            "next: declare in absent the layers this project does not have, then run `rotproof create`, which lists \
+             the layers it would make, and `rotproof create --yes` to make them"
         );
     }
     Ok(())
 }
 
 /// Make what is missing, and say what was written. A second run with nothing changed writes nothing.
-fn create(root: &Path) -> Result<(), String> {
+fn create(root: &Path, yes: bool) -> Result<(), String> {
     let disk = Disk::new(root);
-    let made = application::create::create(&disk, &disk, &disk.name()?)?;
+    let made = application::create::create(&disk, &disk, &disk.name()?, yes)?;
     for path in &made.written {
         println!("wrote {path}");
     }

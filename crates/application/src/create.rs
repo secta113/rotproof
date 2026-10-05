@@ -3,6 +3,10 @@
 //! - Each layer of the stack's layout that is neither declared absent nor present (its path exists) is made, with its
 //!   files. A present layer is the project's, and nothing in it is touched.
 //!   A repository that keeps records only (`stack = "none"`) has no layers to make.
+//!   Layers are made only with `--yes`. Without it, a run that would make one lists them and writes nothing: a project
+//!   that ran `rotproof create` straight after `rotproof init`, never listing in absent what it lacks, would otherwise
+//!   get every layer of the stack (`ui` and its five levels in a command-line tool), and `rotproof create` never
+//!   deletes them again. A run that makes no layer, as after an upgrade, needs no `--yes`.
 //! - The records skeleton: the directories of `docs/`, `docs/log.md` with its title when it does not exist, and the
 //!   generated files (the index files and the rules of `docs/backlog/`, `docs/specs/` and `docs/knowledge/`), which
 //!   Rotproof rewrites.
@@ -29,7 +33,7 @@ use crate::tree::{exactly, read_text};
 use domain::bundle::{LOG, in_docs, record_tags as tags_in};
 use domain::hook::SETTINGS;
 use domain::layers::{
-    DECLARATION, Declared, MISSING, completed, lacking, parse_declaration, unreadable,
+    DECLARATION, Declared, MISSING, Place, completed, lacking, parse_declaration, unreadable,
 };
 use domain::project::{GUIDE, guide, project_files};
 use domain::tree::{Tree, Writer};
@@ -47,11 +51,12 @@ pub struct Made {
     pub not_written: Option<String>,
 }
 
-/// Make what is missing in `tree`, writing through `out`, for the project named `name` (its root directory's). `Err`
-/// is a declaration that cannot be read, or a file that cannot be written.
-pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, String> {
+/// Make what is missing in `tree`, writing through `out`, for the project named `name` (its root directory's). Layers
+/// are made only when `yes` says so. `Err` is a declaration that cannot be read, a file that cannot be written, or
+/// layers to make without `yes`: then nothing is written.
+pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str, yes: bool) -> Result<Made, String> {
     let mut made = Made::default();
-    let declared = match declaration(tree).map_err(|e| e.to_string())? {
+    let (declared, completed) = match declaration(tree).map_err(|e| e.to_string())? {
         None => return Err(MISSING.into()),
         Some(Err(why)) => match complete(tree)? {
             // Written only once the completed declaration reads and fits its stack, so a declaration that fails for
@@ -59,19 +64,30 @@ pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, Str
             Some((text, added)) => {
                 let declaration = parse_declaration(&text).map_err(|why| unreadable(&why))?;
                 let declared = Declared::new(declaration).map_err(|found| found.join("\n"))?;
-                write(out, DECLARATION, &text, &mut made)?;
-                made.added = added;
-                declared
+                (declared, Some((text, added)))
             }
             None => return Err(unreadable(&why)),
         },
-        Some(Ok(declaration)) => Declared::new(declaration).map_err(|found| found.join("\n"))?,
+        Some(Ok(declaration)) => (
+            Declared::new(declaration).map_err(|found| found.join("\n"))?,
+            None,
+        ),
     };
-    for place in &declared.places {
-        // A level whose layer is declared absent is absent too. Otherwise its layer was made just before it
-        if declared.is_absent(place) || tree.found(&place.path).is_some() {
-            continue;
-        }
+    // A level whose layer is declared absent is absent too. A level of a layer about to be made is not there either
+    let layers: Vec<&Place> = declared
+        .places
+        .iter()
+        .filter(|place| !declared.is_absent(place) && tree.found(&place.path).is_none())
+        .collect();
+    // Before anything is written: a project that never listed in absent what it lacks would get every layer
+    if !layers.is_empty() && !yes {
+        return Err(unconfirmed(&layers));
+    }
+    if let Some((text, added)) = completed {
+        write(out, DECLARATION, &text, &mut made)?;
+        made.added = added;
+    }
+    for place in layers {
         for (path, text) in &place.files {
             write(out, path, text, &mut made)?;
         }
@@ -152,6 +168,19 @@ fn record_tags(tree: &dyn Tree) -> Result<Vec<String>, String> {
         tags.extend(tags_in(&docs));
     }
     Ok(tags.into_iter().collect())
+}
+
+/// What `rotproof create` says when it would make `layers` and was not told to: each with its path, and how to go on.
+fn unconfirmed(layers: &[&Place]) -> String {
+    let listed: Vec<String> = layers
+        .iter()
+        .map(|place| format!("  {}/ ({})", place.path, place.name))
+        .collect();
+    format!(
+        "rotproof create would make these layers, and makes them only with --yes:\n{}\nDeclare in absent in \
+         {DECLARATION} the ones this project does not have, then run `rotproof create --yes`. Nothing was written.",
+        listed.join("\n")
+    )
 }
 
 fn write(out: &dyn Writer, path: &str, text: &str, made: &mut Made) -> Result<(), String> {
