@@ -7,7 +7,6 @@ use domain::bundle::{
     Docs, KnowledgeFolder, Problems, Specs, expected, in_docs, is_document, knowledge_with_rules,
     specs_with_rules,
 };
-use domain::schema::SPEC_FOLDERS;
 use domain::tree::Tree;
 
 /// The bundle of one repository, `docs/` in its tree, and the areas its records are grouped by.
@@ -40,9 +39,9 @@ impl<'a> Bundle<'a> {
     /// the documents left out of the index files.
     pub fn expected(&self) -> io::Result<(Vec<(String, String)>, Problems)> {
         let backlog = self.read_folder("backlog")?;
-        let specs = self.read_spec_folders()?;
+        let specs = self.read_folder("specs")?;
         let knowledge = self.read_folder("knowledge")?;
-        Ok(expected(&backlog, specs, &knowledge, &self.areas))
+        Ok(expected(&backlog, &specs, &knowledge, &self.areas))
     }
 
     /// The documents of `docs/knowledge/`.
@@ -55,15 +54,7 @@ impl<'a> Bundle<'a> {
 
     /// Every spec of `docs/specs/`.
     pub fn read_specs(&self) -> io::Result<Specs> {
-        Ok(specs_with_rules(self.read_spec_folders()?, &self.areas))
-    }
-
-    /// The documents of each directory of specs.
-    fn read_spec_folders(&self) -> io::Result<Vec<(&'static str, Docs)>> {
-        SPEC_FOLDERS
-            .iter()
-            .map(|(folder, _)| Ok((*folder, self.read_folder(folder)?)))
-            .collect()
+        Ok(specs_with_rules(&self.read_folder("specs")?, &self.areas))
     }
 }
 

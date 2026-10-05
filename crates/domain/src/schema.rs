@@ -67,13 +67,6 @@ static OWN_FIELDS: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|
     own
 });
 
-/// Directory -> the statuses a spec in it may have. Every spec stays in `docs/specs/` when it closes, so its path, and
-/// every link to it, never changes: the status alone says it is closed
-pub const SPEC_FOLDERS: [(&str, &[Status]); 1] = [(
-    "specs",
-    &[Status::Draft, Status::Stable, Status::Deprecated],
-)];
-
 // OKF actors (section 7): `<producer>/<version>` for an agent, `human:<id>` for a person, `process:<id>`. OKF does not
 // limit the characters of `<id>` (its own samples use `human:jsmith@acme`), so only whitespace is excluded
 static ACTOR: LazyLock<Regex> =
@@ -265,24 +258,13 @@ pub fn guide_doc(text: &str) -> Option<Result<Guide, String>> {
     Some(fields.finish(guide))
 }
 
-/// A spec in `docs/<folder>/`, or why it breaks the format or does not belong in that folder.
-pub fn spec(folder: &str, text: &str) -> Result<(Spec, Sections), String> {
+/// A spec in `docs/specs/`, or why it breaks the format. Any status: every spec stays there when it closes, so its
+/// path, and every link to it, never changes, and the status alone says it is closed.
+pub fn spec(text: &str) -> Result<(Spec, Sections), String> {
     let (meta, sections) = split(text)?;
     let mut fields = Fields::new(&meta);
     let spec = spec_fields(&mut fields);
     let spec = fields.finish(spec)?;
-    let allowed = SPEC_FOLDERS
-        .iter()
-        .find(|(name, _)| *name == folder)
-        .map_or(&[][..], |(_, statuses)| *statuses);
-    if !allowed.contains(&spec.status) {
-        let names: Vec<&str> = allowed.iter().map(|s| s.name()).collect();
-        return Err(format!(
-            "status {} does not belong in {folder}/ ({})",
-            spec.status.name(),
-            names.join(", ")
-        ));
-    }
     if spec.status == Status::Deprecated
         && sections
             .get(CLOSED_SECTION)
@@ -971,7 +953,7 @@ Text.
             if *kind != "spec" {
                 let on_spec =
                     SPEC.replace("status: stable", &format!("status: stable\n{field}: x"));
-                assert!(spec("specs", &on_spec).is_err(), "{field} passed on a spec");
+                assert!(spec(&on_spec).is_err(), "{field} passed on a spec");
             }
             if *kind != "backlog item" {
                 let on_item =
@@ -1410,27 +1392,19 @@ Something.
 
     #[test]
     fn a_good_spec_passes() {
-        assert!(
-            spec("specs", SPEC).is_ok(),
-            "{:?}",
-            spec("specs", SPEC).err()
-        );
+        assert!(spec(SPEC).is_ok(), "{:?}", spec(SPEC).err());
         let part = SPEC.replace("status: stable", "status: stable\nepic: big-work");
         assert_eq!(
-            spec("specs", &part).map(|(spec, _)| spec.epic),
+            spec(&part).map(|(spec, _)| spec.epic),
             Ok(Some("big-work".into()))
         );
         let closed = closed_record(SPEC, "Done.");
-        assert!(
-            spec("specs", &closed).is_ok(),
-            "{:?}",
-            spec("specs", &closed).err()
-        );
+        assert!(spec(&closed).is_ok(), "{:?}", spec(&closed).err());
         // The Resolution at the end, as it was written before it had to come first
         let at_the_end =
             SPEC.replace("status: stable", "status: deprecated") + "\n# Resolution\n\nDone.\n";
         assert_eq!(
-            spec("specs", &at_the_end).err(),
+            spec(&at_the_end).err(),
             Some(
                 "a closed spec opens with # Resolution, before every other heading (its first heading is # Goals)"
                     .into()
@@ -1443,75 +1417,60 @@ Something.
         let closed = SPEC.replace("status: stable", "status: deprecated");
         let bad = [
             (
-                "specs",
                 "no description",
                 SPEC.replace("description: One sentence.\n", ""),
             ),
             (
-                "specs",
                 "a blank description",
                 SPEC.replace("description: One sentence.", "description: \" \""),
             ),
             (
-                "specs",
                 "an empty tag",
                 SPEC.replace("tags: [operations]", "tags: [\"\"]"),
             ),
             // A spec has exactly one area, as a backlog item does
-            ("specs", "no tag", SPEC.replace("tags: [operations]\n", "")),
+            ("no tag", SPEC.replace("tags: [operations]\n", "")),
             // An epic is named by its slug, not by a path
             (
-                "specs",
                 "an epic named by its path",
                 SPEC.replace("status: stable", "status: stable\nepic: /specs/big.md"),
             ),
             (
-                "specs",
                 "an epic named by its path without .md",
                 SPEC.replace("status: stable", "status: stable\nepic: specs/big"),
             ),
             (
-                "specs",
                 "an epic named by its file name",
                 SPEC.replace("status: stable", "status: stable\nepic: big.md"),
             ),
             (
-                "specs",
                 "an empty epic",
                 SPEC.replace("status: stable", "status: stable\nepic: \"\""),
             ),
             (
-                "specs",
                 "a misspelled epic",
                 SPEC.replace("status: stable", "status: stable\nepik: big"),
             ),
             (
-                "specs",
                 "two tags",
                 SPEC.replace("tags: [operations]", "tags: [operations, billing]"),
             ),
             (
-                "specs",
                 "unknown field",
                 SPEC.replace("status: stable", "status: stable\nstatu: stable"),
             ),
             (
-                "specs",
                 "date-only verified",
                 SPEC.replace(
                     "status: stable",
                     "status: stable\nverified: {by: human:a, at: 2026-10-01}",
                 ),
             ),
-            (
-                "specs",
-                "no frontmatter",
-                "# Goals\n\nSomething.\n".to_string(),
-            ),
-            ("specs", "closed without a resolution", closed),
+            ("no frontmatter", "# Goals\n\nSomething.\n".to_string()),
+            ("closed without a resolution", closed),
         ];
-        for (folder, name, text) in bad {
-            assert!(spec(folder, &text).is_err(), "{folder}: {name} passed");
+        for (name, text) in bad {
+            assert!(spec(&text).is_err(), "{name} passed");
         }
     }
 }
