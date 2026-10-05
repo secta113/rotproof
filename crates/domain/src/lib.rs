@@ -8,6 +8,7 @@ pub mod approvals;
 pub mod bundle;
 pub mod code;
 pub mod direction;
+pub mod follows;
 pub mod hook;
 pub mod layers;
 pub mod links;

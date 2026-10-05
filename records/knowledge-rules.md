@@ -47,6 +47,21 @@ The body is free, except that a deprecated document opens with `# Resolution`: w
   the log, as the history of the document.
 - **A document that no longer holds stays.** Set `status: deprecated` and write `# Resolution` as the first heading:
   what replaced it. Deleting it breaks the links to it, and its hashes in the log would name nothing.
+- **A document that describes code follows it.** It names what it describes in `follows`, each with its hash when
+  the document was last reviewed against it, and `rotproof check` fails when one of them changed since, printing the
+  line to write once the document is reviewed:
+
+  ```yaml
+  follows:
+    src/api/routes.py: 3e1f0a9c              # a file, in any language
+    src/api/routes.py::create_user: 0b7d21e4  # a function or class of a Python file
+    src/api/routes.py::Router.add: 9a01c3ff   # a method
+    src/api/: 51c0d2aa                       # every .py file under a directory
+  ```
+
+  A definition is hashed from its first decorator to its end, so a change elsewhere in its file does not fail it. What
+  a document follows must exist: a file, directory or definition that is gone fails. Writing the new hash changes the
+  document, so its log entry records the review. A document about a decision follows nothing.
 
 # Index
 

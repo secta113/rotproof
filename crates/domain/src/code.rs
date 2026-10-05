@@ -25,6 +25,9 @@ pub trait Parsers {
     fn python(&self, source: &str, path: &str) -> Source<Vec<String>>;
     /// The names of the functions and classes a Python file defines, at any depth.
     fn python_definitions(&self, source: &str) -> BTreeSet<String>;
+    /// The source text of the definition `dotted` names in a Python file (`f`, `Class`, `Class.method`), from its
+    /// first decorator to its end: `None` when the file does not define it so.
+    fn python_definition(&self, source: &str, dotted: &str) -> Option<String>;
     /// A TypeScript or JavaScript file, whose path from the root says how to read it: every specifier it imports.
     fn typescript(&self, source: &str, path: &str) -> Source<String>;
     /// The aliases of the TypeScript project in `tree`, from its `tsconfig*.json` files. An error is a config that

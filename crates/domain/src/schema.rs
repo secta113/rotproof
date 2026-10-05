@@ -180,6 +180,8 @@ pub struct Knowledge {
     pub tag: String,
     /// `Stable` = holds / `Deprecated` = no longer holds. A deprecated document stays, so links to it keep working
     pub status: Status,
+    /// What it follows, each key with its hash when the document was last reviewed (`follows.rs`), in the order written
+    pub follows: Vec<(String, String)>,
 }
 
 /// A document in `docs/backlog/`.
@@ -343,13 +345,44 @@ fn knowledge_fields(fields: &mut Fields) -> Option<Knowledge> {
     let status = fields.required("status", status(&[Status::Stable, Status::Deprecated]));
     fields.optional("verified", stamps);
     fields.optional("stale_after", time);
+    let follows = fields.optional("follows", followed_hashes);
     okf_optional(fields);
     Some(Knowledge {
         title: title?,
         description: description?,
         tag: tag?,
         status: status?,
+        follows: follows?.unwrap_or_default(),
     })
+}
+
+/// What a knowledge document follows: a mapping of keys `follows.rs` can read to hashes of 8 lower-case hex digits.
+fn followed_hashes(value: &Yaml) -> Result<Vec<(String, String)>, String> {
+    let Yaml::Hash(map) = value else {
+        return Err(format!(
+            "not a mapping of what it follows to hashes: {value:?}"
+        ));
+    };
+    let mut found = Vec::new();
+    for (key, hash) in map {
+        let Yaml::String(key) = key else {
+            return Err(format!("not a path: {key:?}"));
+        };
+        crate::follows::followed(key)?;
+        let Yaml::String(hash) = hash else {
+            return Err(format!("{key}: not a hash of 8 hex digits: {hash:?}"));
+        };
+        if hash.len() != 8 || !hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+            return Err(format!(
+                "{key}: {hash:?} is not a hash of 8 lower-case hex digits"
+            ));
+        }
+        found.push((key.clone(), hash.clone()));
+    }
+    if found.is_empty() {
+        return Err("empty: leave the field out when the document follows nothing".into());
+    }
+    Ok(found)
 }
 
 fn item(fields: &mut Fields) -> Option<Item> {
@@ -926,6 +959,7 @@ Text.
                 ("deadline_kind", "backlog item"),
                 ("deadline", "backlog item"),
                 ("epic", "spec"),
+                ("follows", "knowledge document"),
             ]
         );
         // Every field the item reads is found, optional ones included

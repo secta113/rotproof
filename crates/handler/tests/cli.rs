@@ -2665,3 +2665,164 @@ fn approve_refuses_without_a_terminal_and_prune_removes_only_what_matches_nothin
     let out = run(&["--root", &root_arg(r), "check"]);
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
 }
+
+/// Every `key: hash` the check asks to write in follows, from its output.
+fn to_write(said: &str) -> Vec<(String, String)> {
+    said.split('`')
+        .filter_map(|part| {
+            let (key, hash) = part.rsplit_once(": ")?;
+            (hash.len() == 8 && hash.bytes().all(|b| b.is_ascii_hexdigit()) && !key.contains(' '))
+                .then(|| (key.to_string(), hash.to_string()))
+        })
+        .collect()
+}
+
+#[test]
+fn a_knowledge_document_fails_when_what_it_follows_changes_unreviewed() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::write(
+        r.join("domain/model.py"),
+        "import os\n\n@dataclass\nclass Song:\n    title: str\n\n    def play(self):\n        return 1\n\n\
+         def other():\n    return 2\n",
+    )
+    .unwrap();
+    fs::write(r.join("domain/kinds.py"), "KINDS = 1\n").unwrap();
+    let keys = [
+        "domain/model.py",
+        "domain/model.py::Song",
+        "domain/model.py::Song.play",
+        "domain/",
+    ];
+    let document = |pins: &[(String, String)]| {
+        let follows: String = pins
+            .iter()
+            .map(|(key, hash)| format!("  {key}: \"{hash}\"\n"))
+            .collect();
+        format!(
+            "---\ntype: Knowledge\ntitle: Model\ndescription: The model.\ntags: [a]\nstatus: stable\nfollows:\n\
+             {follows}---\n\n# Shape\n\nA song plays.\n"
+        )
+    };
+    // The check names every key and the hash it has now: pinned at those, the document matches its code
+    let placeholders: Vec<(String, String)> = keys
+        .iter()
+        .map(|key| (key.to_string(), "00000000".to_string()))
+        .collect();
+    fs::write(r.join("docs/knowledge/model.md"), document(&placeholders)).unwrap();
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    let pins: Vec<(String, String)> = to_write(&said)
+        .into_iter()
+        .filter(|(key, _)| keys.contains(&key.as_str()))
+        .collect();
+    assert_eq!(pins.len(), keys.len(), "{said}");
+    let pin = |pins: &[(String, String)]| {
+        fs::write(r.join("docs/knowledge/model.md"), document(pins)).unwrap();
+        assert!(run(&["--root", &arg, "index"]).status.success());
+        let said = stdout(&run(&["--root", &arg, "check"]));
+        let line = said
+            .split('`')
+            .find(|part| part.starts_with("* **Knowledge**: knowledge/model.md@"))
+            .map(str::to_string);
+        if let Some(line) = line {
+            fs::write(
+                r.join("docs/log.md"),
+                format!("# Log\n\n## 2026-10-02\n\n* Something\n  {line}\n"),
+            )
+            .unwrap();
+        }
+    };
+    pin(&pins);
+    let check = || {
+        let out = run(&["--root", &arg, "check"]);
+        (out.status.code(), stdout(&out))
+    };
+    let (code, said) = check();
+    assert_eq!(code, Some(0), "{said}");
+
+    // A change elsewhere in the file fails the file, not the definitions
+    fs::write(
+        r.join("domain/model.py"),
+        fs::read_to_string(r.join("domain/model.py"))
+            .unwrap()
+            .replace("return 2", "return 3"),
+    )
+    .unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    let changed: Vec<String> = to_write(&said).into_iter().map(|(key, _)| key).collect();
+    assert_eq!(changed, ["domain/model.py", "domain/"], "{said}");
+    assert!(said.contains(
+        "every knowledge document matches the code it follows:\n  knowledge/model.md follows domain/model.py, \
+         which changed since the document was last reviewed"
+    ), "{said}");
+
+    // A decorator is part of its definition
+    fs::write(
+        r.join("domain/model.py"),
+        fs::read_to_string(r.join("domain/model.py"))
+            .unwrap()
+            .replace("@dataclass", "@dataclass(frozen=True)"),
+    )
+    .unwrap();
+    let (_, said) = check();
+    assert!(
+        to_write(&said)
+            .iter()
+            .any(|(key, _)| key == "domain/model.py::Song"),
+        "{said}"
+    );
+    assert!(
+        !to_write(&said)
+            .iter()
+            .any(|(key, _)| key == "domain/model.py::Song.play"),
+        "{said}"
+    );
+
+    // A file added to a followed directory changes it
+    let pinned = to_write(&said);
+    pin(&pinned
+        .iter()
+        .cloned()
+        .chain(
+            pins.iter()
+                .filter(|(k, _)| !pinned.iter().any(|(p, _)| p == k))
+                .cloned(),
+        )
+        .collect::<Vec<_>>());
+    let (code, said) = check();
+    assert_eq!(code, Some(0), "{said}");
+    fs::write(r.join("domain/more.py"), "MORE = 1\n").unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(
+        to_write(&said)
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect::<Vec<_>>(),
+        ["domain/"],
+        "{said}"
+    );
+
+    // A definition gone fails, as a dangling link does
+    fs::write(r.join("domain/model.py"), "def other():\n    return 3\n").unwrap();
+    let (_, said) = check();
+    assert!(
+        said.contains("follows domain/model.py::Song.play, which is not there"),
+        "{said}"
+    );
+
+    // A key Rotproof cannot follow fails the document's format
+    fs::write(
+        r.join("docs/knowledge/model.md"),
+        document(&[("domain/model.rs::f".into(), "00000000".into())]),
+    )
+    .unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("only Python's definitions are read"),
+        "{said}"
+    );
+}

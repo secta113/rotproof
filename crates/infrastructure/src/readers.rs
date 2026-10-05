@@ -19,6 +19,10 @@ impl Parsers for Readers {
         crate::python::definitions(source)
     }
 
+    fn python_definition(&self, source: &str, dotted: &str) -> Option<String> {
+        crate::python::definition(source, dotted)
+    }
+
     fn typescript(&self, source: &str, path: &str) -> Source<String> {
         crate::typescript::read(source, path)
     }

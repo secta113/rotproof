@@ -281,7 +281,11 @@ what is open (`backlog/`, closed once dealt with), and how things are now (`know
 only when it no longer holds). A closed spec is history; what it built is described in `knowledge/`, an API or a data
 model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
 contents, under the label `**Knowledge**` (`* **Knowledge**: knowledge/api.md@a3f9c1d2`), and `rotproof check` fails
-an edit the log does not name.
+an edit the log does not name. A knowledge document that describes code names it in `follows`, each with its hash when
+the document was last reviewed: a file in any language, and in Python also a function or class
+(`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). `rotproof check` fails when one changed
+since, and prints the line to write once the document is reviewed; writing it changes the document, so its log entry
+records the review.
 
 A record stays where it was written when it closes: its status says it is closed, and the index lists it under
 `# Closed`. Its path, and every link to it, never changes, so closing a record is a change to that record and its
@@ -443,6 +447,12 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   lines, names it with the first 8 hex digits of SHA-256 of the whole file (every line ending as `\n`). An edit the
   log does not name fails, and the failure prints the line to write. A `**Knowledge**` field that names a document
   `docs/knowledge/` does not have fails too.
+- **Every knowledge document matches the code it follows:** each key of `follows` names a path from the root with
+  `/` (a file; a directory with a `/` at its end; a definition of a `.py` file after `::`, as `f`, `Class` or
+  `Class.method`) with a hash of 8 lower-case hex digits, and that hash is what it names now: the file's text, every
+  line ending as `\n`; the definition's source from its first decorator to its end; or every `.py` file under the
+  directory (outside what the project's `.gitignore` files exclude, and hidden ones), each with its path. What is not
+  there fails. A deprecated document no longer holds, so what it follows is not read.
 - **Every document is a known type in its directory.** The fields OKF defines for a document pass as OKF writes them
   (`generated` needs only `by`; every entry of `sources` needs a `resource`; `usage_window` is a `{from, to}` range).
   The names OKF reserves appear only where Rotproof writes and reads them: `index.md` in `docs/` and in each directory

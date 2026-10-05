@@ -141,9 +141,61 @@ pub fn definitions(source: &str) -> BTreeSet<String> {
     definitions.0
 }
 
+/// The source text of the definition `dotted` names in a Python file: a function or class at the top, or one inside
+/// a class or a function named before it (`Class.method`), from its first decorator to its end. `None` when the file
+/// does not define it so.
+pub fn definition(source: &str, dotted: &str) -> Option<String> {
+    let module = ruff_python_parser::parse_unchecked_source(source, PySourceType::Python);
+    let mut body: &[Stmt] = &module.syntax().body;
+    let mut found = None;
+    for name in dotted.split('.') {
+        let (range, decorators, inner) = body.iter().find_map(|stmt| match stmt {
+            Stmt::FunctionDef(def) if def.name.as_str() == name => {
+                Some((def.range, &def.decorator_list, &def.body))
+            }
+            Stmt::ClassDef(class) if class.name.as_str() == name => {
+                Some((class.range, &class.decorator_list, &class.body))
+            }
+            _ => None,
+        })?;
+        let start = decorators
+            .iter()
+            .map(|d| d.range.start())
+            .chain([range.start()])
+            .min()
+            .expect("the definition's own start is there");
+        found = Some((start.to_usize(), range.end().to_usize()));
+        body = inner;
+    }
+    let (start, end) = found?;
+    source.get(start..end).map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_definition_is_cut_from_its_first_decorator_to_its_end() {
+        let source = "import x\n\n@first\n@second(1)\ndef f(a):\n    return a\n\n\nclass C:\n    \
+                      @staticmethod\n    def m():\n        pass\n\n    def n(self):\n        pass\n";
+        assert_eq!(
+            definition(source, "f").as_deref(),
+            Some("@first\n@second(1)\ndef f(a):\n    return a")
+        );
+        assert_eq!(
+            definition(source, "C.m").as_deref(),
+            Some("@staticmethod\n    def m():\n        pass")
+        );
+        assert!(
+            definition(source, "C")
+                .unwrap()
+                .ends_with("def n(self):\n        pass")
+        );
+        for missing in ["g", "C.f", "f.a", "x", "C.m.z"] {
+            assert_eq!(definition(source, missing), None, "{missing}");
+        }
+    }
 
     fn parts(dotted: &str) -> Vec<String> {
         dotted.split('.').map(String::from).collect()

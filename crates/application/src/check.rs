@@ -255,6 +255,16 @@ fn records(
     } else if let Err(why) = log_path {
         add("the log keeps its structure", vec![why]);
     }
+    let held = bundle
+        .read_knowledge()?
+        .documents
+        .into_iter()
+        .map(|(name, (doc, _))| (name, doc))
+        .collect();
+    add(
+        "every knowledge document matches the code it follows",
+        crate::follows::drift(tree, parsers, &held),
+    );
 
     let mut out_of_place = misplaced(&concepts(tree, DOCS)?);
     out_of_place.extend(unread(tree, DOCS)?);
