@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
+use utils::paths::within;
 
 /// Where a project declares its structure, from the root
 pub const DECLARATION: &str = ".config/rotproof.toml";
@@ -508,6 +509,21 @@ impl Declared {
     pub fn is_absent(&self, place: &Place) -> bool {
         let absent = &self.declaration.absent;
         absent.contains(&place.name) || place.parent.as_ref().is_some_and(|p| absent.contains(p))
+    }
+
+    /// The paths in `unchecked`, as compared: without a `/` at the end.
+    pub fn unchecked(&self) -> impl Iterator<Item = &str> {
+        self.declaration
+            .unchecked
+            .iter()
+            .map(|path| path.trim_end_matches('/'))
+    }
+
+    /// The layer or level a path in `unchecked` holds or sits in. Such a path switches nothing off: a layer cannot be.
+    pub fn overlapped(&self, path: &str) -> Option<&Place> {
+        self.places
+            .iter()
+            .find(|p| within(&p.path, path) || within(path, &p.path))
     }
 }
 

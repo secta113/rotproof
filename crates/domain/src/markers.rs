@@ -80,13 +80,13 @@ pub fn has_comments(layout: &Layout, name: &str) -> bool {
     }
 }
 
-/// Whether the file at `path` sits in a path the project lists in `unchecked`.
+/// Whether the file at `path` sits in a path the project lists in `unchecked`. A path that holds or sits in a layer
+/// switches nothing off, as the structure check says of it: the markers in that layer are read all the same.
 pub fn is_unchecked(declared: &Declared, path: &str) -> bool {
     declared
-        .declaration
-        .unchecked
-        .iter()
-        .any(|skip| within(path, skip.trim_end_matches('/')))
+        .unchecked()
+        .filter(|skip| declared.overlapped(skip).is_none())
+        .any(|skip| within(path, skip))
 }
 
 /// The findings in the file at `path`, whose text is `source` and whose reader found `comments` (byte offset, text):
@@ -184,6 +184,19 @@ mod tests {
         assert!(is_unchecked(&declared, "gen/a/b.py"));
         assert!(!is_unchecked(&declared, "generated/a.py"));
         assert!(!is_unchecked(&declared, "domain/scripts/x.py"));
+    }
+
+    #[test]
+    fn a_path_in_unchecked_that_holds_or_sits_in_a_layer_skips_nothing() {
+        let declared = Declared::new(
+            crate::layers::parse_declaration(
+                "stack = \"python\"\nareas = []\nunchecked = [\"domain\", \"ui/atoms/gen/\"]\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!is_unchecked(&declared, "domain/song.py"));
+        assert!(!is_unchecked(&declared, "ui/atoms/gen/x.py"));
     }
 
     #[test]

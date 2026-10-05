@@ -54,17 +54,8 @@ pub fn named(declared: &Declared) -> Vec<String> {
         .places
         .iter()
         .map(|p| p.path.clone())
-        .chain(unchecked(declared).map(String::from))
+        .chain(declared.unchecked().map(String::from))
         .collect()
-}
-
-/// The paths in `unchecked`, as compared: without a `/` at the end.
-fn unchecked(declared: &Declared) -> impl Iterator<Item = &str> {
-    declared
-        .declaration
-        .unchecked
-        .iter()
-        .map(|path| path.trim_end_matches('/'))
 }
 
 /// Every directory whose code files the rules read, by what `seen` says of the paths [`named`] gives: the layout's
@@ -141,7 +132,7 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
     }
 
     let mut skipped: Vec<&str> = layout.not_layers.iter().map(String::as_str).collect();
-    for path in unchecked(declared) {
+    for path in declared.unchecked() {
         if path.contains('\\') {
             found.push(format!(
                 "unchecked lists {path:?}: separate a path with /, which every platform reads"
@@ -154,11 +145,7 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
             found.push(format!(
                 "unchecked lists {path:?}: write a path from the root, such as scripts or src/generated"
             ));
-        } else if let Some(place) = declared
-            .places
-            .iter()
-            .find(|p| within(&p.path, path) || within(path, &p.path))
-        {
+        } else if let Some(place) = declared.overlapped(path) {
             found.push(format!(
                 "unchecked lists {path}, which holds or sits in the layer {} ({}/): a layer cannot be switched off",
                 place.name, place.path
