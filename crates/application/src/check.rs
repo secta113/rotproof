@@ -41,6 +41,7 @@ use domain::records::{
     root_specs, unlogged, unread_paths,
 };
 use domain::tree::Tree;
+use domain::upgrade::VERSION;
 use utils::markdown::links;
 use utils::paths::{file_name, join};
 
@@ -115,6 +116,18 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
             check: heading.clone().into(),
             detail,
         }));
+        findings.extend(
+            domain::upgrade::problems(
+                declared.declaration.files.as_deref(),
+                &declared.declaration.declined,
+                VERSION,
+            )
+            .into_iter()
+            .map(|detail| Finding {
+                check: "the project's files are up to this version of Rotproof".into(),
+                detail,
+            }),
+        );
         let guide = domain::project::guide(&declared.declaration.stack, declared.layout.as_ref());
         let found = exactly(tree, GUIDE)
             .ok()

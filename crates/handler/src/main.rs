@@ -5,12 +5,15 @@ use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use application::create::Made;
+use application::init::Initialized;
 use chrono::{Local, SecondsFormat};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use domain::approvals::{APPROVALS, Approved, Kept};
 use domain::hook::Changes;
 use domain::layers::{DECLARATION, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
+use domain::upgrade::VERSION;
 use infrastructure::disk::{Disk, project_root};
 use infrastructure::git::Git;
 use infrastructure::readers::Readers;
@@ -40,7 +43,8 @@ Check the layers and the records, and exit non-zero when one breaks the rules
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
 layers), that each layer imports only what the layer table allows or a person approved in \
 .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
-comment holds {markers}, that \
+comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
+updates them), that \
 .rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the rules.md of each directory). \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
 a rule is broken, 2 when a file cannot be read.";
@@ -60,15 +64,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Write .config/rotproof.toml for a stack, once. Edit it, then run `rotproof create`
+    /// Write .config/rotproof.toml for a stack; run again after upgrading Rotproof, to update the project's files
     ///
-    /// Writes only the declaration, with every field and what it means, so the layers the project does not want are
-    /// listed in absent before anything is made. Never overwrites a declaration that exists. Exits 2 for an unknown
-    /// stack or a declaration that exists.
+    /// Without a declaration, writes only the declaration, with every field and what it means, so the layers the
+    /// project does not want are listed in absent before anything is made; then edit it and run `rotproof create`.
+    /// With one, it is the whole upgrade of Rotproof: it applies every update a newer Rotproof brings to the files
+    /// `rotproof create` wrote once (such as a rule added to .claude/settings.json), except the ones the declaration
+    /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
+    /// the declaration to this version. It never changes the declaration's other values. What an update cannot do
+    /// without a person, it says, leaves files as it was, and exits 2. Exits 2 too for an unknown stack, a stack
+    /// other than the declared one, or a file that cannot be read or written.
     Init {
-        /// python, typescript, rust, or none (records only)
+        /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
         #[arg(long)]
-        stack: String,
+        stack: Option<String>,
     },
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
     ///
@@ -78,8 +87,8 @@ enum Command {
     /// Rotproof and a CI workflow, and for rust the workspace's Cargo.toml), each when it does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files and rules in
     /// docs/. Adds the fields the declaration lacks, keeping its comments and values. Never overwrites another file,
-    /// and never moves or deletes one. Run it when a project starts, after editing the declaration, and after
-    /// upgrading Rotproof.
+    /// and never moves or deletes one. Run it when a project starts, and after editing the declaration; after upgrading
+    /// Rotproof, `rotproof init` does what it does, without making a layer.
     /// Makes layers only with --yes: without it, a run that would make one lists them, writes nothing and exits 2, so
     /// the layers the project does not have are declared absent first. Exits 2 too when the declaration cannot be read
     /// or a file cannot be written.
@@ -158,7 +167,7 @@ fn main() -> ExitCode {
         return stop_hook(&cli.root);
     }
     let result = match cli.command {
-        Command::Init { stack } => init(&cli.root, &stack).map(|()| true),
+        Command::Init { stack } => init(&cli.root, stack.as_deref()).map(|()| true),
         Command::Create { yes } => create(&cli.root, yes).map(|()| true),
         Command::Check => check(&cli.root),
         Command::Guide { stack } => {
@@ -190,43 +199,76 @@ fn main() -> ExitCode {
     }
 }
 
-/// Write the declaration, and say what to do next.
-fn init(root: &Path, stack: &str) -> Result<(), String> {
+/// Write the declaration, or upgrade the project's files, and say what to do next.
+fn init(root: &Path, stack: Option<&str>) -> Result<(), String> {
     let disk = Disk::new(root);
-    let path = application::init::init(&disk, &disk, stack)?;
-    println!("wrote {path}");
-    if stack == RECORDS_ONLY {
-        println!("next: run `rotproof create` to make docs/");
-    } else {
-        println!(
-            "next: declare in absent the layers this project does not have, then run `rotproof create`, which lists \
-             the layers it would make, and `rotproof create --yes` to make them"
-        );
+    let upgraded = match application::init::init(&disk, &disk, stack, &disk.name()?, VERSION)? {
+        Initialized::Declared(path) => {
+            println!("wrote {path}");
+            if stack == Some(RECORDS_ONLY) {
+                println!("next: run `rotproof create` to make docs/");
+            } else {
+                println!(
+                    "next: declare in absent the layers this project does not have, then run `rotproof create`, \
+                     which lists the layers it would make, and `rotproof create --yes` to make them"
+                );
+            }
+            return Ok(());
+        }
+        Initialized::Upgraded(upgraded) => upgraded,
+    };
+    for (name, path) in &upgraded.applied {
+        println!("updated {path}: {name}");
     }
+    report_made(&upgraded.made);
+    if !upgraded.by_hand.is_empty() {
+        for why in &upgraded.by_hand {
+            println!("needs a person: {why}");
+        }
+        return Err(format!(
+            "the project's files stay up to {} in {DECLARATION} until these are done or declined: then run \
+             `rotproof init` again",
+            upgraded.from
+        ));
+    }
+    if upgraded.files_set {
+        println!(
+            "the project's files are up to {VERSION} (from {}): files = \"{VERSION}\" in {DECLARATION}",
+            upgraded.from
+        );
+    } else {
+        println!("the project's files are up to {VERSION} already");
+    }
+    println!("next: run `rotproof check`");
     Ok(())
 }
 
-/// Make what is missing, and say what was written. A second run with nothing changed writes nothing.
-fn create(root: &Path, yes: bool) -> Result<(), String> {
-    let disk = Disk::new(root);
-    let made = application::create::create(&disk, &disk, &disk.name()?, yes)?;
+/// Say what `rotproof create`, or the refresh of an upgrade, wrote and added.
+fn report_made(made: &Made) {
     for path in &made.written {
         println!("wrote {path}");
     }
     for field in &made.added {
         println!("added to {DECLARATION}: {field}");
     }
+    if let Some(why) = &made.not_written {
+        println!("not written: {why}");
+    }
+    for (name, why) in &made.left_out {
+        println!("left out of the index, fix it: {name}: {why}");
+    }
+}
+
+/// Make what is missing, and say what was written. A second run with nothing changed writes nothing.
+fn create(root: &Path, yes: bool) -> Result<(), String> {
+    let disk = Disk::new(root);
+    let made = application::create::create(&disk, &disk, &disk.name()?, yes)?;
+    report_made(&made);
     if made.written.is_empty() {
         println!(
             "nothing to make: the tree has what {} declares",
             DECLARATION
         );
-    }
-    if let Some(why) = &made.not_written {
-        println!("not written: {why}");
-    }
-    for (name, why) in made.left_out {
-        println!("left out of the index, fix it: {name}: {why}");
     }
     if !made.written.is_empty() {
         println!("next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md");

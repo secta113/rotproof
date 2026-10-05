@@ -25,12 +25,26 @@ fn repo() -> tempfile::TempDir {
     root
 }
 
-/// A repository with only `.config/rotproof.toml`.
+/// A repository with only `.config/rotproof.toml`, its files up to this version of Rotproof.
 fn declared(declaration: &str) -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     fs::create_dir_all(root.path().join(".config")).unwrap();
-    fs::write(root.path().join(".config/rotproof.toml"), declaration).unwrap();
+    fs::write(
+        root.path().join(".config/rotproof.toml"),
+        up_to_date(declaration),
+    )
+    .unwrap();
     root
+}
+
+/// `declaration` with `files` at this version of Rotproof, unless it names one: a declaration written by hand would
+/// otherwise be up to the first release, and fail once Rotproof is newer.
+fn up_to_date(declaration: &str) -> String {
+    if declaration.contains("files =") {
+        declaration.to_string()
+    } else {
+        format!("{declaration}files = \"{}\"\n", env!("CARGO_PKG_VERSION"))
+    }
 }
 
 fn root_arg(root: &Path) -> String {
@@ -529,7 +543,7 @@ fn create_writes_the_projects_files_once() {
         };
         fs::write(
             root.join(".config/rotproof.toml"),
-            format!("stack = \"{stack}\"\nareas = [\"a\"]\n{absent}"),
+            up_to_date(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n{absent}")),
         )
         .unwrap();
         let arg = root_arg(&root);
@@ -789,7 +803,7 @@ fn record(kind: &str, tag: &str) -> String {
 #[test]
 fn create_adds_the_fields_the_declaration_lacks() {
     // A declaration an older Rotproof wrote, before areas existed, with comments and values of the project's own
-    let older = "# Ours\nstack = \"python\"\nabsent = [\"ui\"]  # no UI here\n";
+    let older = &up_to_date("# Ours\nstack = \"python\"\nabsent = [\"ui\"]  # no UI here\n");
     let root = declared("stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n");
     let r = root.path();
     let arg = root_arg(r);
@@ -888,7 +902,7 @@ fn create_leaves_a_declaration_it_cannot_complete_as_it_was() {
         );
         assert_eq!(
             fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap(),
-            declaration
+            up_to_date(declaration)
         );
         assert!(!root.path().join("docs").exists(), "{declaration}");
     }
@@ -932,7 +946,7 @@ fn create_fails_without_a_declaration_it_can_read() {
 type Plant = Box<dyn Fn(&Path)>;
 
 fn declare(root: &Path, text: &str) {
-    fs::write(root.join(".config/rotproof.toml"), text).unwrap();
+    fs::write(root.join(".config/rotproof.toml"), up_to_date(text)).unwrap();
 }
 
 fn plant_file(root: &Path, path: &str) {
@@ -1975,13 +1989,19 @@ fn init_writes_a_declaration_that_create_reads() {
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
         let out = run(&["--root", &arg, "check"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
-        // The declaration is the project's: a second init leaves it as it is
+        // The declaration is the project's: a second init upgrades the project's files, which are up to this version
+        // already, and leaves it as it is
         declare(root.path(), &format!("{written}# edited\n"));
         let again = run(&["--root", &arg, "init", "--stack", stack]);
-        assert_eq!(again.status.code(), Some(2), "{stack}");
-        assert!(String::from_utf8_lossy(&again.stderr).contains("never overwrites"));
+        assert_eq!(again.status.code(), Some(0), "{stack}: {}", stdout(&again));
+        assert!(stdout(&again).contains("are up to"), "{}", stdout(&again));
         let kept = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
-        assert!(kept.ends_with("# edited\n"), "{stack}: {kept}");
+        assert_eq!(kept, format!("{written}# edited\n"), "{stack}");
+        // With another stack, it refuses: it never changes a stack
+        let other = if stack == "rust" { "python" } else { "rust" };
+        let again = run(&["--root", &arg, "init", "--stack", other]);
+        assert_eq!(again.status.code(), Some(2), "{stack}");
+        assert!(String::from_utf8_lossy(&again.stderr).contains("never changes a stack"));
     }
 }
 
@@ -1994,7 +2014,60 @@ fn init_needs_a_known_stack() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("known: python, typescript, rust, none"));
     let out = run(&["--root", &arg, "init"]);
     assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("name the stack with --stack"));
     assert!(tree(root.path()).is_empty(), "{:?}", tree(root.path()));
+}
+
+#[test]
+fn init_upgrades_a_project_made_by_the_first_release() {
+    // As `rotproof create` of 0.1.0 left a project: no files in the declaration, and settings without the deny rule
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        "stack = \"none\"\nareas = [\"a\"]\n",
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    fs::write(r.join(".claude/settings.json"), "{\n  \"hooks\": {}\n}\n").unwrap();
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let version = env!("CARGO_PKG_VERSION");
+    // While Rotproof is 0.1.0 itself, its files are up to date: nothing to update, and the check passes
+    let out = run(&["--root", &arg, "check"]);
+    if version == "0.1.0" {
+        assert!(out.status.success(), "{}", stdout(&out));
+        return;
+    }
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("the project's files are up to 0.1.0 (no files in the declaration)"),
+        "{}",
+        stdout(&out)
+    );
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(stdout(&out).contains("updated .claude/settings.json: claude-deny-approvals"));
+    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
+    assert!(
+        settings.contains("Edit(/.config/rotproof-approved.toml)"),
+        "{settings}"
+    );
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    assert!(
+        declaration.starts_with("stack = \"none\"\nareas = [\"a\"]\n"),
+        "{declaration}"
+    );
+    assert!(
+        declaration.contains(&format!("files = \"{version}\"")),
+        "{declaration}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
 }
 
 #[test]
@@ -2180,7 +2253,9 @@ fn a_marker_in_a_rust_comment_fails() {
     write("crates/generated/src/lib.rs", "// XXX generated\n");
     fs::write(
         r.join(".config/rotproof.toml"),
-        "stack = \"rust\"\nareas = [\"a\"]\nabsent = []\nunchecked = [\"crates/generated\"]\n",
+        up_to_date(
+            "stack = \"rust\"\nareas = [\"a\"]\nabsent = []\nunchecked = [\"crates/generated\"]\n",
+        ),
     )
     .unwrap();
     let arg = root_arg(r);

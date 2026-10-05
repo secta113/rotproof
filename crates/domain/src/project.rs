@@ -330,6 +330,8 @@ mod tests {
                 areas: Vec::new(),
                 absent: Vec::new(),
                 unchecked: Vec::new(),
+                files: None,
+                declined: Vec::new(),
             })
             .unwrap();
             let (files, not_written) = project_files(&declared, "x");

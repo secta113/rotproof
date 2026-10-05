@@ -15,8 +15,11 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   generates:** this file, and the `index.md` and `rules.md` files in `docs/`. It never changes another file, apart
   from adding the fields the declaration lacks, and never moves or deletes one. Nothing runs it on its own.
 - **`rotproof index` rewrites the `index.md` files in `docs/`** after a record changes. Never edit them by hand.
-- **Upgrade Rotproof in a commit of its own:** change the pinned version, install it, run `rotproof create`, then
-  `rotproof check`. Until `rotproof create` has run, `rotproof check` fails with this file out of date.
+- **Upgrade Rotproof in a commit of its own:** change the pinned version, install it, run `rotproof init`, then
+  `rotproof check`. `rotproof init` applies what the new version brings to the files `rotproof create` wrote once
+  (except the updates `declined` lists in `.config/rotproof.toml`), rewrites this file, and sets `files` there to the
+  new version. Until it has run, `rotproof check` fails. What an update cannot do without a person, it says: do it by
+  hand, or decline it by its name in `declined`.
 {layers}
 ## The records
 

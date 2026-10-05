@@ -51,10 +51,37 @@ pub struct Made {
     pub not_written: Option<String>,
 }
 
+/// What a run does with the layers that are neither present nor declared absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layers {
+    /// Make them (`--yes`)
+    Make,
+    /// Stop before anything is written when there is one (no `--yes`)
+    Stop,
+    /// Leave them, and make the rest (`rotproof init` on an upgrade)
+    Leave,
+}
+
 /// Make what is missing in `tree`, writing through `out`, for the project named `name` (its root directory's). Layers
 /// are made only when `yes` says so. `Err` is a declaration that cannot be read, a file that cannot be written, or
 /// layers to make without `yes`: then nothing is written.
 pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str, yes: bool) -> Result<Made, String> {
+    make(
+        tree,
+        out,
+        name,
+        if yes { Layers::Make } else { Layers::Stop },
+    )
+}
+
+/// What `rotproof create` does after an upgrade, never making a layer: the fields the declaration lacks, the files
+/// Rotproof generates, and the records skeleton and the project's files where they are missing. A layer that is
+/// missing stays missing, for `rotproof check` to name.
+pub fn refresh(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, String> {
+    make(tree, out, name, Layers::Leave)
+}
+
+fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<Made, String> {
     let mut made = Made::default();
     let (declared, completed) = match declaration(tree).map_err(|e| e.to_string())? {
         None => return Err(MISSING.into()),
@@ -74,14 +101,16 @@ pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str, yes: bool) -> Resul
         ),
     };
     // A level whose layer is declared absent is absent too. A level of a layer about to be made is not there either
-    let layers: Vec<&Place> = declared
+    let mut layers: Vec<&Place> = declared
         .places
         .iter()
         .filter(|place| !declared.is_absent(place) && tree.found(&place.path).is_none())
         .collect();
     // Before anything is written: a project that never listed in absent what it lacks would get every layer
-    if !layers.is_empty() && !yes {
-        return Err(unconfirmed(&layers));
+    match mode {
+        Layers::Stop if !layers.is_empty() => return Err(unconfirmed(&layers)),
+        Layers::Leave => layers.clear(),
+        _ => {}
     }
     if let Some((text, added)) = completed {
         write(out, DECLARATION, &text, &mut made)?;

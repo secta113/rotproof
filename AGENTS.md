@@ -39,6 +39,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `schema.rs` | The frontmatter of each document type |
 | `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure and what it points at, the hash of a knowledge document, and the floor of the bundle |
 | `tree.rs` | The ports to a project's files (`Tree` to read them, `Writer` to write them), and how Rotproof reads a file's text and how Windows reads a name |
+| `upgrade.rs` | Upgrading a project's files: the version they are up to (`files` in the declaration), the named updates a later version brings to the files `rotproof create` writes once, and what each does to its file |
 | `code.rs` | What the readers give, as plain values, and the port to them (`Parsers`): the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; and where Cargo looks for a workspace |
 | `layers.rs` | The layer definitions in `layers/`, what a project's `.config/rotproof.toml` says, and the fields `rotproof create` adds to it |
@@ -54,7 +55,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `approvals.rs` | Reading the approvals file from the tree, and `rotproof approve`: an entry added for a forbidden import a person approved, and the entries that match nothing removed (`--prune`) |
 | `bundle.rs` | Reading `docs/` from the tree, directory by directory |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
-| `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks |
+| `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
 | `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
@@ -63,7 +64,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `markers.rs` | The marker check, read from the tree: every code file walked, and its comments read by the reader of its language |
 | `hook.rs` | `rotproof stop-hook`, the hook Claude Code runs when the agent stops |
 | `index.rs` | `rotproof index`: every index file written from the frontmatter, and the open items to measure again |
-| `init.rs` | `rotproof init`: writing a project's declaration, once |
+| `init.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
 | `structure.rs` | The structure check, read from the tree |
 

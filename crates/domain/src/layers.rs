@@ -10,6 +10,8 @@ use serde::Deserialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
 use utils::paths::within;
 
+use crate::upgrade::VERSION;
+
 /// Where a project declares its structure, from the root
 pub const DECLARATION: &str = ".config/rotproof.toml";
 /// What to do when the declaration is missing, with every stack: a test keeps the list equal to [`known_stacks`]
@@ -307,6 +309,13 @@ pub struct Declaration {
     pub absent: Vec<String>,
     #[serde(default)]
     pub unchecked: Vec<String>,
+    /// The version of Rotproof the project's files are up to (`upgrade.rs`). `None` is the first release; only
+    /// `rotproof init` writes it
+    #[serde(default)]
+    pub files: Option<String>,
+    /// The updates of the project's files it declines, by name (`upgrade.rs`)
+    #[serde(default)]
+    pub declined: Vec<String>,
 }
 
 /// What is wrong with a list of areas. An area becomes a heading, so it has text, no space at either end, and no other
@@ -438,10 +447,12 @@ pub fn declaration_text(stack: &str) -> String {
                 # `rotproof check` fails when the tree and this file differ, either way.\n";
     let stacks = known_stacks().join(" | ");
     let areas = format!("{AREAS_COMMENT}areas = []\n");
+    let upgrades =
+        format!("\n{FILES_COMMENT}files = \"{VERSION}\"\n\n{DECLINED_COMMENT}declined = []\n");
     if stack == RECORDS_ONLY {
         return format!(
             "{head}\n# {stacks}. \"none\": records only (docs/), no layers to make or check\n\
-             stack = \"{stack}\"\n\n{areas}"
+             stack = \"{stack}\"\n\n{areas}{upgrades}"
         );
     }
     format!(
@@ -450,9 +461,17 @@ pub fn declaration_text(stack: &str) -> String {
          absent = []\n\n\
          # Paths outside the layers that Rotproof does not look into, such as \"scripts\" (helper scripts, generated\n\
          # or vendored code). A path that holds a layer, or does not exist, fails\n\
-         unchecked = []\n"
+         unchecked = []\n{upgrades}"
     )
 }
+
+/// What `declined` is, as the declaration says it above the field.
+pub const DECLINED_COMMENT: &str = "# Updates of the project's files this project declines, by name, such as \"claude-deny-approvals\".\n\
+                                    # `rotproof init` says when one cannot be applied without a person\n";
+
+/// What `files` is, as the declaration says it above the field.
+pub const FILES_COMMENT: &str = "# The version of Rotproof the project's files are up to. Written by `rotproof init`: after upgrading\n\
+                                 # Rotproof, run it again, and it updates them\n";
 
 /// A declaration together with the layout it names. `Err` is every reason the two do not fit, for the check.
 #[derive(Debug)]

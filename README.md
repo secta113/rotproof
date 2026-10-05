@@ -61,7 +61,8 @@ cargo build --release   # the binary is target/release/rotproof (rotproof.exe on
 ## Usage
 
 ```sh
-rotproof --root <repository> init --stack python  # write .config/rotproof.toml, once
+rotproof --root <repository> init --stack python  # write .config/rotproof.toml, when there is none
+rotproof --root <repository> init    # after upgrading Rotproof: update the project's files (see "Upgrading Rotproof")
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write every generated file in docs/ (the index files and the rules)
@@ -80,7 +81,8 @@ each command's output names the next step. A test follows that path from an empt
 
 Start a project with `rotproof init --stack <stack>` (`python`, `typescript`, `rust`, or `none` for a repository
 that keeps records only). It writes only the declaration, so you declare in `absent` the layers you do not want before
-anything is made, and it never overwrites a declaration that exists. Then run `rotproof create --yes`.
+anything is made. Then run `rotproof create --yes`. Run on a project that has a declaration, `rotproof init` upgrades
+the project's files instead (see "Upgrading Rotproof"), and never changes the declaration's values but `files`.
 
 `rotproof create` makes layers only with `--yes`. Without it, a run that would make one lists the layers, writes
 nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer of the stack, `ui` and its
@@ -116,16 +118,39 @@ The project's files are written once, as a starting point, and are the project's
 How a `typescript` or `rust` project pins Rotproof is not decided yet, so for those stacks `rotproof create` writes
 neither the pin nor the workflow, and says so.
 
-Run it also after upgrading Rotproof. When a newer Rotproof requires a field the declaration lacks, `rotproof check`
-fails and says so, and `rotproof create` adds the field under a comment that says what it is and where its first value
-came from (`areas` gets the tags the records use, sorted by name), keeping every comment and value already there. A
-value that is present is never changed, so an upgrade fails only on what the new rules find.
+When a newer Rotproof requires a field the declaration lacks, `rotproof check` fails and says so, and
+`rotproof create` adds the field under a comment that says what it is and where its first value came from (`areas`
+gets the tags the records use, sorted by name), keeping every comment and value already there. A value that is present
+is never changed, so an upgrade fails only on what the new rules find.
+
+### Upgrading Rotproof
+
+Upgrade in a commit of its own: change the pinned version, install it, run `rotproof init`, then `rotproof check`.
+
+The files `rotproof create` writes once are the project's from then on, so a later version cannot simply rewrite
+them. What it adds to them comes as named updates instead, which `rotproof init` applies when it runs on a project
+that has a declaration:
+
+- **`files` in the declaration is the version the project's files are up to.** `rotproof init` writes it; a
+  declaration without it is up to 0.1.0. `rotproof check` fails while it is older than the running Rotproof, whether
+  or not an update applies, so every upgrade runs `rotproof init` once.
+- **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
+  does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
+  `.rotproof/AGENTS.md`, the generated files in `docs/`), and sets `files` to the running version. It never changes
+  the declaration's other values, and run twice it changes nothing the second time.
+- **An update only adds,** and does nothing when its file has it already. What it cannot do without a person (its file
+  is missing, or not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by
+  hand, or decline the update by its name in `declined`, and run `rotproof init` again.
+
+| Update | Version | File | What it adds |
+|---|---|---|---|
+| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
 `layers/table.toml`), and gives the rules of the records, starting with reading the index files before work. It names
-the Rotproof version that wrote it, so after an upgrade `rotproof check` fails until `rotproof create` has rewritten
-it. Edited by hand, it fails too: a project's own rules go in its own `AGENTS.md`.
+the Rotproof version that wrote it, so after an upgrade `rotproof check` fails until `rotproof init` (or
+`rotproof create`) has rewritten it. Edited by hand, it fails too: a project's own rules go in its own `AGENTS.md`.
 
 The guide only helps if your agent reads it. The `AGENTS.md` and `CLAUDE.md` that `rotproof create` writes point at it;
 a project that has its own points at it from its `AGENTS.md` (or whatever file its agent reads first), and imports it
@@ -358,6 +383,9 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
   `approved.at` that is not a datetime with a time zone, and two entries for one import. A file named otherwise
   (`Rotproof-Approved.toml`) approves nothing, and fails.
+- **The project's files are up to this version of Rotproof** (see "Upgrading Rotproof"): `files` in the declaration
+  (0.1.0 when it is missing) is a version as `major.minor.patch`, neither older nor newer than the running Rotproof,
+  and every name in `declined` is an update.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
   outside `unchecked` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,

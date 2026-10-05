@@ -17,3 +17,4 @@ pub mod records;
 pub mod schema;
 pub mod structure;
 pub mod tree;
+pub mod upgrade;
