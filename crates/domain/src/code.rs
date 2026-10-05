@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 use crate::tree::Tree;
+use utils::paths::{join, normalize, parent};
 
 /// The readers of code: the port the checks read code through.
 pub trait Parsers {
@@ -119,7 +120,7 @@ impl Aliases {
             || specifier.starts_with("./")
             || specifier.starts_with("../")
         {
-            return Landing::At(normalize(&format!("{}/{specifier}", parent(file))));
+            return Landing::At(normalize(&join(parent(file), specifier)));
         }
         if let Some(from_root) = specifier.strip_prefix('/') {
             return Landing::At(normalize(from_root));
@@ -160,36 +161,6 @@ pub fn module_files(path: &str) -> Vec<String> {
         files.push(format!("{path}/index.{extension}"));
     }
     files
-}
-
-/// The directory of a path from the root: "" for a file at the root.
-pub fn parent(path: &str) -> String {
-    path.rsplit_once('/')
-        .map_or(String::new(), |(dir, _)| dir.to_string())
-}
-
-/// `path` from the directory `dir` (from the root), not yet normalized.
-pub fn join(dir: &str, path: &str) -> String {
-    if dir.is_empty() {
-        path.to_string()
-    } else {
-        format!("{dir}/{path}")
-    }
-}
-
-/// A path from the root without `.`, `..` or empty parts. `None` when it climbs above the root.
-fn normalize(path: &str) -> Option<String> {
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            part => parts.push(part),
-        }
-    }
-    Some(parts.join("/"))
 }
 
 /// Where a dependency comes from.

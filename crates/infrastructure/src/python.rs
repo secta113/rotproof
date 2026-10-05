@@ -16,7 +16,7 @@ use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::{PySourceType, Stmt};
 
 use domain::code::{Source, module_parts};
-use utils::source::line_of;
+use utils::text::line_of;
 
 /// Read one file, whose path from the root names the package its relative imports start from.
 pub fn read(source: &str, path: &str) -> Source<Vec<String>> {

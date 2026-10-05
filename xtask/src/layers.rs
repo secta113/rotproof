@@ -137,7 +137,7 @@ fn xtask_markers(tree: &dyn Tree) -> Result<(Vec<String>, BTreeSet<usize>), Stri
     let paths = tree.files(XTASK).map_err(|e| format!("{XTASK}: {e}"))?;
     for path in paths
         .iter()
-        .filter(|path| utils::rust::is_source(path.rsplit('/').next().unwrap_or(path)))
+        .filter(|path| utils::rust::is_source(utils::paths::file_name(path)))
     {
         let Some(source) =
             read_code(tree, path, "comments", &mut found).map_err(|e| e.to_string())?

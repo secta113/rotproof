@@ -20,9 +20,10 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
 
-use domain::code::{Alias, Aliases, Source, join, parent};
+use domain::code::{Alias, Aliases, Source};
 use domain::tree::{Tree, with_lf};
-use utils::source::line_of;
+use utils::paths::{join, parent};
+use utils::text::line_of;
 
 /// Read one file, whose path from the root says how: `.tsx` with JSX, `.d.ts` as declarations.
 pub fn read(source: &str, path: &str) -> Source<String> {
@@ -241,7 +242,7 @@ fn load_one(
             return Ok(None);
         }
     };
-    let dir = parent(name);
+    let dir = parent(name).to_string();
     let mut options = Options::default();
     let extends: Vec<&str> = match json.get("extends") {
         Some(Value::String(one)) => vec![one.as_str()],

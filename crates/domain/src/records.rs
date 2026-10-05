@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::bundle::Docs;
 use utils::frontmatter::split;
 use utils::markdown::{heading, visible};
+use utils::paths::{file_name, parent};
 
 /// Directory (relative to docs/, "" for the root) -> the document types allowed in it
 const TYPES: [(&str, &[&str]); 4] = [
@@ -198,11 +199,6 @@ pub fn log_problems(text: &str) -> Vec<String> {
     found
 }
 
-/// The name a path ends with.
-pub fn file_name(path: &str) -> &str {
-    path.rsplit_once('/').map_or(path, |(_, name)| name)
-}
-
 /// Path -> why, for the files under `docs/` (paths relative to it) that a reader takes for part of the bundle and
 /// Rotproof would not read.
 ///
@@ -214,7 +210,7 @@ pub fn unread_paths(paths: &[String]) -> BTreeMap<String, String> {
     let mut bad = BTreeMap::new();
     for path in paths {
         let name = file_name(path);
-        let folder = path.rsplit_once('/').map_or("", |(folder, _)| folder);
+        let folder = parent(path);
         let read = match name {
             "index.md" => TYPES.iter().any(|(known, _)| *known == folder),
             "log.md" => folder.is_empty(),
@@ -263,7 +259,7 @@ pub fn floor() -> Vec<String> {
 pub fn misplaced(docs: &Docs) -> BTreeMap<String, String> {
     let mut bad = BTreeMap::new();
     for (path, text) in docs {
-        let folder = path.rsplit_once('/').map_or("", |(folder, _)| folder);
+        let folder = parent(path);
         let kind = match split(text) {
             Ok((meta, _)) => match meta.get(&yaml_rust2::Yaml::String("type".into())) {
                 Some(yaml_rust2::Yaml::String(kind)) => Some(kind.clone()),

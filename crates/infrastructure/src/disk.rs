@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use domain::layers::DECLARATION;
 use domain::tree::{Tree, Writer};
-use utils::source::{relative_path, within};
+use utils::paths::{relative_path, within};
 
 /// A project's files, from its root directory.
 #[derive(Debug, Clone)]

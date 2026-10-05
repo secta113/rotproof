@@ -4,6 +4,7 @@
 use std::io;
 
 use domain::tree::{Tree, as_windows_reads, with_lf};
+use utils::paths::file_name;
 
 /// The text of the file at `path`, as Rotproof reads it ([`with_lf`]).
 pub fn read_text(tree: &dyn Tree, path: &str) -> io::Result<String> {
@@ -123,7 +124,7 @@ pub fn code_files(
     Ok(tree
         .files(dir)?
         .into_iter()
-        .filter(|path| is_code(path.rsplit('/').next().unwrap_or(path)))
+        .filter(|path| is_code(file_name(path)))
         .collect())
 }
 

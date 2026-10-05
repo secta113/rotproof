@@ -34,11 +34,12 @@ use domain::code::Parsers;
 use domain::layers::{DECLARATION, area_problems};
 use domain::project::GUIDE;
 use domain::records::{
-    dangling_backlog_refs, file_name, floor, knowledge_refs, log_problems, misplaced, root_specs,
-    unlogged, unread_paths,
+    dangling_backlog_refs, floor, knowledge_refs, log_problems, misplaced, root_specs, unlogged,
+    unread_paths,
 };
 use domain::tree::Tree;
 use utils::markdown::links;
+use utils::paths::{file_name, join};
 
 /// One broken rule: which check found it, and what is wrong.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,11 +334,7 @@ fn walk(
 ) -> io::Result<()> {
     for (name, is_dir) in tree.entries(dir)? {
         let path = format!("{prefix}{name}");
-        let full = if dir.is_empty() {
-            name.clone()
-        } else {
-            format!("{dir}/{name}")
-        };
+        let full = join(dir, &name);
         if is_dir {
             walk(tree, &full, &format!("{path}/"), out)?;
         } else {

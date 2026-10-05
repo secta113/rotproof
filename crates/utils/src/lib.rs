@@ -7,5 +7,6 @@
 
 pub mod frontmatter;
 pub mod markdown;
+pub mod paths;
 pub mod rust;
-pub mod source;
+pub mod text;

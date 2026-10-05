@@ -81,7 +81,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
 | `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
 | `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals |
-| `source.rs` | The paths and lines in messages, and whether a path sits in another |
+| `paths.rs` | Paths from the root with `/`: the parent, the name, a join, without `.` and `..`, whether one sits in another, and the paths in messages |
+| `text.rs` | The line at a position in a text, for messages |
 
 ## How this repository differs from what Rotproof keeps
 

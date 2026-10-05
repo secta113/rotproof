@@ -23,7 +23,8 @@ use regex::Regex;
 
 use crate::code::is_source;
 use crate::layers::{Declared, Language, Layout};
-use utils::source::{line_of, within};
+use utils::paths::within;
+use utils::text::line_of;
 
 /// The words that fail in a comment.
 pub const MARKERS: [&str; 5] = ["TODO", "FIXME", "XXX", "HACK", "NOTE"];

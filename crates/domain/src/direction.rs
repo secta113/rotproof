@@ -19,6 +19,7 @@
 //! The rules here judge an import once it is resolved to a place; `application` reads the code and resolves it.
 
 use crate::layers::{Place, listed};
+use utils::paths::parent;
 
 /// The finding for an import from `from` that lands in `to`, or `None` when the table allows it. `what` says what
 /// was imported, as "imports x" or "depends on x".
@@ -30,20 +31,6 @@ pub fn judged(at: &str, what: &str, from: &Place, to: &Place) -> Option<String> 
             what_it_may_import(from)
         )
     })
-}
-
-/// The directory of a path from the root ("" for the root).
-pub fn parent(path: &str) -> &str {
-    path.rsplit_once('/').map_or("", |(dir, _)| dir)
-}
-
-/// The path of `name` in `dir`, both from the root.
-pub fn in_dir(dir: &str, name: &str) -> String {
-    if dir.is_empty() {
-        name.to_string()
-    } else {
-        format!("{dir}/{name}")
-    }
 }
 
 /// The directories Cargo looks in for the workspace of a manifest in `dir` that does not name one: `dir`, then each

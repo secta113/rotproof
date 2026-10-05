@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::layers::{DECLARATION, Declared, Layout, Place};
-use utils::source::within;
+use utils::paths::{join, within};
 
 /// What the structure check reads from the tree.
 #[derive(Debug, Default)]
@@ -222,11 +222,7 @@ fn first_entry(path: &str, dir: &str) -> String {
         &path[dir.len() + 1..]
     };
     let first = inside.split('/').next().unwrap_or(inside);
-    if dir.is_empty() {
-        first.to_string()
-    } else {
-        format!("{dir}/{first}")
-    }
+    join(dir, first)
 }
 
 /// The code in a layer with levels (`ui`) that sits beside its levels, of the code files `code` in it, as entries

@@ -7,9 +7,10 @@ use std::io;
 use crate::code::lands;
 use crate::tree::{code_files, exactly, read_code};
 use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
-use domain::direction::{in_dir, judged, parent, place_of, workspace_dirs};
+use domain::direction::{judged, place_of, workspace_dirs};
 use domain::layers::{Declared, Language, Layout, Place};
 use domain::tree::Tree;
+use utils::paths::{join, parent};
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
 /// error is a directory that could not be walked.
@@ -81,7 +82,7 @@ fn rust(
                             found.push(format!(
                                 "{at}: {name} comes from the workspace, and {} has no {name} in \
                                  [workspace.dependencies], so it is not checked",
-                                in_dir(&workspace, "Cargo.toml")
+                                join(&workspace, "Cargo.toml")
                             ));
                             continue;
                         };
@@ -167,7 +168,7 @@ impl<'p> Manifests<'p> {
             None => workspace_dirs(dir),
         };
         for at in dirs {
-            let path = in_dir(&at, "Cargo.toml");
+            let path = join(&at, "Cargo.toml");
             if exactly(tree, &path).is_ok_and(|(_, is_dir)| !is_dir)
                 && let Some(candidate) = self.read(tree, &path, found)?
                 && candidate.is_workspace
