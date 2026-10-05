@@ -46,10 +46,9 @@ fn rust(
 ) -> io::Result<Vec<String>> {
     let mut found = Vec::new();
     let mut manifests = Manifests::new(parsers);
-    let parts = |path: &str| -> Vec<String> { path.split('/').map(String::from).collect() };
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
-            let Some(from) = place_of(&parts(&path), places) else {
+            let Some(from) = place_of(&path, places) else {
                 continue;
             };
             let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
@@ -96,7 +95,7 @@ fn rust(
                 let Some(target) = target else {
                     continue;
                 };
-                let Some(to) = place_of(&parts(&target), places) else {
+                let Some(to) = place_of(&target, places) else {
                     continue;
                 };
                 found.extend(judged(
@@ -194,13 +193,12 @@ fn typescript(
         .iter()
         .map(|why| format!("{why}; imports through it are not checked"))
         .collect();
-    let parts = |path: &str| -> Vec<String> { path.split('/').map(String::from).collect() };
     // Every source file of the layers with the place it sits in, and each file a starter puts outside the layers with
     // the layer it belongs to, while that layer is there
     let mut files: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
-            if let Some(from) = place_of(&parts(&path), places) {
+            if let Some(from) = place_of(&path, places) {
                 files.push((path, from));
             }
         }
@@ -230,7 +228,7 @@ fn typescript(
             let Some(target) = lands(tree, &aliases, &path, &specifier) else {
                 continue;
             };
-            let Some(to) = place_of(&parts(&target), places) else {
+            let Some(to) = place_of(&target, places) else {
                 continue;
             };
             found.extend(judged(
@@ -254,7 +252,7 @@ fn python(
     let mut found = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
-            let Some(from) = place_of(&module_parts(&path), places) else {
+            let Some(from) = place_of(&module_parts(&path).join("/"), places) else {
                 continue;
             };
             let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
@@ -267,7 +265,7 @@ fn python(
                 ));
             }
             for (line, module) in read.imports {
-                let Some(to) = place_of(&module, places) else {
+                let Some(to) = place_of(&module.join("/"), places) else {
                     continue;
                 };
                 found.extend(judged(

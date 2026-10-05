@@ -19,7 +19,7 @@
 //! The rules here judge an import once it is resolved to a place; `application` reads the code and resolves it.
 
 use crate::layers::{Place, listed};
-use utils::paths::parent;
+use utils::paths::{parent, within};
 
 /// The finding for an import from `from` that lands in `to`, or `None` when the table allows it. `what` says what
 /// was imported, as "imports x" or "depends on x".
@@ -45,15 +45,13 @@ pub fn workspace_dirs(dir: &str) -> Vec<String> {
     dirs
 }
 
-/// The place a module sits in: the one whose path is the longest prefix of the module's parts.
-pub fn place_of<'a>(module: &[String], places: &[&'a Place]) -> Option<&'a Place> {
+/// The place a path from the root sits in: the longest place it is in, by whole names. A Python module is placed by
+/// its parts joined with `/`, as the path of its package.
+pub fn place_of<'a>(path: &str, places: &[&'a Place]) -> Option<&'a Place> {
     places
         .iter()
         .copied()
-        .filter(|place| {
-            let parts: Vec<&str> = place.path.split('/').collect();
-            module.len() >= parts.len() && parts.iter().zip(module).all(|(a, b)| a == b)
-        })
+        .filter(|place| within(path, &place.path))
         .max_by_key(|place| place.path.len())
 }
 
@@ -113,10 +111,6 @@ mod tests {
         layout("python").unwrap().places(&table())
     }
 
-    fn parts(dotted: &str) -> Vec<String> {
-        dotted.split('.').map(String::from).collect()
-    }
-
     #[test]
     fn what_the_table_allows_is_closed_under_chaining() {
         // Only direct imports are judged, so a chain of allowed imports must never reach what its first may not
@@ -147,7 +141,8 @@ mod tests {
     fn a_module_sits_in_the_longest_place_it_starts_with() {
         let places = python_places();
         let places: Vec<&Place> = places.iter().collect();
-        let name = |dotted: &str| place_of(&parts(dotted), &places).map(|p| p.name.clone());
+        let name =
+            |dotted: &str| place_of(&dotted.replace('.', "/"), &places).map(|p| p.name.clone());
         assert_eq!(name("ui.atoms.button"), Some("ui.atoms".into()));
         assert_eq!(name("ui.atoms"), Some("ui.atoms".into()));
         assert_eq!(name("ui.helpers"), Some("ui".into()));
