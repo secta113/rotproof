@@ -51,10 +51,8 @@ static RECORDS: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// What in a report leaves something open, matched in any case. Words common in plain prose ("later") are left out:
-/// a hook that fires on every message is answered without reading. So is "todo" for now: while the marker check is
-/// being built and talked about, it names that check more often than it leaves work open, and the word in a comment
-/// in the code fails the marker check anyway.
-pub const PHRASES: [&str; 14] = [
+/// a hook that fires on every message is answered without reading.
+pub const PHRASES: [&str; 15] = [
     "未確認",
     "後で",
     "あとで",
@@ -69,6 +67,7 @@ pub const PHRASES: [&str; 14] = [
     "unverified",
     "out of scope",
     "follow-up",
+    "todo",
 ];
 
 /// The changes a project's version control shows: the port the hook asks whether anything was recorded.
@@ -163,6 +162,11 @@ mod tests {
         assert!(context.contains("\"not checked\""), "{context}");
         assert!(context.contains("nothing in docs/ changed"), "{context}");
         assert_eq!(out["hookSpecificOutput"]["hookEventName"], "Stop");
+    }
+
+    #[test]
+    fn a_todo_left_in_a_report_is_found() {
+        assert_eq!(open_phrases("Done. TODO: the Windows path"), ["todo"]);
     }
 
     #[test]
