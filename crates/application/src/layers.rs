@@ -3,15 +3,20 @@
 use std::io;
 
 use crate::tree::{Lookup, exactly, lookup};
-use domain::layers::{DECLARATION, Declaration, MISSING, parse_declaration};
+use domain::layers::{DECLARATION, Declaration, MISSING, parse_declaration, unreadable};
 use domain::tree::Tree;
 
 /// The areas a project declares, or why the declaration cannot be read.
 pub fn areas(tree: &dyn Tree) -> io::Result<Result<Vec<String>, String>> {
+    Ok(read(tree)?.map(|declaration| declaration.areas))
+}
+
+/// The declaration, or what every command says when it is missing or cannot be read.
+pub fn read(tree: &dyn Tree) -> io::Result<Result<Declaration, String>> {
     Ok(match declaration(tree)? {
         None => Err(MISSING.into()),
-        Some(Err(why)) => Err(format!("{DECLARATION}: {why}")),
-        Some(Ok(declaration)) => Ok(declaration.areas),
+        Some(Err(why)) => Err(unreadable(&why)),
+        Some(Ok(declaration)) => Ok(declaration),
     })
 }
 
@@ -30,6 +35,6 @@ pub fn declaration(tree: &dyn Tree) -> io::Result<Option<Result<Declaration, Str
     };
     let text = tree
         .read(&path)
-        .map_err(|e| io::Error::new(e.kind(), format!("{DECLARATION}: {e}")))?;
+        .map_err(|e| io::Error::new(e.kind(), unreadable(&e.to_string())))?;
     Ok(Some(parse_declaration(&text)))
 }

@@ -3,9 +3,9 @@
 
 use std::io;
 
-use crate::layers::declaration;
+use crate::layers::read;
 use crate::tree::{code_files, exactly};
-use domain::layers::{DECLARATION, Declared, MISSING};
+use domain::layers::{DECLARATION, Declared};
 use domain::structure::{Seen, listed, named, problems as judged};
 use domain::tree::Tree;
 
@@ -18,24 +18,33 @@ pub struct Structure {
     pub skipped: Option<String>,
     /// The declaration with its layout, when it can be read and fits, for the checks that follow
     pub declared: Option<Declared>,
+    /// The areas it declares, when it can be read: the check of the records takes them from here, so the declaration
+    /// is read once
+    pub areas: Option<Vec<String>>,
 }
 
 /// Every way `tree` differs from its declaration. An error is a file or directory that could not be read.
 pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
-    let failed = |found: Vec<String>| {
-        Ok(Structure {
-            found,
-            skipped: None,
-            declared: None,
-        })
+    let declaration = match read(tree)? {
+        Ok(declaration) => declaration,
+        Err(why) => {
+            return Ok(Structure {
+                found: vec![why],
+                ..Structure::default()
+            });
+        }
     };
-    let declared = match declaration(tree)? {
-        None => return failed(vec![MISSING.into()]),
-        Some(Err(why)) => return failed(vec![format!("{DECLARATION}: {why}")]),
-        Some(Ok(declaration)) => match Declared::new(declaration) {
-            Ok(declared) => declared,
-            Err(found) => return failed(found),
-        },
+    // The records are grouped by the areas even when the stack does not fit: they are checked all the same
+    let areas = Some(declaration.areas.clone());
+    let declared = match Declared::new(declaration) {
+        Ok(declared) => declared,
+        Err(found) => {
+            return Ok(Structure {
+                found,
+                areas,
+                ..Structure::default()
+            });
+        }
     };
     let Some(layout) = &declared.layout else {
         return Ok(Structure {
@@ -44,6 +53,7 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
                 "the layers are not checked: {DECLARATION} declares stack = \"none\" (records only)"
             )),
             declared: Some(declared),
+            areas,
         });
     };
     let mut seen = Seen::default();
@@ -59,6 +69,7 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
         found: judged(&declared, layout, &seen),
         skipped: None,
         declared: Some(declared),
+        areas,
     })
 }
 

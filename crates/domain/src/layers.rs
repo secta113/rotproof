@@ -18,6 +18,11 @@ pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotpro
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
 
+/// What every command says of a declaration that cannot be read, for `why`.
+pub fn unreadable(why: &str) -> String {
+    format!("{DECLARATION}: {why}")
+}
+
 const TABLE: &str = include_str!("../../../layers/table.toml");
 /// Stack -> its layout
 pub const STACKS: [(&str, &str); 3] = [

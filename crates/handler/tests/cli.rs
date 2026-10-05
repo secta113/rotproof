@@ -978,6 +978,25 @@ fn each_difference_from_the_declaration_fails() {
     }
 }
 
+/// A declaration whose stack does not fit still names the areas the records are grouped by, so the records are checked
+/// all the same: only a declaration that cannot be read leaves them unchecked
+#[test]
+fn the_records_are_checked_under_a_stack_that_does_not_fit() {
+    let root = clean_repo();
+    declare(root.path(), "stack = \"cobol\"\nareas = [\"a\"]\n");
+    fs::write(
+        root.path().join("docs/backlog/broken.md"),
+        "no frontmatter\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(said.contains("unknown stack"), "{said}");
+    assert!(!said.contains("the records are not checked"), "{said}");
+    assert!(said.contains("broken.md"), "{said}");
+}
+
 /// A repository that keeps every rule, with `ui`: what `rotproof create` makes for `stack`, and a log entry.
 fn repo_with_ui(stack: &str, absent: &str) -> tempfile::TempDir {
     let root = declared(&format!(

@@ -28,7 +28,9 @@ use crate::layers::declaration;
 use crate::tree::{exactly, read_text};
 use domain::bundle::{LOG, in_docs, record_tags as tags_in};
 use domain::hook::SETTINGS;
-use domain::layers::{DECLARATION, Declared, MISSING, completed, lacking, parse_declaration};
+use domain::layers::{
+    DECLARATION, Declared, MISSING, completed, lacking, parse_declaration, unreadable,
+};
 use domain::project::{GUIDE, guide, project_files};
 use domain::tree::{Tree, Writer};
 
@@ -55,14 +57,13 @@ pub fn create(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, Str
             // Written only once the completed declaration reads and fits its stack, so a declaration that fails for
             // another reason is left as it was
             Some((text, added)) => {
-                let declaration =
-                    parse_declaration(&text).map_err(|why| format!("{DECLARATION}: {why}"))?;
+                let declaration = parse_declaration(&text).map_err(|why| unreadable(&why))?;
                 let declared = Declared::new(declaration).map_err(|found| found.join("\n"))?;
                 write(out, DECLARATION, &text, &mut made)?;
                 made.added = added;
                 declared
             }
-            None => return Err(format!("{DECLARATION}: {why}")),
+            None => return Err(unreadable(&why)),
         },
         Some(Ok(declaration)) => Declared::new(declaration).map_err(|found| found.join("\n"))?,
     };
@@ -115,7 +116,7 @@ fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     let Ok((path, _)) = exactly(tree, DECLARATION) else {
         return Ok(None);
     };
-    let text = read_text(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
+    let text = read_text(tree, &path).map_err(|e| unreadable(&e.to_string()))?;
     let Some(lacking) = lacking(&text) else {
         return Ok(None);
     };
@@ -134,9 +135,7 @@ fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     }
     // In the line endings the project wrote: `read_text` gave every line `\n`, and a declaration checked out with
     // CRLF would otherwise change on every line, not only where a field was added
-    let raw = tree
-        .read(&path)
-        .map_err(|e| format!("{DECLARATION}: {e}"))?;
+    let raw = tree.read(&path).map_err(|e| unreadable(&e.to_string()))?;
     Ok(Some(completed(&text, &values, raw.contains("\r\n"))))
 }
 

@@ -1,7 +1,7 @@
 //! `rotproof guide`: the guide for a stack, named or declared.
 
 use crate::layers::declaration;
-use domain::layers::{DECLARATION, known_stacks};
+use domain::layers::{DECLARATION, known_stacks, unreadable};
 use domain::project::guide_named;
 use domain::tree::Tree;
 
@@ -21,7 +21,8 @@ pub fn guide_for(tree: &dyn Tree, stack: Option<&str>) -> Result<String, String>
                 }
                 Some(Err(why)) => {
                     return Err(format!(
-                        "{DECLARATION}: {why}; or name a stack with --stack ({stacks})"
+                        "{}; or name a stack with --stack ({stacks})",
+                        unreadable(&why)
                     ));
                 }
             }

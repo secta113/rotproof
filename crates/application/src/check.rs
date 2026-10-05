@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::io;
 
 use crate::bundle::Bundle;
-use crate::layers::areas;
+
 use crate::links::broken;
 use crate::tree::{exactly, read_text};
 use domain::bundle::{DOCS, Docs, backlog, in_docs, is_document};
@@ -103,7 +103,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
             });
         }
     }
-    findings.extend(records(tree, parsers)?);
+    findings.extend(records(tree, parsers, structure.areas)?);
     Ok(Report {
         findings,
         skipped,
@@ -111,8 +111,12 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
     })
 }
 
-/// Every broken rule of the records.
-fn records(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Vec<Finding>> {
+/// Every broken rule of the records, grouped by `areas`: `None` when the declaration cannot be read.
+fn records(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    areas: Option<Vec<String>>,
+) -> io::Result<Vec<Finding>> {
     let mut found = Vec::new();
     let mut add = |check: &'static str, details: Vec<String>| {
         found.extend(details.into_iter().map(|detail| Finding {
@@ -122,9 +126,9 @@ fn records(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Vec<Finding>> {
     };
     // Every record names an area, so nothing below can be judged without them. The structure check names what is
     // wrong with the declaration; this says that the records were not checked because of it
-    let areas = match areas(tree)? {
-        Ok(areas) => areas,
-        Err(_) => {
+    let areas = match areas {
+        Some(areas) => areas,
+        None => {
             add(
                 "the bundle is seen",
                 vec![format!(
