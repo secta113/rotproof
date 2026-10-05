@@ -7,6 +7,7 @@ use std::process::ExitCode;
 
 use chrono::Local;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use domain::approvals::APPROVALS;
 use domain::hook::Changes;
 use domain::layers::{DECLARATION, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
@@ -37,7 +38,9 @@ const CHECK_HELP: &str = "\
 Check the layers and the records, and exit non-zero when one breaks the rules
 
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
-layers), that each layer imports only what the layer table allows, that no comment holds {markers}, that \
+layers), that each layer imports only what the layer table allows or a person approved in \
+.config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
+comment holds {markers}, that \
 .rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the rules.md of each directory). \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
 a rule is broken, 2 when a file cannot be read.";
@@ -207,6 +210,16 @@ fn check(root: &Path) -> Result<bool, String> {
         application::check::check(&Disk::new(root), &Readers).map_err(|e| e.to_string())?;
     if let Some(why) = &report.skipped {
         println!("{why}");
+    }
+    // An approval never hides: every one is printed, on every run, before what fails
+    if !report.approved.is_empty() {
+        println!(
+            "approved by a person in {APPROVALS} ({}):",
+            report.approved.len()
+        );
+        for line in &report.approved {
+            println!("  {line}");
+        }
     }
     let found = report.findings;
     let mut last = "";

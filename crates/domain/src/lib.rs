@@ -4,6 +4,7 @@
 //! No I/O, and no call through a port: a rule takes the values a use case in `application` has read, and gives back
 //! what it decides. Imports `utils` only.
 
+pub mod approvals;
 pub mod bundle;
 pub mod code;
 pub mod direction;

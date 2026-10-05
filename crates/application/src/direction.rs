@@ -7,10 +7,19 @@ use std::io;
 use crate::code::lands;
 use crate::tree::{code_files, exactly, read_code, resolved};
 use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
-use domain::direction::{judged, place_of, workspace_dirs};
+use domain::direction::{Forbidden, judged, place_of, workspace_dirs};
 use domain::layers::{Declared, Language, Layout, Place};
 use domain::tree::Tree;
 use utils::paths::{join, parent};
+
+/// What the direction check found.
+#[derive(Debug, Default)]
+pub struct Direction {
+    /// Every file that could not be read, or whose imports could not be resolved
+    pub problems: Vec<String>,
+    /// Every import the table does not allow, before the approvals are read
+    pub forbidden: Vec<Forbidden>,
+}
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
 /// error is a directory that could not be walked.
@@ -18,10 +27,10 @@ pub fn problems(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     declared: &Declared,
-) -> io::Result<Vec<String>> {
+) -> io::Result<Direction> {
     let Some(layout) = &declared.layout else {
         // A repository of records only: the structure check already says that the layers were not checked
-        return Ok(Vec::new());
+        return Ok(Direction::default());
     };
     // Only the places that are there: an import of a layer declared absent names a module the project does not have
     let places: Vec<&Place> = declared
@@ -43,8 +52,9 @@ fn rust(
     parsers: &dyn Parsers,
     layout: &Layout,
     places: &[&Place],
-) -> io::Result<Vec<String>> {
+) -> io::Result<Direction> {
     let mut found = Vec::new();
+    let mut forbidden = Vec::new();
     let mut manifests = Manifests::new(parsers);
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
@@ -98,8 +108,10 @@ fn rust(
                 let Some(to) = place_of(&target, places) else {
                     continue;
                 };
-                found.extend(judged(
-                    &at,
+                forbidden.extend(judged(
+                    &path,
+                    dependency.line,
+                    name,
                     &format!("depends on {name} ({target}{through})"),
                     from,
                     to,
@@ -107,7 +119,10 @@ fn rust(
             }
         }
     }
-    Ok(found)
+    Ok(Direction {
+        problems: found,
+        forbidden,
+    })
 }
 
 /// Every manifest read by the Rust check, by its path from the root, so a workspace is read once for all its members
@@ -186,7 +201,8 @@ fn typescript(
     parsers: &dyn Parsers,
     layout: &Layout,
     places: &[&Place],
-) -> io::Result<Vec<String>> {
+) -> io::Result<Direction> {
+    let mut forbidden = Vec::new();
     let aliases = parsers.typescript_aliases(tree)?;
     let mut found: Vec<String> = aliases
         .problems
@@ -232,15 +248,20 @@ fn typescript(
             let Some(to) = place_of(&target, places) else {
                 continue;
             };
-            found.extend(judged(
-                &format!("{path}:{line}"),
+            forbidden.extend(judged(
+                &path,
+                line,
+                &specifier,
                 &format!("imports {specifier} ({target})"),
                 from,
                 to,
             ));
         }
     }
-    Ok(found)
+    Ok(Direction {
+        problems: found,
+        forbidden,
+    })
 }
 
 /// The direction check of a Python project: every import of a `.py` file in a layer, as the module it names.
@@ -249,8 +270,9 @@ fn python(
     parsers: &dyn Parsers,
     layout: &Layout,
     places: &[&Place],
-) -> io::Result<Vec<String>> {
+) -> io::Result<Direction> {
     let mut found = Vec::new();
+    let mut forbidden = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
             let Some(from) = place_of(&module_parts(&path).join("/"), places) else {
@@ -269,14 +291,20 @@ fn python(
                 let Some(to) = place_of(&resolved(tree, &module.join("/")), places) else {
                     continue;
                 };
-                found.extend(judged(
-                    &format!("{path}:{line}"),
-                    &format!("imports {}", module.join(".")),
+                let dotted = module.join(".");
+                forbidden.extend(judged(
+                    &path,
+                    line,
+                    &dotted,
+                    &format!("imports {dotted}"),
                     from,
                     to,
                 ));
             }
         }
     }
-    Ok(found)
+    Ok(Direction {
+        problems: found,
+        forbidden,
+    })
 }

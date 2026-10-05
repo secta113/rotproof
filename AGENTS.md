@@ -34,6 +34,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/domain/src/` | Content |
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
+| `approvals.rs` | The approvals file, `.config/rotproof-approved.toml`: the imports the layer table forbids that a person approved, each keyed by its file and what it imports, matched against what the direction check found, and the file with an entry added or removed |
 | `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, the files Rotproof generates in it (the index files and the rules), and the tags the records use |
 | `schema.rs` | The frontmatter of each document type |
 | `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure and what it points at, the hash of a knowledge document, and the floor of the bundle |
@@ -50,6 +51,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/application/src/` | Content |
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
+| `approvals.rs` | Reading the approvals file from the tree |
 | `bundle.rs` | Reading `docs/` from the tree, directory by directory |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks |

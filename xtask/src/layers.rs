@@ -102,7 +102,14 @@ pub fn problems(root: &Path) -> Result<Vec<String>, String> {
     };
     let direction =
         application::direction::problems(&tree, &Readers, &declared).map_err(|e| e.to_string())?;
-    found.extend(direction.into_iter().map(|why| format!("direction: {why}")));
+    // Rotproof keeps no approvals: every forbidden import fails
+    found.extend(
+        direction
+            .problems
+            .into_iter()
+            .chain(direction.forbidden.into_iter().map(|f| f.detail))
+            .map(|why| format!("direction: {why}")),
+    );
     let mut markers =
         application::markers::problems(&tree, &Readers, &declared).map_err(|e| e.to_string())?;
     let (in_xtask, words) = xtask_markers(&tree)?;

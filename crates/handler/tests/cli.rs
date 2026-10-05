@@ -2406,3 +2406,90 @@ fn a_knowledge_document_belongs_in_docs_knowledge() {
         "{said}"
     );
 }
+
+/// An approvals file with one entry for each `(from, import)`.
+fn approvals(entries: &[(&str, &str)]) -> String {
+    entries
+        .iter()
+        .map(|(from, import)| {
+            format!(
+                "[[kept]]\nfrom = \"{from}\"\nimport = \"{import}\"\nreason = \"the framework loads it\"\n\
+                 approved = {{ by = \"someone\", at = \"2026-10-06T09:00:00+09:00\" }}\n\n"
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn an_approved_import_passes_and_is_printed_and_a_stale_approval_fails() {
+    let root = clean_repo();
+    let r = root.path();
+    fs::write(
+        r.join("domain/model.py"),
+        "import infrastructure.db\nimport application\n\ndef f():\n    import infrastructure.db\n",
+    )
+    .unwrap();
+    let path = r.join(".config/rotproof-approved.toml");
+    let check = || {
+        let out = run(&["--root", &root_arg(r), "check"]);
+        (out.status.code(), stdout(&out))
+    };
+    // Without an entry, both imports fail
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("domain/model.py:1: imports infrastructure.db"),
+        "{said}"
+    );
+    assert!(
+        said.contains("domain/model.py:2: imports application"),
+        "{said}"
+    );
+
+    // One entry approves its import on every line, and only that import; it is printed once
+    fs::write(
+        &path,
+        approvals(&[("domain/model.py", "infrastructure.db")]),
+    )
+    .unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains(
+        "approved by a person in .config/rotproof-approved.toml (1):\n  infrastructure.db in domain/model.py: \
+         the framework loads it (someone, 2026-10-06T09:00:00+09:00)\n"
+    ), "{said}");
+    assert!(!said.contains("domain/model.py:1:"), "{said}");
+    assert!(!said.contains("domain/model.py:5:"), "{said}");
+    assert!(
+        said.contains("domain/model.py:2: imports application"),
+        "{said}"
+    );
+
+    // Both approved: the check passes, and still prints them
+    fs::write(
+        &path,
+        approvals(&[
+            ("domain/model.py", "infrastructure.db"),
+            ("domain/model.py", "application"),
+        ]),
+    )
+    .unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(0), "{said}");
+    assert!(said.contains("(2):"), "{said}");
+
+    // The import fixed, its approval fails until it goes
+    fs::write(r.join("domain/model.py"), "import application\n").unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains(
+        "every approval matches a forbidden import:\n  .config/rotproof-approved.toml: approved, but no such \
+         forbidden import: infrastructure.db in domain/model.py"
+    ), "{said}");
+
+    // A broken file names what is wrong
+    fs::write(&path, "[[kept]]\nfrom = \"domain/model.py\"\n").unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("every approval matches a forbidden import:\n  .config/rotproof-approved.toml: missing field"), "{said}");
+}

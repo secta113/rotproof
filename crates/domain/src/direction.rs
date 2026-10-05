@@ -21,15 +21,34 @@
 use crate::layers::{Place, importable};
 use utils::paths::{parent, within};
 
-/// The finding for an import from `from` that lands in `to`, or `None` when the table allows it. `what` says what
-/// was imported, as "imports x" or "depends on x".
-pub fn judged(at: &str, what: &str, from: &Place, to: &Place) -> Option<String> {
-    (!allowed(from, to)).then(|| {
-        format!(
-            "{at}: {what}, {}; {}",
+/// An import the table forbids: the file that imports, what it imports as the check names it (a Python module, a
+/// TypeScript specifier, a crate's dependency), and the finding. The file and the import are what an approval is
+/// keyed by (`approvals.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Forbidden {
+    pub file: String,
+    pub import: String,
+    pub detail: String,
+}
+
+/// The import of `import` by `file`, on `line`, that lands in `to`, when the table forbids it from `from`. `what`
+/// says what was imported, as "imports x" or "depends on x".
+pub fn judged(
+    file: &str,
+    line: usize,
+    import: &str,
+    what: &str,
+    from: &Place,
+    to: &Place,
+) -> Option<Forbidden> {
+    (!allowed(from, to)).then(|| Forbidden {
+        file: file.to_string(),
+        import: import.to_string(),
+        detail: format!(
+            "{file}:{line}: {what}, {}; {}",
             described(from, to),
             what_it_may_import(from)
-        )
+        ),
     })
 }
 

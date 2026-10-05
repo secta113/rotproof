@@ -3,7 +3,9 @@
 //! - **The tree matches `.config/rotproof.toml`**: the layers of the stack are present or declared absent, and no code
 //!   sits outside them (`structure.rs`).
 //! - **The layers import only what the table allows** (`direction.rs`): the imports of `python` and `typescript`, and
-//!   the dependencies each crate of `rust` declares.
+//!   the dependencies each crate of `rust` declares. A forbidden import a person approved in
+//!   `.config/rotproof-approved.toml` passes and is printed on every run, and an approval that matches no forbidden
+//!   import fails (`approvals.rs`).
 //! - **No comment holds a marker**, one of the words in `markers::MARKERS` (`markers.rs`): work left to do belongs in
 //!   the backlog, where it is listed and closed.
 //! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
@@ -29,6 +31,7 @@ use crate::bundle::Bundle;
 
 use crate::links::broken;
 use crate::tree::{exactly, read_text};
+use domain::approvals::{shown, sort, stale};
 use domain::bundle::{DOCS, Docs, backlog, in_docs, is_document};
 use domain::code::Parsers;
 use domain::layers::{DECLARATION, area_problems};
@@ -57,6 +60,8 @@ pub struct Report {
     pub skipped: Option<String>,
     /// Whether the tree was checked against a stack's layers (not for `stack = "none"`)
     pub layers_checked: bool,
+    /// Every forbidden import a person approved, as printed on every run: one line per entry that approves something
+    pub approved: Vec<String>,
 }
 
 /// Every broken rule in the repository `tree` holds. An error is a file that could not be read at all.
@@ -71,13 +76,39 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
         })
         .collect();
     let mut layers_checked = false;
+    let mut approved = Vec::new();
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
         let direction = crate::direction::problems(tree, parsers, declared)?;
-        findings.extend(direction.into_iter().map(|detail| Finding {
-            check: "the layers import only what layers/table.toml allows".into(),
-            detail,
-        }));
+        let approvals = crate::approvals::read(tree)?;
+        let sorted = sort(&direction.forbidden, &approvals.entries);
+        findings.extend(
+            direction
+                .problems
+                .into_iter()
+                .chain(sorted.forbidden.iter().map(|f| f.detail.clone()))
+                .map(|detail| Finding {
+                    check: "the layers import only what layers/table.toml allows".into(),
+                    detail,
+                }),
+        );
+        findings.extend(
+            approvals
+                .problems
+                .into_iter()
+                .chain(sorted.stale.iter().map(|entry| stale(entry)))
+                .map(|detail| Finding {
+                    check: "every approval matches a forbidden import".into(),
+                    detail,
+                }),
+        );
+        approved = sorted
+            .approved
+            .iter()
+            .map(|(_, entry)| shown(entry))
+            .collect();
+        approved.sort();
+        approved.dedup();
         let markers = crate::markers::problems(tree, parsers, declared)?;
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {
@@ -107,6 +138,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
         findings,
         skipped: structure.skipped,
         layers_checked,
+        approved,
     })
 }
 
