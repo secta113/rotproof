@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::io;
 
 use crate::code::lands;
-use crate::tree::{code_files, exactly, read_code};
+use crate::tree::{code_files, exactly, read_code, resolved};
 use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
 use domain::direction::{judged, place_of, workspace_dirs};
 use domain::layers::{Declared, Language, Layout, Place};
@@ -228,6 +228,7 @@ fn typescript(
             let Some(target) = lands(tree, &aliases, &path, &specifier) else {
                 continue;
             };
+            let target = resolved(tree, &target);
             let Some(to) = place_of(&target, places) else {
                 continue;
             };
@@ -265,7 +266,7 @@ fn python(
                 ));
             }
             for (line, module) in read.imports {
-                let Some(to) = place_of(&module.join("/"), places) else {
+                let Some(to) = place_of(&resolved(tree, &module.join("/")), places) else {
                     continue;
                 };
                 found.extend(judged(

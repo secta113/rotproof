@@ -276,16 +276,21 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   relative ones and those inside functions or under `if TYPE_CHECKING:` included. A layer may import itself and the
   layers in its `imports`; a level of `ui` the levels below it and the layers in its `imports`. Only direct imports
   are judged: what the table allows is closed under chaining, so a chain of allowed imports never reaches a forbidden
-  layer. Imports of modules in no layer (the standard library, packages) are not judged, and imports built at run
-  time (`importlib`) are not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all
-  be read.
+  layer. A module is placed where its parts, as a path, land as the operating system that runs the check resolves
+  them: on Windows, `Infrastructure.db` lands in `infrastructure`, as Python imports it with `PYTHONCASEOK` set.
+  Imports of modules in no layer (the standard library, packages) are not judged, and imports built at run time
+  (`importlib`) are not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be
+  read.
 - **The layers import only what the table allows** (TypeScript): every `import` (`import type` too), `export ...
   from`, `import x = require(...)`, and `import(...)` and `require(...)` with a literal string, in the `.ts`, `.tsx`,
   `.js` and `.jsx` files (and `.mts`, `.cts`, `.mjs`, `.cjs`) of the layers, read with
   [oxc](https://oxc.rs/). The place of an import is the path it lands on, whether or not a file is there: a relative
   specifier from the file, one starting with `/` from the root (as Vite reads it), and any other through
   `compilerOptions.paths` of the `tsconfig*.json` files at the root (and the local files they extend), then through
-  their `baseUrl` when a module is there; otherwise it names a package, which is not judged. A `tsconfig*.json` that
+  their `baseUrl` when a module is there; otherwise it names a package, which is not judged. The path is placed where
+  it lands as the operating system that runs the check resolves it: on Windows, `../Infrastructure/db`,
+  `../infrastructure./db` and a short name (`../INFRAS~1/db`) land in `infrastructure`, as Vite builds them, and
+  links are followed everywhere. A `tsconfig*.json` that
   cannot be read, or a `paths` entry with more than one `*`, fails rather than leaving its aliases unjudged. Two
   limits: only the first target of a `paths` entry is used, and a config extended from a package is not read, so an
   alias defined only there is taken for a package.

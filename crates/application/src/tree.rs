@@ -4,7 +4,7 @@
 use std::io;
 
 use domain::tree::{Tree, as_windows_reads, with_lf};
-use utils::paths::file_name;
+use utils::paths::{file_name, join, parent};
 
 /// The text of the file at `path`, as Rotproof reads it ([`with_lf`]).
 pub fn read_text(tree: &dyn Tree, path: &str) -> io::Result<String> {
@@ -108,6 +108,26 @@ pub fn exactly(tree: &dyn Tree, rel: &str) -> Result<(String, bool), String> {
             "missing: {rel} ({on_disk} is there: names are compared exactly, as Linux and GitHub compare them)"
         )),
         Lookup::Missing => Err(format!("missing: {rel}")),
+    }
+}
+
+/// Where `path` (from the root) lands as the operating system resolves it ([`Tree::landed`]): the longest beginning of
+/// it that lands inside the root, with the rest as written, so an import that names a module without its extension, or
+/// a name inside a file, lands by the directory it is in. On Windows, a directory in another case, with dots or spaces
+/// at its end or with a short name lands where it is; links are followed everywhere. The path as written when no
+/// beginning of it lands.
+pub fn resolved(tree: &dyn Tree, path: &str) -> String {
+    let mut at = path;
+    let mut rest: Vec<&str> = Vec::new();
+    loop {
+        if let Some(real) = tree.landed("", at) {
+            return rest.iter().rev().fold(real, |dir, name| join(&dir, name));
+        }
+        if at.is_empty() {
+            return path.to_string();
+        }
+        rest.push(file_name(at));
+        at = parent(at);
     }
 }
 

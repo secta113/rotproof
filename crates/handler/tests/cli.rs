@@ -1355,6 +1355,69 @@ fn a_rust_path_through_a_link_lands_where_the_link_points() {
     assert!(lands_in_application(&said, 0), "{said}");
 }
 
+#[cfg(windows)]
+#[test]
+fn a_typescript_or_python_import_lands_where_windows_resolves_it() {
+    // Vite 8.3 builds each of these TypeScript imports on Windows (tsc refuses the first two and passes a short name,
+    // measured 2026-10-05), and Python imports the Python one with PYTHONCASEOK set
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    fs::write(
+        r.join("tsconfig.json"),
+        "{ \"compilerOptions\": { \"baseUrl\": \"src\" } }",
+    )
+    .unwrap();
+    fs::write(r.join("src/infrastructure/db.ts"), "export {}\n").unwrap();
+    fs::write(
+        r.join("src/domain/song.ts"),
+        "import '../Infrastructure/db';\nimport '../infrastructure./db';\nimport 'Infrastructure/db';\n",
+    )
+    .unwrap();
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    for (line, specifier) in [
+        (1, "../Infrastructure/db"),
+        (2, "../infrastructure./db"),
+        (3, "Infrastructure/db"),
+    ] {
+        assert!(
+            said.contains(&format!(
+                "src/domain/song.ts:{line}: imports {specifier} (src/infrastructure/db), in infrastructure; "
+            )),
+            "{specifier}:\n{said}"
+        );
+    }
+
+    let root = repo_with_ui("python", "");
+    let r = root.path();
+    fs::write(r.join("domain/model.py"), "import Infrastructure.db\n").unwrap();
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    assert!(
+        said.contains("domain/model.py:1: imports Infrastructure.db, in infrastructure; "),
+        "{said}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_typescript_import_through_a_link_lands_where_the_link_points() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    fs::create_dir(r.join("vendor")).unwrap();
+    std::os::unix::fs::symlink("../src/infrastructure", r.join("vendor/infra")).unwrap();
+    fs::write(
+        r.join("src/domain/song.ts"),
+        "import '../../vendor/infra/db';\n",
+    )
+    .unwrap();
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    assert!(
+        said.contains(
+            "src/domain/song.ts:1: imports ../../vendor/infra/db (src/infrastructure/db), in infrastructure; "
+        ),
+        "{said}"
+    );
+}
+
 #[test]
 fn every_form_of_typescript_import_is_judged() {
     let root = repo_with_ui("typescript", "");

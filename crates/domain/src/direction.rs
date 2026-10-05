@@ -9,12 +9,12 @@
 //!   is not judged. Imports built at run time (`importlib.import_module`, `__import__`) are not seen.
 //!
 //! The layout's `language` says how the code is read. For `python`, a module is named by its dotted name
-//! (`python.rs`), and sits in the place its parts start with. For `typescript`, an import is resolved to a path
-//! (`typescript.rs`), and sits in the place that path starts with. For `rust`, a crate's code file is its
-//! `Cargo.toml`, and each dependency it declares (`cargo.rs`) is resolved to the path it names, directly or through
-//! its workspace, as the operating system resolves it (on Windows, another case, dots and spaces at the end and short
-//! names too), and sits in the place it lands in. Cargo compiles a crate only against the crates it declares, so the
-//! declarations are its imports.
+//! (`python.rs`), and its parts joined with `/` are its path. For `typescript`, an import is resolved to a path
+//! (`typescript.rs`). For `rust`, a crate's code file is its `Cargo.toml`, and each dependency it declares
+//! (`cargo.rs`) is resolved to the path it names, directly or through its workspace; Cargo compiles a crate only
+//! against the crates it declares, so the declarations are its imports. In every language, the path sits in the place
+//! it lands in as the operating system resolves it (on Windows, another case, dots and spaces at the end and short
+//! names too), so a spelling that builds on the machine that runs the check is judged there.
 //!
 //! The rules here judge an import once it is resolved to a place; `application` reads the code and resolves it.
 

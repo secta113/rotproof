@@ -53,7 +53,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `bundle.rs` | Reading `docs/` from the tree, directory by directory |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks |
-| `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, the code files of a directory, and the text of a file |
+| `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
 | `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
