@@ -108,7 +108,7 @@ The project's files are written once, as a starting point, and are the project's
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
-| `.claude/settings.json` | The stop hook (see "The stop hook") |
+| `.claude/settings.json` | The stop hook (see "The stop hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present |
@@ -147,7 +147,8 @@ continuing because of a stop hook, the hook lets it stop, so it never loops. A l
 word `spec`, `backlog` or `knowledge`) is not read: what it leaves open is recorded where it points. The
 phrases are built in (Japanese and English); the agent decides what each one meant.
 
-`rotproof create` writes `.claude/settings.json` with the hook when it does not exist. A project that has one adds the
+`rotproof create` writes `.claude/settings.json` with the hook when it does not exist, together with the rule that
+denies Claude Code editing the approvals file (see "Approving a forbidden import"). A project that has one adds the
 hook to it:
 
 ```json
@@ -188,6 +189,10 @@ approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
 
 - **It runs only when stdin is a terminal,** so an agent's shell cannot approve: a person does. There is no comment
   that silences the check on the import's line: it would be the easiest thing for an agent to write.
+- **Claude Code is denied editing the file.** The `.claude/settings.json` that `rotproof create` writes holds
+  `"permissions": { "deny": ["Edit(/.config/rotproof-approved.toml)"] }`, which refuses Claude Code's edit tools and
+  its shell's file commands and redirects (`>>`, `sed -i`) on the file, with no prompt. A person edits it in an
+  editor, or through `rotproof approve`.
 - **An approval never hides.** `rotproof check` passes the approved import on every line of its file, and prints every
   approval on every run.
 - **An approval follows the code.** An entry that matches no forbidden import fails: the import moved away, was

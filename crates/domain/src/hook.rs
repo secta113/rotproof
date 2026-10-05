@@ -23,11 +23,18 @@ const EVENT: &str = "Stop";
 /// The field of the input that holds the agent's last message
 const MESSAGE: &str = "last_assistant_message";
 
-/// The settings that run the hook, and where `rotproof create` writes them, once: the project's file from then on.
-/// `rotproof` has to be on the `PATH` the agent runs hooks with.
+/// The settings Claude Code runs the project with, and where `rotproof create` writes them, once: the project's file
+/// from then on. They run the hook, for which `rotproof` has to be on the `PATH` the agent runs hooks with, and deny
+/// editing the approvals file (`approvals.rs`): Claude Code then refuses its edit tools and its shell's file commands
+/// and redirects on it, with no prompt, so only a person adds an approval, through `rotproof approve`.
 pub const SETTINGS: [(&str, &str); 1] = [(
     ".claude/settings.json",
     r#"{
+  "permissions": {
+    "deny": [
+      "Edit(/.config/rotproof-approved.toml)"
+    ]
+  },
   "hooks": {
     "Stop": [
       {
@@ -141,6 +148,21 @@ fn open_phrases(message: &str) -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_settings_are_json_and_deny_editing_the_approvals_file() {
+        let (_, text) = SETTINGS[0];
+        let read: Value = serde_json::from_str(text).unwrap();
+        // A rule's leading `/` is the directory that holds `.claude/`: the project's root, where the file is
+        assert_eq!(
+            read["permissions"]["deny"],
+            json!([format!("Edit(/{})", crate::approvals::APPROVALS)])
+        );
+        assert_eq!(
+            read["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "rotproof stop-hook"
+        );
+    }
 
     fn input(message: &str, active: bool) -> String {
         json!({

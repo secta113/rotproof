@@ -2271,6 +2271,11 @@ fn the_stop_hook_sends_the_agent_back_once_while_docs_did_not_change() {
         settings.contains("\"command\": \"rotproof stop-hook\"") && settings.contains("\"Stop\""),
         "{settings}"
     );
+    // and that deny Claude Code editing the approvals file, which only a person adds to
+    assert!(
+        settings.contains("\"deny\": [\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]"),
+        "{settings}"
+    );
     assert!(!r.join(".gemini").exists());
     git(r, &["init", "-q"]);
     git(r, &["add", "-A"]);
