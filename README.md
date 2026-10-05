@@ -65,6 +65,8 @@ rotproof --root <repository> init --stack python  # write .config/rotproof.toml,
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write every generated file in docs/ (the index files and the rules)
+rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
+rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
 rotproof stop-hook                   # run by Claude Code when the agent stops (see "The stop hook")
 ```
@@ -160,6 +162,40 @@ hook to it:
 project is the nearest directory upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A
 hook that fails (not a git repository, an input from another hook) exits 1, which both agents show without keeping
 the agent from stopping; exit code 2 would keep it from stopping.
+
+## Approving a forbidden import
+
+Sometimes a project means to break the layer table: a framework forces an import, or a fix cannot wait for the
+refactoring. Such an import passes only as an entry in `.config/rotproof-approved.toml`, which a person adds on a
+terminal:
+
+```sh
+rotproof approve domain/model.py infrastructure.db
+```
+
+The file and the import are named as `rotproof check` names them: the file from the root, and the import as the check
+writes it (a Python module, a TypeScript specifier, a crate's dependency). `rotproof approve` shows the forbidden
+import, asks why it is kept and for a `y`, signs with git's `user.name` (or a name it asks for when that is not set),
+and adds the entry:
+
+```toml
+[[kept]]
+from = "domain/model.py"
+import = "infrastructure.db"
+reason = "the ORM's session factory must be built where the model is"
+approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
+```
+
+- **It runs only when stdin is a terminal,** so an agent's shell cannot approve: a person does. There is no comment
+  that silences the check on the import's line: it would be the easiest thing for an agent to write.
+- **An approval never hides.** `rotproof check` passes the approved import on every line of its file, and prints every
+  approval on every run.
+- **An approval follows the code.** An entry that matches no forbidden import fails: the import moved away, was
+  fixed, or became allowed. `rotproof approve --prune` removes those entries. It needs no terminal, since it only
+  takes approvals away and never lets anything pass that failed before.
+- **This raises the cost of an exception; it does not prevent everything.** A script that writes the file passes. The
+  point is that an exception is a deliberate act that a reviewer sees in the diff, never a side effect of fixing a
+  failure.
 
 ## The layers
 
@@ -312,6 +348,11 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   registry or git are not judged. A `Cargo.toml` that is not UTF-8 or
   TOML fails, and so does a dependency taken from a workspace that does not declare it. Not seen: `[patch]` and
   `[replace]`, and source files taken from another crate's directory (`#[path]`, `include!`, `[lib] path`).
+- **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
+  in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
+  matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
+  `approved.at` that is not a datetime with a time zone, and two entries for one import. A file named otherwise
+  (`Rotproof-Approved.toml`) approves nothing, and fails.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
   outside `unchecked` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,

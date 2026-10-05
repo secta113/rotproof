@@ -1,13 +1,13 @@
 //! Keeps a project's structure: makes and checks its layers (as `.config/rotproof.toml` declares them) and the records
 //! an agent works from (backlog, specs and log in `docs/`, written in OKF 0.2), and writes their index files.
 
-use std::io::Read;
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use chrono::Local;
+use chrono::{Local, SecondsFormat};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use domain::approvals::APPROVALS;
+use domain::approvals::{APPROVALS, Approved, Kept};
 use domain::hook::Changes;
 use domain::layers::{DECLARATION, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
@@ -29,8 +29,8 @@ The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has r
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
-when a file cannot be read or written, the command line is wrong, or `rotproof create` would make layers without
---yes.";
+when a file cannot be read or written, the command line is wrong, `rotproof create` would make layers without --yes,
+or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -102,6 +102,27 @@ enum Command {
         #[arg(long)]
         stack: Option<String>,
     },
+    /// Approve a forbidden import on a terminal, or remove the approvals that match nothing (--prune)
+    ///
+    /// `rotproof approve <file> <import>` keeps an import the layer table forbids, as `rotproof check` names it: the
+    /// file from the root, and the import as the check writes it (a Python module, a TypeScript specifier, a crate's
+    /// dependency). It shows the forbidden import, asks why it is kept and for a y, signs with git's user.name (or a
+    /// name it asks for), and adds the entry to .config/rotproof-approved.toml. It runs only when stdin is a terminal,
+    /// so an agent's shell cannot approve: a person does. `rotproof approve --prune` removes every entry that matches
+    /// no forbidden import, needs no terminal, and never lets anything pass that failed before. Exits 2 when stdin is
+    /// not a terminal, the import is not forbidden or is approved already, the answer is not y, or a file cannot be
+    /// read or written.
+    Approve {
+        /// The file that imports, from the root, as `rotproof check` names it
+        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
+        file: Option<String>,
+        /// What it imports, as `rotproof check` names it
+        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
+        import: Option<String>,
+        /// Remove the entries that match no forbidden import
+        #[arg(long)]
+        prune: bool,
+    },
     /// Write every index.md in docs/ from the frontmatter
     ///
     /// Rewrites docs/index.md and the index.md of docs/backlog/, docs/specs/ and docs/knowledge/, and the rules.md
@@ -147,6 +168,15 @@ fn main() -> ExitCode {
             })
         }
         Command::Index => index(&cli.root).map(|()| true),
+        Command::Approve {
+            file,
+            import,
+            prune,
+        } => match (prune, file, import) {
+            (true, _, _) => approve_prune(&cli.root).map(|()| true),
+            (false, Some(file), Some(import)) => approve(&cli.root, &file, &import).map(|()| true),
+            _ => unreachable!("clap requires the file and the import without --prune"),
+        },
         Command::StopHook => unreachable!("answered above"),
     };
     match result {
@@ -264,6 +294,87 @@ fn stop_hook(root: &Path) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Ask a person on the terminal to approve the forbidden import of `import` by `file`, and add the entry. Every answer
+/// is read from stdin, which must be a terminal: an agent's shell tool has none.
+fn approve(root: &Path, file: &str, import: &str) -> Result<(), String> {
+    if !std::io::stdin().is_terminal() {
+        return Err(
+            "rotproof approve asks a person, and stdin is not a terminal (an agent's shell has none): run it in your \
+             own terminal"
+                .into(),
+        );
+    }
+    let disk = Disk::new(root);
+    let pending = application::approvals::pending(&disk, &Readers, file, import)?;
+    println!("forbidden by the layer table:");
+    for forbidden in &pending {
+        println!("  {}", forbidden.detail);
+    }
+    let by = match Git::new(root).user_name() {
+        Some(name) => name,
+        None => ask("git's user.name is not set; the name to sign with: ")?,
+    };
+    let reason = ask(&format!("why is {import} in {file} kept? "))?;
+    let answer = ask(&format!(
+        "approve it as {by}, in {APPROVALS}, printed on every run? [y/N] "
+    ))?;
+    if !answer.eq_ignore_ascii_case("y") {
+        return Err("not approved: nothing written".into());
+    }
+    let entry = Kept {
+        from: file.to_string(),
+        import: import.to_string(),
+        reason,
+        approved: Approved {
+            by,
+            at: Local::now()
+                .fixed_offset()
+                .to_rfc3339_opts(SecondsFormat::Secs, true),
+        },
+    };
+    let path = application::approvals::approve(&disk, &disk, &entry)?;
+    println!("wrote {path}");
+    Ok(())
+}
+
+/// Print `question` and read one line of answer from stdin, trimmed. An empty answer is asked again; the end of the
+/// input is an error.
+fn ask(question: &str) -> Result<String, String> {
+    loop {
+        print!("{question}");
+        std::io::stdout()
+            .flush()
+            .map_err(|e| format!("the question could not be shown: {e}"))?;
+        let mut line = String::new();
+        let read = std::io::stdin()
+            .read_line(&mut line)
+            .map_err(|e| format!("the answer could not be read: {e}"))?;
+        if read == 0 {
+            return Err("no answer: nothing written".into());
+        }
+        let line = line.trim();
+        if !line.is_empty() {
+            return Ok(line.to_string());
+        }
+    }
+}
+
+/// Remove the approvals that match no forbidden import, and say which.
+fn approve_prune(root: &Path) -> Result<(), String> {
+    let disk = Disk::new(root);
+    let removed = application::approvals::prune(&disk, &Readers, &disk)?;
+    if removed.is_empty() {
+        println!("nothing to prune: every approval in {APPROVALS} matches a forbidden import");
+    }
+    for entry in &removed {
+        println!(
+            "removed from {APPROVALS}: {} in {}",
+            entry.import, entry.from
+        );
+    }
+    Ok(())
 }
 
 /// Write every index file, then list what was left out of them and the items to measure again.

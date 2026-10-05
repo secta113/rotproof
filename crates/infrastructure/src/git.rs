@@ -17,6 +17,18 @@ impl Git {
             root: root.to_path_buf(),
         }
     }
+
+    /// The name git signs commits with here, `user.name`: `None` when it is not set or git cannot run.
+    pub fn user_name(&self) -> Option<String> {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args(["config", "user.name"])
+            .output()
+            .ok()?;
+        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (out.status.success() && !name.is_empty()).then_some(name)
+    }
 }
 
 impl Changes for Git {

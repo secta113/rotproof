@@ -2487,9 +2487,101 @@ fn an_approved_import_passes_and_is_printed_and_a_stale_approval_fails() {
          forbidden import: infrastructure.db in domain/model.py"
     ), "{said}");
 
+    // A file named otherwise approves nothing, on any system, and says so
+    fs::remove_file(&path).unwrap();
+    fs::write(
+        r.join(".config/Rotproof-Approved.toml"),
+        approvals(&[("domain/model.py", "application")]),
+    )
+    .unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("is not read: the approvals file is .config/rotproof-approved.toml"),
+        "{said}"
+    );
+    assert!(
+        said.contains("domain/model.py:1: imports application"),
+        "{said}"
+    );
+    fs::remove_file(r.join(".config/Rotproof-Approved.toml")).unwrap();
+
     // A broken file names what is wrong
     fs::write(&path, "[[kept]]\nfrom = \"domain/model.py\"\n").unwrap();
     let (code, said) = check();
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains("every approval matches a forbidden import:\n  .config/rotproof-approved.toml: missing field"), "{said}");
+}
+
+#[test]
+fn approve_refuses_without_a_terminal_and_prune_removes_only_what_matches_nothing() {
+    let root = clean_repo();
+    let r = root.path();
+    fs::write(r.join("domain/model.py"), "import infrastructure.db\n").unwrap();
+    let path = r.join(".config/rotproof-approved.toml");
+
+    // The test's stdin is no terminal, as an agent's shell has none: nothing is asked, nothing written
+    let out = run(&[
+        "--root",
+        &root_arg(r),
+        "approve",
+        "domain/model.py",
+        "infrastructure.db",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("stdin is not a terminal"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!path.exists());
+    // The file and the import are both needed, unless pruning
+    let out = run(&["--root", &root_arg(r), "approve", "domain/model.py"]);
+    assert_eq!(out.status.code(), Some(2));
+
+    // Nothing to prune without a file
+    let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        stdout(&out).contains("nothing to prune"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!path.exists());
+
+    // One entry still matches, one does not: only the second goes, and its comment with it is kept above the next
+    fs::write(
+        &path,
+        format!(
+            "# our note\n{}",
+            approvals(&[
+                ("domain/gone.py", "infrastructure.db"),
+                ("domain/model.py", "infrastructure.db"),
+            ])
+        ),
+    )
+    .unwrap();
+    let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "removed from .config/rotproof-approved.toml: infrastructure.db in domain/gone.py"
+        ),
+        "{}",
+        stdout(&out)
+    );
+    let left = fs::read_to_string(&path).unwrap();
+    assert!(left.starts_with("# our note\n"), "{left}");
+    assert!(!left.contains("domain/gone.py"), "{left}");
+    assert!(left.contains("domain/model.py"), "{left}");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+
+    // Pruning never lets through what failed: with the import fixed, its entry goes and the check passes
+    fs::write(r.join("domain/model.py"), "import utils\n").unwrap();
+    let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert!(!fs::read_to_string(&path).unwrap().contains("[[kept]]"));
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
 }
