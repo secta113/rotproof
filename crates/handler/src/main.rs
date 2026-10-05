@@ -123,14 +123,24 @@ enum Command {
     /// read or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
-        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
+        #[arg(
+            required_unless_present_any = ["prune", "follows"],
+            conflicts_with_all = ["prune", "follows"]
+        )]
         file: Option<String>,
         /// What it imports, as `rotproof check` names it
-        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
+        #[arg(
+            required_unless_present_any = ["prune", "follows"],
+            conflicts_with_all = ["prune", "follows"]
+        )]
         import: Option<String>,
         /// Remove the entries that match no forbidden import
-        #[arg(long)]
+        #[arg(long, conflicts_with = "follows")]
         prune: bool,
+        /// Re-pin, in one act on a terminal, every knowledge document whose followed code changed (after a
+        /// refactoring that kept what the code does): each hash in follows set to what the code is now
+        #[arg(long)]
+        follows: bool,
     },
     /// Write every index.md in docs/ from the frontmatter
     ///
@@ -181,10 +191,14 @@ fn main() -> ExitCode {
             file,
             import,
             prune,
-        } => match (prune, file, import) {
-            (true, _, _) => approve_prune(&cli.root).map(|()| true),
-            (false, Some(file), Some(import)) => approve(&cli.root, &file, &import).map(|()| true),
-            _ => unreachable!("clap requires the file and the import without --prune"),
+            follows,
+        } => match (prune, follows, file, import) {
+            (true, _, _, _) => approve_prune(&cli.root).map(|()| true),
+            (_, true, _, _) => approve_follows(&cli.root).map(|()| true),
+            (false, false, Some(file), Some(import)) => {
+                approve(&cli.root, &file, &import).map(|()| true)
+            }
+            _ => unreachable!("clap requires the file and the import without --prune or --follows"),
         },
         Command::StopHook => unreachable!("answered above"),
     };
@@ -401,6 +415,63 @@ fn ask(question: &str) -> Result<String, String> {
             return Ok(line.to_string());
         }
     }
+}
+
+/// Ask a person on the terminal, once, to re-pin every knowledge document whose followed code changed, and write the
+/// new hashes. What is gone, or cannot be read, is left for the person to edit.
+fn approve_follows(root: &Path) -> Result<(), String> {
+    if !std::io::stdin().is_terminal() {
+        return Err(
+            "rotproof approve --follows asks a person, and stdin is not a terminal (an agent's shell has none): run \
+             it in your own terminal, or review each document and write the hash `rotproof check` prints"
+                .into(),
+        );
+    }
+    let disk = Disk::new(root);
+    let drifts = application::follows::changed(&disk, &Readers)?;
+    if drifts.is_empty() {
+        println!("nothing to re-pin: every knowledge document matches the code it follows");
+        return Ok(());
+    }
+    let mut left = Vec::new();
+    println!("the code changed under these knowledge documents since they were last reviewed:");
+    for d in &drifts {
+        match &d.now {
+            Ok(Some(now)) => println!(
+                "  knowledge/{} follows {}: {} -> {now}",
+                d.doc, d.key, d.pinned
+            ),
+            Ok(None) => left.push(format!(
+                "knowledge/{} follows {}, which is not there",
+                d.doc, d.key
+            )),
+            Err(why) => left.push(format!("knowledge/{} follows {}: {why}", d.doc, d.key)),
+        }
+    }
+    let changed = drifts.len() - left.len();
+    if changed > 0 {
+        let answer = ask(&format!(
+            "re-pin these {changed} as reviewed, as if each document was read against its code? [y/N] "
+        ))?;
+        if !answer.eq_ignore_ascii_case("y") {
+            return Err("not re-pinned: nothing written".into());
+        }
+        for (doc, hash) in application::follows::repin(&disk, &disk, &drifts)? {
+            println!("wrote docs/knowledge/{doc}");
+            println!(
+                "  in the log entry of this change, write: * **Knowledge**: knowledge/{doc}@{hash}"
+            );
+        }
+    }
+    if !left.is_empty() {
+        for why in &left {
+            println!("needs a person: {why}");
+        }
+        return Err(
+            "what is gone was not re-pinned: edit follows in those documents by hand".into(),
+        );
+    }
+    Ok(())
 }
 
 /// Remove the approvals that match no forbidden import, and say which.

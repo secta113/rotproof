@@ -68,6 +68,7 @@ rotproof --root <repository> check   # check the layers and the records; exits 1
 rotproof --root <repository> index   # write every generated file in docs/ (the index files and the rules)
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
+rotproof --root <repository> approve --follows  # re-pin the knowledge documents whose followed code changed
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
 rotproof stop-hook                   # run by Claude Code when the agent stops (see "The stop hook")
 ```
@@ -285,7 +286,10 @@ an edit the log does not name. A knowledge document that describes code names it
 the document was last reviewed: a file in any language, and in Python also a function or class
 (`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). `rotproof check` fails when one changed
 since, and prints the line to write once the document is reviewed; writing it changes the document, so its log entry
-records the review.
+records the review. After a refactoring that moved code without changing what it does, a person can re-pin every
+changed hash in one act: `rotproof approve --follows` lists each document and what changed under it, asks for one `y`
+on a terminal (an agent's shell has none), writes the new hashes, and prints the log lines to write. What is gone is
+left for the person to edit. No LLM judges whether the meaning changed: the agent that refactors is usually one.
 
 A record stays where it was written when it closes: its status says it is closed, and the index lists it under
 `# Closed`. Its path, and every link to it, never changes, so closing a record is a change to that record and its

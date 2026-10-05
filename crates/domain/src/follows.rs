@@ -104,9 +104,79 @@ pub fn drifted(doc: &str, key: &str, pinned: &str, now: Option<&str>) -> Option<
     }
 }
 
+/// The knowledge document `text` with each pin in `pins` (a key of `follows`, its hash as written, the hash to write)
+/// set to its new hash, and everything else as it was: only the hash on the key's line in the frontmatter changes,
+/// quoted as it was. `Err` when a key is not on one line of the frontmatter with its hash, for a person to edit.
+pub fn repinned(text: &str, pins: &[(&str, &str, &str)]) -> Result<String, String> {
+    let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+    let end = lines
+        .iter()
+        .skip(1)
+        .position(|line| line.trim_end() == "---")
+        .map(|i| i + 1)
+        .filter(|_| lines.first().map(|l| l.trim_end()) == Some("---"))
+        .ok_or("no frontmatter")?;
+    for (key, old, new) in pins {
+        let mut found = 0;
+        for line in &mut lines[1..end] {
+            let trimmed = line.trim_start();
+            let Some(rest) = [
+                format!("{key}:"),
+                format!("\"{key}\":"),
+                format!("'{key}':"),
+            ]
+            .iter()
+            .find_map(|head| trimmed.strip_prefix(head.as_str())) else {
+                continue;
+            };
+            // A comment after the value is YAML's, not the value's
+            let value = rest
+                .split(" #")
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .trim_matches(['"', '\'']);
+            if value == *old {
+                *line = line.replacen(old, new, 1);
+                found += 1;
+            }
+        }
+        if found != 1 {
+            return Err(format!(
+                "{key} is not on one line of the frontmatter with its hash {old}: edit follows by hand"
+            ));
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pin_changes_only_its_hash() {
+        let text = "---\ntype: Knowledge\nfollows:\n  src/a.py: \"00000000\"\n  'src/b.py::f': 11111111  # ours\n\
+                    ---\n\n# Body\n\nsrc/a.py: 00000000\n";
+        let pinned = repinned(
+            text,
+            &[
+                ("src/a.py", "00000000", "aaaaaaaa"),
+                ("src/b.py::f", "11111111", "bbbbbbbb"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            pinned,
+            text.replacen("\"00000000\"", "\"aaaaaaaa\"", 1)
+                .replace("11111111", "bbbbbbbb")
+        );
+        // The body is not the frontmatter
+        assert!(pinned.ends_with("src/a.py: 00000000\n"));
+        assert!(repinned(text, &[("src/c.py", "00000000", "cccccccc")]).is_err());
+        assert!(repinned(text, &[("src/a.py", "99999999", "cccccccc")]).is_err());
+        assert!(repinned("no frontmatter", &[]).is_err());
+    }
 
     #[test]
     fn a_key_names_a_file_a_directory_or_a_python_definition() {
