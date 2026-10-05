@@ -6,6 +6,7 @@
 //! Skipping it would let CI pass with a check silently gone.
 
 mod drift;
+mod layers;
 mod licenses;
 
 use std::collections::BTreeSet;
@@ -332,6 +333,10 @@ fn main() -> ExitCode {
     results.push((
         "Third-party licenses",
         report("Third-party licenses", licenses_list(&cargo, root)),
+    ));
+    results.push((
+        "Layers (Rotproof)",
+        report("Layers (Rotproof)", layers::problems(root)),
     ));
     println!("\n{}", "=".repeat(40));
     for (name, ok) in &results {

@@ -89,7 +89,8 @@ Run `rotproof create` when a project starts, and again after you change `.config
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
 (below), and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files and rules in `docs/`). It never
 overwrites a file it does not generate, and never moves or deletes one. Nothing runs it on its own, so a layer removed
-by mistake fails `rotproof check` instead of coming back.
+  `xtask/src/layers.rs` in place of the file, and reads the comments of `xtask/` for markers too, which the layout
+  leaves out; the records are kept outside, so they are not checked here.
 
 The project's files are written once, as a starting point, and are the project's from then on:
 
@@ -379,7 +380,9 @@ heading may be indented by up to 3 spaces, and a closing run of `#` (`## Notes #
 `cargo xtask ci` runs format, lint and tests, the same checks as CI. It also fails when the map in `AGENTS.md`
 misses a tracked top-level path or a module of a crate in `crates/` (or names one that is gone), when
 `rust-toolchain.toml`, the `Dockerfile` and the CI workflow name different toolchain versions, and when
-`THIRD-PARTY-LICENSES.txt` does not list the crates the binary links (below). On Windows the host needs Visual
+`THIRD-PARTY-LICENSES.txt` does not list the crates the binary links (below), and when Rotproof's own crates break
+the rules of the Rust layout it keeps: a crate outside the layers, a dependency the table does not allow, or a marker
+in a comment of `crates/` or `xtask/`. On Windows the host needs Visual
 Studio's C++ tools and the Windows SDK. Everything also runs in the container (`compose.yaml`), where the host needs
 only Docker: `docker compose run --rm dev cargo xtask ci`.
 
