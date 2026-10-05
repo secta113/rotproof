@@ -12,7 +12,7 @@ resolver = "3"
 # Rotproof's version, the one place that names it: every crate of the workspace takes it, and maturin takes the
 # wheel's from the handler
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 
 # Every dependency of every crate, the one place that names its version or path: each crate takes it with
 # `workspace = true`, and `cargo xtask ci` fails on one that names its own
