@@ -298,12 +298,12 @@ A record stays where it was written when it closes: its status says it is closed
 `# Closed`. Its path, and every link to it, never changes, so closing a record is a change to that record and its
 index line only.
 
-Every backlog item and every spec belongs to exactly one area: its only tag, one of the `areas` the declaration
-lists. The index files group by area, in the order of `areas`, so the project puts the largest or most active area
-first. An area says where a record belongs (the layers, the records, billing), and never closes. A declared area that
-no record uses passes, so an area is declared before its first record. Renaming an area is editing `areas` and the tag
-of every record in it, closed ones included: the tag is frontmatter for the index, not history. Guides keep their
-optional tags, which name no area.
+Every backlog item, spec and knowledge document belongs to exactly one area: its only tag, one of the `areas` the
+declaration lists. The index files group by area, in the order of `areas`, so the project puts the largest or most
+active area first. An area says where a record belongs (the layers, the records, billing), and never closes. A
+declared area that no record uses passes, so an area is declared before its first record. Renaming an area is editing
+`areas` and the tag of every record in it, closed ones included: the tag is frontmatter for the index, not history.
+Guides keep their optional tags, which name no area.
 
 A large piece of work is split into specs that are parts of an epic. The epic is a spec like any other, with goals and
 an order of work of its own; a part names it by slug (its file name without `.md`) in `epic`:

@@ -795,15 +795,13 @@ fn slug(value: &Yaml) -> Result<String, String> {
     }
 }
 
-/// Exactly one tag: the area the index groups a backlog item or a spec by. Whether it is declared is checked against
-/// the declaration, which the document alone does not know (`bundle.rs`).
+/// Exactly one tag: the area the index groups a backlog item, a spec or a knowledge document by. Whether it is
+/// declared is checked against the declaration, which the document alone does not know (`bundle.rs`).
 fn one_tag(value: &Yaml) -> Result<String, String> {
     let mut tags = text_list(value)?;
     match tags.len() {
         1 => Ok(tags.remove(0)),
-        n => Err(format!(
-            "{n} tags; a backlog item or a spec has exactly one area"
-        )),
+        n => Err(format!("{n} tags; a record has exactly one area")),
     }
 }
 
@@ -926,6 +924,14 @@ Text.
         for (name, text) in bad {
             assert!(knowledge_doc(&text).is_err(), "{name} passed");
         }
+        // The area is shared by three types, so its message names none of them
+        let why = knowledge_doc(&KNOWLEDGE.replace("tags: [operations]", "tags: []"))
+            .err()
+            .unwrap();
+        assert!(
+            why.contains("0 tags; a record has exactly one area"),
+            "{why}"
+        );
     }
 
     #[test]
