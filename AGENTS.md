@@ -29,7 +29,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 
 | Module of `crates/handler/src/` | Content |
 |---|---|
-| `main.rs` | The command line, which is the `handler`: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--follows`), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof stop-hook`, and the help that leads from one to the next. It alone builds the adapters in `infrastructure` |
+| `main.rs` | The command line, which is the `handler`: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof stop-hook`, and the help that leads from one to the next. It alone builds the adapters in `infrastructure` |
 
 | Module of `crates/domain/src/` | Content |
 |---|---|
@@ -62,7 +62,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
-| `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, and the re-pin of `rotproof approve --follows` |
+| `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, and the re-pin of `rotproof approve --reviewed` |
 | `markers.rs` | The marker check, read from the tree: every code file walked, and its comments read by the reader of its language |
 | `hook.rs` | `rotproof stop-hook`, the hook Claude Code runs when the agent stops |
 | `index.rs` | `rotproof index`: every index file written from the frontmatter, and the open items to measure again |

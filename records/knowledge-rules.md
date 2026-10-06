@@ -64,7 +64,7 @@ The body is free, except that a deprecated document opens with `# Resolution`: w
   A definition is hashed from its first decorator to its end, so a change elsewhere in its file does not fail it. What
   a document follows must exist: a file, directory or definition that is gone fails. Writing the new hash changes the
   document, so its log entry records the review. A document about a decision follows nothing. After a refactoring
-  that kept what the code does, a person re-pins every changed hash in one act with `rotproof approve --follows`, on
+  that kept what the code does, a person re-pins every changed hash in one act with `rotproof approve --reviewed`, on
   a terminal.
 
 # Index

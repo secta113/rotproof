@@ -116,40 +116,40 @@ enum Command {
         #[arg(long)]
         stack: Option<String>,
     },
-    /// Approve on a terminal a forbidden import, or the knowledge documents whose followed code changed (--follows);
+    /// Approve on a terminal a forbidden import, or the knowledge documents whose followed code changed (--reviewed);
     /// or remove the approvals that match nothing (--prune)
     ///
     /// `rotproof approve <file> <import>` keeps an import the layer table forbids, as `rotproof check` names it: the
     /// file from the root, and the import as the check writes it (a Python module, a TypeScript specifier, a crate's
     /// dependency). It shows the forbidden import, asks why it is kept and for a y, signs with git's user.name (or a
-    /// name it asks for), and adds the entry to .config/rotproof-approved.toml. `rotproof approve --follows`, after a
+    /// name it asks for), and adds the entry to .config/rotproof-approved.toml. `rotproof approve --reviewed`, after a
     /// refactoring that kept what the code does, lists every knowledge document whose followed code changed and what
-    /// changed under it, asks for one y, writes the new hashes in their follows, and prints the log lines to write;
-    /// what is gone is left to edit by hand. Both run only when stdin is a terminal, so an agent's shell cannot
-    /// approve: a person does. `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that
-    /// matches no forbidden import, needs no terminal, and never lets anything pass that failed before. Exits 2 when
-    /// stdin is not a terminal, the import is not forbidden or is approved already, the answer is not y, something
-    /// followed is gone, or a file cannot be read or written.
+    /// changed under it, says to read the changes first, asks for one y, writes the new hashes in their follows, and
+    /// prints the log lines to write; what is gone is left to edit by hand. Both run only when stdin is a terminal, so
+    /// an agent's shell cannot approve: a person does. `rotproof approve --prune` removes every entry of
+    /// .config/rotproof-approved.toml that matches no forbidden import, needs no terminal, and never lets anything pass
+    /// that failed before. Exits 2 when stdin is not a terminal, the import is not forbidden or is approved already,
+    /// the answer is not y, something followed is gone, or a file cannot be read or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
         #[arg(
-            required_unless_present_any = ["prune", "follows"],
-            conflicts_with_all = ["prune", "follows"]
+            required_unless_present_any = ["prune", "reviewed"],
+            conflicts_with_all = ["prune", "reviewed"]
         )]
         file: Option<String>,
         /// What it imports, as `rotproof check` names it
         #[arg(
-            required_unless_present_any = ["prune", "follows"],
-            conflicts_with_all = ["prune", "follows"]
+            required_unless_present_any = ["prune", "reviewed"],
+            conflicts_with_all = ["prune", "reviewed"]
         )]
         import: Option<String>,
         /// Remove the entries that match no forbidden import
-        #[arg(long, conflicts_with = "follows")]
+        #[arg(long, conflicts_with = "reviewed")]
         prune: bool,
         /// Re-pin, in one act on a terminal, every knowledge document whose followed code changed (after a
         /// refactoring that kept what the code does): each hash in follows set to what the code is now
         #[arg(long)]
-        follows: bool,
+        reviewed: bool,
     },
     /// Write every index.md in docs/ from the frontmatter
     ///
@@ -213,14 +213,16 @@ fn main() -> ExitCode {
             file,
             import,
             prune,
-            follows,
-        } => match (prune, follows, file, import) {
+            reviewed,
+        } => match (prune, reviewed, file, import) {
             (true, _, _, _) => approve_prune(&cli.root).map(|()| true),
-            (_, true, _, _) => approve_follows(&cli.root).map(|()| true),
+            (_, true, _, _) => approve_reviewed(&cli.root).map(|()| true),
             (false, false, Some(file), Some(import)) => {
                 approve(&cli.root, &file, &import).map(|()| true)
             }
-            _ => unreachable!("clap requires the file and the import without --prune or --follows"),
+            _ => {
+                unreachable!("clap requires the file and the import without --prune or --reviewed")
+            }
         },
         Command::Follows { keys } => follows(&cli.root, &keys).map(|()| true),
         Command::StopHook => unreachable!("answered above"),
@@ -442,10 +444,10 @@ fn ask(question: &str) -> Result<String, String> {
 
 /// Ask a person on the terminal, once, to re-pin every knowledge document whose followed code changed, and write the
 /// new hashes. What is gone, or cannot be read, is left for the person to edit.
-fn approve_follows(root: &Path) -> Result<(), String> {
+fn approve_reviewed(root: &Path) -> Result<(), String> {
     if !std::io::stdin().is_terminal() {
         return Err(
-            "rotproof approve --follows asks a person, and stdin is not a terminal (an agent's shell has none): run \
+            "rotproof approve --reviewed asks a person, and stdin is not a terminal (an agent's shell has none): run \
              it in your own terminal, or review each document and write the hash `rotproof check` prints"
                 .into(),
         );
@@ -473,6 +475,11 @@ fn approve_follows(root: &Path) -> Result<(), String> {
     }
     let changed = drifts.len() - left.len();
     if changed > 0 {
+        // A hash says only that the code changed; the refactoring may be committed already, so no diff is named
+        println!(
+            "the hashes do not say what changed: read the changes first (git diff, or the commits since each document \
+             was last reviewed)"
+        );
         let answer = ask(&format!(
             "re-pin these {changed} as reviewed, as if each document was read against its code? [y/N] "
         ))?;

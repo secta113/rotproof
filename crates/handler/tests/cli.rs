@@ -2838,7 +2838,7 @@ fn the_re_pin_of_followed_code_refuses_without_a_terminal() {
     let doc = "---\ntype: Knowledge\ntitle: M\ndescription: D.\ntags: [a]\nstatus: stable\nfollows:\n  \
                domain/__init__.py: \"00000000\"\n---\n\n# Shape\n\nText.\n";
     fs::write(r.join("docs/knowledge/model.md"), doc).unwrap();
-    let out = run(&["--root", &arg, "approve", "--follows"]);
+    let out = run(&["--root", &arg, "approve", "--reviewed"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("stdin is not a terminal"),
@@ -2850,9 +2850,9 @@ fn the_re_pin_of_followed_code_refuses_without_a_terminal() {
         doc
     );
     // One act at a time
-    let out = run(&["--root", &arg, "approve", "--follows", "--prune"]);
+    let out = run(&["--root", &arg, "approve", "--reviewed", "--prune"]);
     assert_eq!(out.status.code(), Some(2));
-    let out = run(&["--root", &arg, "approve", "--follows", "a.py", "b"]);
+    let out = run(&["--root", &arg, "approve", "--reviewed", "a.py", "b"]);
     assert_eq!(out.status.code(), Some(2));
 }
 
