@@ -28,12 +28,16 @@ Start a project:
                                      layers it would make and writes nothing)
   4. rotproof check                  check them; this is the project's CI
 
+Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files), then
+`rotproof check`.
+
 The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has run; `rotproof guide --stack <stack>`
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
 when a file cannot be read or written, the command line is wrong, `rotproof create` would make layers without --yes,
-or `rotproof approve` is not run on a terminal or not answered y.";
+`rotproof init` leaves an update of the project's files to a person, or `rotproof approve` is not run on a terminal
+or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -45,7 +49,8 @@ layers), that each layer imports only what the layer table allows or a person ap
 .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
 comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that \
-.rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the rules.md of each directory). \
+.rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the rules.md of each directory), \
+a knowledge document matching the code it follows among them. \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
 a rule is broken, 2 when a file cannot be read.";
 
@@ -111,16 +116,20 @@ enum Command {
         #[arg(long)]
         stack: Option<String>,
     },
-    /// Approve a forbidden import on a terminal, or remove the approvals that match nothing (--prune)
+    /// Approve on a terminal a forbidden import, or the knowledge documents whose followed code changed (--follows);
+    /// or remove the approvals that match nothing (--prune)
     ///
     /// `rotproof approve <file> <import>` keeps an import the layer table forbids, as `rotproof check` names it: the
     /// file from the root, and the import as the check writes it (a Python module, a TypeScript specifier, a crate's
     /// dependency). It shows the forbidden import, asks why it is kept and for a y, signs with git's user.name (or a
-    /// name it asks for), and adds the entry to .config/rotproof-approved.toml. It runs only when stdin is a terminal,
-    /// so an agent's shell cannot approve: a person does. `rotproof approve --prune` removes every entry that matches
-    /// no forbidden import, needs no terminal, and never lets anything pass that failed before. Exits 2 when stdin is
-    /// not a terminal, the import is not forbidden or is approved already, the answer is not y, or a file cannot be
-    /// read or written.
+    /// name it asks for), and adds the entry to .config/rotproof-approved.toml. `rotproof approve --follows`, after a
+    /// refactoring that kept what the code does, lists every knowledge document whose followed code changed and what
+    /// changed under it, asks for one y, writes the new hashes in their follows, and prints the log lines to write;
+    /// what is gone is left to edit by hand. Both run only when stdin is a terminal, so an agent's shell cannot
+    /// approve: a person does. `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that
+    /// matches no forbidden import, needs no terminal, and never lets anything pass that failed before. Exits 2 when
+    /// stdin is not a terminal, the import is not forbidden or is approved already, the answer is not y, something
+    /// followed is gone, or a file cannot be read or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
         #[arg(

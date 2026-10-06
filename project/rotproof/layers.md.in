@@ -12,4 +12,10 @@
 - **`application` does not import `infrastructure` (dependency inversion).** When a use case needs something external,
   define a port (an interface) in `domain`, and build the real implementation in `handler`. Define a port only when
   `application` calls it, with only the methods it calls.
+- **An import the table forbids passes only when a person approves it.** Fix a forbidden import; when the project
+  means to keep it (a framework forces it, a fix cannot wait for the refactoring), ask a person to run
+  `rotproof approve <file> <import>` on a terminal, which adds it to `.config/rotproof-approved.toml` with the reason.
+  An agent cannot approve: the command refuses without a terminal, and Claude Code is denied editing that file.
+  `rotproof check` prints every approval on every run, and fails on one that matches no forbidden import any more:
+  after fixing an approved import, run `rotproof approve --prune`, which removes such entries and needs no terminal.
 {ui}

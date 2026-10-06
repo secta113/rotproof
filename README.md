@@ -231,7 +231,8 @@ approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
 ## The layers
 
 A project declares its structure in `.config/rotproof.toml`, the directory tools share for their configuration.
-`rotproof init` writes it, and from then on it is the project's file. pip installs only the Rotproof binary: the layer
+`rotproof init` writes it, and from then on it is the project's file: Rotproof only adds a field it lacks and sets
+`files` on an upgrade. pip installs only the Rotproof binary: the layer
 definitions are built into it, and the declaration is never shipped with it.
 
 ```toml
