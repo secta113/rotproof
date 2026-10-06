@@ -188,7 +188,7 @@ hook to it:
 
 `rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active). The
 project is the nearest directory upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A
-hook that fails (not a git repository, an input from another hook) exits 1, which both agents show without keeping
+hook that fails (not a git repository, an input from another hook) exits 1, which Claude Code shows without keeping
 the agent from stopping; exit code 2 would keep it from stopping.
 
 ## Approving a forbidden import
