@@ -59,6 +59,8 @@ The body is free, except that a deprecated document opens with `# Resolution`: w
     src/api/: 51c0d2aa                       # every .py file under a directory
   ```
 
+  `rotproof follows <key>...` prints these lines, with the hashes as the code is now: run it when a document starts
+  to follow something, once the document says what the code does.
   A definition is hashed from its first decorator to its end, so a change elsewhere in its file does not fail it. What
   a document follows must exist: a file, directory or definition that is gone fails. Writing the new hash changes the
   document, so its log entry records the review. A document about a decision follows nothing. After a refactoring

@@ -69,6 +69,7 @@ rotproof --root <repository> index   # write every generated file in docs/ (the 
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> approve --follows  # re-pin the knowledge documents whose followed code changed
+rotproof --root <repository> follows <key>...  # print the hash to pin in follows, for each key
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
 rotproof stop-hook                   # run by Claude Code when the agent stops (see "The stop hook")
 ```
@@ -285,9 +286,10 @@ model, or why something was decided. Every edit of a knowledge document is named
 contents, under the label `**Knowledge**` (`* **Knowledge**: knowledge/api.md@a3f9c1d2`), and `rotproof check` fails
 an edit the log does not name. A knowledge document that describes code names it in `follows`, each with its hash when
 the document was last reviewed: a file in any language, and in Python also a function or class
-(`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). `rotproof check` fails when one changed
-since, and prints the line to write once the document is reviewed; writing it changes the document, so its log entry
-records the review. After a refactoring that moved code without changing what it does, a person can re-pin every
+(`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). `rotproof follows <key>...` prints the
+line to put in `follows` for each key, as the code is now, when a document starts to follow it. `rotproof check` fails
+when one changed since, and prints the line to write once the document is reviewed; writing it changes the document,
+so its log entry records the review. After a refactoring that moved code without changing what it does, a person can re-pin every
 changed hash in one act: `rotproof approve --follows` lists each document and what changed under it, asks for one `y`
 on a terminal (an agent's shell has none), writes the new hashes, and prints the log lines to write. What is gone is
 left for the person to edit. No LLM judges whether the meaning changed: the agent that refactors is usually one.

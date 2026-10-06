@@ -158,6 +158,19 @@ enum Command {
     /// index.md by hand. Lists the documents it left out and why, and the backlog items past their stale_after. Exits
     /// 2 when the declaration or a document cannot be read.
     Index,
+    /// Print the hash a knowledge document pins for each key of follows, as the code is now, writing nothing
+    ///
+    /// Each key is what follows in a knowledge document names: a file from the root (src/api/routes.py), a definition
+    /// of a Python file (src/api/routes.py::create_user, or Class.method), or every .py file under a directory
+    /// (src/api/). Prints one line per key, `key: "hash"`, to put in follows once the document is reviewed against the
+    /// code: when a document starts to follow it, or after it changed. Writes nothing, and needs no terminal: pinning
+    /// is the edit of the document, which its log entry records. Exits 2 when a key is not a form follows takes, names
+    /// what is not there, or cannot be read.
+    Follows {
+        /// The keys, as follows writes them
+        #[arg(required = true)]
+        keys: Vec<String>,
+    },
     /// Run as Claude Code's Stop hook: send the agent back once when its last message leaves something open and
     /// nothing in docs/ changed. Reads the hook input on stdin
     ///
@@ -209,6 +222,7 @@ fn main() -> ExitCode {
             }
             _ => unreachable!("clap requires the file and the import without --prune or --follows"),
         },
+        Command::Follows { keys } => follows(&cli.root, &keys).map(|()| true),
         Command::StopHook => unreachable!("answered above"),
     };
     match result {
@@ -497,6 +511,24 @@ fn approve_prune(root: &Path) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// Print each key with the hash of what it names now, as follows writes it; then say what could not be hashed.
+fn follows(root: &Path, keys: &[String]) -> Result<(), String> {
+    let disk = Disk::new(root);
+    let mut failed = Vec::new();
+    for key in keys {
+        match application::follows::current(&disk, &Readers, key) {
+            Ok(Some(hash)) => println!("{key}: \"{hash}\""),
+            Ok(None) => failed.push(format!("{key}: not there")),
+            Err(why) => failed.push(format!("{key}: {why}")),
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(failed.join("\n"))
+    }
 }
 
 /// Write every index file, then list what was left out of them and the items to measure again.
