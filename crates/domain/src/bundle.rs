@@ -11,7 +11,7 @@ use chrono::NaiveDate;
 use crate::layers::DECLARATION;
 use crate::schema::{
     CLOSED_SECTION, ClosedAs, Guide, Item, Knowledge, KnowledgeDoc, Milestone, Spec, Status, Time,
-    WorkDoc, knowledge_doc, work_doc,
+    WHEN_SECTION, WorkDoc, knowledge_doc, work_doc,
 };
 use utils::frontmatter::{Sections, split};
 use yaml_rust2::Yaml;
@@ -631,8 +631,9 @@ fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
     )
 }
 
-/// The knowledge index: the guides, the documents that hold by area in the order `areas` declares them, and the
-/// deprecated ones last under `# Closed`, with what replaced them.
+/// The knowledge index: the guides, the alarms that hold under `# When something happens`, the other documents that
+/// hold by area in the order `areas` declares them, and the deprecated ones last under `# Closed`, with what replaced
+/// them.
 pub fn render_knowledge(
     documents: &BTreeMap<String, (Knowledge, Sections)>,
     guides: &BTreeMap<String, Guide>,
@@ -647,10 +648,36 @@ pub fn render_knowledge(
             doc.description
         )
     };
+    // The alarms first, across the areas: reading the index before the work is what watches for them. Each with what
+    // is seen and the strings to search for, so a message met is found in the index too
+    let alarm = |sections: &Sections| sections.contains_key(WHEN_SECTION);
+    let alarms: Vec<String> = documents
+        .iter()
+        .filter(|(_, (doc, sections))| doc.status == Status::Stable && alarm(sections))
+        .map(|(name, (doc, sections))| {
+            let matches = if doc.matches.is_empty() {
+                String::new()
+            } else {
+                let spans: Vec<String> = doc.matches.iter().map(|text| code_span(text)).collect();
+                format!(" | Match: {}", spans.join(", "))
+            };
+            format!(
+                "{} | When: {}{matches}",
+                entry(name, doc),
+                first_sentence(&sections[WHEN_SECTION])
+            )
+        })
+        .collect();
+    if !alarms.is_empty() {
+        out.extend(["".into(), "# When something happens".into(), "".into()]);
+        out.extend(alarms);
+    }
     for area in areas {
         let in_area: Vec<_> = documents
             .iter()
-            .filter(|(_, (doc, _))| &doc.tag == area && doc.status == Status::Stable)
+            .filter(|(_, (doc, sections))| {
+                &doc.tag == area && doc.status == Status::Stable && !alarm(sections)
+            })
             .collect();
         if in_area.is_empty() {
             continue;
@@ -673,6 +700,19 @@ pub fn render_knowledge(
         }
     }
     out.join("\n") + "\n"
+}
+
+/// `text` as a code span, as CommonMark reads one: fenced with more backticks than any run inside it, and with a space
+/// at each end when it starts or ends with a backtick, so a string to match is shown as it is, whatever it holds.
+fn code_span(text: &str) -> String {
+    let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') {
+        " "
+    } else {
+        ""
+    };
+    format!("{fence}{pad}{text}{pad}{fence}")
 }
 
 /// The bundle-root index. Only this index file may carry frontmatter (OKF 0.2, section 12).
@@ -857,6 +897,62 @@ Not yet. Measured by hand.
     }
 
     #[test]
+    fn the_alarms_come_first_with_what_is_seen_and_what_to_search_for() {
+        let doc = |title: &str, tag: &str, matches: &str, body: &str| {
+            format!(
+                "---\ntype: Knowledge\ntitle: {title}\ndescription: D.\ntags: [{tag}]\nstatus: stable\n{matches}---\n\n{body}"
+            )
+        };
+        let alarm_body = "# When\n\nThe publish job prints 403. More.\n\n# Do\n\nFile a draft.\n";
+        let docs: Docs = [
+            (
+                "api.md".to_string(),
+                doc("API", "billing", "", "# Shape\n\nX.\n"),
+            ),
+            (
+                "publish.md".to_string(),
+                doc(
+                    "Publish",
+                    "operations",
+                    "match: [403, \"`x` \"]\n",
+                    alarm_body,
+                ),
+            ),
+            (
+                "quiet.md".to_string(),
+                doc("Quiet", "billing", "", alarm_body),
+            ),
+            (
+                "gone.md".to_string(),
+                crate::schema::closed_record(
+                    &doc("Gone", "billing", "", alarm_body),
+                    "Fixed upstream.",
+                ),
+            ),
+        ]
+        .into();
+        let read = knowledge(&docs, &areas());
+        assert!(read.problems.is_empty(), "{:?}", read.problems);
+        let index = render_knowledge(&read.documents, &read.guides, &areas());
+        assert_eq!(
+            index
+                .lines()
+                .filter(|l| l.contains("](") || l.starts_with('#'))
+                .collect::<Vec<_>>(),
+            [
+                "# When something happens",
+                // A string with a backtick at its end is still shown as it is
+                "* [Publish](publish.md) - D. | When: The publish job prints 403. | Match: `403`, `` `x`  ``",
+                "* [Quiet](quiet.md) - D. | When: The publish job prints 403.",
+                "# billing",
+                "* [API](api.md) - D.",
+                "# Closed",
+                "* [Gone](gone.md) - D. | Resolution: Fixed upstream.",
+            ]
+        );
+    }
+
+    #[test]
     fn the_knowledge_index_lists_by_area_then_what_no_longer_holds() {
         let doc = |title: &str, tag: &str| {
             format!(
@@ -883,8 +979,8 @@ Not yet. Measured by hand.
                 .collect::<Vec<_>>(),
             [
                 "# Guides",
-                "* [Knowledge rules](rules.md) - What goes in docs/knowledge/, how each document is written, and how \
-                 the log names every edit. The format is OKF 0.2; rotproof check checks it.",
+                "* [Knowledge rules](rules.md) - What goes in docs/knowledge/, how each document and alarm is written, \
+                 and how the log names every edit. The format is OKF 0.2; rotproof check checks it.",
                 "# operations",
                 "* [Ops](ops.md) - D.",
                 "# billing",

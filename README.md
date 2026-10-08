@@ -301,6 +301,14 @@ says to read the changes first (a hash says only that the code changed), asks fo
 shell has none), writes the new hashes, and prints the log lines to write. What is gone is left for the person to
 edit. No LLM judges whether the meaning changed: the agent that refactors is usually one.
 
+Some knowledge matters only when something is seen: a service refuses an upload, a CI image moves. Such a document is
+an alarm, with `# When` (what is seen and where, in the words of the output) and `# Do` (what to do then, usually
+filing a draft work item until the next milestone), and optionally `match`, the short strings of the output that stay
+when its wording changes. It is knowledge and not work: nothing waits yet, and it may never come, so a milestone for
+it would stay open forever. The knowledge index lists the alarms first, under `# When something happens`, with what
+is seen and the strings: whoever meets a message searches `docs/` for it, and reading the index before work watches
+for them.
+
 A record stays where it was written when it closes: its status says it is closed, `closed_as` says how (`done` or
 `dropped`), and the index lists it under `# Closed`. Its path, and every link to it, never changes, so closing a record
 is a change to that record and its index line only. How it closed is a field and not only words in its resolution, as
@@ -485,7 +493,8 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   `deprecated`), and **the log names it as it is now:** some `**Knowledge**` field of a log entry, with its wrapped
   lines, names it with the first 8 hex digits of SHA-256 of the whole file (every line ending as `\n`). An edit the
   log does not name fails, and the failure prints the line to write. A `**Knowledge**` field that names a document
-  `docs/knowledge/` does not have fails too.
+  `docs/knowledge/` does not have fails too. An alarm has both `# When` and `# Do`, neither empty, and only an alarm
+  has `match`: a list of strings, each on one line and named once.
 - **Every knowledge document matches the code it follows:** each key of `follows` names a path from the root with
   `/` (a file; a directory with a `/` at its end; a definition of a `.py` file after `::`, as `f`, `Class` or
   `Class.method`) with a hash of 8 lower-case hex digits, and that hash is what it names now: the file's text, every

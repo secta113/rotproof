@@ -220,7 +220,15 @@ pub struct Knowledge {
     pub status: Status,
     /// What it follows, each key with its hash when the document was last reviewed (`follows.rs`), in the order written
     pub follows: Vec<(String, String)>,
+    /// For an alarm (a document with `# When`): short strings, each as it appears in what is observed, so a search for
+    /// the message met finds the document even when the rest of the message changed
+    pub matches: Vec<String>,
 }
+
+/// The body headings of an alarm: a knowledge document that matters only when something is seen. `# When` says what
+/// is seen and where, as observed; `# Do` what to do then. One without the other is not an alarm
+pub const WHEN_SECTION: &str = "When";
+pub const DO_SECTION: &str = "Do";
 
 /// A moment the work waits for: a release, an agreement, something outside the project. It holds no work and no
 /// decision, only whether it has happened.
@@ -417,6 +425,25 @@ pub fn knowledge_doc(text: &str) -> Result<KnowledgeDoc, String> {
         }
         resolution_first(text, "knowledge document")?;
     }
+    let alarm = [WHEN_SECTION, DO_SECTION].map(|heading| sections.get(heading));
+    if alarm.iter().any(Option::is_some) {
+        let empty: Vec<&str> = [WHEN_SECTION, DO_SECTION]
+            .into_iter()
+            .zip(alarm)
+            .filter(|(_, text)| text.is_none_or(|text| text.is_empty()))
+            .map(|(heading, _)| heading)
+            .collect();
+        if !empty.is_empty() {
+            return Err(format!(
+                "an alarm has both # {WHEN_SECTION} (what is seen, and where) and # {DO_SECTION} (what to do then); \
+                 missing or empty: {empty:?}"
+            ));
+        }
+    } else if !knowledge.matches.is_empty() {
+        return Err(format!(
+            "match: only an alarm, a document with # {WHEN_SECTION} and # {DO_SECTION}, has strings to match"
+        ));
+    }
     Ok(KnowledgeDoc::Knowledge(knowledge, sections))
 }
 
@@ -516,6 +543,7 @@ fn knowledge_fields(fields: &mut Fields) -> Option<Knowledge> {
     fields.optional("verified", stamps);
     fields.optional("stale_after", time);
     let follows = fields.optional("follows", followed_hashes);
+    let matches = fields.optional("match", match_strings);
     okf_optional(fields);
     Some(Knowledge {
         title: title?,
@@ -523,7 +551,36 @@ fn knowledge_fields(fields: &mut Fields) -> Option<Knowledge> {
         tag: tag?,
         status: status?,
         follows: follows?.unwrap_or_default(),
+        matches: matches?.unwrap_or_default(),
     })
+}
+
+/// The strings an alarm is found by: a list of short texts, each on one line and named once, as they appear in what is
+/// observed (an error message, an exit code, an HTTP status).
+fn match_strings(value: &Yaml) -> Result<Vec<String>, String> {
+    let Yaml::Array(list) = value else {
+        return Err(format!(
+            "not a list: write the strings in [], even one ([\"{}\"])",
+            text(value).unwrap_or_default()
+        ));
+    };
+    // A number is a string here: an exit code or an HTTP status is matched as the text it is printed as
+    let found: Vec<String> = list
+        .iter()
+        .map(|value| match value {
+            Yaml::Integer(n) => Ok(n.to_string()),
+            other => one_line(other),
+        })
+        .collect::<Result<_, _>>()?;
+    if found.is_empty() {
+        return Err("empty: leave the field out when there is nothing to match".into());
+    }
+    for (i, string) in found.iter().enumerate() {
+        if found[..i].contains(string) {
+            return Err(format!("{string:?} is named twice"));
+        }
+    }
+    Ok(found)
 }
 
 /// What a knowledge document follows: a mapping of keys `follows.rs` can read to hashes of 8 lower-case hex digits.
@@ -1347,6 +1404,88 @@ Text.
         assert!(matches!(knowledge_doc(rules), Ok(KnowledgeDoc::Guide(_))));
     }
 
+    const ALARM: &str = "---
+type: Knowledge
+title: PyPI refuses the upload
+description: What to do when the release workflow cannot publish to PyPI.
+tags: [operations]
+status: stable
+match: [403, trusted publisher]
+---
+
+# When
+
+The publish job of the release workflow prints `HTTPError: 403 Forbidden` and `trusted publisher`.
+
+# Do
+
+File a draft work item with until: [the next release], and check the trusted publisher on PyPI.
+";
+
+    #[test]
+    fn an_alarm_says_what_is_seen_and_what_to_do() {
+        let Ok(KnowledgeDoc::Knowledge(doc, _)) = knowledge_doc(ALARM) else {
+            panic!("{:?}", knowledge_doc(ALARM).err());
+        };
+        // An exit code or a status is matched as the text it is printed as
+        assert_eq!(doc.matches, ["403", "trusted publisher"]);
+        // The strings are optional; the headings are what make an alarm
+        assert!(knowledge_doc(&ALARM.replace("match: [403, trusted publisher]\n", "")).is_ok());
+        let bad = [
+            (
+                "no # Do",
+                ALARM.replace("# Do\n\nFile a draft", "# Then\n\nFile a draft"),
+                "missing or empty: [\"Do\"]",
+            ),
+            (
+                "an empty # When",
+                ALARM.replace(
+                    "The publish job of the release workflow prints `HTTPError: 403 Forbidden` and `trusted publisher`.\n",
+                    "",
+                ),
+                "missing or empty: [\"When\"]",
+            ),
+            (
+                "only # Do",
+                ALARM.replace("# When\n", "# Seen\n"),
+                "missing or empty: [\"When\"]",
+            ),
+            (
+                "strings without # When",
+                KNOWLEDGE.replace("status: stable", "status: stable\nmatch: [403]"),
+                "match: only an alarm",
+            ),
+            (
+                "one string, not in a list",
+                ALARM.replace("match: [403, trusted publisher]", "match: \"403\""),
+                "match: not a list",
+            ),
+            ("an empty list", ALARM.replace("match: [403, trusted publisher]", "match: []"), "match: empty"),
+            (
+                "a string twice",
+                ALARM.replace("match: [403, trusted publisher]", "match: [403, \"403\"]"),
+                "\"403\" is named twice",
+            ),
+            (
+                "a string on two lines",
+                ALARM.replace("match: [403, trusted publisher]", "match: [\"a\\nb\"]"),
+                "on more than one line",
+            ),
+        ];
+        for (name, text, said) in bad {
+            let why = knowledge_doc(&text).err().unwrap_or_default();
+            assert!(why.contains(said), "{name}: {why:?}");
+        }
+        // Only a knowledge document holds alarms
+        let why = work_doc(&GOOD.replace("status: stable", "status: stable\nmatch: [403]"))
+            .err()
+            .unwrap_or_default();
+        assert!(
+            why.contains("match is a field of a knowledge document"),
+            "{why:?}"
+        );
+    }
+
     #[test]
     fn a_broken_knowledge_document_is_caught() {
         let bad = [
@@ -1414,6 +1553,7 @@ Text.
                 ("filed", vec!["work item"]),
                 ("date", vec!["milestone"]),
                 ("follows", vec!["knowledge document"]),
+                ("match", vec!["knowledge document"]),
             ]
         );
         // Every field the item reads is found, optional ones included
