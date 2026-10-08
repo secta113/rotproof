@@ -18,7 +18,7 @@ use utils::paths::{file_name, parent};
 /// Directory (relative to docs/, "" for the root) -> the document types allowed in it
 const TYPES: [(&str, &[&str]); 3] = [
     ("", &["Guide"]),
-    ("work", &["Spec", "Work Item", "Guide"]),
+    ("work", &["Spec", "Work Item", "Milestone", "Guide"]),
     ("knowledge", &["Knowledge", "Guide"]),
 ];
 
@@ -530,7 +530,7 @@ mod tests {
         );
         assert_eq!(
             found["work/no-type.md"],
-            "no type does not belong in docs/work (Spec, Work Item, Guide)"
+            "no type does not belong in docs/work (Spec, Work Item, Milestone, Guide)"
         );
         assert_eq!(found["specs/old.md"], "no document belongs in docs/specs/");
     }

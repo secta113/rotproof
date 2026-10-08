@@ -48,6 +48,12 @@ static OWN_FIELDS: LazyLock<Vec<(&'static str, Vec<&'static str>)>> = LazyLock::
             }),
         ),
         (
+            "milestone",
+            keys_read(|fields| {
+                milestone_fields(fields);
+            }),
+        ),
+        (
             "knowledge document",
             keys_read(|fields| {
                 knowledge_fields(fields);
@@ -226,16 +232,36 @@ pub struct Knowledge {
     pub follows: Vec<(String, String)>,
 }
 
+/// A moment the work waits for: a release, an agreement, something outside the project. It holds no work and no
+/// decision, only whether it has happened.
+#[derive(Debug, Clone)]
+pub struct Milestone {
+    pub title: String,
+    pub description: String,
+    /// The area
+    pub tag: String,
+    /// `Draft` = proposed / `Stable` = placed, and it has not happened yet / `Deprecated` = closed
+    pub status: Status,
+    /// How it closed: `Done` when it happened, `Dropped` when it was withdrawn. Present exactly when it is closed
+    pub closed_as: Option<ClosedAs>,
+    /// The day it is planned or announced for. Passing it fails nothing: the index and `rotproof index` show it
+    pub date: Option<NaiveDate>,
+}
+
+/// The body heading every milestone needs: what to look at to know it has happened
+pub const CONDITION_SECTION: &str = "Condition";
+
 /// A document in `docs/work/`.
 #[derive(Debug, Clone)]
 pub enum WorkDoc {
     Item(Item, Sections),
     Spec(Spec, Sections),
+    Milestone(Milestone, Sections),
     Guide(Guide),
 }
 
 /// A document in `docs/work/`, read by its `type`, or why it breaks the format of that type. A document whose type is
-/// neither `Spec` nor `Guide` is read as a work item, which says what its type should be.
+/// none of `Spec`, `Milestone` and `Guide` is read as a work item, which says what its type should be.
 pub fn work_doc(text: &str) -> Result<WorkDoc, String> {
     let (meta, sections) = split(text)?;
     let mut fields = Fields::new(&meta);
@@ -246,6 +272,23 @@ pub fn work_doc(text: &str) -> Result<WorkDoc, String> {
         }
         Some(Yaml::String(kind)) if kind == "Spec" => {
             return spec(text).map(|(spec, sections)| WorkDoc::Spec(spec, sections));
+        }
+        Some(Yaml::String(kind)) if kind == "Milestone" => {
+            let milestone = milestone_fields(&mut fields);
+            let milestone = fields.finish(milestone)?;
+            let required = [CONDITION_SECTION]
+                .into_iter()
+                .chain((milestone.status == Status::Deprecated).then_some(CLOSED_SECTION));
+            let empty: Vec<&str> = required
+                .filter(|s| sections.get(*s).is_none_or(|text| text.is_empty()))
+                .collect();
+            if !empty.is_empty() {
+                return Err(format!("body headings missing or empty: {empty:?}"));
+            }
+            if milestone.status == Status::Deprecated {
+                resolution_first(text, "milestone")?;
+            }
+            return Ok(WorkDoc::Milestone(milestone, sections));
         }
         _ => {}
     }
@@ -427,6 +470,30 @@ fn closed_as(fields: &mut Fields, status: Option<Status>) -> Read<Option<ClosedA
         }
         (_, None) => Some(None),
     }
+}
+
+fn milestone_fields(fields: &mut Fields) -> Option<Milestone> {
+    fields.required("type", one_of(&["Milestone"]));
+    let title = fields.required("title", one_line);
+    let description = fields.required("description", one_line);
+    let tag = fields.required("tags", one_tag);
+    let status = fields.required(
+        "status",
+        status(&[Status::Draft, Status::Stable, Status::Deprecated]),
+    );
+    let closed_as = closed_as(fields, status);
+    let date = fields.optional("date", date);
+    fields.optional("verified", stamps);
+    fields.optional("stale_after", time);
+    okf_optional(fields);
+    Some(Milestone {
+        title: title?,
+        description: description?,
+        tag: tag?,
+        status: status?,
+        closed_as: closed_as?,
+        date: date?,
+    })
 }
 
 fn knowledge_fields(fields: &mut Fields) -> Option<Knowledge> {
@@ -979,6 +1046,96 @@ Not yet.
         assert!(work_doc(GOOD).is_ok(), "{:?}", work_doc(GOOD).err());
     }
 
+    const MILESTONE: &str = "---
+type: Milestone
+title: Rotproof 0.3.0
+description: The release that puts the records in docs/work/.
+tags: [operations]
+status: stable
+date: 2026-11-01
+---
+
+# Condition
+
+The release workflow of tag v0.3.0 passes every job.
+";
+
+    #[test]
+    fn a_milestone_holds_only_whether_it_happened() {
+        let Ok(WorkDoc::Milestone(milestone, _)) = work_doc(MILESTONE) else {
+            panic!("{:?}", work_doc(MILESTONE).err());
+        };
+        assert_eq!(
+            (milestone.status, milestone.closed_as, milestone.date),
+            (Status::Stable, None, NaiveDate::from_ymd_opt(2026, 11, 1))
+        );
+        for good in [
+            MILESTONE.replace("status: stable", "status: draft"),
+            MILESTONE.replace("date: 2026-11-01\n", ""),
+            closed_record(MILESTONE, "Released on 2026-11-01."),
+            closed_record(MILESTONE, "Withdrawn.").replace("closed_as: done", "closed_as: dropped"),
+        ] {
+            assert!(
+                work_doc(&good).is_ok(),
+                "{good}: {:?}",
+                work_doc(&good).err()
+            );
+        }
+        let bad = [
+            (
+                "no condition",
+                MILESTONE.replace(
+                    "# Condition\n\nThe release workflow of tag v0.3.0 passes every job.\n",
+                    "",
+                ),
+                "body headings missing or empty: [\"Condition\"]",
+            ),
+            // What create writes: a comment is not seen, so the heading is empty
+            (
+                "only a comment",
+                MILESTONE
+                    .replace("The release workflow", "<!-- The release workflow")
+                    .replace("every job.", "every job. -->"),
+                "missing or empty: [\"Condition\"]",
+            ),
+            (
+                "closed without a resolution",
+                MILESTONE.replace("status: stable", "status: deprecated\nclosed_as: done"),
+                "missing or empty: [\"Resolution\"]",
+            ),
+            (
+                "closed without saying how",
+                closed_record(MILESTONE, "Released.").replace("closed_as: done\n", ""),
+                "closed_as: missing",
+            ),
+            (
+                "a date and time",
+                MILESTONE.replace("date: 2026-11-01", "date: 2026-11-01T00:00:00+09:00"),
+                "date: not a date",
+            ),
+            // A moment is not a part of the work: it is what the work waits for
+            (
+                "a parent",
+                MILESTONE.replace("status: stable", "status: stable\nparent: big"),
+                "parent is a field of a work item or a spec",
+            ),
+            (
+                "a trigger and a deadline",
+                MILESTONE.replace("status: stable", "status: stable\ndeadline: x"),
+                "deadline is a field of a work item",
+            ),
+        ];
+        for (name, text, said) in bad {
+            let why = work_doc(&text).err().unwrap_or_default();
+            assert!(why.contains(said), "{name}: {why:?}");
+        }
+        // The date is the milestone's own field
+        let why = spec(&SPEC.replace("status: stable", "status: stable\ndate: 2026-11-01"))
+            .err()
+            .unwrap_or_default();
+        assert!(why.contains("date is a field of a milestone"), "{why:?}");
+    }
+
     #[test]
     fn a_closed_record_says_how_it_closed() {
         for (closed_as, expected) in [("done", ClosedAs::Done), ("dropped", ClosedAs::Dropped)] {
@@ -1166,11 +1323,12 @@ Text.
         assert_eq!(
             *OWN_FIELDS,
             [
-                ("closed_as", vec!["work item", "spec"]),
+                ("closed_as", vec!["work item", "spec", "milestone"]),
                 ("parent", vec!["work item", "spec"]),
                 ("filed", vec!["work item"]),
                 ("deadline_kind", vec!["work item"]),
                 ("deadline", vec!["work item"]),
+                ("date", vec!["milestone"]),
                 ("follows", vec!["knowledge document"]),
             ]
         );
@@ -1201,6 +1359,15 @@ Text.
                 let on_spec =
                     SPEC.replace("status: stable", &format!("status: stable\n{field}: x"));
                 assert!(spec(&on_spec).is_err(), "{field} passed on a spec");
+            }
+            if !kinds.contains(&"milestone") {
+                let on_milestone =
+                    MILESTONE.replace("status: stable", &format!("status: stable\n{field}: x"));
+                let why = work_doc(&on_milestone).err();
+                assert!(
+                    why.as_ref().is_some_and(|why| why.contains(&said)),
+                    "{field} on a milestone: {why:?}"
+                );
             }
             if !kinds.contains(&"knowledge document") {
                 let on_knowledge =

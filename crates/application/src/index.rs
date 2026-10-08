@@ -1,4 +1,5 @@
-//! `rotproof index`: every index file written from the frontmatter, and the open items to measure again.
+//! `rotproof index`: every index file written from the frontmatter, the open items to measure again, and the open
+//! milestones past their date.
 
 use crate::bundle::Bundle;
 use crate::layers::areas;
@@ -15,6 +16,8 @@ pub struct Indexed {
     pub left_out: Vec<(String, String)>,
     /// The open work items past their `stale_after`, each with it
     pub stale: Vec<(String, String)>,
+    /// The open milestones past their `date`, each with it
+    pub past_date: Vec<(String, String)>,
 }
 
 /// Write every index file of the bundle in `tree` through `out`, and find the items stale at `now`. `Err` is a
@@ -37,6 +40,9 @@ pub fn index(tree: &dyn Tree, out: &dyn Writer, now: Time) -> Result<Indexed, St
             .stale_after
             .expect("an item is stale only past its stale_after");
         indexed.stale.push((name, at.to_string()));
+    }
+    for (name, date) in parsed.past_their_date(now.date_naive()) {
+        indexed.past_date.push((name, date.to_string()));
     }
     Ok(indexed)
 }
@@ -64,7 +70,9 @@ mod tests {
         for path in &indexed.written {
             assert!(tree.text(path).is_some(), "{path}");
         }
-        assert!(indexed.left_out.is_empty() && indexed.stale.is_empty());
+        assert!(
+            indexed.left_out.is_empty() && indexed.stale.is_empty() && indexed.past_date.is_empty()
+        );
         let without = Fake::new(&[("docs/log.md", "# Log\n")]);
         assert!(index(&without, &without, now).is_err());
     }

@@ -10,8 +10,8 @@ use chrono::NaiveDate;
 
 use crate::layers::DECLARATION;
 use crate::schema::{
-    CLOSED_SECTION, ClosedAs, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, Spec, Status,
-    Time, WorkDoc, knowledge_doc, work_doc,
+    CLOSED_SECTION, ClosedAs, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, Milestone, Spec,
+    Status, Time, WorkDoc, knowledge_doc, work_doc,
 };
 use utils::frontmatter::{Sections, split};
 use yaml_rust2::Yaml;
@@ -28,6 +28,25 @@ pub const WORK_RULES: &str = include_str!("../../../records/work-rules.md");
 pub const KNOWLEDGE_RULES: &str = include_str!("../../../records/knowledge-rules.md");
 /// The log as `rotproof create` makes it. From then on it is the project's
 pub const LOG: &str = include_str!("../../../records/log.md");
+/// Where `rotproof create` writes a milestone when `docs/work/` has none
+pub const FIRST_MILESTONE: &str = "docs/work/next-milestone.md";
+
+/// The milestone `rotproof create` writes when `docs/work/` has none, in the area `area`. Its `# Condition` holds only
+/// a comment, which a reader does not see, so the check fails on it until a person writes what to look at.
+pub fn first_milestone(area: &str) -> String {
+    include_str!("../../../records/milestone.md").replace("{area}", area)
+}
+
+/// Whether any document among `docs` (those of `docs/work/`) is a milestone, open or closed, passing or not.
+pub fn has_milestone(docs: &Docs) -> bool {
+    docs.values().any(|text| {
+        split(text).is_ok_and(|(meta, _)| {
+            meta.get(&Yaml::String("type".into()))
+                .and_then(Yaml::as_str)
+                == Some("Milestone")
+        })
+    })
+}
 /// The bundle-root index links to these, in this order
 const ROOT_ENTRIES: [(&str, &str, &str); 3] = [
     (
@@ -51,6 +70,8 @@ pub struct Work {
     pub items: BTreeMap<String, (Item, Sections)>,
     /// File name -> the spec, for the specs that pass
     pub specs: BTreeMap<String, (Spec, Sections)>,
+    /// File name -> the milestone, for the milestones that pass
+    pub milestones: BTreeMap<String, (Milestone, Sections)>,
     /// File name -> the guide: the rules, and any a project adds
     pub guides: BTreeMap<String, Guide>,
     /// `work/<file name>` -> why the document is left out of the index files
@@ -126,6 +147,33 @@ impl Work {
             .collect()
     }
 
+    /// Why the project has no next moment for its work to wait for, or nothing while a milestone is open. A milestone
+    /// left out of the index files does not count: the message about it says what to fix.
+    pub fn without_an_open_milestone(&self) -> Option<String> {
+        let open = self
+            .milestones
+            .values()
+            .any(|(milestone, _)| milestone.status != Status::Deprecated);
+        (!open).then(|| {
+            "no open milestone in docs/work/: write the next moment the work waits for (a release, a deploy, something \
+             outside the project) as a milestone; docs/work/rules.md says how"
+                .into()
+        })
+    }
+
+    /// The open milestones whose `date` is before `today`, each with its date. Passing the date fails nothing: work is
+    /// late more often than not, and a check that failed on a date alone would turn CI red with no change.
+    pub fn past_their_date(&self, today: NaiveDate) -> Vec<(String, NaiveDate)> {
+        self.milestones
+            .iter()
+            .filter(|(_, (milestone, _))| milestone.status != Status::Deprecated)
+            .filter_map(|(name, (milestone, _))| {
+                let date = milestone.date?;
+                (date < today).then(|| (name.clone(), date))
+            })
+            .collect()
+    }
+
     /// Why the record `name` cannot have the spec `parent` as its parent, or `None` when it can. The parent of a spec
     /// is an epic, which has no parent of its own; the parent of a work item is any spec.
     fn wrong_parent(&self, name: &str, parent: &str, of_spec: bool) -> Option<String> {
@@ -145,7 +193,7 @@ impl Work {
                 format!("{parent} is left out of the index files itself: fix it first")
             }
             None => format!(
-                "names no spec in docs/work/: {parent} (a work item or a guide is not a spec)"
+                "names no spec in docs/work/: {parent} (a work item, a milestone or a guide is not a spec)"
             ),
         })
     }
@@ -156,10 +204,10 @@ fn in_work(name: &str) -> String {
     format!("work/{name}")
 }
 
-/// Every document of `docs/work/` (file name -> text): the work items, specs and guides that pass, and why the others
-/// do not, checked one by one and against each other. A record whose area is not among `areas` does not pass, and a
-/// record is left out of the index files when its relation to its parent is undefined: the parent is missing, is not
-/// a spec, is the record itself, or, for a spec, is a part of another.
+/// Every document of `docs/work/` (file name -> text): the work items, specs, milestones and guides that pass, and
+/// why the others do not, checked one by one and against each other. A record whose area is not among `areas` does not
+/// pass, and a record is left out of the index files when its relation to its parent is undefined: the parent is
+/// missing, is not a spec, is the record itself, or, for a spec, is a part of another.
 pub fn work(docs: &Docs, areas: &[String]) -> Work {
     let mut out = Work::default();
     for (name, text) in docs {
@@ -172,11 +220,18 @@ pub fn work(docs: &Docs, areas: &[String]) -> Work {
                 out.problems
                     .insert(in_work(name), undeclared(&spec.tag, areas));
             }
+            Ok(WorkDoc::Milestone(milestone, _)) if !areas.contains(&milestone.tag) => {
+                out.problems
+                    .insert(in_work(name), undeclared(&milestone.tag, areas));
+            }
             Ok(WorkDoc::Item(item, sections)) => {
                 out.items.insert(name.clone(), (item, sections));
             }
             Ok(WorkDoc::Spec(spec, sections)) => {
                 out.specs.insert(name.clone(), (spec, sections));
+            }
+            Ok(WorkDoc::Milestone(milestone, sections)) => {
+                out.milestones.insert(name.clone(), (milestone, sections));
             }
             Ok(WorkDoc::Guide(guide)) => {
                 out.guides.insert(name.clone(), guide);
@@ -333,8 +388,9 @@ struct Entry<'a> {
     line: String,
 }
 
-/// The index of `work/` (an OKF index.md): the guides, the open records by area in the order `areas` declares them,
-/// and the closed records last under `# Closed`, so they do not bury the open ones.
+/// The index of `work/` (an OKF index.md): the guides, the open milestones under `# Milestones`, the open records by
+/// area in the order `areas` declares them, and the closed records last under `# Closed`, milestones first, so they do
+/// not bury the open ones. A milestone is listed across the areas: it is the moment the work of every area waits for.
 ///
 /// A record in the same area as its parent, and open or closed as its parent is, is listed under it, indented: the
 /// parts of an epic and the work items of a spec. Any other record with a parent is listed on its own with its parent
@@ -397,7 +453,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
         _ => entry.line.clone(),
     };
     // Each entry `keep` takes that is not listed under a parent, with its children under it
-    let section = |heading: &str, keep: &dyn Fn(&Entry) -> bool| {
+    let tree = |keep: &dyn Fn(&Entry) -> bool| {
         let mut lines = Vec::new();
         let mut under = vec![];
         for entry in entries.iter().rev() {
@@ -413,17 +469,66 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
                 }
             }
         }
+        lines
+    };
+    let section = |heading: &str, mut lines: Vec<String>| {
         if !lines.is_empty() {
             lines.splice(0..0, ["".into(), format!("# {heading}"), "".into()]);
         }
         lines
     };
+    // The milestones: across the areas, as the moments the work in every area waits for. The open ones by date, those
+    // with none last
+    let mut milestones: Vec<_> = work.milestones.iter().collect();
+    milestones.sort_by_key(|(name, (milestone, _))| {
+        (milestone.date.is_none(), milestone.date, name.as_str())
+    });
+    let milestone_line = |name: &str, milestone: &Milestone, sections: &Sections| {
+        let after = match milestone.closed_as {
+            Some(closed_as) => format!(" | {}", resolution(closed_as, sections)),
+            None => {
+                let proposed = if milestone.status == Status::Draft {
+                    " | Status: draft."
+                } else {
+                    ""
+                };
+                let date = milestone
+                    .date
+                    .map(|date| format!(" | Date: {date}."))
+                    .unwrap_or_default();
+                format!("{proposed}{date}")
+            }
+        };
+        format!(
+            "* [{}]({name}) - {}{after}",
+            link_text(&milestone.title),
+            milestone.description
+        )
+    };
+    let (closed_milestones, open_milestones): (Vec<_>, Vec<_>) = milestones
+        .into_iter()
+        .map(|(name, (milestone, sections))| {
+            (
+                milestone.status == Status::Deprecated,
+                milestone_line(name, milestone, sections),
+            )
+        })
+        .partition(|(closed, _)| *closed);
+    let lines = |pairs: Vec<(bool, String)>| -> Vec<String> {
+        pairs.into_iter().map(|(_, line)| line).collect()
+    };
     let mut out = vec![GENERATED.to_string()];
     out.extend(guide_section(&work.guides));
+    out.extend(section("Milestones", lines(open_milestones)));
     for area in areas {
-        out.extend(section(area, &|entry| entry.tag == area && !entry.closed));
+        out.extend(section(
+            area,
+            tree(&|entry| entry.tag == area && !entry.closed),
+        ));
     }
-    out.extend(section("Closed", &|entry| entry.closed));
+    let mut closed = lines(closed_milestones);
+    closed.extend(tree(&|entry| entry.closed));
+    out.extend(section("Closed", closed));
     out.join("\n") + "\n"
 }
 
@@ -551,8 +656,8 @@ pub fn render_root() -> String {
     out.join("\n") + "\n"
 }
 
-/// Every tag the work items, specs and knowledge documents among `docs` use. A document that cannot be read is left
-/// to `rotproof check`.
+/// Every tag the work items, specs, milestones and knowledge documents among `docs` use. A document that cannot be
+/// read is left to `rotproof check`.
 pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
     let mut tags = BTreeSet::new();
     for text in docs.values() {
@@ -562,7 +667,7 @@ pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
         let kind = meta
             .get(&Yaml::String("type".into()))
             .and_then(Yaml::as_str);
-        if !matches!(kind, Some("Work Item" | "Spec" | "Knowledge")) {
+        if !matches!(kind, Some("Work Item" | "Spec" | "Milestone" | "Knowledge")) {
             continue;
         }
         match meta.get(&Yaml::String("tags".into())) {
@@ -1258,5 +1363,135 @@ Not yet. Measured by hand.
             &areas(),
         );
         assert!(all.problems.is_empty(), "{:?}", all.problems);
+    }
+
+    /// A milestone titled after its slug: open with `status` and `date`, or closed when `status` is `deprecated`.
+    fn milestone_doc(slug: &str, status: &str, date: Option<&str>) -> (String, String) {
+        let date = date.map(|d| format!("date: {d}\n")).unwrap_or_default();
+        let text = format!(
+            "---\ntype: Milestone\ntitle: {slug}\ndescription: D.\ntags: [billing]\nstatus: {}\n{date}---\n\n\
+             # Condition\n\nThe tag is pushed.\n",
+            if status == "deprecated" {
+                "stable"
+            } else {
+                status
+            }
+        );
+        let text = if status == "deprecated" {
+            crate::schema::closed_record(&text, "Pushed.")
+        } else {
+            text
+        };
+        (format!("{slug}.md"), text)
+    }
+
+    #[test]
+    fn the_milestones_come_first_across_the_areas_by_date() {
+        let all = work(
+            &[
+                milestone_doc("undated", "stable", None),
+                milestone_doc("later", "draft", Some("2026-12-01")),
+                milestone_doc("sooner", "stable", Some("2026-11-01")),
+                milestone_doc("past", "deprecated", Some("2026-01-01")),
+                spec_doc("old", "operations", None, true),
+                item_doc("unsorted", "operations", None, false),
+            ]
+            .into_iter()
+            .collect(),
+            &areas(),
+        );
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        let index = render_work(&all, &areas());
+        assert_eq!(
+            index
+                .lines()
+                .filter(|l| l.contains("](") || l.starts_with('#'))
+                .collect::<Vec<_>>(),
+            [
+                "# Milestones",
+                "* [sooner](sooner.md) - D. | Date: 2026-11-01.",
+                "* [later](later.md) - D. | Status: draft. | Date: 2026-12-01.",
+                "* [undated](undated.md) - D.",
+                "# operations",
+                "* [unsorted](unsorted.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet. \
+                 | Deadline: until the next deploy",
+                "# Closed",
+                "* [past](past.md) - D. | Done: Pushed.",
+                "* [old](old.md) - D. | Done: Implemented.",
+            ]
+        );
+        let today = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
+        // The closed one is past its date too, but it is closed
+        assert_eq!(
+            all.past_their_date(today),
+            [(
+                "sooner.md".to_string(),
+                NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()
+            )]
+        );
+        assert_eq!(all.without_an_open_milestone(), None);
+    }
+
+    #[test]
+    fn a_project_always_has_an_open_milestone() {
+        let cases = [
+            ("none at all", vec![]),
+            (
+                "only closed ones",
+                vec![milestone_doc("past", "deprecated", None)],
+            ),
+            // One that breaks the format does not count: the message about it says what to fix
+            (
+                "only a broken one",
+                vec![(
+                    "broken.md".to_string(),
+                    "---\ntype: Milestone\ntitle: B\n---\n".to_string(),
+                )],
+            ),
+        ];
+        for (name, docs) in cases {
+            let docs: Docs = docs.into_iter().collect();
+            assert!(
+                work(&docs, &areas())
+                    .without_an_open_milestone()
+                    .is_some_and(|why| why.starts_with("no open milestone in docs/work/")),
+                "{name}"
+            );
+            // create writes one only when there is none at all, broken or closed
+            assert_eq!(has_milestone(&docs), name != "none at all", "{name}");
+        }
+        // A proposed one is open
+        let docs: Docs = [milestone_doc("next", "draft", None)].into_iter().collect();
+        assert_eq!(work(&docs, &areas()).without_an_open_milestone(), None);
+        // What create writes has no condition yet, so it does not count until a person writes one
+        let docs: Docs = [("next-milestone.md".to_string(), first_milestone("billing"))]
+            .into_iter()
+            .collect();
+        let read = work(&docs, &areas());
+        assert!(
+            read.problems["work/next-milestone.md"].contains("missing or empty: [\"Condition\"]"),
+            "{:?}",
+            read.problems
+        );
+        assert!(read.without_an_open_milestone().is_some());
+    }
+
+    #[test]
+    fn a_milestone_is_no_parent() {
+        let all = work(
+            &[
+                milestone_doc("release", "stable", None),
+                item_doc("p", "operations", Some("release"), false),
+            ]
+            .into_iter()
+            .collect(),
+            &areas(),
+        );
+        assert!(
+            all.problems["work/p.md"]
+                .contains("names no spec in docs/work/: release (a work item, a milestone"),
+            "{:?}",
+            all.problems
+        );
     }
 }

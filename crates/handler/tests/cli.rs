@@ -11,6 +11,47 @@ fn run(args: &[&str]) -> Output {
         .expect("the binary runs")
 }
 
+/// The comment `rotproof create` leaves in the milestone it writes, until a person writes what to look at
+const UNWRITTEN: &str = "<!-- Written by `rotproof create`";
+
+/// `rotproof create` with `args` (`--root <root> create ...`), then what a person does next: the milestone it wrote
+/// gets a `# Condition` and the index is written again. Until then the check fails, as
+/// `create_leaves_a_milestone_for_a_person_to_write` shows; the tests that go on from a made project start after it.
+fn create(args: &[&str]) -> Output {
+    let out = run(args);
+    let root = args[1];
+    let milestone = Path::new(root).join("docs/work/next-milestone.md");
+    if let Ok(text) = fs::read_to_string(&milestone)
+        && let Some(start) = text.find(UNWRITTEN)
+    {
+        let written = format!(
+            "{}The release workflow of tag v0.1.0 passes every job.\n",
+            &text[..start]
+        );
+        fs::write(&milestone, written).unwrap();
+        run(&["--root", root, "index"]);
+    }
+    out
+}
+
+/// What a person does when `rotproof init` declared no area: declare `core`, put the milestone `rotproof create` wrote
+/// in it, and write the index again.
+fn declare_first_area(root: &Path) {
+    let declaration = root.join(".config/rotproof.toml");
+    let text = fs::read_to_string(&declaration).unwrap();
+    assert!(text.contains("areas = []"), "{text}");
+    fs::write(
+        &declaration,
+        text.replace("areas = []", "areas = [\"core\"]"),
+    )
+    .unwrap();
+    let milestone = root.join("docs/work/next-milestone.md");
+    let text = fs::read_to_string(&milestone).unwrap();
+    assert!(text.contains("tags: []"), "{text}");
+    fs::write(&milestone, text.replace("tags: []", "tags: [core]")).unwrap();
+    assert!(run(&["--root", &root_arg(root), "index"]).status.success());
+}
+
 fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
@@ -61,7 +102,7 @@ fn a_missing_root_fails() {
 /// A repository that keeps every rule: what `rotproof create` makes for a Python project without `ui`, and a log entry.
 fn clean_repo() -> tempfile::TempDir {
     let root = declared("stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n");
-    let out = run(&["--root", &root_arg(root.path()), "create", "--yes"]);
+    let out = create(&["--root", &root_arg(root.path()), "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
     fs::write(
         root.path().join("docs/log.md"),
@@ -386,6 +427,100 @@ fn index_names_what_it_left_out() {
 }
 
 #[test]
+fn create_leaves_a_milestone_for_a_person_to_write() {
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = run(&["--root", &arg, "create"]);
+    assert!(
+        stdout(&out).contains("wrote docs/work/next-milestone.md"),
+        "{}",
+        stdout(&out)
+    );
+    // What the next moment is, the project says: until it does, the check fails on the milestone
+    let check = run(&["--root", &arg, "check"]);
+    assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
+    for said in [
+        "work/next-milestone.md: body headings missing or empty: [\"Condition\"]",
+        "a milestone is open:\n  no open milestone in docs/work/",
+    ] {
+        assert!(stdout(&check).contains(said), "{said}: {}", stdout(&check));
+    }
+    let milestone = r.join("docs/work/next-milestone.md");
+    let text = fs::read_to_string(&milestone).unwrap();
+    let start = text.find(UNWRITTEN).unwrap();
+    fs::write(
+        &milestone,
+        format!("{}The tag v0.1.0 is pushed.\n", &text[..start]),
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+    let check = run(&["--root", &arg, "check"]);
+    assert!(check.status.success(), "{}", stdout(&check));
+    let index = fs::read_to_string(r.join("docs/work/index.md")).unwrap();
+    assert!(
+        index.contains(
+            "# Milestones\n\n* [The next milestone](next-milestone.md) - The next moment the work waits for. | \
+             Status: draft."
+        ),
+        "{index}"
+    );
+    // Once the project has a milestone, create never writes another, closed or not: the next one is the project's
+    let closed = fs::read_to_string(&milestone)
+        .unwrap()
+        .replace("status: draft", "status: deprecated\nclosed_as: done")
+        .replace(
+            "# Condition",
+            "# Resolution\n\nPushed on 2026-10-09.\n\n# Condition",
+        );
+    fs::write(&milestone, closed).unwrap();
+    let out = run(&["--root", &arg, "create"]);
+    assert!(!stdout(&out).contains("next-milestone"), "{}", stdout(&out));
+    let check = run(&["--root", &arg, "check"]);
+    assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
+    assert!(
+        stdout(&check).contains("no open milestone in docs/work/"),
+        "{}",
+        stdout(&check)
+    );
+}
+
+#[test]
+fn index_names_the_milestones_past_their_date() {
+    let root = repo();
+    let milestone = |slug: &str, status: &str, date: &str| {
+        fs::write(
+            root.path().join(format!("docs/work/{slug}.md")),
+            format!(
+                "---\ntype: Milestone\ntitle: {slug}\ndescription: D.\ntags: [operations]\nstatus: {status}\n\
+                 date: {date}\n---\n\n# Condition\n\nThe tag is pushed.\n"
+            ),
+        )
+        .unwrap();
+    };
+    milestone("late", "stable", "2020-01-01");
+    milestone("ahead", "stable", "2999-01-01");
+    let out = run(&["--root", &root_arg(root.path()), "index"]);
+    assert!(out.status.success());
+    assert!(
+        stdout(&out).contains(
+            "past its date and still open, close it or move its date: late.md (2020-01-01)"
+        ),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stdout(&out).contains("ahead.md"), "{}", stdout(&out));
+    // The date passing fails nothing, and the index does not depend on today
+    let check = run(&["--root", &root_arg(root.path()), "check"]);
+    assert!(!stdout(&check).contains("late.md"), "{}", stdout(&check));
+    let index = fs::read_to_string(root.path().join("docs/work/index.md")).unwrap();
+    assert!(
+        index.contains("* [late](late.md) - D. | Date: 2020-01-01.\n* [ahead](ahead.md) - D. | Date: 2999-01-01."),
+        "{index}"
+    );
+}
+
+#[test]
 fn index_names_the_items_to_measure_again() {
     let root = repo();
     let item = "---
@@ -496,7 +631,7 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
     for (stack, made, not_made) in stacks {
         let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
         let arg = root_arg(root.path());
-        let first = run(&["--root", &arg, "create", "--yes"]);
+        let first = create(&["--root", &arg, "create", "--yes"]);
         assert!(first.status.success(), "{stack}: {}", stdout(&first));
         for path in made
             .iter()
@@ -516,7 +651,7 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
             assert!(!root.path().join(path).exists(), "{stack}: {path} was made");
         }
         let before = tree(root.path());
-        let second = run(&["--root", &arg, "create"]);
+        let second = create(&["--root", &arg, "create"]);
         assert!(second.status.success());
         assert!(
             stdout(&second).contains("nothing to make"),
@@ -564,7 +699,7 @@ fn create_writes_the_projects_files_once() {
         )
         .unwrap();
         let arg = root_arg(&root);
-        let out = run(&["--root", &arg, "create", "--yes"]);
+        let out = create(&["--root", &arg, "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
         for path in [
             "AGENTS.md",
@@ -652,7 +787,7 @@ fn create_writes_the_projects_files_once() {
         // From then on the files are the project's: an edit stays, and only a missing file is written again
         fs::write(root.join("AGENTS.md"), "mine\n").unwrap();
         fs::remove_file(root.join("CLAUDE.md")).unwrap();
-        let out = run(&["--root", &arg, "create"]);
+        let out = create(&["--root", &arg, "create"]);
         assert_eq!(
             fs::read_to_string(root.join("AGENTS.md")).unwrap(),
             "mine\n"
@@ -671,7 +806,11 @@ fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
     for stack in ["python", "typescript", "rust", "none"] {
         let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
         let arg = root_arg(root.path());
-        assert!(run(&["--root", &arg, "create", "--yes"]).status.success());
+        assert!(
+            create(&["--root", &arg, "create", "--yes"])
+                .status
+                .success()
+        );
         let guide = root.path().join(".rotproof/AGENTS.md");
         let written = fs::read_to_string(&guide).unwrap();
         assert!(
@@ -706,7 +845,7 @@ fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
                 "{stack}: {}",
                 stdout(&out)
             );
-            let out = run(&["--root", &arg, "create"]);
+            let out = create(&["--root", &arg, "create"]);
             assert!(
                 stdout(&out).contains("wrote .rotproof/AGENTS.md"),
                 "{stack}: {}",
@@ -733,7 +872,7 @@ fn create_respects_absent_and_leaves_what_it_does_not_own() {
     fs::create_dir_all(root.path().join(".claude")).unwrap();
     let settings = "{\"hooks\": {}}\n";
     fs::write(root.path().join(".claude/settings.json"), settings).unwrap();
-    let out = run(&["--root", &arg, "create", "--yes"]);
+    let out = create(&["--root", &arg, "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(root.path().join("ui/pages/__init__.py").is_file());
     assert!(!root.path().join("ui/templates").exists());
@@ -763,7 +902,7 @@ fn create_makes_layers_only_with_yes() {
         let root = declared(&format!("stack = \"{stack}\"\n"));
         let arg = root_arg(root.path());
         let before = tree(root.path());
-        let out = run(&["--root", &arg, "create"]);
+        let out = create(&["--root", &arg, "create"]);
         assert_eq!(out.status.code(), Some(2), "{stack}: {}", stdout(&out));
         let said = String::from_utf8_lossy(&out.stderr);
         assert!(
@@ -775,7 +914,7 @@ fn create_makes_layers_only_with_yes() {
     // A repository of records only has no layers to make
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     assert!(
-        run(&["--root", &root_arg(root.path()), "create"])
+        create(&["--root", &root_arg(root.path()), "create"])
             .status
             .success()
     );
@@ -783,10 +922,14 @@ fn create_makes_layers_only_with_yes() {
     // Once made, a run that makes no layer needs no --yes; a layer taken out of absent later is listed alone
     let root = declared("stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n");
     let arg = root_arg(root.path());
-    assert!(run(&["--root", &arg, "create", "--yes"]).status.success());
-    assert!(run(&["--root", &arg, "create"]).status.success());
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    assert!(create(&["--root", &arg, "create"]).status.success());
     declare(root.path(), "stack = \"python\"\nareas = [\"a\"]\n");
-    let out = run(&["--root", &arg, "create"]);
+    let out = create(&["--root", &arg, "create"]);
     assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
     let said = String::from_utf8_lossy(&out.stderr);
     let listed: Vec<&str> = said.lines().filter(|l| l.starts_with("  ")).collect();
@@ -802,7 +945,11 @@ fn create_makes_layers_only_with_yes() {
         ]
     );
     assert!(!root.path().join("ui").exists());
-    assert!(run(&["--root", &arg, "create", "--yes"]).status.success());
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
     assert!(root.path().join("ui/atoms/__init__.py").is_file());
 }
 
@@ -827,7 +974,11 @@ fn create_adds_the_fields_the_declaration_lacks() {
     let root = declared("stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n");
     let r = root.path();
     let arg = root_arg(r);
-    assert!(run(&["--root", &arg, "create", "--yes"]).status.success());
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
     fs::write(
         r.join("docs/log.md"),
         "# Log\n\n## 2026-10-02\n\n* Something\n",
@@ -852,11 +1003,11 @@ fn create_adds_the_fields_the_declaration_lacks() {
         stdout(&check)
     );
 
-    let out = run(&["--root", &arg, "create"]);
+    let out = create(&["--root", &arg, "create"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(
         stdout(&out).contains(
-            "added to .config/rotproof.toml: areas = [\"billing\", \"operations\", \"records\"]"
+            "added to .config/rotproof.toml: areas = [\"a\", \"billing\", \"operations\", \"records\"]"
         ),
         "{}",
         stdout(&out)
@@ -874,11 +1025,11 @@ fn create_adds_the_fields_the_declaration_lacks() {
 
     // A value that is present is never changed, and a second run adds nothing
     let edited = now.replace(
-        "[\"billing\", \"operations\", \"records\"]",
-        "[\"records\", \"operations\", \"billing\"]",
+        "[\"a\", \"billing\", \"operations\", \"records\"]",
+        "[\"records\", \"operations\", \"billing\", \"a\"]",
     );
     fs::write(r.join(".config/rotproof.toml"), &edited).unwrap();
-    let again = run(&["--root", &arg, "create"]);
+    let again = create(&["--root", &arg, "create"]);
     assert!(!stdout(&again).contains("added to"), "{}", stdout(&again));
     assert_eq!(
         fs::read_to_string(r.join(".config/rotproof.toml")).unwrap(),
@@ -892,7 +1043,7 @@ fn create_keeps_the_line_endings_of_the_declaration() {
     let older = "# Ours\r\nstack = \"none\"\r\n";
     let root = repo();
     fs::write(root.path().join(".config/rotproof.toml"), older).unwrap();
-    let out = run(&["--root", &root_arg(root.path()), "create"]);
+    let out = create(&["--root", &root_arg(root.path()), "create"]);
     assert!(out.status.success(), "{}", stdout(&out));
     let now = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
     assert!(now.starts_with(older), "{now:?}");
@@ -913,7 +1064,7 @@ fn create_leaves_a_declaration_it_cannot_complete_as_it_was() {
         ("stack = \"python\"\nextra = 1\n", "unknown field"),
     ] {
         let root = declared(declaration);
-        let out = run(&["--root", &root_arg(root.path()), "create"]);
+        let out = create(&["--root", &root_arg(root.path()), "create"]);
         assert_eq!(out.status.code(), Some(2), "{declaration}");
         assert!(
             String::from_utf8_lossy(&out.stderr).contains(said),
@@ -952,7 +1103,7 @@ fn create_fails_without_a_declaration_it_can_read() {
             Some(text) => declared(text),
             None => tempfile::tempdir().unwrap(),
         };
-        let out = run(&["--root", &root_arg(root.path()), "create"]);
+        let out = create(&["--root", &root_arg(root.path()), "create"]);
         assert_eq!(out.status.code(), Some(2), "{said}");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(stderr.contains(said), "{said}: {stderr}");
@@ -1111,7 +1262,7 @@ fn repo_with_ui(stack: &str, absent: &str) -> tempfile::TempDir {
     let root = declared(&format!(
         "stack = \"{stack}\"\nareas = [\"a\"]\nabsent = [{absent}]\n"
     ));
-    let out = run(&["--root", &root_arg(root.path()), "create", "--yes"]);
+    let out = create(&["--root", &root_arg(root.path()), "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
     fs::write(
         root.path().join("docs/log.md"),
@@ -1774,7 +1925,11 @@ fn every_stack_with_layers_checks_everything() {
     for stack in ["python", "typescript", "rust"] {
         let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
         let arg = root_arg(root.path());
-        assert!(run(&["--root", &arg, "create", "--yes"]).status.success());
+        assert!(
+            create(&["--root", &arg, "create", "--yes"])
+                .status
+                .success()
+        );
         fs::write(
             root.path().join("docs/log.md"),
             "# Log\n\n## 2026-10-02\n\n* Something\n",
@@ -1831,7 +1986,7 @@ fn only_the_projects_own_gitignore_hides_code() {
         "stack = \"typescript\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n",
     );
     assert!(
-        run(&["--root", &root_arg(&r), "create", "--yes"])
+        create(&["--root", &root_arg(&r), "create", "--yes"])
             .status
             .success()
     );
@@ -1910,7 +2065,7 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         stdout(&out)
     );
     // Run straight after init, create lists the layers it would make and says how to go on, writing nothing
-    let out = run(&["--root", &arg, "create"]);
+    let out = create(&["--root", &arg, "create"]);
     assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
     assert!(
         stderr(&out).contains("  ui/pages/ (ui.pages)")
@@ -1920,7 +2075,7 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         stderr(&out)
     );
     assert_eq!(tree(root.path()).len(), 1, "{:?}", tree(root.path()));
-    let out = run(&["--root", &arg, "create", "--yes"]);
+    let out = create(&["--root", &arg, "create", "--yes"]);
     assert!(
         stdout(&out).contains("next: run `rotproof check`"),
         "{}",
@@ -1931,6 +2086,16 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         "# Log\n\n## 2026-10-04\n\n* Started\n",
     )
     .unwrap();
+    // The milestone create wrote has no area yet, as init declared none, and the check says what is missing
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("work/next-milestone.md: tags: 0 tags")
+            && stdout(&out).contains("no open milestone in docs/work/"),
+        "{}",
+        stdout(&out)
+    );
+    declare_first_area(root.path());
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
@@ -1950,7 +2115,11 @@ fn guide_prints_what_create_writes_with_or_without_a_project() {
     for stack in ["python", "typescript", "rust", "none"] {
         let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
         let arg = root_arg(root.path());
-        assert!(run(&["--root", &arg, "create", "--yes"]).status.success());
+        assert!(
+            create(&["--root", &arg, "create", "--yes"])
+                .status
+                .success()
+        );
         let written = fs::read_to_string(root.path().join(".rotproof/AGENTS.md")).unwrap();
         // In the project, from its declaration; outside any project, from --stack
         let inside = run(&["--root", &arg, "guide"]);
@@ -2001,10 +2170,12 @@ fn init_writes_a_declaration_that_create_reads() {
             "{stack}: {:?}",
             tree(root.path())
         );
-        let out = run(&["--root", &arg, "create", "--yes"]);
+        let out = create(&["--root", &arg, "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
+        declare_first_area(root.path());
         let out = run(&["--root", &arg, "check"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
+        let written = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
         // The declaration is the project's: a second init upgrades the project's files, which are up to this version
         // already, and leaves it as it is
         declare(root.path(), &format!("{written}# edited\n"));
@@ -2045,7 +2216,7 @@ fn init_upgrades_a_project_made_by_the_first_release() {
         "stack = \"none\"\nareas = [\"a\"]\n",
     )
     .unwrap();
-    assert!(run(&["--root", &arg, "create"]).status.success());
+    assert!(create(&["--root", &arg, "create"]).status.success());
     fs::write(r.join(".claude/settings.json"), "{\n  \"hooks\": {}\n}\n").unwrap();
     fs::write(
         r.join("docs/log.md"),
@@ -2090,7 +2261,7 @@ fn init_upgrades_a_project_made_by_the_first_release() {
 fn a_repository_of_records_only_makes_and_checks_only_docs() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let arg = root_arg(root.path());
-    let out = run(&["--root", &arg, "create"]);
+    let out = create(&["--root", &arg, "create"]);
     assert!(out.status.success(), "{}", stdout(&out));
     let made: Vec<String> = tree(root.path())
         .into_iter()
@@ -2351,7 +2522,7 @@ fn git(root: &Path, args: &[&str]) {
 fn the_stop_hook_sends_the_agent_back_once_while_docs_did_not_change() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
-    assert!(run(&["--root", &root_arg(r), "create"]).status.success());
+    assert!(create(&["--root", &root_arg(r), "create"]).status.success());
     // create wrote the settings that run the hook, for Claude Code only
     let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
     assert!(
@@ -2493,7 +2664,7 @@ fn a_knowledge_document_belongs_in_docs_knowledge() {
     assert!(
         said.contains(
             "every document is a known type in its place:\n  work/api.md: type \"Knowledge\" does not belong in \
-             docs/work (Spec, Work Item, Guide)"
+             docs/work (Spec, Work Item, Milestone, Guide)"
         ),
         "{said}"
     );

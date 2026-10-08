@@ -16,6 +16,8 @@
 //!   tag of every work item, spec and knowledge document is one of them.
 //! - **A parent closes after its children**: a spec's `parent` names an epic, which has no parent of its own, a work
 //!   item's `parent` names a spec, and no closed spec has an open child.
+//! - **A milestone is open**: there is always a next moment for the work to wait for. A milestone whose `date` has
+//!   passed fails nothing; `rotproof index` lists it.
 //! - **`docs/` is one OKF bundle**: every document is a known type in the directory for its type, every file Rotproof
 //!   generates (the index files and the rules) equals what `rotproof index` writes, and no spec sits at the root.
 //! - **The log keeps the OKF log structure**: every second-level heading is a date, newest first, and the entries
@@ -278,6 +280,10 @@ fn records(
     add(
         "a parent closes after its children",
         work.closed_before_its_children(),
+    );
+    add(
+        "a milestone is open",
+        work.without_an_open_milestone().into_iter().collect(),
     );
     let (files, _) = bundle.expected()?;
     let stale: Vec<String> = files

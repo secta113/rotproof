@@ -8,8 +8,10 @@
 //!   get every layer of the stack (`ui` and its five levels in a command-line tool), and `rotproof create` never
 //!   deletes them again. A run that makes no layer, as after an upgrade, needs no `--yes`.
 //! - The records skeleton: the directories of `docs/`, `docs/log.md` with its title when it does not exist, and the
-//!   generated files (the index files and the rules of `docs/work/` and `docs/knowledge/`), which
-//!   Rotproof rewrites.
+//!   generated files (the index files and the rules of `docs/work/` and `docs/knowledge/`), which Rotproof rewrites.
+//! - A milestone, `docs/work/next-milestone.md`, when `docs/work/` has none: a project always has a next moment for
+//!   its work to wait for. What that moment is, the project says: the milestone's `# Condition` holds only a comment,
+//!   so `rotproof check` fails until a person writes it.
 //! - Rotproof's guide, `.rotproof/AGENTS.md` (`project.rs`), which Rotproof rewrites: the rules it keeps in the stack,
 //!   from the version that runs.
 //! - `.claude/settings.json` with the hook that runs `rotproof stop-hook` when the agent stops (`hook.rs`), when it
@@ -30,7 +32,9 @@ use std::collections::BTreeSet;
 use crate::bundle::Bundle;
 use crate::layers::declaration;
 use crate::tree::{exactly, read_text};
-use domain::bundle::{LOG, in_docs, record_tags as tags_in};
+use domain::bundle::{
+    FIRST_MILESTONE, LOG, first_milestone, has_milestone, in_docs, record_tags as tags_in,
+};
 use domain::hook::SETTINGS;
 use domain::layers::{
     DECLARATION, Declared, MISSING, Place, completed, lacking, parse_declaration, unreadable,
@@ -129,6 +133,17 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
     }
     if tree.found(&in_docs("log.md")).is_none() {
         write(out, "docs/log.md", LOG, &mut made)?;
+    }
+    // A project always has a next moment for its work to wait for. Only when it has no milestone at all: one whose
+    // milestones are all closed is told to write the next, not given a copy of the first
+    let work = bundle.read_folder("work").map_err(|e| e.to_string())?;
+    if !has_milestone(&work) && tree.found(FIRST_MILESTONE).is_none() {
+        let area = declared
+            .declaration
+            .areas
+            .first()
+            .map_or("", String::as_str);
+        write(out, FIRST_MILESTONE, &first_milestone(area), &mut made)?;
     }
     let guide = guide(&declared.declaration.stack, declared.layout.as_ref());
     if read_text(tree, GUIDE).ok().as_ref() != Some(&guide) {

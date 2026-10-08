@@ -157,8 +157,8 @@ enum Command {
     ///
     /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, and the rules.md Rotproof keeps
     /// there, from the frontmatter of the documents. Run it after a record changes; never edit an index.md by hand.
-    /// Lists the documents it left out and why, and the work items past their stale_after. Exits 2 when the
-    /// declaration or a document cannot be read.
+    /// Lists the documents it left out and why, the work items past their stale_after, and the open milestones past
+    /// their date. Exits 2 when the declaration or a document cannot be read.
     Index,
     /// Print the hash a knowledge document pins for each key of follows, as the code is now, writing nothing
     ///
@@ -552,6 +552,9 @@ fn index(root: &Path) -> Result<(), String> {
     }
     for (name, at) in indexed.stale {
         println!("past stale_after, measure the state again: {name} ({at})");
+    }
+    for (name, date) in indexed.past_date {
+        println!("past its date and still open, close it or move its date: {name} ({date})");
     }
     Ok(())
 }

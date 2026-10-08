@@ -268,10 +268,10 @@ case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 docs/
   index.md          generated
   log.md            what was done, newest first
-  work/             every spec and work item, open or closed
-    rules.md        generated: the rules of both types (type: Guide)
+  work/             every spec, work item and milestone, open or closed
+    rules.md        generated: the rules of the three types (type: Guide)
     index.md        generated
-    <slug>.md       one record per file (type: Spec or Work Item, status: draft, stable or deprecated)
+    <slug>.md       one record per file (type: Spec, Work Item or Milestone; status: draft, stable or deprecated)
   knowledge/        how things are now, and why (type: Knowledge, status: stable or deprecated)
     rules.md        generated: the knowledge rules (type: Guide)
     index.md        generated
@@ -281,7 +281,12 @@ The two directories hold records that are handled differently. `work/` holds wha
 it, closed once implemented, done or dropped, and never moved. Which type a sentence belongs to is one question: if
 the work were finished today, would it be false? A spec holds what stays true (what was decided, why, what was
 rejected); a work item holds what would then be false (what is not done or measured yet, and how far it has come).
-Whether a record is decided is its `status`: a draft spec is not agreed yet, a draft work item is not sorted yet.
+Whether a record is decided is its `status`: a draft spec is not agreed yet, a draft work item is not sorted yet. A
+milestone holds neither: it is a moment the work waits for (a release, an agreement, something outside the project),
+with a `# Condition` that says what to look at to know it came, and an optional `date` that fails nothing when it
+passes. A project always has an open one, its next moment: `rotproof create` writes `next-milestone.md` when
+`docs/work/` has none, with a condition that is only a comment, so the check fails until a person writes what the next
+moment is. The index lists the open milestones first, across the areas, by date.
 `knowledge/` holds how things are now, edited in place and deprecated only when it no longer holds. A closed spec is
 history; what it built is described in `knowledge/`, an API or a data model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
 contents, under the label `**Knowledge**` (`* **Knowledge**: knowledge/api.md@a3f9c1d2`), and `rotproof check` fails
@@ -453,6 +458,9 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   (not a path, not a work item or a guide, not the spec itself), and that spec has no `parent` of its own: one level
   only. The `parent` of a work item is the slug of any spec. A record that breaks one of these is left out of the index
   files.
+- **A milestone is open,** and every milestone keeps the format: `title`, `description`, `status` and exactly one
+  declared area, a non-empty `# Condition`, and once it is closed `closed_as` and a non-empty `# Resolution` as the first
+  heading. `date` is a day (`YYYY-MM-DD`). A milestone has no `parent`, and no record names one as its parent.
 - **A parent closes after its children:** no closed spec has an open part or an open work item. A child that is
   dropped closes as dropped, as any record does.
 - **The log exists, points only at work items that exist** (`work/<slug>.md`, or `backlog/<slug>.md` as entries
