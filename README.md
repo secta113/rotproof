@@ -202,9 +202,10 @@ rotproof approve domain/model.py infrastructure.db
 ```
 
 The file and the import are named as `rotproof check` names them: the file from the root, and the import as the check
-writes it (a Python module, a TypeScript specifier, a crate's dependency). `rotproof approve` shows the forbidden
-import, asks why it is kept and for a `y`, signs with git's `user.name` (or a name it asks for when that is not set),
-and adds the entry:
+writes it (a Python dotted name, a TypeScript specifier, a crate's dependency). In Python, each name of
+`from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them.
+`rotproof approve` shows the forbidden import, asks why it is kept and for a `y`, signs with git's `user.name` (or a
+name it asks for when that is not set), and adds the entry:
 
 ```toml
 [[kept]]

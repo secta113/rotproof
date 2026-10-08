@@ -21,9 +21,9 @@
 use crate::layers::{Place, importable};
 use utils::paths::{parent, within};
 
-/// An import the table forbids: the file that imports, what it imports as the check names it (a Python module, a
-/// TypeScript specifier, a crate's dependency), and the finding. The file and the import are what an approval is
-/// keyed by (`approvals.rs`).
+/// An import the table forbids: the file that imports, what it imports as the check names it (a Python dotted name,
+/// `m.n` for `from m import n`; a TypeScript specifier; a crate's dependency), and the finding. The file and the
+/// import are what an approval is keyed by (`approvals.rs`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Forbidden {
     pub file: String,

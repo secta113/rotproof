@@ -35,7 +35,8 @@ const HEADER: &str = "\
 pub struct Kept {
     /// The file that imports, from the root: a `.py` or TypeScript file, or a crate's `Cargo.toml`
     pub from: String,
-    /// What it imports, as the check names it: a Python module, a TypeScript specifier, a crate's dependency
+    /// What it imports, as the check names it: a Python dotted name (`from m import n` is `m.n`, whether `n` is a
+    /// module or not), a TypeScript specifier, a crate's dependency
     pub import: String,
     pub reason: String,
     pub approved: Approved,

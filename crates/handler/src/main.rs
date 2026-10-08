@@ -120,16 +120,17 @@ enum Command {
     /// or remove the approvals that match nothing (--prune)
     ///
     /// `rotproof approve <file> <import>` keeps an import the layer table forbids, as `rotproof check` names it: the
-    /// file from the root, and the import as the check writes it (a Python module, a TypeScript specifier, a crate's
-    /// dependency). It shows the forbidden import, asks why it is kept and for a y, signs with git's user.name (or a
-    /// name it asks for), and adds the entry to .config/rotproof-approved.toml. `rotproof approve --reviewed`, after a
-    /// refactoring that kept what the code does, lists every knowledge document whose followed code changed and what
-    /// changed under it, says to read the changes first, asks for one y, writes the new hashes in their follows, and
-    /// prints the log lines to write; what is gone is left to edit by hand. Both run only when stdin is a terminal, so
-    /// an agent's shell cannot approve: a person does. `rotproof approve --prune` removes every entry of
-    /// .config/rotproof-approved.toml that matches no forbidden import, needs no terminal, and never lets anything pass
-    /// that failed before. Exits 2 when stdin is not a terminal, the import is not forbidden or is approved already,
-    /// the answer is not y, something followed is gone, or a file cannot be read or written.
+    /// file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each name of
+    /// `from m import n`; a TypeScript specifier; a crate's dependency). It shows the forbidden import, asks why it is
+    /// kept and for a y, signs with git's user.name (or a name it asks for), and adds the entry to
+    /// .config/rotproof-approved.toml. `rotproof approve --reviewed`, after a refactoring that kept what the code does,
+    /// lists every knowledge document whose followed code changed and what changed under it, says to read the changes
+    /// first, asks for one y, writes the new hashes in their follows, and prints the log lines to write; what is gone
+    /// is left to edit by hand. Both run only when stdin is a terminal, so an agent's shell cannot approve: a person
+    /// does. `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden
+    /// import, needs no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not a
+    /// terminal, the import is not forbidden or is approved already, the answer is not y, something followed is gone,
+    /// or a file cannot be read or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
         #[arg(
