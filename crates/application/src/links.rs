@@ -54,17 +54,13 @@ mod tests {
     use super::*;
 
     /// A bundle with a document, a log whose format guide is an HTML comment, and a Python file outside the bundle.
-    /// Laid out as in a project: the links are written from `docs/backlog/`.
+    /// Laid out as in a project: the links are written from `docs/work/`.
     fn tree() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
         let docs = root.path().join("docs");
-        fs::create_dir_all(docs.join("backlog")).unwrap();
+        fs::create_dir_all(docs.join("work")).unwrap();
         fs::create_dir_all(root.path().join("tests")).unwrap();
-        fs::write(
-            docs.join("backlog/rules.md"),
-            "# Rules\n\n## What goes here\n",
-        )
-        .unwrap();
+        fs::write(docs.join("work/rules.md"), "# Rules\n\n## What goes here\n").unwrap();
         fs::write(docs.join("log.md"), "# Log\n\n<!--\n### Task name\n-->\n").unwrap();
         fs::write(
             root.path().join("tests/upper.PY"),
@@ -111,7 +107,7 @@ mod tests {
                     &infrastructure::readers::Readers,
                     text,
                     target,
-                    "docs/backlog",
+                    "docs/work",
                     "docs",
                 )
             })
@@ -124,7 +120,7 @@ mod tests {
         let resolved = [
             (
                 "heading from the bundle root",
-                "/backlog/rules.md#what-goes-here",
+                "/work/rules.md#what-goes-here",
             ),
             ("heading by a relative path", "rules.md#what-goes-here"),
             ("a file", "/log.md"),
@@ -146,7 +142,7 @@ mod tests {
     fn a_dangling_link_is_caught() {
         let root = tree();
         let bad = [
-            ("missing heading", "/backlog/rules.md#no-such-heading"),
+            ("missing heading", "/work/rules.md#no-such-heading"),
             ("missing file", "/no_such_file.md"),
             (
                 "`no_such_function_anywhere`",
@@ -174,11 +170,11 @@ mod tests {
             // A .PY file is Python too: its link names a definition
             ("`nothing_here`", "../../tests/upper.PY"),
             // Each opens the file on Windows, and nothing on Linux or GitHub
-            ("another case", "/backlog/Rules.md"),
-            ("a directory in another case", "/Backlog/rules.md"),
+            ("another case", "/work/Rules.md"),
+            ("a directory in another case", "/Work/rules.md"),
             ("a dot at the end", "/log.md."),
             ("a space at the end", "/log.md%20"),
-            ("a directory with a dot at the end", "../backlog./rules.md"),
+            ("a directory with a dot at the end", "../work./rules.md"),
             ("a stream", "/log.md:hidden"),
             // A file: URL is a path on one machine too
             (
@@ -195,9 +191,9 @@ mod tests {
         }
         let said = |target: &str| reasons(root.path(), &[("x", target)]).remove(0).unwrap();
         assert!(
-            said("/backlog/Rules.md").contains("the disk has backlog/rules.md"),
+            said("/work/Rules.md").contains("the disk has work/rules.md"),
             "{}",
-            said("/backlog/Rules.md")
+            said("/work/Rules.md")
         );
         assert!(said("../../../outside.md").contains("outside the repository"));
     }

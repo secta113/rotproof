@@ -2,7 +2,7 @@
 
 use crate::bundle::Bundle;
 use crate::layers::areas;
-use domain::bundle::{backlog, stale};
+use domain::bundle::stale;
 use domain::schema::Time;
 use domain::tree::{Tree, Writer};
 
@@ -13,7 +13,7 @@ pub struct Indexed {
     pub written: Vec<String>,
     /// Documents left out of the index files: name -> why
     pub left_out: Vec<(String, String)>,
-    /// The open backlog items past their `stale_after`, each with it
+    /// The open work items past their `stale_after`, each with it
     pub stale: Vec<(String, String)>,
 }
 
@@ -30,8 +30,7 @@ pub fn index(tree: &dyn Tree, out: &dyn Writer, now: Time) -> Result<Indexed, St
         indexed.written.push(path);
     }
     indexed.left_out = problems.into_iter().collect();
-    let docs = bundle.read_folder("backlog").map_err(|e| e.to_string())?;
-    let parsed = backlog(&docs, &bundle.areas);
+    let parsed = bundle.read_work().map_err(|e| e.to_string())?;
     for name in stale(&parsed.items, now) {
         let at = parsed.items[&name]
             .0
@@ -56,17 +55,12 @@ mod tests {
             ),
             ("docs/log.md", "# Log\n"),
             // The directories of the bundle, with rules that are about to be rewritten
-            ("docs/backlog/rules.md", ""),
-            ("docs/specs/rules.md", ""),
+            ("docs/work/rules.md", ""),
             ("docs/knowledge/rules.md", ""),
         ]);
         let now = chrono::DateTime::parse_from_rfc3339("2026-10-05T00:00:00+09:00").unwrap();
         let indexed = index(&tree, &tree, now).unwrap();
-        assert!(
-            indexed
-                .written
-                .contains(&"docs/backlog/index.md".to_string())
-        );
+        assert!(indexed.written.contains(&"docs/work/index.md".to_string()));
         for path in &indexed.written {
             assert!(tree.text(path).is_some(), "{path}");
         }

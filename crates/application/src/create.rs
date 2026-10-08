@@ -8,7 +8,7 @@
 //!   get every layer of the stack (`ui` and its five levels in a command-line tool), and `rotproof create` never
 //!   deletes them again. A run that makes no layer, as after an upgrade, needs no `--yes`.
 //! - The records skeleton: the directories of `docs/`, `docs/log.md` with its title when it does not exist, and the
-//!   generated files (the index files and the rules of `docs/backlog/`, `docs/specs/` and `docs/knowledge/`), which
+//!   generated files (the index files and the rules of `docs/work/` and `docs/knowledge/`), which
 //!   Rotproof rewrites.
 //! - Rotproof's guide, `.rotproof/AGENTS.md` (`project.rs`), which Rotproof rewrites: the rules it keeps in the stack,
 //!   from the version that runs.
@@ -123,7 +123,7 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
     }
 
     let bundle = Bundle::new(tree, declared.declaration.areas.clone());
-    for folder in ["backlog", "specs", "knowledge"] {
+    for folder in ["work", "knowledge"] {
         let dir = in_docs(folder);
         out.make_dir(&dir).map_err(|e| format!("{dir}: {e}"))?;
     }
@@ -184,12 +184,12 @@ fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     Ok(Some(completed(&text, &values, raw.contains("\r\n"))))
 }
 
-/// Every tag the backlog items, specs and knowledge documents use, sorted by name: the first value of `areas`, so the
+/// Every tag the work items, specs and knowledge documents use, sorted by name: the first value of `areas`, so the
 /// records that fit their one-area rule keep fitting once the field exists.
 fn record_tags(tree: &dyn Tree) -> Result<Vec<String>, String> {
     let bundle = Bundle::new(tree, Vec::new());
     let mut tags = BTreeSet::new();
-    for folder in ["backlog", "specs", "knowledge"] {
+    for folder in ["work", "knowledge"] {
         if tree.found(&in_docs(folder)) != Some(true) {
             continue;
         }

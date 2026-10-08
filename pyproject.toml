@@ -5,7 +5,7 @@ build-backend = "maturin"
 
 [project]
 name = "rotproof"
-description = "Keeps a project's structure from drifting: checks its layers and the records an agent works from (backlog, specs, knowledge, log)"
+description = "Keeps a project's structure from drifting: checks its layers and the records an agent works from (specs, work items, knowledge, log)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT OR Apache-2.0"

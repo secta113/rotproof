@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::layers::DECLARATION;
 use crate::schema::{
-    BacklogDoc, CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, Spec, Status,
-    Time, backlog_doc, guide_doc, knowledge_doc, spec,
+    CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, Spec, Status, Time,
+    WorkDoc, knowledge_doc, work_doc,
 };
 use utils::frontmatter::{Sections, split};
 use yaml_rust2::Yaml;
@@ -19,22 +19,19 @@ pub const RESERVED: [&str; 2] = ["index.md", "log.md"];
 /// The notice at the top of every generated index. An HTML comment, so OKF readers do not see it
 pub const GENERATED: &str = "<!-- Generated from the frontmatter by `rotproof index`. Do not edit: `rotproof check` \
                              fails when this file differs from what `rotproof index` writes. -->";
-/// The backlog rules. Rotproof writes them like an index file, so the rules a project reads are the rules its Rotproof
-/// checks
-pub const RULES: &str = include_str!("../../../records/rules.md");
-/// The spec rules, written like the backlog rules
-pub const SPEC_RULES: &str = include_str!("../../../records/spec-rules.md");
-/// The knowledge rules, written like the backlog rules
+/// The rules of `docs/work/`. Rotproof writes them like an index file, so the rules a project reads are the rules its
+/// Rotproof checks
+pub const WORK_RULES: &str = include_str!("../../../records/work-rules.md");
+/// The knowledge rules, written like the rules of `docs/work/`
 pub const KNOWLEDGE_RULES: &str = include_str!("../../../records/knowledge-rules.md");
 /// The log as `rotproof create` makes it. From then on it is the project's
 pub const LOG: &str = include_str!("../../../records/log.md");
 /// The bundle-root index links to these, in this order
-const ROOT_ENTRIES: [(&str, &str, &str); 4] = [
-    ("Backlog", "backlog/", "Open problems and postponed work."),
+const ROOT_ENTRIES: [(&str, &str, &str); 3] = [
     (
-        "Specs",
-        "specs/",
-        "Proposed changes: being written, in progress, or closed.",
+        "Work",
+        "work/",
+        "Specs and work items: what was decided, and the work waiting on it, open and closed.",
     ),
     ("Knowledge", "knowledge/", "How things are now, and why."),
     ("Log", "log.md", "What was done, newest first."),
@@ -45,35 +42,17 @@ pub type Docs = BTreeMap<String, String>;
 /// File name -> why it was left out.
 pub type Problems = BTreeMap<String, String>;
 
-/// The documents of `docs/backlog/`, sorted out.
+/// The documents of `docs/work/`, sorted out and read together: a part names its epic by slug.
 #[derive(Debug, Default)]
-pub struct Backlog {
+pub struct Work {
+    /// File name -> the work item, for the items that pass
     pub items: BTreeMap<String, (Item, Sections)>,
+    /// File name -> the spec, for the specs that pass
+    pub specs: BTreeMap<String, (Spec, Sections)>,
+    /// File name -> the guide: the rules, and any a project adds
     pub guides: BTreeMap<String, Guide>,
+    /// `work/<file name>` -> why the document is left out of the index files
     pub problems: Problems,
-}
-
-/// The documents of `docs/backlog/`, sorted out. An item whose area is not among `areas` is left out with why.
-pub fn backlog(docs: &Docs, areas: &[String]) -> Backlog {
-    let mut out = Backlog::default();
-    for (name, text) in docs {
-        match backlog_doc(text) {
-            Ok(BacklogDoc::Item(item, _)) if !areas.contains(&item.tag) => {
-                out.problems
-                    .insert(name.clone(), undeclared(&item.tag, areas));
-            }
-            Ok(BacklogDoc::Item(item, sections)) => {
-                out.items.insert(name.clone(), (item, sections));
-            }
-            Ok(BacklogDoc::Guide(guide)) => {
-                out.guides.insert(name.clone(), guide);
-            }
-            Err(why) => {
-                out.problems.insert(name.clone(), why);
-            }
-        }
-    }
-    out
 }
 
 /// The documents of `docs/knowledge/`, sorted out.
@@ -107,18 +86,7 @@ pub fn knowledge(docs: &Docs, areas: &[String]) -> KnowledgeFolder {
     out
 }
 
-/// The documents of `docs/specs/`, sorted out and read together: a part names its epic by slug.
-#[derive(Debug, Default)]
-pub struct Specs {
-    /// File name -> the spec, for the specs that pass
-    pub specs: BTreeMap<String, (Spec, Sections)>,
-    /// File name -> the guide: the spec rules, and any a project adds
-    pub guides: BTreeMap<String, Guide>,
-    /// `specs/<file name>` -> why the document is left out of the index files
-    pub problems: Problems,
-}
-
-impl Specs {
+impl Work {
     /// The spec with this slug.
     pub fn find(&self, slug: &str) -> Option<&Spec> {
         self.specs.get(&format!("{slug}.md")).map(|(spec, _)| spec)
@@ -136,7 +104,7 @@ impl Specs {
                     format!(
                         "{}: its epic {epic} is closed while this part is open. Close the part first (as \
                          dropped, if it was), or reopen the epic",
-                        in_specs(name)
+                        in_work(name)
                     )
                 })
             })
@@ -144,31 +112,38 @@ impl Specs {
     }
 }
 
-/// A document of `docs/specs/` as the problems name it.
-fn in_specs(name: &str) -> String {
-    format!("specs/{name}")
+/// A document of `docs/work/` as the problems name it.
+fn in_work(name: &str) -> String {
+    format!("work/{name}")
 }
 
-/// Every document of `docs/specs/` (file name -> text): the specs and guides that pass, and why the others do not,
-/// checked one by one and against each other. A spec whose area is not among `areas` does not pass, and a spec is left
-/// out of the index files when its relation to its epic is undefined: the epic is missing, is itself, or is a part of
-/// another.
-pub fn all_specs(docs: &Docs, areas: &[String]) -> Specs {
-    let mut out = Specs::default();
+/// Every document of `docs/work/` (file name -> text): the work items, specs and guides that pass, and why the others
+/// do not, checked one by one and against each other. A record whose area is not among `areas` does not pass, and a
+/// spec is left out of the index files when its relation to its epic is undefined: the epic is missing, is itself, or
+/// is a part of another.
+pub fn work(docs: &Docs, areas: &[String]) -> Work {
+    let mut out = Work::default();
     for (name, text) in docs {
-        match (guide_doc(text), spec(text)) {
-            (Some(Ok(guide)), _) => {
+        match work_doc(text) {
+            Ok(WorkDoc::Item(item, _)) if !areas.contains(&item.tag) => {
+                out.problems
+                    .insert(in_work(name), undeclared(&item.tag, areas));
+            }
+            Ok(WorkDoc::Spec(spec, _)) if !areas.contains(&spec.tag) => {
+                out.problems
+                    .insert(in_work(name), undeclared(&spec.tag, areas));
+            }
+            Ok(WorkDoc::Item(item, sections)) => {
+                out.items.insert(name.clone(), (item, sections));
+            }
+            Ok(WorkDoc::Spec(spec, sections)) => {
+                out.specs.insert(name.clone(), (spec, sections));
+            }
+            Ok(WorkDoc::Guide(guide)) => {
                 out.guides.insert(name.clone(), guide);
             }
-            (Some(Err(why)), _) | (None, Err(why)) => {
-                out.problems.insert(in_specs(name), why);
-            }
-            (None, Ok((spec, _))) if !areas.contains(&spec.tag) => {
-                out.problems
-                    .insert(in_specs(name), undeclared(&spec.tag, areas));
-            }
-            (None, Ok(parsed)) => {
-                out.specs.insert(name.clone(), parsed);
+            Err(why) => {
+                out.problems.insert(in_work(name), why);
             }
         }
     }
@@ -189,11 +164,11 @@ pub fn all_specs(docs: &Docs, areas: &[String]) -> Specs {
                     ),
                     None => continue,
                 },
-                None if out.problems.contains_key(&in_specs(&file)) => {
+                None if out.problems.contains_key(&in_work(&file)) => {
                     format!("{epic} is left out of the index files itself: fix it first")
                 }
                 None => format!(
-                    "names no spec in docs/specs/: {epic} (a backlog item or a guide is not a spec)"
+                    "names no spec in docs/work/: {epic} (a work item or a guide is not a spec)"
                 ),
             }
         };
@@ -201,7 +176,7 @@ pub fn all_specs(docs: &Docs, areas: &[String]) -> Specs {
     }
     for (name, why) in left {
         out.specs.remove(&name);
-        out.problems.insert(in_specs(&name), why);
+        out.problems.insert(in_work(&name), why);
     }
     out
 }
@@ -230,31 +205,19 @@ pub fn is_document(name: &str, is_dir: bool) -> bool {
 }
 
 /// Every file Rotproof generates in the bundle (the index files and the rules) -> what it should contain now, and the
-/// documents left out of the index files, from the documents read in `docs/backlog/`, `docs/specs/` and
-/// `docs/knowledge/`.
+/// documents left out of the index files, from the documents read in `docs/work/` and `docs/knowledge/`.
 pub fn expected(
-    backlog_docs: &Docs,
-    spec_docs: &Docs,
+    work_docs: &Docs,
     knowledge_docs: &Docs,
     areas: &[String],
 ) -> (Vec<(String, String)>, Problems) {
-    // The rules as they are about to be written, so the backlog index lists them on the run that writes them
-    let mut docs = backlog_docs.clone();
-    docs.insert("rules.md".into(), RULES.into());
-    let backlog = backlog(&docs, areas);
+    let work = work_with_rules(work_docs, areas);
     let mut files = vec![
-        (in_docs("backlog/rules.md"), RULES.into()),
+        (in_docs("work/rules.md"), WORK_RULES.into()),
         (in_docs("index.md"), render_root()),
-        (
-            in_docs("backlog/index.md"),
-            render_backlog(&backlog.items, &backlog.guides, areas),
-        ),
+        (in_docs("work/index.md"), render_work(&work, areas)),
     ];
-    files.push((in_docs("specs/rules.md"), SPEC_RULES.into()));
-    let mut problems = backlog.problems;
-    let specs = specs_with_rules(spec_docs, areas);
-    files.push((in_docs("specs/index.md"), render_specs(&specs, areas)));
-    problems.extend(specs.problems);
+    let mut problems = work.problems;
     let read = knowledge_with_rules(knowledge_docs, areas);
     files.push((in_docs("knowledge/rules.md"), KNOWLEDGE_RULES.into()));
     files.push((
@@ -277,12 +240,12 @@ pub fn knowledge_with_rules(docs: &Docs, areas: &[String]) -> KnowledgeFolder {
     knowledge(&docs, areas)
 }
 
-/// Every spec, from the documents read in `docs/specs/`, with the spec rules read as Rotproof writes them, so the index
+/// The documents of `docs/work/`, from those read there, with the rules read as Rotproof writes them, so the index
 /// lists them on the run that writes them.
-pub fn specs_with_rules(docs: &Docs, areas: &[String]) -> Specs {
+pub fn work_with_rules(docs: &Docs, areas: &[String]) -> Work {
     let mut docs = docs.clone();
-    docs.insert("rules.md".into(), SPEC_RULES.into());
-    all_specs(&docs, areas)
+    docs.insert("rules.md".into(), WORK_RULES.into());
+    work(&docs, areas)
 }
 
 /// A title as the text of a link in the index. `[`, `]` and `\` are escaped, so a title with brackets stays the text
@@ -323,54 +286,56 @@ pub fn first_sentence(text: &str) -> &str {
     first
 }
 
-/// The backlog index (an OKF index.md): the guides, the open items by area in the order `areas` declares them, and the
-/// closed items last so they do not bury the open ones.
+/// The index of `work/` (an OKF index.md): the guides, the open records by area in the order `areas` declares them,
+/// and the closed records last under `# Closed`, so they do not bury the open ones. Under each heading the specs come
+/// first, then the work items.
 ///
-/// Each entry has the OKF form `* [title](target) - description`, with the frontmatter's `description`. An open item
-/// adds, after ` | `, the date of the last measurement, the first sentence of its state and its deadline: what a
-/// reader of the backlog needs. The separator is a symbol so the parts stay apart in any language.
-pub fn render_backlog(
-    items: &BTreeMap<String, (Item, Sections)>,
-    guides: &BTreeMap<String, Guide>,
-    areas: &[String],
-) -> String {
+/// Each entry has the OKF form `* [title](target) - description`, with the frontmatter's `description`, and adds after
+/// ` | ` what a reader needs: an open spec its status, an open item the date of the last measurement, the first
+/// sentence of its state and its deadline, and a closed record its resolution. The separator is a symbol so the parts
+/// stay apart in any language.
+pub fn render_work(work: &Work, areas: &[String]) -> String {
     let mut out = vec![GENERATED.to_string()];
-    out.extend(guide_section(guides));
-    let open: Vec<(&String, &(Item, Sections))> = items
-        .iter()
-        .filter(|(_, (item, _))| item.status == Status::Stable)
-        .collect();
-    for area in areas {
-        let mut in_area: Vec<_> = open
-            .iter()
-            .filter(|(_, (item, _))| &item.tag == area)
-            .collect();
-        if in_area.is_empty() {
-            continue;
+    out.extend(guide_section(&work.guides));
+    let section = |heading: &str, mut lines: Vec<String>| {
+        if lines.is_empty() {
+            return lines;
         }
-        in_area.sort_by_key(|(name, (item, _))| (item.filed, *name));
-        out.extend(["".into(), format!("# {area}"), "".into()]);
-        out.extend(
-            in_area
+        lines.splice(0..0, ["".into(), format!("# {heading}"), "".into()]);
+        lines
+    };
+    for area in areas {
+        let mut lines = spec_lines(work, &|spec| {
+            &spec.tag == area && spec.status != Status::Deprecated
+        });
+        let mut items: Vec<_> = work
+            .items
+            .iter()
+            .filter(|(_, (item, _))| &item.tag == area && item.status == Status::Stable)
+            .collect();
+        items.sort_by_key(|(name, (item, _))| (item.filed, *name));
+        lines.extend(
+            items
                 .into_iter()
                 .map(|(name, (item, sections))| open_line(name, item, sections)),
         );
+        out.extend(section(area, lines));
     }
-    let closed: Vec<_> = items
-        .iter()
-        .filter(|(_, (item, _))| item.status == Status::Deprecated)
-        .collect();
-    if !closed.is_empty() {
-        out.extend(["".into(), "# Closed".into(), "".into()]);
-        for (name, (item, sections)) in closed {
-            out.push(format!(
-                "* [{}]({name}) - {} | Resolution: {}",
-                link_text(&item.title),
-                item.description,
-                first_sentence(&sections[CLOSED_SECTION])
-            ));
-        }
-    }
+    let mut closed = spec_lines(work, &|spec| spec.status == Status::Deprecated);
+    closed.extend(
+        work.items
+            .iter()
+            .filter(|(_, (item, _))| item.status == Status::Deprecated)
+            .map(|(name, (item, sections))| {
+                format!(
+                    "* [{}]({name}) - {} | Resolution: {}",
+                    link_text(&item.title),
+                    item.description,
+                    first_sentence(&sections[CLOSED_SECTION])
+                )
+            }),
+    );
+    out.extend(section("Closed", closed));
     out.join("\n") + "\n"
 }
 
@@ -411,13 +376,12 @@ fn open_line(name: &str, item: &Item, sections: &Sections) -> String {
     )
 }
 
-/// The index of `specs/`: the open specs by area, in the order `areas` declares them, and the closed specs last under
-/// `# Closed`, as the backlog index does, so they do not bury the open ones. An open spec shows its status; a closed
-/// one its resolution.
+/// The index lines of the specs that `keep` takes, for one heading of the index of `work/`. An open spec shows its
+/// status; a closed one its resolution.
 ///
 /// A part in the same area as its epic, and open or closed as its epic is, is listed under it, indented. Any other part
 /// is listed on its own with its epic after its line, so each spec appears once.
-pub fn render_specs(all: &Specs, areas: &[String]) -> String {
+fn spec_lines(all: &Work, keep: &dyn Fn(&Spec) -> bool) -> Vec<String> {
     let here = &all.specs;
     let closed = |spec: &Spec| spec.status == Status::Deprecated;
     // The epic a part is listed under, in this index
@@ -437,7 +401,7 @@ pub fn render_specs(all: &Specs, areas: &[String]) -> String {
             Some(epic) if nested_in(spec).is_none() => {
                 let epic_spec = all
                     .find(epic)
-                    .expect("all_specs leaves out a part whose epic it cannot find");
+                    .expect("work leaves out a part whose epic it cannot find");
                 format!(" | Epic: [{}]({epic}.md)", link_text(&epic_spec.title))
             }
             _ => String::new(),
@@ -448,33 +412,20 @@ pub fn render_specs(all: &Specs, areas: &[String]) -> String {
             spec.description
         )
     };
-    let mut out = vec![GENERATED.to_string()];
-    out.extend(guide_section(&all.guides));
     // Each top-level spec that `keep` takes, with its parts under it
-    let section = |heading: &str, keep: &dyn Fn(&Spec) -> bool| {
-        let top: Vec<_> = here
-            .iter()
-            .filter(|(_, (spec, _))| keep(spec) && nested_in(spec).is_none())
-            .collect();
-        if top.is_empty() {
-            return Vec::new();
-        }
-        let mut lines = vec!["".into(), format!("# {heading}"), "".into()];
-        for (name, (spec, sections)) in top {
-            lines.push(line(name, spec, sections));
-            for (part_name, (part, part_sections)) in here {
-                if nested_in(part).as_ref() == Some(name) {
-                    lines.push(format!("  {}", line(part_name, part, part_sections)));
-                }
+    let mut lines = Vec::new();
+    let top = here
+        .iter()
+        .filter(|(_, (spec, _))| keep(spec) && nested_in(spec).is_none());
+    for (name, (spec, sections)) in top {
+        lines.push(line(name, spec, sections));
+        for (part_name, (part, part_sections)) in here {
+            if nested_in(part).as_ref() == Some(name) {
+                lines.push(format!("  {}", line(part_name, part, part_sections)));
             }
         }
-        lines
-    };
-    for area in areas {
-        out.extend(section(area, &|spec| &spec.tag == area && !closed(spec)));
     }
-    out.extend(section("Closed", &|spec| closed(spec)));
-    out.join("\n") + "\n"
+    lines
 }
 
 /// The knowledge index: the guides, the documents that hold by area in the order `areas` declares them, and the
@@ -543,7 +494,7 @@ pub fn render_root() -> String {
     out.join("\n") + "\n"
 }
 
-/// Every tag the backlog items, specs and knowledge documents among `docs` use. A document that cannot be read is left
+/// Every tag the work items, specs and knowledge documents among `docs` use. A document that cannot be read is left
 /// to `rotproof check`.
 pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
     let mut tags = BTreeSet::new();
@@ -554,7 +505,7 @@ pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
         let kind = meta
             .get(&Yaml::String("type".into()))
             .and_then(Yaml::as_str);
-        if !matches!(kind, Some("Backlog Item" | "Spec" | "Knowledge")) {
+        if !matches!(kind, Some("Work Item" | "Spec" | "Knowledge")) {
             continue;
         }
         match meta.get(&Yaml::String("tags".into())) {
@@ -588,7 +539,7 @@ mod tests {
     use super::*;
 
     const GOOD: &str = "---
-type: Backlog Item
+type: Work Item
 title: Some problem
 description: Something is wrong.
 tags: [operations]
@@ -612,12 +563,12 @@ Not yet. Measured by hand.
 [somewhere](/log.md)
 ";
 
-    fn parsed(docs: &[(&str, String)]) -> Backlog {
+    fn parsed(docs: &[(&str, String)]) -> Work {
         let docs: Docs = docs
             .iter()
             .map(|(name, text)| (name.to_string(), text.clone()))
             .collect();
-        let parsed = backlog(&docs, &areas());
+        let parsed = work(&docs, &areas());
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
         parsed
     }
@@ -646,11 +597,7 @@ Not yet. Measured by hand.
     #[test]
     fn an_open_item_shows_its_state_and_deadline() {
         // Measured at 08:00 in +09:00, which is the day before in UTC: the date is the one where it was measured
-        let index = render_backlog(
-            &parsed(&[("good.md", GOOD.into())]).items,
-            &BTreeMap::new(),
-            &areas(),
-        );
+        let index = render_work(&parsed(&[("good.md", GOOD.into())]), &areas());
         let line = "* [Some problem](good.md) - Something is wrong. | State (2026-09-28): Not yet. | Deadline: until \
                     the next deploy";
         assert_eq!(index, format!("{GENERATED}\n\n# operations\n\n{line}\n"));
@@ -660,7 +607,7 @@ Not yet. Measured by hand.
     fn a_title_with_brackets_stays_the_text_of_its_own_entry() {
         let title = r#"title: 'Evil ](fake.md) [hacked \ end'"#;
         let item = GOOD.replace("title: Some problem", title);
-        let index = render_backlog(&parsed(&[("x.md", item)]).items, &BTreeMap::new(), &areas());
+        let index = render_work(&parsed(&[("x.md", item)]), &areas());
         let line = index.lines().find(|l| l.starts_with("* ")).unwrap();
         assert!(
             line.starts_with(r"* [Evil \](fake.md) \[hacked \\ end](x.md) - "),
@@ -686,10 +633,7 @@ Not yet. Measured by hand.
             "stale_after: 2027-03-31T00:00:00+09:00\ndeadline_kind:",
         );
         let parsed = parsed(&[("fresh.md", fresh), ("plain.md", GOOD.into())]);
-        assert!(
-            render_backlog(&parsed.items, &BTreeMap::new(), &areas())
-                .contains("| Re-measure after 2027-03-31.")
-        );
+        assert!(render_work(&parsed, &areas()).contains("| Re-measure after 2027-03-31."));
         let cutoff = FixedOffset::east_opt(9 * 3600)
             .unwrap()
             .with_ymd_and_hms(2027, 3, 31, 0, 0, 0)
@@ -743,11 +687,7 @@ Not yet. Measured by hand.
     #[test]
     fn a_closed_item_leaves_the_open_list() {
         let closed = crate::schema::closed_record(GOOD, "Fixed.");
-        let index = render_backlog(
-            &parsed(&[("closed.md", closed)]).items,
-            &BTreeMap::new(),
-            &areas(),
-        );
+        let index = render_work(&parsed(&[("closed.md", closed)]), &areas());
         assert!(
             index.contains("# Closed") && index.contains("Fixed."),
             "{index}"
@@ -766,10 +706,7 @@ Not yet. Measured by hand.
     #[test]
     fn the_tags_of_the_records_are_collected_and_others_are_not() {
         let docs: Docs = [
-            (
-                "a.md",
-                "---\ntype: Backlog Item\ntags: [billing, ops]\n---\n",
-            ),
+            ("a.md", "---\ntype: Work Item\ntags: [billing, ops]\n---\n"),
             ("b.md", "---\ntype: Spec\ntags: records\n---\n"),
             ("rules.md", "---\ntype: Guide\ntags: [guides]\n---\n"),
             ("broken.md", "no frontmatter"),
@@ -785,16 +722,14 @@ Not yet. Measured by hand.
     #[test]
     fn every_generated_file_is_expected_with_the_rules_listed() {
         let none = Docs::new();
-        let (files, problems) = expected(&none, &none, &none, &areas());
+        let (files, problems) = expected(&none, &none, &areas());
         let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
         assert_eq!(
             paths,
             [
-                "docs/backlog/rules.md",
+                "docs/work/rules.md",
                 "docs/index.md",
-                "docs/backlog/index.md",
-                "docs/specs/rules.md",
-                "docs/specs/index.md",
+                "docs/work/index.md",
                 "docs/knowledge/rules.md",
                 "docs/knowledge/index.md",
             ]
@@ -803,8 +738,7 @@ Not yet. Measured by hand.
         // The rules are listed on the run that writes them
         let index = |path: &str| &files.iter().find(|(p, _)| p == path).unwrap().1;
         for (path, rules) in [
-            ("docs/backlog/index.md", "rules.md"),
-            ("docs/specs/index.md", "rules.md"),
+            ("docs/work/index.md", "rules.md"),
             ("docs/knowledge/index.md", "rules.md"),
         ] {
             assert!(index(path).contains(rules), "{path}");
@@ -828,7 +762,7 @@ Not yet. Measured by hand.
         let later = GOOD.replace("filed: 2026-09-27", "filed: 2026-09-28");
         let other = GOOD.replace("tags: [operations]", "tags: [billing]");
         let parsed = parsed(&[("a.md", later), ("b.md", GOOD.into()), ("c.md", other)]);
-        let index = render_backlog(&parsed.items, &BTreeMap::new(), &areas());
+        let index = render_work(&parsed, &areas());
         // A declared area that no record uses has no heading
         assert_eq!(
             outline(&index),
@@ -849,24 +783,24 @@ Not yet. Measured by hand.
             GOOD.replace("tags: [operations]", "tags: [Operations]"),
         )]
         .into();
-        let parsed = backlog(&docs, &areas());
+        let parsed = work(&docs, &areas());
         assert!(parsed.items.is_empty());
         assert!(
-            parsed.problems["x.md"].contains("\"Operations\" is not an area declared")
-                && parsed.problems["x.md"].contains("operations, billing, unused"),
+            parsed.problems["work/x.md"].contains("\"Operations\" is not an area declared")
+                && parsed.problems["work/x.md"].contains("operations, billing, unused"),
             "{:?}",
             parsed.problems
         );
         let spec =
             "---\ntype: Spec\ntitle: S\ndescription: D.\ntags: [nowhere]\nstatus: stable\n---\n";
-        let Specs {
+        let Work {
             specs: passed,
             problems,
             ..
-        } = all_specs(&[("s.md".to_string(), spec.to_string())].into(), &[]);
+        } = work(&[("s.md".to_string(), spec.to_string())].into(), &[]);
         assert!(passed.is_empty());
         assert!(
-            problems["specs/s.md"].contains("it declares none"),
+            problems["work/s.md"].contains("it declares none"),
             "{problems:?}"
         );
     }
@@ -884,16 +818,46 @@ Not yet. Measured by hand.
             ("c.md".to_string(), spec("billing")),
         ]
         .into();
-        let all = all_specs(&docs, &areas());
+        let all = work(&docs, &areas());
         assert!(all.problems.is_empty(), "{:?}", all.problems);
         assert_eq!(
-            outline(&render_specs(&all, &areas())),
+            outline(&render_work(&all, &areas())),
             [
                 "# operations",
                 "* [S](b.md",
                 "# billing",
                 "* [S](a.md",
                 "* [S](c.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn specs_and_work_items_share_one_index_specs_first() {
+        let docs: Docs = [
+            ("item.md".to_string(), GOOD.to_string()),
+            spec_doc("spec", "operations", None, false),
+            (
+                "old-item.md".to_string(),
+                crate::schema::closed_record(GOOD, "Fixed."),
+            ),
+            spec_doc("old-spec", "operations", None, true),
+            ("rules.md".to_string(), WORK_RULES.to_string()),
+        ]
+        .into();
+        let all = work(&docs, &areas());
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        assert_eq!(
+            outline(&render_work(&all, &areas())),
+            [
+                "# Guides",
+                "* [Work rules](rules.md",
+                "# operations",
+                "* [spec](spec.md",
+                "* [Some problem](item.md",
+                "# Closed",
+                "* [old-spec](old-spec.md",
+                "* [Some problem](old-item.md",
             ]
         );
     }
@@ -914,14 +878,14 @@ Not yet. Measured by hand.
         )
     }
 
-    /// `docs/specs/` holding the open and the closed specs together.
+    /// `docs/work/` holding the open and the closed specs together.
     fn spec_docs(open: Vec<(String, String)>, closed: Vec<(String, String)>) -> Docs {
         open.into_iter().chain(closed).collect()
     }
 
     #[test]
     fn a_part_is_listed_under_its_epic_or_names_it() {
-        let all = all_specs(
+        let all = work(
             &spec_docs(
                 vec![
                     spec_doc("big", "operations", None, false),
@@ -944,7 +908,7 @@ Not yet. Measured by hand.
         );
         assert!(all.problems.is_empty(), "{:?}", all.problems);
         assert_eq!(all.closed_before_its_parts(), Vec::<String>::new());
-        let index = render_specs(&all, &areas());
+        let index = render_work(&all, &areas());
         assert_eq!(
             index
                 .lines()
@@ -968,7 +932,7 @@ Not yet. Measured by hand.
 
     #[test]
     fn an_epic_closes_after_its_parts() {
-        let all = all_specs(
+        let all = work(
             &spec_docs(
                 vec![spec_doc("part", "operations", Some("big"), false)],
                 vec![spec_doc("big", "operations", None, true)],
@@ -977,10 +941,10 @@ Not yet. Measured by hand.
         );
         // The open part stays listed, naming its closed epic, and the check names the order
         assert!(all.problems.is_empty(), "{:?}", all.problems);
-        assert!(render_specs(&all, &areas()).contains("| Epic: [big](big.md)"));
+        assert!(render_work(&all, &areas()).contains("| Epic: [big](big.md)"));
         let found = all.closed_before_its_parts();
         assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].starts_with("specs/part.md: its epic big is closed"));
+        assert!(found[0].starts_with("work/part.md: its epic big is closed"));
     }
 
     #[test]
@@ -995,9 +959,9 @@ Not yet. Measured by hand.
                 spec_doc("p", "operations", Some("nowhere"), false),
                 "names no spec",
             ),
-            // A backlog item has a slug too, but it is not a spec
+            // A work item has a slug too, but it is not a spec
             (
-                "a backlog item",
+                "a work item",
                 spec_doc("p", "operations", Some("some-item"), false),
                 "names no spec",
             ),
@@ -1016,7 +980,7 @@ Not yet. Measured by hand.
                 spec_doc("p", "operations", Some("broken"), false),
                 "left out of the index",
             ),
-            // The spec rules sit among the specs, but are a guide
+            // The rules sit among the specs, but are a guide
             (
                 "a guide",
                 spec_doc("p", "operations", Some("rules"), false),
@@ -1024,14 +988,15 @@ Not yet. Measured by hand.
             ),
         ];
         for (name, part, said) in cases {
-            let all = all_specs(
+            let all = work(
                 &spec_docs(
                     vec![
                         part,
                         spec_doc("top", "operations", None, false),
                         spec_doc("mid", "operations", Some("top"), false),
                         broken.clone(),
-                        ("rules.md".to_string(), SPEC_RULES.to_string()),
+                        ("some-item.md".to_string(), GOOD.to_string()),
+                        ("rules.md".to_string(), WORK_RULES.to_string()),
                     ],
                     vec![],
                 ),
@@ -1040,7 +1005,7 @@ Not yet. Measured by hand.
             assert!(!all.specs.contains_key("p.md"), "{name}: still listed");
             let why = all
                 .problems
-                .get("specs/p.md")
+                .get("work/p.md")
                 .map(String::as_str)
                 .unwrap_or("");
             assert!(

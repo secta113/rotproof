@@ -8,8 +8,8 @@ two structures:
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
   of dependencies stays what it was meant to be.
-- **The specs and records:** what is open, what is being changed, how things are now, and why. A backlog (open
-  defects and postponed work, each with a trigger, a state and a deadline), specs, knowledge documents (an API, a data
+- **The specs and records:** what is open, what is being changed, how things are now, and why. Specs and work items
+  (open defects and postponed work, each with a trigger, a state and a deadline), knowledge documents (an API, a data
   model, a decision, edited in place and named in the log at every edit), and a log, each kept to strict rules. A
   finding does not stay outside them: a `TODO` or `NOTE` in a code comment fails the check, and a stop hook sends an
   agent back when its last message leaves something open that it did not record.
@@ -34,7 +34,7 @@ direction: from the imports in Python and TypeScript, and from the dependencies 
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 (its `SPEC.md` as of commit `ad30107`): every document has YAML frontmatter with a `type`, `index.md` and `log.md` are
 reserved names, and the log's headings are dates. An OKF reader can read the records as a bundle. The rules on top of
-that format (a backlog item's trigger, state and deadline, a closed record opening with its resolution, a knowledge
+that format (a work item's trigger, state and deadline, a closed record opening with its resolution, a knowledge
 document's hash in the log, the shape of a log entry) are Rotproof's own, stricter than OKF, and not part of it.
 Rotproof is not an OKF validator.
 
@@ -166,13 +166,13 @@ in `CLAUDE.md` for Claude Code:
 ## The stop hook
 
 An agent's findings are lost when it reports them and stops: "not checked", "out of scope" in its last message, and
-nothing in the backlog. `rotproof stop-hook` is [Claude Code's `Stop` hook](https://code.claude.com/docs/en/hooks),
+nothing in the records. `rotproof stop-hook` is [Claude Code's `Stop` hook](https://code.claude.com/docs/en/hooks),
 run when the agent stops, and reads that last message. When the message holds a phrase that leaves something open
 and `git status` shows no change in `docs/`, the hook sends the agent back once, asking it to record the finding or to
 say in one line where it already is. While the agent is
 continuing because of a stop hook, the hook lets it stop, so it never loops. A line that points at the records (the
-word `spec`, `backlog` or `knowledge`) is not read: what it leaves open is recorded where it points. The
-phrases are built in (Japanese and English); the agent decides what each one meant.
+word `spec`, `backlog` or `knowledge`, the words `work item`, or a path through `work/`) is not read: what it leaves
+open is recorded where it points. The phrases are built in (Japanese and English); the agent decides what each one meant.
 
 `rotproof create` writes `.claude/settings.json` with the hook when it does not exist, together with the rule that
 denies Claude Code editing the approvals file (see "Approving a forbidden import"). A project that has one adds the
@@ -268,21 +268,19 @@ case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 docs/
   index.md          generated
   log.md            what was done, newest first
-  backlog/
-    rules.md        generated: the backlog rules (type: Guide)
+  work/             every spec and work item, open or closed
+    rules.md        generated: the rules of both types (type: Guide)
     index.md        generated
-    <slug>.md       one item per file (type: Backlog Item)
-  specs/            every spec, open or closed (type: Spec, status: draft, stable or deprecated)
-    rules.md        generated: the spec rules (type: Guide)
-    index.md        generated
+    <slug>.md       one record per file (type: Spec, status: draft, stable or deprecated;
+                    or type: Work Item, status: stable or deprecated)
   knowledge/        how things are now, and why (type: Knowledge, status: stable or deprecated)
     rules.md        generated: the knowledge rules (type: Guide)
     index.md        generated
 ```
 
-The three directories answer three questions: what is being changed (`specs/`, closed once implemented or dropped),
-what is open (`backlog/`, closed once dealt with), and how things are now (`knowledge/`, edited in place, deprecated
-only when it no longer holds). A closed spec is history; what it built is described in `knowledge/`, an API or a data
+The two directories hold records that are handled differently. `work/` holds what is being changed and what is open:
+specs and work items, closed once implemented, dealt with or dropped, and never moved. `knowledge/` holds how things
+are now, edited in place and deprecated only when it no longer holds. A closed spec is history; what it built is described in `knowledge/`, an API or a data
 model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
 contents, under the label `**Knowledge**` (`* **Knowledge**: knowledge/api.md@a3f9c1d2`), and `rotproof check` fails
 an edit the log does not name. A knowledge document that describes code names it in `follows`, each with its hash when
@@ -300,7 +298,7 @@ A record stays where it was written when it closes: its status says it is closed
 `# Closed`. Its path, and every link to it, never changes, so closing a record is a change to that record and its
 index line only.
 
-Every backlog item, spec and knowledge document belongs to exactly one area: its only tag, one of the `areas` the
+Every spec, work item and knowledge document belongs to exactly one area: its only tag, one of the `areas` the
 declaration lists. The index files group by area, in the order of `areas`, so the project puts the largest or most
 active area first. An area says where a record belongs (the layers, the records, billing), and never closes. A
 declared area that no record uses passes, so an area is declared before its first record. Renaming an area is editing
@@ -324,11 +322,11 @@ name one area mixes two, so it is split into one part per area, and the epic tie
 work. In an index, a part in the same area as its epic, and open or closed as its epic is, is listed under it,
 indented; any other part is listed on its own with `Epic: [<title>](...)` after its line, so each spec appears once.
 
-A backlog item has this frontmatter and these body headings:
+A work item has this frontmatter and these body headings:
 
 ```markdown
 ---
-type: Backlog Item
+type: Work Item
 title: Some problem
 description: One sentence: what the problem is.
 tags: [area]                  # exactly one, declared in areas; the index groups items by it
@@ -403,13 +401,13 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   outside `unchecked` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
   a crate's `tests/` and `build.rs` included, read by Rotproof's own scanner, which skips strings, raw strings and
-  character literals as Rust's lexer does. Work left to do belongs in the backlog, where it is listed and closed, and
+  character literals as Rust's lexer does. Work left to do belongs in a work item, where it is listed and closed, and
   a decision with its reason in the spec or the log entry of the change; a comment that explains how to read the code
   stays, without the word. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
   strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
 
-- **The bundle is there:** `docs/`, `docs/index.md`, `docs/backlog/`, `docs/backlog/rules.md`, `docs/specs/`,
-  `docs/specs/rules.md`, `docs/knowledge/` and `docs/knowledge/rules.md` exist, and the declaration with its `areas`
+- **The bundle is there:** `docs/`, `docs/index.md`, `docs/work/`, `docs/work/rules.md`, `docs/knowledge/` and
+  `docs/knowledge/rules.md` exist, and the declaration with its `areas`
   can be read. Without them every other check
   would pass with nothing checked.
 - **Every name is compared exactly,** wherever Rotproof looks for a file or a directory: a link's target, the files
@@ -418,10 +416,10 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   (`README.md:secret`) or a short name (`README~1.MD`). Linux and GitHub find none of them, so each fails, and the
   message says what the disk has.
 - **The areas are distinct headings:** none is empty, has a space at either end or a line break, and no two differ only in case.
-- **Every backlog item keeps the format:** the fields above with their types, and non-empty Trigger, State and Details
+- **Every work item keeps the format:** the fields above with their types, and non-empty Trigger, State and Details
   (and Resolution when closed, as the first heading). A field Rotproof does not know passes as an extension, as OKF allows, unless it looks
   like a misspelling of a field the document type has (`stale_afer`, `staleAfter`, `Title`), or is a field only
-  another type has (a backlog item's `deadline` on a spec, a spec's `epic` on a backlog item): those fail, in every
+  another type has (a work item's `deadline` on a spec, a spec's `epic` on a work item): those fail, in every
   document type, as a misspelled optional field would otherwise be silently dropped. A deadline is an event or a reason, never only a date
   (`2026-10-31`, `2026/10/31`, `31.10.2026`, `2026年10月31日` or a month alone); an event may contain a date. Every
   time has a time zone. `stale_after` is later than the last `verified`. A required text is not blank (spaces alone
@@ -441,13 +439,13 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   (`render_index()`) or a dotted path (`Bundle.render`); when it names nothing, the message says which name to write
   or lists the names the file defines.
 - **Every spec keeps the format:** `title`, `description`, `status` and exactly one declared area in `tags`, and a
-  non-empty `# Resolution` as the first heading once it is closed. `epic`, when present, is the slug of another spec in `docs/specs/` (not
-  a path, not a backlog item or a guide, not the spec itself), and that spec has no `epic` of its own: one level only.
+  non-empty `# Resolution` as the first heading once it is closed. `epic`, when present, is the slug of another spec in `docs/work/` (not
+  a path, not a work item or a guide, not the spec itself), and that spec has no `epic` of its own: one level only.
   A spec that breaks one of these is left out of the index files.
 - **An epic closes after its parts:** no closed epic has an open part. A part that is dropped closes as dropped, as
   any spec does.
-- **The log exists, points only at backlog items that exist** (`backlog/<slug>.md`, written with `/` or `\`, the
-  slug percent-encoded or not), and its second-level headings are dates, newest first. Below the title, the log is
+- **The log exists, points only at work items that exist** (`work/<slug>.md`, or `backlog/<slug>.md` as entries
+  written before `docs/work/` name them, written with `/` or `\`, the slug percent-encoded or not), and its second-level headings are dates, newest first. Below the title, the log is
   a flat list of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented
   lines (wrapped text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the
   first date fails. A new log, with only its title and HTML comments, passes.
@@ -468,8 +466,8 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   of documents, `log.md` in `docs/`. A markdown file is named `.md`, in lowercase: GitHub shows a `.MD` file, but
   Rotproof would not read it.
 - **Every file Rotproof generates equals what `rotproof index` writes:** the index files, so nobody maintains a list by
-  hand, and `docs/backlog/rules.md` and `docs/specs/rules.md`, so the rules a project reads are the rules its Rotproof
-  checks. A project's own rules go in another guide in `docs/backlog/` or `docs/specs/`.
+  hand, and `docs/work/rules.md` and `docs/knowledge/rules.md`, so the rules a project reads are the rules its Rotproof
+  checks. A project's own rules go in another guide in the same directory.
 - **No spec sits at the repository root.**
 
 The frontmatter is read as YAML 1.2: quoting a value never changes whether it passes. Its closing `---` may end the

@@ -1,4 +1,4 @@
-//! The frontmatter of each record type: backlog items, guides, specs and knowledge documents.
+//! The frontmatter of each record type: work items, specs, guides and knowledge documents.
 //!
 //! OKF lets a producer add any key, and tells readers not to reject one they do not know. So an unknown field passes
 //! as an extension, unless it looks like a misspelling of a field the type reads (OKF's or Rotproof's): that one
@@ -19,17 +19,17 @@ use utils::frontmatter::{Sections, first_heading, split};
 /// A datetime with a time zone, as OKF writes every timestamp.
 pub type Time = DateTime<FixedOffset>;
 
-/// Body headings every backlog item needs. A closed item also needs `CLOSED_SECTION`
+/// Body headings every work item needs. A closed item also needs `CLOSED_SECTION`
 pub const SECTIONS: [&str; 3] = ["Trigger", "State", "Details"];
 pub const CLOSED_SECTION: &str = "Resolution";
-/// The fields only one type reads, with that type: a backlog item's `filed`, `deadline_kind` and `deadline`, and a
+/// The fields only one type reads, with that type: a work item's `filed`, `deadline_kind` and `deadline`, and a
 /// spec's `epic`. Found from the readers, so a field added to a type is in it with no list to update. On another type,
 /// one is not an extension: it is a sign of the wrong `type`, under which the item's trigger and deadline, or the
 /// spec's place in its epic, would go unchecked
 static OWN_FIELDS: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|| {
     let readers = [
         (
-            "backlog item",
+            "work item",
             keys_read(|fields| {
                 item(fields);
             }),
@@ -119,7 +119,7 @@ pub enum DeadlineKind {
     NoDeadline,
 }
 
-/// The frontmatter of one backlog item.
+/// The frontmatter of one work item.
 #[derive(Debug, Clone)]
 pub struct Item {
     pub title: String,
@@ -151,7 +151,7 @@ impl Item {
     }
 }
 
-/// A document that is not an item, such as the backlog rules.
+/// A document that is not an item, such as the rules of a directory.
 #[derive(Debug, Clone)]
 pub struct Guide {
     pub title: String,
@@ -184,20 +184,28 @@ pub struct Knowledge {
     pub follows: Vec<(String, String)>,
 }
 
-/// A document in `docs/backlog/`.
+/// A document in `docs/work/`.
 #[derive(Debug, Clone)]
-pub enum BacklogDoc {
+pub enum WorkDoc {
     Item(Item, Sections),
+    Spec(Spec, Sections),
     Guide(Guide),
 }
 
-/// A document in `docs/backlog/`, or why it breaks the backlog format.
-pub fn backlog_doc(text: &str) -> Result<BacklogDoc, String> {
+/// A document in `docs/work/`, read by its `type`, or why it breaks the format of that type. A document whose type is
+/// neither `Spec` nor `Guide` is read as a work item, which says what its type should be.
+pub fn work_doc(text: &str) -> Result<WorkDoc, String> {
     let (meta, sections) = split(text)?;
     let mut fields = Fields::new(&meta);
-    if fields.peek("type") == Some(&Yaml::String("Guide".into())) {
-        let guide = guide(&mut fields);
-        return fields.finish(guide).map(BacklogDoc::Guide);
+    match fields.peek("type") {
+        Some(Yaml::String(kind)) if kind == "Guide" => {
+            let guide = guide(&mut fields);
+            return fields.finish(guide).map(WorkDoc::Guide);
+        }
+        Some(Yaml::String(kind)) if kind == "Spec" => {
+            return spec(text).map(|(spec, sections)| WorkDoc::Spec(spec, sections));
+        }
+        _ => {}
     }
     let item = item(&mut fields);
     let item = fields.finish(item)?;
@@ -212,9 +220,9 @@ pub fn backlog_doc(text: &str) -> Result<BacklogDoc, String> {
         return Err(format!("body headings missing or empty: {empty:?}"));
     }
     if item.status == Status::Deprecated {
-        resolution_first(text, "item")?;
+        resolution_first(text, "work item")?;
     }
-    Ok(BacklogDoc::Item(item, sections))
+    Ok(WorkDoc::Item(item, sections))
 }
 
 /// For tests: a record closed as it should be, `status: deprecated` and `# Resolution` as the first heading of its
@@ -260,7 +268,7 @@ pub fn guide_doc(text: &str) -> Option<Result<Guide, String>> {
     Some(fields.finish(guide))
 }
 
-/// A spec in `docs/specs/`, or why it breaks the format. Any status: every spec stays there when it closes, so its
+/// A spec in `docs/work/`, or why it breaks the format. Any status: every spec stays there when it closes, so its
 /// path, and every link to it, never changes, and the status alone says it is closed.
 pub fn spec(text: &str) -> Result<(Spec, Sections), String> {
     let (meta, sections) = split(text)?;
@@ -386,7 +394,7 @@ fn followed_hashes(value: &Yaml) -> Result<Vec<(String, String)>, String> {
 }
 
 fn item(fields: &mut Fields) -> Option<Item> {
-    fields.required("type", one_of(&["Backlog Item"]));
+    fields.required("type", one_of(&["Work Item"]));
     let title = fields.required("title", one_line);
     let description = fields.required("description", one_line);
     let tag = fields.required("tags", one_tag);
@@ -795,7 +803,7 @@ fn slug(value: &Yaml) -> Result<String, String> {
     }
 }
 
-/// Exactly one tag: the area the index groups a backlog item, a spec or a knowledge document by. Whether it is
+/// Exactly one tag: the area the index groups a work item, a spec or a knowledge document by. Whether it is
 /// declared is checked against the declaration, which the document alone does not know (`bundle.rs`).
 fn one_tag(value: &Yaml) -> Result<String, String> {
     let mut tags = text_list(value)?;
@@ -811,7 +819,7 @@ mod tests {
 
     /// A valid item. Each bad input below changes exactly one thing in it
     const GOOD: &str = "---
-type: Backlog Item
+type: Work Item
 title: Some problem
 description: Something is wrong.
 tags: [operations]
@@ -847,21 +855,21 @@ Not yet.
     fn passing(cases: &[(&str, String)]) -> Vec<String> {
         cases
             .iter()
-            .filter_map(|(name, text)| backlog_doc(text).ok().map(|_| name.to_string()))
+            .filter_map(|(name, text)| work_doc(text).ok().map(|_| name.to_string()))
             .collect()
     }
 
     fn failing(cases: &[(&str, String)]) -> Vec<(String, String)> {
         cases
             .iter()
-            .filter_map(|(name, text)| backlog_doc(text).err().map(|why| (name.to_string(), why)))
+            .filter_map(|(name, text)| work_doc(text).err().map(|why| (name.to_string(), why)))
             .collect()
     }
 
     #[test]
     fn the_good_input_passes() {
         // If the valid item did not pass, a failure below would not show that the one change was caught
-        assert!(backlog_doc(GOOD).is_ok(), "{:?}", backlog_doc(GOOD).err());
+        assert!(work_doc(GOOD).is_ok(), "{:?}", work_doc(GOOD).err());
     }
 
     const KNOWLEDGE: &str = "---
@@ -937,23 +945,19 @@ Text.
     #[test]
     fn a_closed_item_opens_with_its_resolution() {
         let closed = closed_record(GOOD, "Fixed.");
-        assert!(
-            backlog_doc(&closed).is_ok(),
-            "{:?}",
-            backlog_doc(&closed).err()
-        );
+        assert!(work_doc(&closed).is_ok(), "{:?}", work_doc(&closed).err());
         let at_the_end =
             good("status: stable", "status: deprecated") + "\n# Resolution\n\nFixed.\n";
         assert_eq!(
-            backlog_doc(&at_the_end).err(),
+            work_doc(&at_the_end).err(),
             Some(
-                "a closed item opens with # Resolution, before every other heading (its first heading is # Trigger)"
+                "a closed work item opens with # Resolution, before every other heading (its first heading is # Trigger)"
                     .into()
             )
         );
         // A heading only in a comment does not count: the reader sees # Trigger first
         let hidden = at_the_end.replacen("\n# Trigger", "\n<!--\n# Resolution\n-->\n# Trigger", 1);
-        assert!(backlog_doc(&hidden).is_err());
+        assert!(work_doc(&hidden).is_err());
     }
 
     #[test]
@@ -961,9 +965,9 @@ Text.
         assert_eq!(
             *OWN_FIELDS,
             [
-                ("filed", "backlog item"),
-                ("deadline_kind", "backlog item"),
-                ("deadline", "backlog item"),
+                ("filed", "work item"),
+                ("deadline_kind", "work item"),
+                ("deadline", "work item"),
                 ("epic", "spec"),
                 ("follows", "knowledge document"),
             ]
@@ -989,20 +993,20 @@ Text.
         assert!(OWN_FIELDS.len() >= 4, "{:?}", *OWN_FIELDS);
         for (field, kind) in OWN_FIELDS.iter() {
             let on_guide = guide.replace("type: Guide", &format!("type: Guide\n{field}: x"));
-            assert!(backlog_doc(&on_guide).is_err(), "{field} passed on a guide");
+            assert!(work_doc(&on_guide).is_err(), "{field} passed on a guide");
             if *kind != "spec" {
                 let on_spec =
                     SPEC.replace("status: stable", &format!("status: stable\n{field}: x"));
                 assert!(spec(&on_spec).is_err(), "{field} passed on a spec");
             }
-            if *kind != "backlog item" {
+            if *kind != "work item" {
                 let on_item =
                     GOOD.replace("status: stable", &format!("status: stable\n{field}: x"));
-                let why = backlog_doc(&on_item).err();
+                let why = work_doc(&on_item).err();
                 assert!(
                     why.as_ref()
                         .is_some_and(|why| why.contains(&format!("a field of a {kind}"))),
-                    "{field} on a backlog item: {why:?}"
+                    "{field} on a work item: {why:?}"
                 );
             }
         }
@@ -1137,7 +1141,7 @@ Text.
         let failed = failing(&okf);
         assert!(failed.is_empty(), "{failed:?}");
         // The newest measurement is the last one (used for the index date and for stale_after)
-        let Ok(BacklogDoc::Item(item, _)) = backlog_doc(&okf[0].1) else {
+        let Ok(WorkDoc::Item(item, _)) = work_doc(&okf[0].1) else {
             panic!()
         };
         assert_eq!(item.last_verified().by, "process:nightly");
@@ -1394,8 +1398,8 @@ Text.
                 ),
             ),
             (
-                "a spec in the backlog",
-                good("type: Backlog Item", "type: Spec"),
+                "a work item's fields under type Spec",
+                good("type: Work Item", "type: Spec"),
             ),
         ];
         let passed = passing(&bad);
@@ -1404,16 +1408,16 @@ Text.
 
     #[test]
     fn a_guide_passes_with_its_own_fields() {
-        let rules = "---\ntype: Guide\ntitle: Backlog rules\ndescription: What goes here.\n---\n\n# What goes here\n";
-        let Ok(BacklogDoc::Guide(guide)) = backlog_doc(rules) else {
-            panic!("{:?}", backlog_doc(rules))
+        let rules = "---\ntype: Guide\ntitle: Work rules\ndescription: What goes here.\n---\n\n# What goes here\n";
+        let Ok(WorkDoc::Guide(guide)) = work_doc(rules) else {
+            panic!("{:?}", work_doc(rules))
         };
         assert_eq!(guide.status, Status::Stable);
         for bad in [
             rules.replace("description: What goes here.\n", ""),
             rules.replace("type: Guide", "type: Guide\ndeadline: never"),
         ] {
-            assert!(backlog_doc(&bad).is_err(), "{bad}");
+            assert!(work_doc(&bad).is_err(), "{bad}");
         }
     }
 
@@ -1468,7 +1472,7 @@ Something.
                 "an empty tag",
                 SPEC.replace("tags: [operations]", "tags: [\"\"]"),
             ),
-            // A spec has exactly one area, as a backlog item does
+            // A spec has exactly one area, as a work item does
             ("no tag", SPEC.replace("tags: [operations]\n", "")),
             // An epic is named by its slug, not by a path
             (

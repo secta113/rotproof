@@ -19,7 +19,7 @@ fn stdout(out: &Output) -> String {
 fn repo() -> tempfile::TempDir {
     let root = declared("stack = \"none\"\nareas = [\"operations\"]\n");
     let docs = root.path().join("docs");
-    for folder in ["backlog", "specs", "knowledge"] {
+    for folder in ["work", "knowledge"] {
         fs::create_dir_all(docs.join(folder)).unwrap();
     }
     root
@@ -85,8 +85,8 @@ fn a_record_with_a_byte_order_mark_passes() {
     let root = clean_repo();
     let docs = root.path().join("docs");
     fs::write(
-        docs.join("backlog/x.md"),
-        "\u{feff}---\ntype: Backlog Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\
+        docs.join("work/x.md"),
+        "\u{feff}---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\
          verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
          # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n",
     )
@@ -99,7 +99,7 @@ fn a_record_with_a_byte_order_mark_passes() {
     let out = run(&["--root", &root_arg(root.path()), "index"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(
-        fs::read_to_string(docs.join("backlog/index.md"))
+        fs::read_to_string(docs.join("work/index.md"))
             .unwrap()
             .contains("[X](x.md)")
     );
@@ -111,34 +111,34 @@ fn a_record_with_a_byte_order_mark_passes() {
 fn each_broken_rule_fails_under_its_check() {
     let item = |details: &str| {
         format!(
-            "---\ntype: Backlog Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\
+            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\
              verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
              # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n{details}\n"
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
     let cases: [(&str, &str, String); 20] = [
-        ("the bundle is seen", "docs/backlog/rules.md", String::new()),
+        ("the bundle is seen", "docs/work/rules.md", String::new()),
         (
-            "every backlog document keeps the format",
-            "docs/backlog/x.md",
+            "every document in docs/work/ keeps the format",
+            "docs/work/x.md",
             "# no frontmatter\n".into(),
         ),
         (
             "every link in # Details resolves",
-            "docs/backlog/x.md",
+            "docs/work/x.md",
             item("[gone](/no_such.md)"),
         ),
         // The only link is inside a comment, so a reader sees none
         (
             "every link in # Details resolves",
-            "docs/backlog/x.md",
+            "docs/work/x.md",
             item("Nothing yet. <!-- [log](/log.md) -->"),
         ),
         (
-            "the log points only at real backlog items",
+            "the log points only at real work items",
             "docs/log.md",
-            "# Log\n\n## 2026-10-02\n\n- docs/backlog/no-such-item.md\n".into(),
+            "# Log\n\n## 2026-10-02\n\n- docs/work/no-such-item.md\n".into(),
         ),
         (
             "the log keeps its structure",
@@ -156,27 +156,32 @@ fn each_broken_rule_fails_under_its_check() {
             "---\ntype: Spec\n---\n".into(),
         ),
         (
-            "every spec keeps the format",
-            "docs/specs/x.md",
+            "every document in docs/work/ keeps the format",
+            "docs/work/y.md",
             "---\ntype: Spec\ntitle: A\ndescription: B.\nstatus: stable\n---\n".into(),
         ),
         (
             "every generated file is up to date",
-            "docs/backlog/index.md",
+            "docs/work/index.md",
             "edited by hand\n".into(),
         ),
         // The rules a project reads are the rules its Rotproof checks
         (
             "every generated file is up to date",
-            "docs/backlog/rules.md",
-            "---\ntype: Guide\ntitle: Backlog rules\ndescription: Our own.\n---\n".into(),
+            "docs/work/rules.md",
+            "---\ntype: Guide\ntitle: Work rules\ndescription: Our own.\n---\n".into(),
+        ),
+        // A record left where the records were before docs/work/
+        (
+            "every document is a known type in its place",
+            "docs/backlog/x.md",
+            item("[log](/log.md)"),
         ),
         (
-            "every generated file is up to date",
-            "docs/specs/rules.md",
-            "---\ntype: Guide\ntitle: Spec rules\ndescription: Our own.\n---\n".into(),
+            "the bundle is seen",
+            "docs/knowledge/rules.md",
+            String::new(),
         ),
-        ("the bundle is seen", "docs/specs/rules.md", String::new()),
         (
             "no spec sits at the repository root",
             "genre_spec.md",
@@ -185,18 +190,18 @@ fn each_broken_rule_fails_under_its_check() {
         ("the log keeps its structure", "docs/log.md", String::new()),
         // The area of a record is declared, and the declared areas are distinct headings
         (
-            "every backlog document keeps the format",
-            "docs/backlog/x.md",
+            "every document in docs/work/ keeps the format",
+            "docs/work/x.md",
             item("[log](/log.md)").replace("tags: [a]", "tags: [b]"),
         ),
         (
-            "every spec keeps the format",
-            "docs/specs/x.md",
+            "every document in docs/work/ keeps the format",
+            "docs/work/y.md",
             "---\ntype: Spec\ntitle: A\ndescription: B.\ntags: [b]\nstatus: stable\n---\n".into(),
         ),
         (
-            "every spec keeps the format",
-            "docs/specs/x.md",
+            "every document in docs/work/ keeps the format",
+            "docs/work/y.md",
             "---\ntype: Spec\ntitle: A\ndescription: B.\nstatus: stable\n---\n".into(),
         ),
         (
@@ -236,8 +241,8 @@ fn a_name_in_another_case_is_missing() {
     // a case-only rename is not a rename on Windows
     let cases = [
         (
-            "docs/backlog/rules.md",
-            "docs/backlog/Rules.md",
+            "docs/work/rules.md",
+            "docs/work/Rules.md",
             "the bundle is seen",
         ),
         ("docs/log.md", "docs/Log.md", "the log keeps its structure"),
@@ -249,8 +254,8 @@ fn a_name_in_another_case_is_missing() {
         ),
         // Not in the floor: only the comparison with what Rotproof writes sees it
         (
-            "docs/backlog/index.md",
-            "docs/backlog/Index.md",
+            "docs/work/index.md",
+            "docs/work/Index.md",
             "every generated file is up to date",
         ),
     ];
@@ -289,14 +294,18 @@ fn an_epic_and_its_parts_are_checked_together() {
     // (the check that must name it, the epic's status, the slug the part names)
     let cases = [
         ("an epic closes after its parts", "deprecated", "big"),
-        ("every spec keeps the format", "stable", "no-such-spec"),
+        (
+            "every document in docs/work/ keeps the format",
+            "stable",
+            "no-such-spec",
+        ),
     ];
     for (check, status, named) in cases {
         let root = clean_repo();
         let r = root.path();
-        fs::write(r.join("docs/specs/big.md"), spec("", status)).unwrap();
+        fs::write(r.join("docs/work/big.md"), spec("", status)).unwrap();
         fs::write(
-            r.join("docs/specs/part.md"),
+            r.join("docs/work/part.md"),
             spec(&format!("epic: {named}\n"), "stable"),
         )
         .unwrap();
@@ -322,11 +331,9 @@ fn index_writes_every_index_file() {
         String::from_utf8_lossy(&out.stderr)
     );
     for path in [
-        "docs/backlog/rules.md",
-        "docs/specs/rules.md",
+        "docs/work/rules.md",
         "docs/index.md",
-        "docs/backlog/index.md",
-        "docs/specs/index.md",
+        "docs/work/index.md",
         "docs/knowledge/rules.md",
         "docs/knowledge/index.md",
     ] {
@@ -337,15 +344,10 @@ fn index_writes_every_index_file() {
             stdout(&out)
         );
     }
-    let backlog = fs::read_to_string(root.path().join("docs/backlog/index.md")).unwrap();
+    let work = fs::read_to_string(root.path().join("docs/work/index.md")).unwrap();
     assert!(
-        backlog.contains("* [Backlog rules](rules.md) - What goes in docs/backlog/"),
-        "{backlog}"
-    );
-    let specs = fs::read_to_string(root.path().join("docs/specs/index.md")).unwrap();
-    assert!(
-        specs.contains("# Guides\n\n* [Spec rules](rules.md) - What goes in docs/specs/"),
-        "{specs}"
+        work.contains("# Guides\n\n* [Work rules](rules.md) - What goes in docs/work/"),
+        "{work}"
     );
 }
 
@@ -353,14 +355,14 @@ fn index_writes_every_index_file() {
 fn index_names_what_it_left_out() {
     let root = repo();
     fs::write(
-        root.path().join("docs/backlog/broken.md"),
+        root.path().join("docs/work/broken.md"),
         "# no frontmatter\n",
     )
     .unwrap();
     let out = run(&["--root", &root_arg(root.path()), "index"]);
     assert!(out.status.success());
     assert!(
-        stdout(&out).contains("left out of the index, fix it: broken.md: no frontmatter"),
+        stdout(&out).contains("left out of the index, fix it: work/broken.md: no frontmatter"),
         "{}",
         stdout(&out)
     );
@@ -370,7 +372,7 @@ fn index_names_what_it_left_out() {
 fn index_names_the_items_to_measure_again() {
     let root = repo();
     let item = "---
-type: Backlog Item
+type: Work Item
 title: Old
 description: Measured long ago.
 tags: [operations]
@@ -394,7 +396,7 @@ Y.
 
 Z.
 ";
-    fs::write(root.path().join("docs/backlog/old.md"), item).unwrap();
+    fs::write(root.path().join("docs/work/old.md"), item).unwrap();
     let out = run(&["--root", &root_arg(root.path()), "index"]);
     assert!(out.status.success());
     assert!(
@@ -415,12 +417,12 @@ fn index_fails_without_the_areas() {
 }
 
 #[test]
-fn index_fails_without_a_spec_directory() {
+fn index_fails_without_the_work_directory() {
     let root = repo();
-    fs::remove_dir(root.path().join("docs/specs")).unwrap();
+    fs::remove_dir(root.path().join("docs/work")).unwrap();
     let out = run(&["--root", &root_arg(root.path()), "index"]);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("specs"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("docs/work"));
 }
 
 /// Every file under `root`, from the root with `/`, and its text.
@@ -479,12 +481,10 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
         let arg = root_arg(root.path());
         let first = run(&["--root", &arg, "create", "--yes"]);
         assert!(first.status.success(), "{stack}: {}", stdout(&first));
-        for path in made.iter().chain(&[
-            "docs/log.md",
-            "docs/backlog/rules.md",
-            "docs/specs/rules.md",
-            "docs/index.md",
-        ]) {
+        for path in made
+            .iter()
+            .chain(&["docs/log.md", "docs/work/rules.md", "docs/index.md"])
+        {
             assert!(
                 root.path().join(path).is_file(),
                 "{stack}: {path} was not made"
@@ -789,11 +789,11 @@ fn create_makes_layers_only_with_yes() {
     assert!(root.path().join("ui/atoms/__init__.py").is_file());
 }
 
-/// A backlog item or a spec that keeps every rule, with `tag` as its area.
+/// A work item or a spec that keeps every rule, with `tag` as its area.
 fn record(kind: &str, tag: &str) -> String {
     match kind {
         "item" => format!(
-            "---\ntype: Backlog Item\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: stable\nfiled: 2026-10-01\n\
+            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: stable\nfiled: 2026-10-01\n\
              verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
              # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
         ),
@@ -816,12 +816,12 @@ fn create_adds_the_fields_the_declaration_lacks() {
         "# Log\n\n## 2026-10-02\n\n* Something\n",
     )
     .unwrap();
-    fs::write(r.join("docs/backlog/one.md"), record("item", "operations")).unwrap();
-    fs::write(r.join("docs/backlog/two.md"), record("item", "billing")).unwrap();
-    fs::write(r.join("docs/specs/three.md"), record("spec", "records")).unwrap();
+    fs::write(r.join("docs/work/one.md"), record("item", "operations")).unwrap();
+    fs::write(r.join("docs/work/two.md"), record("item", "billing")).unwrap();
+    fs::write(r.join("docs/work/three.md"), record("spec", "records")).unwrap();
     // A guide's tags are not areas
     fs::write(
-        r.join("docs/backlog/guide.md"),
+        r.join("docs/work/guide.md"),
         "---\ntype: Guide\ntitle: G\ndescription: H.\ntags: [howto]\n---\n\nText.\n",
     )
     .unwrap();
@@ -1080,11 +1080,7 @@ fn each_difference_from_the_declaration_fails() {
 fn the_records_are_checked_under_a_stack_that_does_not_fit() {
     let root = clean_repo();
     declare(root.path(), "stack = \"cobol\"\nareas = [\"a\"]\n");
-    fs::write(
-        root.path().join("docs/backlog/broken.md"),
-        "no frontmatter\n",
-    )
-    .unwrap();
+    fs::write(root.path().join("docs/work/broken.md"), "no frontmatter\n").unwrap();
     let out = run(&["--root", &root_arg(root.path()), "check"]);
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{said}");
@@ -2105,11 +2101,7 @@ fn a_repository_of_records_only_makes_and_checks_only_docs() {
         stdout(&out)
     );
     // The records are still checked
-    fs::write(
-        root.path().join("docs/backlog/index.md"),
-        "edited by hand\n",
-    )
-    .unwrap();
+    fs::write(root.path().join("docs/work/index.md"), "edited by hand\n").unwrap();
     let out = run(&["--root", &arg, "check"]);
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     // No layers means nothing to declare absent or unchecked
@@ -2150,7 +2142,7 @@ fn a_marker_in_a_comment_fails_wherever_the_code_is() {
     assert_eq!(out.status.code(), Some(1), "{said}");
     // The heading names only what was found; each finding is its place, and the line under it as written
     assert!(
-        said.contains("no comment holds TODO or NOTE (work left to do goes in docs/backlog/"),
+        said.contains("no comment holds TODO or NOTE (work left to do goes in docs/work/"),
         "{said}"
     );
     assert!(
@@ -2380,7 +2372,7 @@ fn the_stop_hook_sends_the_agent_back_once_while_docs_did_not_change() {
     let done = open.replace("the Linux path is not checked", "every path passes");
     assert_eq!(stdout(&stop_hook(r, &done)), "");
     // Recorded: a change in docs/, new files included
-    fs::write(r.join("docs/backlog/new.md"), "x\n").unwrap();
+    fs::write(r.join("docs/work/new.md"), "x\n").unwrap();
     let out = stop_hook(r, open);
     assert!(out.status.success());
     assert_eq!(stdout(&out), "");
@@ -2474,7 +2466,7 @@ fn a_knowledge_document_belongs_in_docs_knowledge() {
     let root = clean_repo();
     let r = root.path();
     fs::write(
-        r.join("docs/specs/api.md"),
+        r.join("docs/work/api.md"),
         "---\ntype: Knowledge\ntitle: API\ndescription: D.\ntags: [a]\nstatus: stable\n---\n",
     )
     .unwrap();
@@ -2483,8 +2475,8 @@ fn a_knowledge_document_belongs_in_docs_knowledge() {
     assert_eq!(out.status.code(), Some(1), "{said}");
     assert!(
         said.contains(
-            "every document is a known type in its place:\n  specs/api.md: type \"Knowledge\" does not belong in \
-             docs/specs (Spec, Guide)"
+            "every document is a known type in its place:\n  work/api.md: type \"Knowledge\" does not belong in \
+             docs/work (Spec, Work Item, Guide)"
         ),
         "{said}"
     );

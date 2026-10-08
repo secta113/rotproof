@@ -23,16 +23,15 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
 {layers}
 ## The records
 
-- **Before starting work or deploying, read `docs/backlog/index.md`, `docs/specs/index.md` and
-  `docs/knowledge/index.md`, and open only the items, specs and documents that concern the work.** Read the closed
-  specs (under `# Closed` in `docs/specs/index.md`) and `docs/log.md` when you need to know why something was decided.
-  A trigger written in the backlog is only seen when someone opens it. After measuring an item's state, update it
-  right away.
+- **Before starting work or deploying, read `docs/work/index.md` and `docs/knowledge/index.md`, and open only the
+  specs, work items and documents that concern the work.** Read the closed records (under `# Closed` in
+  `docs/work/index.md`) and `docs/log.md` when you need to know why something was decided. A trigger written in a work
+  item is only seen when someone opens it. After measuring an item's state, update it right away.
 - **How each record is written is in the `rules.md` of its directory,** which Rotproof writes. The project's own rules
   for a directory go in another guide in the same directory.
-- **A finding is recorded, never left in a comment.** Write it as an item in `docs/backlog/`, or in the spec it belongs
-  to. `rotproof check` fails on `TODO`, `FIXME`, `XXX`, `HACK` and `NOTE` in comments in the code.
-- **A closed record stays where it is and opens with `# Resolution`.** Closing a spec or a backlog item sets
+- **A finding is recorded, never left in a comment.** Write it as a work item in `docs/work/`, or in the spec it
+  belongs to. `rotproof check` fails on `TODO`, `FIXME`, `XXX`, `HACK` and `NOTE` in comments in the code.
+- **A closed record stays where it is and opens with `# Resolution`.** Closing a spec or a work item sets
   `status: deprecated` and puts `# Resolution` first; nothing moves.
 - **When a task is done, add one entry to `docs/log.md`, under a `## YYYY-MM-DD` heading for the day, newest first.**
   The log is a flat list of entries under the dates (OKF 0.2, section 9): one list item per task, with its fields as
@@ -44,8 +43,8 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
     * **Changes**: What changed.
     * **Decisions**: Why, including the options that were rejected.
     * **Problems**: What went wrong, the cause, and the workaround. "None" if none.
-    * **Open items**: Pointers to backlog items (docs/backlog/<slug>.md). "None" if none. Write the open work itself
-      in the backlog item: the log is history.
+    * **Open items**: Pointers to work items (docs/work/<slug>.md). "None" if none. Write the open work itself in
+      the work item: the log is history.
     * **Lessons**: What to do differently next time, and where it was recorded if it became a rule.
     * **Knowledge**: Only when the task changed a document in docs/knowledge/: each one as
       knowledge/<slug>.md@<hash>. `rotproof check` fails while a document's current hash is in no entry, and prints

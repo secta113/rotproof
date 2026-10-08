@@ -1,5 +1,6 @@
 //! Keeps a project's structure: makes and checks its layers (as `.config/rotproof.toml` declares them) and the records
-//! an agent works from (backlog, specs and log in `docs/`, written in OKF 0.2), and writes their index files.
+//! an agent works from (specs, work items, knowledge and log in `docs/`, written in OKF 0.2), and writes their index
+//! files.
 
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -55,7 +56,7 @@ Prints every broken rule under the check that found it, and what was not checked
 a rule is broken, 2 when a file cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
-/// import which) and the records an agent works from (backlog, specs, knowledge and log in docs/).
+/// import which) and the records an agent works from (specs, work items, knowledge and log in docs/).
 #[derive(Parser)]
 #[command(name = "rotproof", version, about, after_help = START)]
 struct Cli {
@@ -154,10 +155,10 @@ enum Command {
     },
     /// Write every index.md in docs/ from the frontmatter
     ///
-    /// Rewrites docs/index.md and the index.md of docs/backlog/, docs/specs/ and docs/knowledge/, and the rules.md
-    /// Rotproof keeps there, from the frontmatter of the documents. Run it after a record changes; never edit an
-    /// index.md by hand. Lists the documents it left out and why, and the backlog items past their stale_after. Exits
-    /// 2 when the declaration or a document cannot be read.
+    /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, and the rules.md Rotproof keeps
+    /// there, from the frontmatter of the documents. Run it after a record changes; never edit an index.md by hand.
+    /// Lists the documents it left out and why, and the work items past their stale_after. Exits 2 when the
+    /// declaration or a document cannot be read.
     Index,
     /// Print the hash a knowledge document pins for each key of follows, as the code is now, writing nothing
     ///

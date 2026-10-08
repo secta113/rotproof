@@ -7,13 +7,13 @@
 //!   `.config/rotproof-approved.toml` passes and is printed on every run, and an approval that matches no forbidden
 //!   import fails (`approvals.rs`).
 //! - **No comment holds a marker**, one of the words in `markers::MARKERS` (`markers.rs`): work left to do belongs in
-//!   the backlog, where it is listed and closed.
+//!   a work item in `docs/work/`, where it is listed and closed.
 //! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
 //!   this version of Rotproof (`project.rs`).
-//! - **The backlog works as a backlog**: every document keeps the format, every link in `# Details` resolves, and every
-//!   backlog item the log points to exists.
+//! - **The records in `docs/work/` keep their format**: every document keeps the format of its type, every link in
+//!   a work item's `# Details` resolves, and every work item the log points to exists.
 //! - **Every record has one declared area**: the areas in `.config/rotproof.toml` are distinct headings, and the one
-//!   tag of every backlog item and spec is one of them.
+//!   tag of every work item, spec and knowledge document is one of them.
 //! - **An epic closes after its parts**: a part's `epic` names another spec, one level deep, and no closed epic has
 //!   an open part.
 //! - **`docs/` is one OKF bundle**: every document is a known type in the directory for its type, every file Rotproof
@@ -32,12 +32,12 @@ use crate::bundle::Bundle;
 use crate::links::broken;
 use crate::tree::{exactly, read_text};
 use domain::approvals::{shown, sort, stale};
-use domain::bundle::{DOCS, Docs, backlog, in_docs, is_document};
+use domain::bundle::{DOCS, Docs, in_docs, is_document};
 use domain::code::Parsers;
 use domain::layers::{DECLARATION, area_problems};
 use domain::project::GUIDE;
 use domain::records::{
-    dangling_backlog_refs, dangling_knowledge_refs, floor, knowledge_refs, log_problems, misplaced,
+    dangling_item_refs, dangling_knowledge_refs, floor, knowledge_refs, log_problems, misplaced,
     root_specs, unlogged, unread_paths,
 };
 use domain::tree::Tree;
@@ -185,7 +185,7 @@ fn records(
     add("the areas are distinct headings", area_problems(&areas));
     let bundle = Bundle::new(tree, areas);
 
-    // The floor: the directories and the root index exist, and the backlog rules are found as a document. If a move
+    // The floor: the directories and the root index exist, and the rules are found as a document. If a move
     // or a rename makes the scan come back empty, the checks below see nothing and pass. Each is found by its exact
     // name: `Rules.md` is found as `rules.md` on Windows, and missing on Linux and GitHub
     let missing: Vec<String> = floor()
@@ -197,13 +197,12 @@ fn records(
         return Ok(found);
     }
 
-    let docs = bundle.read_folder("backlog")?;
-    let parsed = backlog(&docs, &bundle.areas);
+    let work = bundle.read_work()?;
     add(
-        "every backlog document keeps the format",
-        pairs(&parsed.problems),
+        "every document in docs/work/ keeps the format",
+        pairs(&work.problems),
     );
-    let details: BTreeMap<String, String> = parsed
+    let details: BTreeMap<String, String> = work
         .items
         .iter()
         .map(|(name, (_, sections))| (name.clone(), sections["Details"].clone()))
@@ -222,13 +221,13 @@ fn records(
     });
     if let Ok(log_path) = log_path {
         let log = read_text(tree, &log_path)?;
-        let names = file_names(tree, &in_docs("backlog"))?;
-        let dangling = dangling_backlog_refs(&log, &names);
+        let names = file_names(tree, &in_docs("work"))?;
+        let dangling = dangling_item_refs(&log, &names);
         add(
-            "the log points only at real backlog items",
+            "the log points only at real work items",
             dangling
                 .into_iter()
-                .map(|name| format!("no such item: docs/backlog/{name}"))
+                .map(|name| format!("no such item: docs/work/{name}"))
                 .collect(),
         );
         add("the log keeps its structure", log_problems(&log));
@@ -272,15 +271,13 @@ fn records(
         "every document is a known type in its place",
         pairs(&out_of_place),
     );
-    let specs = bundle.read_specs()?;
-    add("every spec keeps the format", pairs(&specs.problems));
     add(
         "every knowledge document keeps the format",
         pairs(&bundle.read_knowledge()?.problems),
     );
     add(
         "an epic closes after its parts",
-        specs.closed_before_its_parts(),
+        work.closed_before_its_parts(),
     );
     let (files, _) = bundle.expected()?;
     let stale: Vec<String> = files
@@ -301,7 +298,7 @@ fn records(
         "no spec sits at the repository root",
         root_specs(&names)
             .into_iter()
-            .map(|name| format!("specs go in docs/specs/: {name}"))
+            .map(|name| format!("specs go in docs/work/: {name}"))
             .collect(),
     );
     Ok(found)
@@ -326,7 +323,7 @@ fn pairs(problems: &BTreeMap<String, String>) -> Vec<String> {
 /// Item -> why, for the Details sections with no link or with a link that does not resolve, in the repository's
 /// `tree`.
 ///
-/// Details sit in a backlog item (`docs/backlog/<slug>.md`), so relative links resolve from there and links starting
+/// Details sit in a work item (`docs/work/<slug>.md`), so relative links resolve from there and links starting
 /// with `/` from the bundle root (`docs/`).
 pub fn unresolved(
     details: &BTreeMap<String, String>,
@@ -334,7 +331,7 @@ pub fn unresolved(
     parsers: &dyn Parsers,
 ) -> BTreeMap<String, String> {
     let bundle_root = DOCS;
-    let here = in_docs("backlog");
+    let here = in_docs("work");
     let mut bad = BTreeMap::new();
     for (name, detail) in details {
         let found = links(detail);
@@ -420,7 +417,7 @@ mod tests {
     #[test]
     fn a_details_section_without_a_link_is_caught() {
         let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("docs/backlog")).unwrap();
+        fs::create_dir_all(root.path().join("docs/work")).unwrap();
         fs::write(root.path().join("docs/log.md"), "# Log\n").unwrap();
         let details = map(&[
             ("linked.md", "[log](/log.md)"),
@@ -443,9 +440,9 @@ mod tests {
     #[test]
     fn a_link_in_any_form_is_resolved() {
         let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("docs/backlog")).unwrap();
+        fs::create_dir_all(root.path().join("docs/work")).unwrap();
         fs::write(root.path().join("docs/log.md"), "# Log\n").unwrap();
-        fs::write(root.path().join("docs/backlog/a (1).md"), "# A\n").unwrap();
+        fs::write(root.path().join("docs/work/a (1).md"), "# A\n").unwrap();
         let good = "[log](/log.md)";
         let resolving = [
             "[log](/log.md \"the log\")",
@@ -494,9 +491,9 @@ mod tests {
         let docs = docs_with(&[
             "index.md",
             "log.md",
-            "backlog/index.md",
-            "backlog/item.md",
-            "specs/index.md",
+            "work/index.md",
+            "work/item.md",
+            "knowledge/index.md",
             "assets/diagram.png",
         ]);
         assert_eq!(
@@ -510,12 +507,15 @@ mod tests {
         let bad = [
             // Reserved names where Rotproof neither writes nor reads them
             "extra/index.md",
-            "specs/deeper/index.md",
-            // docs/done/ is no longer read: closed specs stay in docs/specs/
+            "work/deeper/index.md",
+            // docs/done/ is no longer read: closed records stay where they are
             "done/index.md",
-            "backlog/log.md",
+            // Nor docs/backlog/ and docs/specs/: their records are in docs/work/
+            "backlog/index.md",
+            "specs/index.md",
+            "work/log.md",
             // Markdown that is not named .md
-            "backlog/item.MD",
+            "work/item.MD",
             "notes.Md",
         ];
         let docs = docs_with(&bad);

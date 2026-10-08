@@ -52,7 +52,7 @@ impl Markers {
             &self.words[..]
         };
         format!(
-            "no comment holds {} (work left to do goes in docs/backlog/, a decision and its reason in the spec or the \
+            "no comment holds {} (work left to do goes in docs/work/, a decision and its reason in the spec or the \
              log entry of the change, how to read the code in a plain comment without the word)",
             either(words)
         )

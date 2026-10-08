@@ -51,10 +51,15 @@ pub const SETTINGS: [(&str, &str); 1] = [(
 "#,
 )];
 
-// A line that points at the records: the word spec, specs, backlog or knowledge standing alone in ASCII (so `spec に`,
-// `docs/specs/x.md` and `Backlog` count, and `specific` or `inspect` do not). Matched against the line in lower case
+// A line that points at the records: the word spec, specs, backlog or knowledge, or the words work item, standing
+// alone in ASCII (so `spec に`, `docs/specs/x.md`, `Backlog` and `work items` count, and `specific` or `inspect` do
+// not), or a path through `work/` (`docs/work/x.md`, but not `network/`). The word work alone does not count: it is in
+// too many lines that point at nothing. Matched against the line in lower case
 static RECORDS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:^|[^a-z0-9_])(?:specs?|backlog|knowledge)(?:[^a-z0-9_]|$)").unwrap()
+    Regex::new(
+        r"(?:^|[^a-z0-9_])(?:specs?|backlog|knowledge|work[ -]items?)(?:[^a-z0-9_]|$)|(?:^|[^a-z0-9_])work[/\\]",
+    )
+    .unwrap()
 });
 
 /// What in a report leaves something open, matched in any case. Words common in plain prose ("later") are left out:
@@ -117,7 +122,7 @@ pub fn send_back(found: &[&str]) -> String {
     let quoted: Vec<String> = found.iter().map(|phrase| format!("\"{phrase}\"")).collect();
     let text = format!(
         "Your last message says {} and nothing in docs/ changed. If it leaves a finding open, record it now: an \
-         item in docs/backlog/ (docs/backlog/rules.md), or the spec it belongs to. If it is already recorded, or is not \
+         item in docs/work/ (docs/work/rules.md), or the spec it belongs to. If it is already recorded, or is not \
          a finding, say where or why in one line, then stop.",
         quoted.join(", ")
     );
@@ -207,13 +212,23 @@ mod tests {
             "Backlog: the PATH is not checked",
             "- [x.md](docs/specs/x.md): 未確認",
             "閉じた [y.md](/backlog/y.md) は未着手のまま",
+            "閉じた [z.md](/work/z.md) は未着手のまま",
+            "- docs\\work\\z.md: 未確認",
+            "Work items: the PATH is not checked",
+            "the work-item says it is not checked",
         ] {
             assert_eq!(open_phrases(line), Vec::<&str>::new(), "{line}");
         }
         // Only that line: the next one is read
         assert_eq!(open_phrases("spec に書いた\nLinux は未確認"), ["未確認"]);
-        // A word that only contains spec is not a pointer
-        for line in ["the specific path is not checked", "inspect: not checked"] {
+        // A word that only contains spec, or work alone, is not a pointer
+        for line in [
+            "the specific path is not checked",
+            "inspect: not checked",
+            "the work is not checked",
+            "network/ is not checked",
+            "workitem is not checked",
+        ] {
             assert_eq!(open_phrases(line), ["not checked"], "{line}");
         }
     }

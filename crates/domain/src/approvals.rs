@@ -42,7 +42,7 @@ pub struct Kept {
     pub approved: Approved,
 }
 
-/// Who approved an entry and when, as `verified` in a backlog item.
+/// Who approved an entry and when, as `verified` in a work item.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Approved {

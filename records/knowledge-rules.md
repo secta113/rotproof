@@ -10,8 +10,8 @@ description: What goes in docs/knowledge/, how each document is written, and how
 
 How things are now, and why. A spec is a proposed change and becomes history once it closes; a knowledge document
 holds what the change left behind and stays current: an API, a data model, a glossary, or why something was decided,
-with its background, its cost and what would reverse it. Open problems go in `docs/backlog/`, proposed changes in
-`docs/specs/`, and what was done in `docs/log.md`. Start from [index.md](index.md).
+with its background, its cost and what would reverse it. Proposed changes and open problems go in `docs/work/`, as
+specs and work items, and what was done in `docs/log.md`. Start from [index.md](index.md).
 
 A shape that code can generate exactly (an OpenAPI document, a schema) stays generated. The knowledge document links
 to it and says what the code cannot: why it has this shape, and what changing it promises.

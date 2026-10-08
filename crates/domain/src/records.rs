@@ -16,20 +16,20 @@ use utils::markdown::{heading, visible};
 use utils::paths::{file_name, parent};
 
 /// Directory (relative to docs/, "" for the root) -> the document types allowed in it
-const TYPES: [(&str, &[&str]); 4] = [
+const TYPES: [(&str, &[&str]); 3] = [
     ("", &["Guide"]),
-    ("backlog", &["Backlog Item", "Guide"]),
-    ("specs", &["Spec", "Guide"]),
+    ("work", &["Spec", "Work Item", "Guide"]),
     ("knowledge", &["Knowledge", "Guide"]),
 ];
 
-// How the log points to a backlog item. Matched without `docs/`, so pointers written while the backlog was at the
-// repository root (`backlog/<slug>.md`) still match an item by its slug. A pointer written with Windows separators
-// (`docs\backlog\<slug>.md`) is a pointer too, and has to name an item that exists. So is a link that percent-encodes
-// the slug (`backlog/%E6%97%A5.md`). A path without `.md` is not taken for a pointer: in prose, `backlog/` is also
-// followed by words that name no file
-static BACKLOG_REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"backlog[/\\]([\w.%-]+\.md)").unwrap());
+// How the log points to a work item. Matched without `docs/`, so pointers written while the records were at the
+// repository root (`backlog/<slug>.md`) still match an item by its slug. Matched in `backlog/` too: the log is history
+// and never rewritten, and its entries written while the items were in `docs/backlog/` name them there. A pointer
+// written with Windows separators (`docs\work\<slug>.md`) is a pointer too, and has to name an item that exists. So is
+// a link that percent-encodes the slug (`work/%E6%97%A5.md`). A path without `.md` is not taken for a pointer: in
+// prose, `work/` is also followed by words that name no file
+static ITEM_REF: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:^|[^\w])(?:work|backlog)[/\\]([\w.%-]+\.md)").unwrap());
 // The `**Knowledge**` field of a log entry: its indentation and what follows the label
 static KNOWLEDGE_FIELD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)[*+-][ \t]+\*\*Knowledge\*\*:(.*)$").unwrap());
@@ -111,9 +111,9 @@ pub fn unlogged(documents: &BTreeMap<String, String>, refs: &[(String, String)])
         .collect()
 }
 
-/// The `docs/backlog/<slug>.md` the log points to that are not among `names` (the file names in `docs/backlog/`).
-pub fn dangling_backlog_refs(log: &str, names: &[String]) -> Vec<String> {
-    let mut dangling: Vec<String> = BACKLOG_REF
+/// The `docs/work/<slug>.md` the log points to that are not among `names` (the file names in `docs/work/`).
+pub fn dangling_item_refs(log: &str, names: &[String]) -> Vec<String> {
+    let mut dangling: Vec<String> = ITEM_REF
         .captures_iter(log)
         .map(|caps| {
             percent_decode_str(&caps[1])
@@ -259,8 +259,7 @@ pub fn floor() -> Vec<String> {
         .chain(
             [
                 "docs/index.md",
-                "docs/backlog/rules.md",
-                "docs/specs/rules.md",
+                "docs/work/rules.md",
                 "docs/knowledge/rules.md",
             ]
             .map(String::from),
@@ -394,15 +393,22 @@ mod tests {
 
     #[test]
     fn a_dangling_log_pointer_is_caught() {
-        let log = "## 2026-10-01\n\n### Something\n- **Open items**: docs/backlog/rules.md, \
-                   docs/backlog/no-such-item.md, backlog/rules.md, docs\\backlog\\rules.md, \
-                   docs\\backlog\\written-on-windows.md, [日](/backlog/%E6%97%A5.md), \
-                   [月](/backlog/%E6%9C%88.md)\n";
+        let log = "## 2026-10-01\n\n### Something\n- **Open items**: docs/work/rules.md, \
+                   docs/work/no-such-item.md, work/rules.md, docs\\work\\rules.md, \
+                   docs\\work\\written-on-windows.md, [日](/work/%E6%97%A5.md), \
+                   [月](/work/%E6%9C%88.md), docs/backlog/rules.md, docs/backlog/gone-from-backlog.md, \
+                   network/not-a-pointer.md\n";
         let names = ["rules.md", "index.md", "日.md"].map(String::from).to_vec();
-        // A link to a slug outside ASCII is percent-encoded, and points at the item all the same
+        // A link to a slug outside ASCII is percent-encoded, and points at the item all the same. A pointer the log
+        // wrote while the items were in docs/backlog/ names an item in docs/work/ by its slug
         assert_eq!(
-            dangling_backlog_refs(log, &names),
-            ["no-such-item.md", "written-on-windows.md", "月.md"]
+            dangling_item_refs(log, &names),
+            [
+                "gone-from-backlog.md",
+                "no-such-item.md",
+                "written-on-windows.md",
+                "月.md"
+            ]
         );
     }
 
@@ -489,8 +495,9 @@ mod tests {
     #[test]
     fn a_known_type_in_its_place_passes() {
         let docs = map(&[
-            ("specs/good.md", SPEC),
-            ("backlog/rules.md", "---\ntype: Guide\n---\n"),
+            ("work/good.md", SPEC),
+            ("work/item.md", "---\ntype: Work Item\n---\n"),
+            ("work/rules.md", "---\ntype: Guide\n---\n"),
             ("guide.md", "---\ntype: Guide\n---\n"),
         ]);
         assert_eq!(misplaced(&docs), BTreeMap::new());
@@ -498,14 +505,18 @@ mod tests {
 
     #[test]
     fn a_misplaced_document_is_caught() {
-        let item = "---\ntype: Backlog Item\n---\n";
+        let item = "---\ntype: Work Item\n---\n";
         let bad = map(&[
-            ("specs/item.md", item),
+            ("knowledge/item.md", item),
             ("item.md", item),
             ("other/x.md", SPEC),
-            ("backlog/plain.md", "# Just markdown\n"),
-            ("backlog/no-type.md", "---\ntitle: x\n---\n"),
-            ("specs/deeper/x.md", SPEC),
+            // The directories before docs/work/ hold nothing any more
+            ("backlog/old.md", "---\ntype: Backlog Item\n---\n"),
+            ("specs/old.md", SPEC),
+            ("work/old-type.md", "---\ntype: Backlog Item\n---\n"),
+            ("work/plain.md", "# Just markdown\n"),
+            ("work/no-type.md", "---\ntitle: x\n---\n"),
+            ("work/deeper/x.md", SPEC),
         ]);
         let found = misplaced(&bad);
         assert_eq!(
@@ -514,13 +525,14 @@ mod tests {
         );
         // The type is said as written, and a missing one in words
         assert_eq!(
-            found["specs/item.md"],
-            "type \"Backlog Item\" does not belong in docs/specs (Spec, Guide)"
+            found["knowledge/item.md"],
+            "type \"Work Item\" does not belong in docs/knowledge (Knowledge, Guide)"
         );
         assert_eq!(
-            found["backlog/no-type.md"],
-            "no type does not belong in docs/backlog (Backlog Item, Guide)"
+            found["work/no-type.md"],
+            "no type does not belong in docs/work (Spec, Work Item, Guide)"
         );
+        assert_eq!(found["specs/old.md"], "no document belongs in docs/specs/");
     }
 
     #[test]
@@ -528,11 +540,12 @@ mod tests {
         let paths: Vec<String> = [
             "index.md",
             "log.md",
-            "backlog/index.md",
-            "backlog/a.md",
+            "work/index.md",
+            "work/a.md",
             "extra/index.md",
-            "backlog/log.md",
-            "backlog/b.MD",
+            "backlog/index.md",
+            "work/log.md",
+            "work/b.MD",
             "notes.txt",
         ]
         .map(String::from)
@@ -540,7 +553,12 @@ mod tests {
         let found = unread_paths(&paths);
         assert_eq!(
             found.keys().collect::<Vec<_>>(),
-            ["backlog/b.MD", "backlog/log.md", "extra/index.md"]
+            [
+                "backlog/index.md",
+                "extra/index.md",
+                "work/b.MD",
+                "work/log.md"
+            ]
         );
     }
 
@@ -549,16 +567,15 @@ mod tests {
         let floor = floor();
         for path in [
             "docs/",
-            "docs/backlog",
-            "docs/specs",
+            "docs/work",
             "docs/knowledge",
             "docs/index.md",
-            "docs/backlog/rules.md",
-            "docs/specs/rules.md",
+            "docs/work/rules.md",
             "docs/knowledge/rules.md",
         ] {
             assert!(floor.contains(&path.to_string()), "{path}");
         }
+        assert_eq!(floor.len(), 6, "{floor:?}");
     }
 
     #[test]
