@@ -8,10 +8,16 @@
 //!   `rotproof create` does after an upgrade without making a layer, and sets `files` to the running version. What an
 //!   update cannot do without a person it says, and then `files` stays where it was, so `rotproof check` keeps
 //!   failing until it is done or declined. It never changes the declaration's other values.
+//! - **Crossing 0.3.0,** it first moves the records from `docs/backlog/` and `docs/specs/` into `docs/work/`
+//!   (`migrate.rs` in `domain`), which cannot be declined: Rotproof from 0.3.0 reads no other place.
+
+use std::collections::BTreeMap;
 
 use crate::create::{Made, refresh};
 use crate::tree::{exactly, read_text};
+use domain::bundle::DOCS;
 use domain::layers::{DECLARATION, declaration_text, known_stacks};
+use domain::migrate;
 use domain::tree::{Tree, Writer};
 use domain::upgrade::{FIRST, Update, fields, pending, with_files};
 
@@ -30,6 +36,8 @@ pub struct Upgraded {
     pub from: String,
     /// Each update applied, with the file it changed
     pub applied: Vec<(&'static str, &'static str)>,
+    /// How many records moved into `docs/work/`
+    pub moved: usize,
     /// What each update that could not be applied leaves to a person
     pub by_hand: Vec<String>,
     /// What `rotproof create` would have done after the upgrade, without a layer
@@ -92,6 +100,10 @@ fn upgrade(
         from: from.clone(),
         ..Upgraded::default()
     };
+    // Before the refresh, which writes docs/work/ and reads the records there for the areas a declaration lacks
+    if migrate::due(&from, running) {
+        move_records(tree, out, &mut upgraded)?;
+    }
     for update in pending(&from, running, &declared.declined)? {
         apply(tree, out, update, &mut upgraded)?;
     }
@@ -108,6 +120,45 @@ fn upgrade(
         upgraded.files_set = true;
     }
     Ok(upgraded)
+}
+
+/// Move the records of a project made before 0.3.0 into `docs/work/` (`migrate.rs` in `domain`): every file under
+/// `docs/` read, the move planned whole, then written. A move that cannot be planned changes nothing.
+fn move_records(tree: &dyn Tree, out: &dyn Writer, upgraded: &mut Upgraded) -> Result<(), String> {
+    if tree.found(DOCS) != Some(true) {
+        return Ok(());
+    }
+    let mut files = BTreeMap::new();
+    let mut dirs = vec![DOCS.to_string()];
+    while let Some(dir) = dirs.pop() {
+        for (name, is_dir) in tree.entries(&dir).map_err(|e| format!("{dir}: {e}"))? {
+            let path = format!("{dir}/{name}");
+            if is_dir {
+                dirs.push(path);
+            } else {
+                // Only markdown is read: any other file is placed by name, or stops the move
+                let text = if name.ends_with(".md") {
+                    read_text(tree, &path).map_err(|e| format!("{path}: {e}"))?
+                } else {
+                    String::new()
+                };
+                files.insert(path, text);
+            }
+        }
+    }
+    let plan = migrate::plan(&files)?;
+    for (path, text) in &plan.writes {
+        out.write(path, text).map_err(|e| format!("{path}: {e}"))?;
+    }
+    for path in &plan.removes {
+        out.remove(path).map_err(|e| format!("{path}: {e}"))?;
+    }
+    for dir in &plan.dirs {
+        out.remove_dir(dir).map_err(|e| format!("{dir}: {e}"))?;
+    }
+    upgraded.moved = plan.moved;
+    upgraded.by_hand.extend(plan.by_hand);
+    Ok(())
 }
 
 /// Apply one update to its file, or say what it leaves to a person.
@@ -227,6 +278,123 @@ mod tests {
             .map(|p| tree.text(p))
             .collect();
         assert_eq!(before, after);
+    }
+
+    /// A project of records as 0.2.0 laid it out: specs in docs/specs/, backlog items in docs/backlog/
+    fn made_by_0_2() -> Fake {
+        let tree = Fake::default();
+        assert!(matches!(
+            init(&tree, &tree, Some("none"), "x", "0.2.0"),
+            Ok(Initialized::Declared(_))
+        ));
+        let declaration = tree
+            .text(DECLARATION)
+            .unwrap()
+            .replace("areas = []", "areas = [\"a\"]");
+        tree.write(DECLARATION, &declaration).unwrap();
+        let item = "---\ntype: Backlog Item\ntitle: X\ndescription: D.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\
+                    verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\ndeadline_kind: until\ndeadline: until \
+                    0.3.0\n---\n\n# Trigger\n\nT.\n\n# State\n\nS.\n\n# Details\n\n[spec](/specs/design.md)\n";
+        for (path, text) in [
+            (
+                "docs/log.md",
+                "# Log\n\n## 2026-10-01\n\n* [x](/backlog/item.md)\n",
+            ),
+            ("docs/index.md", "old"),
+            ("docs/backlog/item.md", item),
+            ("docs/backlog/index.md", "old"),
+            ("docs/backlog/rules.md", "old"),
+            (
+                "docs/specs/design.md",
+                "---\ntype: Spec\ntitle: D\ndescription: D.\ntags: [a]\nstatus: stable\n---\n\n# Goals\n\nG.\n",
+            ),
+            ("docs/specs/rules.md", "old"),
+            ("docs/knowledge/rules.md", "old"),
+        ] {
+            tree.write(path, text).unwrap();
+        }
+        tree
+    }
+
+    #[test]
+    fn the_upgrade_to_0_3_moves_the_records_once() {
+        let tree = made_by_0_2();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.3.0") else {
+            panic!("upgraded");
+        };
+        assert_eq!(upgraded.moved, 2);
+        for gone in [
+            "docs/backlog",
+            "docs/specs",
+            "docs/backlog/item.md",
+            "docs/specs/rules.md",
+        ] {
+            assert_eq!(tree.found(gone), None, "{gone} is still there");
+        }
+        let item = tree.text("docs/work/item.md").unwrap();
+        assert!(
+            item.contains("type: Work Item\n") && item.contains("[spec](/work/design.md)"),
+            "{item}"
+        );
+        assert!(tree.text("docs/work/design.md").is_some());
+        assert_eq!(
+            tree.text("docs/log.md").unwrap(),
+            "# Log\n\n## 2026-10-01\n\n* [x](/work/item.md)\n"
+        );
+        // The refresh wrote docs/work/ after the move: its rules, its index, and a milestone for a person to write
+        for path in [
+            "docs/work/rules.md",
+            "docs/work/index.md",
+            "docs/work/next-milestone.md",
+        ] {
+            assert!(tree.text(path).is_some(), "{path}");
+        }
+        // The deadline of the open item and the draft it became are left to a person, so files stays where it was
+        assert_eq!(upgraded.by_hand.len(), 2, "{:?}", upgraded.by_hand);
+        assert!(!upgraded.files_set);
+        assert_eq!(
+            read_fields(&tree.text(DECLARATION).unwrap())
+                .unwrap()
+                .files
+                .as_deref(),
+            Some("0.2.0")
+        );
+
+        // Run again: nothing more moves, and files reaches the running version. What is left to a person, the check
+        // names from then on, record by record
+        let Ok(Initialized::Upgraded(again)) = init(&tree, &tree, None, "x", "0.3.0") else {
+            panic!("upgraded");
+        };
+        assert_eq!(again.moved, 0);
+        assert!(
+            again.by_hand.is_empty() && again.files_set,
+            "{:?}",
+            again.by_hand
+        );
+    }
+
+    #[test]
+    fn the_move_waits_for_the_version_and_stops_whole() {
+        // Not crossing 0.3.0: nothing moves
+        let tree = made_by_0_2();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.2.0") else {
+            panic!("upgraded");
+        };
+        assert_eq!(upgraded.moved, 0);
+        assert!(tree.text("docs/backlog/item.md").is_some());
+
+        // A name in both directories: nothing changes at all
+        let tree = made_by_0_2();
+        tree.write("docs/specs/item.md", "---\ntype: Spec\n---\n")
+            .unwrap();
+        let before = tree.text("docs/backlog/item.md");
+        let why = init(&tree, &tree, None, "x", "0.3.0").unwrap_err();
+        assert!(
+            why.contains("docs/backlog/item.md and docs/specs/item.md have the same name"),
+            "{why}"
+        );
+        assert_eq!(tree.text("docs/backlog/item.md"), before);
+        assert_eq!(tree.found("docs/work"), None);
     }
 
     #[test]

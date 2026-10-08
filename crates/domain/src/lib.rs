@@ -14,6 +14,7 @@ pub mod hook;
 pub mod layers;
 pub mod links;
 pub mod markers;
+pub mod migrate;
 pub mod project;
 pub mod records;
 pub mod schema;

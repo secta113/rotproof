@@ -258,6 +258,12 @@ fn init(root: &Path, stack: Option<&str>) -> Result<(), String> {
         }
         Initialized::Upgraded(upgraded) => upgraded,
     };
+    if upgraded.moved > 0 {
+        println!(
+            "moved {} records from docs/backlog/ and docs/specs/ to docs/work/, and the links to them",
+            upgraded.moved
+        );
+    }
     for (name, path) in &upgraded.applied {
         println!("updated {path}: {name}");
     }
@@ -267,8 +273,8 @@ fn init(root: &Path, stack: Option<&str>) -> Result<(), String> {
             println!("needs a person: {why}");
         }
         return Err(format!(
-            "the project's files stay up to {} in {DECLARATION} until these are done or declined: then run \
-             `rotproof init` again",
+            "the project's files stay up to {} in {DECLARATION} until these are done, or declined where the line \
+             says how: then run `rotproof init` again",
             upgraded.from
         ));
     }

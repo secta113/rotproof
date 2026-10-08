@@ -234,9 +234,9 @@ fn each_broken_rule_fails_under_its_check() {
             "docs/work/rules.md",
             "---\ntype: Guide\ntitle: Work rules\ndescription: Our own.\n---\n".into(),
         ),
-        // A record left where the records were before docs/work/
+        // A record left where the records were before docs/work/: run init, which moves it
         (
-            "every document is a known type in its place",
+            "the records are in docs/work/",
             "docs/backlog/x.md",
             item("[log](/log.md)"),
         ),

@@ -96,6 +96,14 @@ impl Writer for Disk {
     fn make_dir(&self, dir: &str) -> io::Result<()> {
         fs::create_dir_all(self.root.join(dir))
     }
+
+    fn remove(&self, path: &str) -> io::Result<()> {
+        fs::remove_file(self.root.join(path))
+    }
+
+    fn remove_dir(&self, dir: &str) -> io::Result<()> {
+        fs::remove_dir(self.root.join(dir))
+    }
 }
 
 impl Disk {

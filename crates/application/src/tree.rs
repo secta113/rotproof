@@ -261,6 +261,33 @@ pub mod fake {
             }
             Ok(())
         }
+
+        fn remove(&self, path: &str) -> io::Result<()> {
+            self.files
+                .borrow_mut()
+                .remove(path)
+                .map(|_| ())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.to_string()))
+        }
+
+        fn remove_dir(&self, dir: &str) -> io::Result<()> {
+            let inside = format!("{dir}/");
+            let holds = self
+                .files
+                .borrow()
+                .keys()
+                .any(|path| path.starts_with(&inside))
+                || self
+                    .dirs
+                    .borrow()
+                    .iter()
+                    .any(|path| path.starts_with(&inside));
+            if holds {
+                return Err(io::Error::other(format!("{dir} is not empty")));
+            }
+            self.dirs.borrow_mut().remove(dir);
+            Ok(())
+        }
     }
 }
 

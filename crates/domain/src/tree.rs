@@ -34,6 +34,10 @@ pub trait Writer {
     fn write(&self, path: &str, text: &str) -> io::Result<()>;
     /// Make the directory `dir`, and the ones it sits in.
     fn make_dir(&self, dir: &str) -> io::Result<()>;
+    /// Remove the file at `path`. Only `rotproof init` removes, when it moves a project's records.
+    fn remove(&self, path: &str) -> io::Result<()>;
+    /// Remove the directory `dir`, which is empty: an error when it is not, so nothing is removed unseen.
+    fn remove_dir(&self, dir: &str) -> io::Result<()>;
 }
 
 /// The text of a file as Rotproof reads it: every line ending as `\n`, and no byte order mark.

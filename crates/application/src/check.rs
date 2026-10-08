@@ -41,6 +41,7 @@ use domain::approvals::{shown, sort, stale};
 use domain::bundle::{DOCS, Docs, in_docs, is_document};
 use domain::code::Parsers;
 use domain::layers::{DECLARATION, area_problems};
+use domain::migrate::{OLD, WORK};
 use domain::project::GUIDE;
 use domain::records::{
     dangling_item_refs, dangling_knowledge_refs, floor, knowledge_refs, log_problems, misplaced,
@@ -190,6 +191,27 @@ fn records(
     };
     add("the areas are distinct headings", area_problems(&areas));
     let bundle = Bundle::new(tree, areas);
+
+    // The records of a project made before 0.3.0: one line that says how to move them, instead of one per record that
+    // has no place, and nothing else, as no check below reads the old places
+    let old: Vec<&str> = OLD
+        .into_iter()
+        .filter(|dir| tree.found(dir) == Some(true))
+        .collect();
+    if !old.is_empty() {
+        add(
+            "the records are in docs/work/",
+            vec![format!(
+                "{} hold the records of a project made before {}: run `rotproof init`, which moves them to {WORK}/",
+                old.iter()
+                    .map(|dir| format!("{dir}/"))
+                    .collect::<Vec<_>>()
+                    .join(" and "),
+                domain::migrate::VERSION
+            )],
+        );
+        return Ok(found);
+    }
 
     // The floor: the directories and the root index exist, and the rules are found as a document. If a move
     // or a rename makes the scan come back empty, the checks below see nothing and pass. Each is found by its exact

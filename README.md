@@ -148,6 +148,17 @@ that has a declaration:
 |---|---|---|---|
 | `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
 
+**Crossing 0.3.0, `rotproof init` first moves the records.** Before 0.3.0 the specs were in `docs/specs/` and the
+backlog items in `docs/backlog/`; from 0.3.0 both are in `docs/work/`, and nothing reads the old places, so the move
+cannot be declined. It is what a machine can do without reading the records: each record to `docs/work/` under its own
+name; every link in `docs/` that reached one pointed at its new place (in the log too, whose words stay as they were
+written); `type: Backlog Item` as `Work Item` and `epic` as `parent`; an open item with no parent as a draft, as a
+stable item is now one sorted into a spec; and the deadline of a closed item dropped, as it binds nothing. The rest it
+says, and `rotproof check` names it record by record: how each closed record closed (`closed_as`), and the deadline of
+each open item, which becomes a milestone named in `until`. The move is planned whole first: a name in both old
+directories, or a file it would not know where to put, stops it with nothing changed, and is renamed or moved by hand.
+Until it has run, `rotproof check` says only that the records are in the old places.
+
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
 `layers/table.toml`), and gives the rules of the records, starting with reading the index files before work. It names
