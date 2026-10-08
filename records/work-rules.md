@@ -39,6 +39,7 @@ one record of any of them. The frontmatter holds the fields used for filtering. 
 | `status` | `draft` (not agreed yet), `stable` (agreed) or `deprecated` (closed) |
 | `closed_as` | Only when closed, and then required: `done` (implemented) or `dropped`. See "Closed records" |
 | `parent` | Optional. The slug of the epic this spec is a part of. See "Parents" |
+| `after`, `until` | Optional. Lists of slugs: the records that come before this one, and after it. See "Arrows" |
 
 The body is free, except that a closed spec opens with `# Resolution`: its first heading.
 
@@ -64,6 +65,7 @@ The body is free, except that a closed spec opens with `# Resolution`: its first
 | `status` | `draft` (open, nobody has sorted it yet), `stable` (open, sorted into a spec) or `deprecated` (closed) |
 | `closed_as` | Only when closed, and then required: `done` or `dropped`. See "Closed records" |
 | `parent` | The slug of the spec it is a part of. Required for `stable`; a draft may have none. See "Parents" |
+| `after`, `until` | Optional. Lists of slugs: the records that come before this one, and after it. See "Arrows" |
 | `filed` | Date the item was filed |
 | `verified` | Who measured the state and when: `{by, at}`, or a list of them. `at` is a datetime with a time zone. `by` is `human:<id>` for a person, `<producer>/<version>` for an agent (example: `claude-code/claude-opus-5-5`), or `process:<id>` |
 | `deadline_kind`, `deadline` | `until` with an event ("... until X"), or `none` with the reason |
@@ -126,6 +128,7 @@ a check that fails on a date alone turns CI red without any change to the code. 
 | `status` | `draft` (proposed), `stable` (placed) or `deprecated` (closed) |
 | `closed_as` | Only when closed, and then required: `done` (it came) or `dropped` (it was withdrawn). See "Closed records" |
 | `date` | Optional. The day it is planned or announced for, `YYYY-MM-DD` |
+| `after`, `until` | Optional. Lists of slugs: the records that come before this one, and after it. See "Arrows" |
 
 Body headings:
 
@@ -168,6 +171,25 @@ more than one area (see "Areas"). A spec that has grown in one area is split the
 - **One level only.** An epic has no `parent` of its own: the tree is an epic, its parts, and their work items.
 - **A draft part that turns out to be work of its own removes its `parent`.**
 
+# Arrows
+
+An arrow says that one record comes before another: "A, then B". It is written once, on either side: `after: [a]` on
+B, or `until: [b]` on A. Write it where it is known: the record that waits writes `after`, and a record with a
+deadline writes `until`, often to a milestone (`until: [release-0-3-0]`). Both fields are lists of slugs, even of one,
+and may name a spec, a work item or a milestone.
+
+- **The later record closes after the earlier one.** B is not closed as done while A is open.
+- **Nothing waits for, or is bounded by, a dropped record.** When A is dropped, B, still open, would wait for what
+  never comes: remove the arrow or point it elsewhere. When B is dropped while A is open, A keeps a deadline that is
+  gone: point the arrow at another record, or remove it.
+- **An arrow is written once.** The same arrow in A's `until` and in B's `after` fails: keep one.
+- **No cycle.** The arrows and the parents make one graph, as a parent closes after its children, and no record waits
+  on itself through it. A parent that writes `until` to its own child is such a cycle.
+- **A name that is not a record fails:** nothing, a guide, the record itself, or a record left out of the index.
+
+The parents are not arrows for the rest: a record does not wait for its parent, and a parent is not ready because its
+children are done.
+
 # Closed records
 
 **A closed record stays where it is.** Set `status: deprecated`, say how it closed in `closed_as`, and write
@@ -195,7 +217,9 @@ they are what the work of every area waits for; then the open records by area; t
 same area as its parent, and open or closed as its parent is, is listed under it, indented; any other record with a
 parent is listed on its own with `Parent: [<title>](...)` after its line. Under a heading or a parent, the specs come
 first, then the work items. An item nobody has sorted yet says `Status: draft.`, and a closed record says how it
-closed, `Done:` or `Dropped:`, before the first sentence of its resolution.
+closed, `Done:` or `Dropped:`, before the first sentence of its resolution. An open record with arrows says
+`Ready.` when every record before it is done, names the records before it still open after `Waits for:`, and those
+after it still open after `Until:`; a milestone counts the records it waits for instead of naming them.
 
 After adding or changing a record, run `rotproof index`. `rotproof check` fails when the index differs from what
 `rotproof index` writes.
@@ -204,7 +228,7 @@ After adding or changing a record, run `rotproof index`. `rotproof check` fails 
 
 - `parent` is an extension field, which OKF allows. OKF expresses relations between documents with links and the
   prose around them; `parent` is a field so that Rotproof can check it. The index writes it as a link.
-- `closed_as` and a milestone's `date` are extension fields. OKF's `status: deprecated` says that a document is
+- `closed_as`, `after`, `until` and a milestone's `date` are extension fields. OKF's `status: deprecated` says that a document is
   closed; `closed_as` says how.
 - A field that looks like a misspelling of a known field (`stale_afer`, `staleAfter`, `Title`) fails the check, so a
   misspelled optional field is not silently dropped. So does a field Rotproof no longer reads (`epic`), with what to

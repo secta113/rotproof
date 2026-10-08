@@ -5,6 +5,7 @@
 //! what it decides. Imports `utils` only.
 
 pub mod approvals;
+pub mod arrows;
 pub mod bundle;
 pub mod code;
 pub mod direction;

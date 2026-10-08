@@ -170,6 +170,7 @@ pub struct Item {
     /// The slug of the spec it is a part of: required once it is sorted (`Stable`). Whether it names one is checked
     /// against the other records, which the document alone does not know (`bundle.rs`)
     pub parent: Option<String>,
+    pub arrows: Arrows,
     pub filed: NaiveDate,
     /// Never empty. As in OKF, written as one mapping or a list of them
     pub verified: Vec<Stamp>,
@@ -217,6 +218,7 @@ pub struct Spec {
     /// The slug of the epic this spec is a part of. Whether it names one is checked against the other records, which
     /// the document alone does not know (`bundle.rs`)
     pub parent: Option<String>,
+    pub arrows: Arrows,
 }
 
 /// A document of how things are now, or why: it never closes while it holds, and is edited in place.
@@ -246,6 +248,17 @@ pub struct Milestone {
     pub closed_as: Option<ClosedAs>,
     /// The day it is planned or announced for. Passing it fails nothing: the index and `rotproof index` show it
     pub date: Option<NaiveDate>,
+    pub arrows: Arrows,
+}
+
+/// The arrows a record of `docs/work/` writes, each "this one before that one". The records they name, and whether
+/// they keep their order, are checked against the other records, which the document alone does not know (`bundle.rs`)
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Arrows {
+    /// The records that come before this one: it starts once they are done
+    pub after: Vec<String>,
+    /// The records that come after this one: it is done by the time they close
+    pub until: Vec<String>,
 }
 
 /// The body heading every milestone needs: what to look at to know it has happened
@@ -427,6 +440,7 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
     let tag = fields.required("tags", one_tag);
     let closed_as = closed_as(fields, status);
     let parent = fields.optional("parent", slug);
+    let arrows = arrows(fields);
     fields.optional("verified", stamps);
     fields.optional("stale_after", time);
     okf_optional(fields);
@@ -437,6 +451,7 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
         status: status?,
         closed_as: closed_as?,
         parent: parent?,
+        arrows: arrows?,
     })
 }
 
@@ -483,6 +498,7 @@ fn milestone_fields(fields: &mut Fields) -> Option<Milestone> {
     );
     let closed_as = closed_as(fields, status);
     let date = fields.optional("date", date);
+    let arrows = arrows(fields);
     fields.optional("verified", stamps);
     fields.optional("stale_after", time);
     okf_optional(fields);
@@ -493,6 +509,7 @@ fn milestone_fields(fields: &mut Fields) -> Option<Milestone> {
         status: status?,
         closed_as: closed_as?,
         date: date?,
+        arrows: arrows?,
     })
 }
 
@@ -555,6 +572,7 @@ fn item(fields: &mut Fields) -> Option<Item> {
     );
     let closed_as = closed_as(fields, status);
     let parent = fields.optional("parent", slug);
+    let arrows = arrows(fields);
     let filed = fields.required("filed", date);
     let verified = fields.required("verified", stamps);
     let deadline_kind = fields.required("deadline_kind", deadline_kind);
@@ -568,6 +586,7 @@ fn item(fields: &mut Fields) -> Option<Item> {
         status: status?,
         closed_as: closed_as?,
         parent: parent?,
+        arrows: arrows?,
         filed: filed?,
         verified: verified?,
         deadline_kind: deadline_kind?,
@@ -976,6 +995,37 @@ fn slug(value: &Yaml) -> Result<String, String> {
     }
 }
 
+/// The `after` and `until` of a record. Each is a list of slugs, each named once.
+fn arrows(fields: &mut Fields) -> Read<Arrows> {
+    let after = fields.optional("after", slugs);
+    let until = fields.optional("until", slugs);
+    Some(Arrows {
+        after: after?.unwrap_or_default(),
+        until: until?.unwrap_or_default(),
+    })
+}
+
+/// A list of slugs, each once. A list, even of one: a field that is sometimes a list and sometimes not is read two ways
+/// by every tool that reads it.
+fn slugs(value: &Yaml) -> Result<Vec<String>, String> {
+    let Yaml::Array(list) = value else {
+        return Err(format!(
+            "not a list: write the slugs in [], even one ([{}])",
+            text(value).unwrap_or_default()
+        ));
+    };
+    let found: Vec<String> = list.iter().map(slug).collect::<Result<_, _>>()?;
+    if found.is_empty() {
+        return Err("empty: leave the field out when there is no arrow".into());
+    }
+    for (i, slug) in found.iter().enumerate() {
+        if found[..i].contains(slug) {
+            return Err(format!("{slug} is named twice"));
+        }
+    }
+    Ok(found)
+}
+
 /// Exactly one tag: the area the index groups a work item, a spec or a knowledge document by. Whether it is
 /// declared is checked against the declaration, which the document alone does not know (`bundle.rs`).
 fn one_tag(value: &Yaml) -> Result<String, String> {
@@ -1134,6 +1184,46 @@ The release workflow of tag v0.3.0 passes every job.
             .err()
             .unwrap_or_default();
         assert!(why.contains("date is a field of a milestone"), "{why:?}");
+    }
+
+    #[test]
+    fn an_arrow_is_a_list_of_slugs() {
+        let Ok(WorkDoc::Item(item, _)) = work_doc(&good(
+            "parent: big-work",
+            "parent: big-work\nafter: [a, b]\nuntil: [release]",
+        )) else {
+            panic!("a list of slugs did not pass");
+        };
+        assert_eq!(
+            item.arrows,
+            Arrows {
+                after: vec!["a".into(), "b".into()],
+                until: vec!["release".into()]
+            }
+        );
+        let bad = [
+            (
+                "one slug, not in a list",
+                "until: release",
+                "until: not a list: write the slugs in [], even one ([release])",
+            ),
+            (
+                "an empty list",
+                "after: []",
+                "after: empty: leave the field out",
+            ),
+            ("a slug twice", "after: [a, a]", "after: a is named twice"),
+            (
+                "a path",
+                "until: [/work/release.md]",
+                "is a path; write the slug",
+            ),
+        ];
+        for (name, field, said) in bad {
+            let text = good("parent: big-work", &format!("parent: big-work\n{field}"));
+            let why = work_doc(&text).err().unwrap_or_default();
+            assert!(why.contains(said), "{name}: {why:?}");
+        }
     }
 
     #[test]
@@ -1325,6 +1415,8 @@ Text.
             [
                 ("closed_as", vec!["work item", "spec", "milestone"]),
                 ("parent", vec!["work item", "spec"]),
+                ("after", vec!["work item", "spec", "milestone"]),
+                ("until", vec!["work item", "spec", "milestone"]),
                 ("filed", vec!["work item"]),
                 ("deadline_kind", vec!["work item"]),
                 ("deadline", vec!["work item"]),

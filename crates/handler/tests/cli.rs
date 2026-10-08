@@ -158,7 +158,18 @@ fn each_broken_rule_fails_under_its_check() {
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 20] = [
+    let cases: [(&str, &str, String); 21] = [
+        // Done before the milestone it comes after
+        (
+            "the arrows keep their order",
+            "docs/work/x.md",
+            item("[log](/log.md)")
+                .replace(
+                    "status: draft",
+                    "status: deprecated\nclosed_as: done\nafter: [next-milestone]",
+                )
+                .replace("# Trigger", "# Resolution\n\nDone.\n\n# Trigger"),
+        ),
         ("the bundle is seen", "docs/work/rules.md", String::new()),
         (
             "every document in docs/work/ keeps the format",

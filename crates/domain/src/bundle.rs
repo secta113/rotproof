@@ -268,6 +268,20 @@ pub fn work(docs: &Docs, areas: &[String]) -> Work {
         out.problems
             .insert(in_work(&name), format!("parent: {why}"));
     }
+    // The arrows, until no record is left out: a record whose arrow names one left out here is then told to fix that
+    // one
+    loop {
+        let left = crate::arrows::unresolved(&out);
+        if left.is_empty() {
+            break;
+        }
+        for (name, why) in left {
+            out.items.remove(&name);
+            out.specs.remove(&name);
+            out.milestones.remove(&name);
+            out.problems.insert(in_work(&name), why);
+        }
+    }
     out
 }
 
@@ -403,6 +417,36 @@ struct Entry<'a> {
 /// or `Dropped:`) and the first sentence of its resolution. The separator is a symbol so the parts stay apart in any
 /// language.
 pub fn render_work(work: &Work, areas: &[String]) -> String {
+    let records = crate::arrows::records(work);
+    let waiting = crate::arrows::waiting(work);
+    // What an open record waits for and what waits for it, after its line. A milestone collects the arrows of much of
+    // the work, so it says how many records it waits for instead of naming them
+    let arrows = |name: &str, milestone: bool| -> String {
+        let Some(waiting) = waiting.get(name) else {
+            return String::new();
+        };
+        let links = |names: &[String]| -> String {
+            let links: Vec<String> = names
+                .iter()
+                .map(|name| format!("[{}]({name})", link_text(records[name.as_str()].title)))
+                .collect();
+            links.join(", ")
+        };
+        let mut out = String::new();
+        if waiting.ready {
+            out.push_str(" | Ready.");
+        }
+        match waiting.before.len() {
+            0 => {}
+            1 if milestone => out.push_str(" | Waits for 1 open record."),
+            n if milestone => out.push_str(&format!(" | Waits for {n} open records.")),
+            _ => out.push_str(&format!(" | Waits for: {}", links(&waiting.before))),
+        }
+        if !waiting.until.is_empty() {
+            out.push_str(&format!(" | Until: {}", links(&waiting.until)));
+        }
+        out
+    };
     let specs = work.specs.iter().map(|(name, (spec, sections))| {
         let after = if let Some(closed_as) = spec.closed_as {
             resolution(closed_as, sections)
@@ -416,9 +460,10 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
             closed: spec.status == Status::Deprecated,
             order: (false, None),
             line: format!(
-                "* [{}]({name}) - {} | {after}",
+                "* [{}]({name}) - {} | {after}{}",
                 link_text(&spec.title),
-                spec.description
+                spec.description,
+                arrows(name, false)
             ),
         }
     });
@@ -428,7 +473,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
         parent: item.parent.as_ref(),
         closed: !item.is_open(),
         order: (true, Some(item.filed)),
-        line: item_line(name, item, sections),
+        line: format!("{}{}", item_line(name, item, sections), arrows(name, false)),
     });
     let mut entries: Vec<Entry> = specs.chain(items).collect();
     entries.sort_by_key(|entry| (entry.order, entry.name));
@@ -496,7 +541,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
                     .date
                     .map(|date| format!(" | Date: {date}."))
                     .unwrap_or_default();
-                format!("{proposed}{date}")
+                format!("{proposed}{date}{}", arrows(name, true))
             }
         };
         format!(

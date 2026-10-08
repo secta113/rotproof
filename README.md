@@ -333,6 +333,12 @@ piece of work. In an index, a record in the same area as its parent, and open or
 under it, indented; any other record with a parent is listed on its own with `Parent: [<title>](...)` after its line,
 so each record appears once.
 
+The order of the work is a third, independent thing: arrows. `after: [a]` on B, or `until: [b]` on A, says "A, then
+B", between any two records, a milestone included: the deadline of a work item is `until: [release-0-3-0]`. The later
+record closes after the earlier one; one that waits for a dropped record is pointed elsewhere; the arrows and the
+parents make no cycle. The index shows what each open record waits for, and says `Ready.` once all of it is done, so
+work whose conditions came true is seen instead of waiting for someone to notice.
+
 A work item has this frontmatter and these body headings:
 
 ```markdown
@@ -344,6 +350,8 @@ tags: [area]                  # exactly one, declared in areas; the index groups
 status: stable                # draft = open and not sorted yet, stable = open and sorted, deprecated = closed
 closed_as: done               # only when closed, and then required: done or dropped
 parent: some-spec             # the spec it is a part of; required for stable
+after: [design]               # optional: the records that come before it
+until: [release-0-3-0]        # optional: the records that come after it, often a milestone
 filed: 2026-10-01
 verified: {by: human:someone, at: 2026-10-01T10:00:00+09:00}
 deadline_kind: until          # until, or none with the reason in deadline
@@ -461,6 +469,10 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
 - **A milestone is open,** and every milestone keeps the format: `title`, `description`, `status` and exactly one
   declared area, a non-empty `# Condition`, and once it is closed `closed_as` and a non-empty `# Resolution` as the first
   heading. `date` is a day (`YYYY-MM-DD`). A milestone has no `parent`, and no record names one as its parent.
+- **The arrows keep their order:** `after` and `until` are lists of slugs of records that pass (not a guide, not the
+  record itself). An arrow is written once, on either side; the later record is not closed as done while the earlier
+  one is open; no open record comes after, or before, a dropped one; and the arrows and the parents (a child before
+  its parent) make no cycle. The index says `Ready.` on an open record whose earlier records are all done.
 - **A parent closes after its children:** no closed spec has an open part or an open work item. A child that is
   dropped closes as dropped, as any record does.
 - **The log exists, points only at work items that exist** (`work/<slug>.md`, or `backlog/<slug>.md` as entries
