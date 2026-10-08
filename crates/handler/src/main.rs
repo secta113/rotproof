@@ -37,8 +37,8 @@ prints them before. `rotproof <command> --help` says what a command reads, write
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
 when a file cannot be read or written, the command line is wrong, `rotproof create` would make layers without --yes,
-`rotproof init` leaves an update of the project's files to a person, or `rotproof approve` is not run on a terminal
-or not answered y.";
+`rotproof init` leaves an update of the project's files to a person or cannot move the records, or `rotproof approve`
+is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -50,13 +50,14 @@ layers), that each layer imports only what the layer table allows or a person ap
 .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
 comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that \
-.rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the rules.md of each directory), \
-a knowledge document matching the code it follows among them. \
+.rotproof/AGENTS.md is up to date, that the records are in docs/work/ (from 0.3.0; `rotproof init` moves those of an \
+older project), and that every record in docs/ keeps its rules (the rules.md of each directory), a knowledge document \
+matching the code it follows among them. \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
 a rule is broken, 2 when a file cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
-/// import which) and the records an agent works from (specs, work items, knowledge and log in docs/).
+/// import which) and the records an agent works from (specs, work items, milestones, knowledge and log in docs/).
 #[derive(Parser)]
 #[command(name = "rotproof", version, about, after_help = START)]
 struct Cli {
@@ -78,8 +79,12 @@ enum Command {
     /// `rotproof create` wrote once (such as a rule added to .claude/settings.json), except the ones the declaration
     /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
     /// the declaration to this version. It never changes the declaration's other values. What an update cannot do
-    /// without a person, it says, leaves files as it was, and exits 2. Exits 2 too for an unknown stack, a stack
-    /// other than the declared one, or a file that cannot be read or written.
+    /// without a person, it says, leaves files as it was, and exits 2. Crossing 0.3.0, it first moves the records
+    /// from docs/backlog/ and docs/specs/ to docs/work/ and points every link in docs/ that reached one at its new
+    /// place; the move cannot be declined, says what it leaves to a person (how each closed record closed, the deadline
+    /// of each open item), and stops with nothing changed when a name is in both directories or a file there is no
+    /// record. Exits 2 too for an unknown stack, a stack other than the declared one, a move that stopped, or a file
+    /// that cannot be read or written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
         #[arg(long)]
@@ -87,10 +92,12 @@ enum Command {
     },
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
     ///
-    /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/ and
-    /// docs/log.md, and the project's files (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's
-    /// settings with the hook and the rule that denies editing the approvals file, for python and none the pin of
-    /// Rotproof and a CI workflow, and for rust the workspace's Cargo.toml), each when it does not exist.
+    /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/,
+    /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, whose condition a person writes
+    /// before `rotproof check` passes, and the project's files (AGENTS.md, CLAUDE.md, README.md, .gitignore,
+    /// .gitattributes, Claude Code's settings with the hook and the rule that denies editing the approvals file, for
+    /// python and none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml), each when it
+    /// does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files and rules in
     /// docs/. Adds the fields the declaration lacks, keeping its comments and values. Never overwrites another file,
     /// and never moves or deletes one. Run it when a project starts, and after editing the declaration; after upgrading

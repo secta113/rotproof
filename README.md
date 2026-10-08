@@ -8,9 +8,11 @@ two structures:
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
   of dependencies stays what it was meant to be.
-- **The specs and records:** what is open, what is being changed, how things are now, and why. Specs and work items
-  (open defects and postponed work, each with a state and a moment it is done by), knowledge documents (an API, a data
-  model, a decision, edited in place and named in the log at every edit), and a log, each kept to strict rules. A
+- **The specs and records:** what is open, what is being changed, how things are now, and why. Specs (what was
+  decided) and work items (what waits: open defects and postponed work, each with a state), tied into one tree and
+  ordered by arrows up to milestones (the moments the work waits for); knowledge documents (an API, a data model, a
+  decision, edited in place and named in the log at every edit, and alarms for what matters only when it is seen); and
+  a log, each kept to strict rules. A
   finding does not stay outside them: a `TODO` or `NOTE` in a code comment fails the check, and a stop hook sends an
   agent back when its last message leaves something open that it did not record.
 
@@ -98,7 +100,7 @@ then `rotproof init --stack typescript` and `rotproof create --yes` in it, which
 
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
-(below), and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files and rules in `docs/`). It never
+(below), a milestone when `docs/work/` has none, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files and rules in `docs/`). It never
 overwrites a file it does not generate, and never moves or deletes one. Nothing runs it on its own, so a layer removed
   `xtask/src/layers.rs` in place of the file, and reads the comments of `xtask/` for markers too, which the layout
   leaves out; the records are kept outside, so they are not checked here.
@@ -112,6 +114,7 @@ The project's files are written once, as a starting point, and are the project's
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
+| `docs/work/next-milestone.md` | When `docs/work/` has no milestone: a draft of the next moment the work waits for, whose `# Condition` holds only a comment, so `rotproof check` fails until a person writes what that moment is |
 | `.claude/settings.json` | The stop hook (see "The stop hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
@@ -444,9 +447,11 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   stays, without the word. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
   strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
 
+- **The records are in `docs/work/`:** no `docs/backlog/` or `docs/specs/` is left from before 0.3.0. When one is,
+  this is the only finding on the records, as nothing else reads the old places: `rotproof init` moves them (see
+  "Upgrading Rotproof").
 - **The bundle is there:** `docs/`, `docs/index.md`, `docs/work/`, `docs/work/rules.md`, `docs/knowledge/` and
-  `docs/knowledge/rules.md` exist, and the declaration with its `areas`
-  can be read. Without them every other check
+  `docs/knowledge/rules.md` exist, and the declaration with its `areas` can be read. Without them every other check
   would pass with nothing checked.
 - **Every name is compared exactly,** wherever Rotproof looks for a file or a directory: a link's target, the files
   above, the layers and the declaration. Rotproof reads the names the directories hold instead of asking the
