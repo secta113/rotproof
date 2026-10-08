@@ -6,6 +6,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use chrono::NaiveDate;
+
 use crate::layers::DECLARATION;
 use crate::schema::{
     CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, Spec, Status, Time,
@@ -42,7 +44,7 @@ pub type Docs = BTreeMap<String, String>;
 /// File name -> why it was left out.
 pub type Problems = BTreeMap<String, String>;
 
-/// The documents of `docs/work/`, sorted out and read together: a part names its epic by slug.
+/// The documents of `docs/work/`, sorted out and read together: a record names its parent by slug.
 #[derive(Debug, Default)]
 pub struct Work {
     /// File name -> the work item, for the items that pass
@@ -92,23 +94,60 @@ impl Work {
         self.specs.get(&format!("{slug}.md")).map(|(spec, _)| spec)
     }
 
-    /// The open parts of a closed epic. An epic closes after its parts, so one of the two has the wrong status. They
-    /// stay in the index files: the relation is clear, and leaving the open part out would hide open work.
-    pub fn closed_before_its_parts(&self) -> Vec<String> {
-        self.specs
+    /// The open children of a closed spec: the parts of an epic and the work items of a spec. A parent closes after its
+    /// children, so one of the two has the wrong status. They stay in the index files: the relation is clear, and
+    /// leaving the open child out would hide open work.
+    pub fn closed_before_its_children(&self) -> Vec<String> {
+        let specs = self.specs.iter().map(|(name, (spec, _))| {
+            (
+                name,
+                "spec",
+                spec.parent.as_ref(),
+                spec.status != Status::Deprecated,
+            )
+        });
+        let items = self
+            .items
             .iter()
-            .filter_map(|(name, (spec, _))| {
-                let epic = spec.epic.as_ref()?;
-                let epic_spec = self.find(epic)?;
-                (spec.status != Status::Deprecated && epic_spec.status == Status::Deprecated).then(|| {
+            .map(|(name, (item, _))| (name, "work item", item.parent.as_ref(), item.is_open()));
+        specs
+            .chain(items)
+            .filter_map(|(name, kind, parent, open)| {
+                let parent_spec = self.find(parent?)?;
+                (open && parent_spec.status == Status::Deprecated).then(|| {
                     format!(
-                        "{}: its epic {epic} is closed while this part is open. Close the part first (as \
-                         dropped, if it was), or reopen the epic",
-                        in_work(name)
+                        "{}: its parent {} is closed while this {kind} is open. Close the {kind} first (as \
+                         dropped, if it was), or reopen the parent",
+                        in_work(name),
+                        parent.expect("found above")
                     )
                 })
             })
             .collect()
+    }
+
+    /// Why the record `name` cannot have the spec `parent` as its parent, or `None` when it can. The parent of a spec
+    /// is an epic, which has no parent of its own; the parent of a work item is any spec.
+    fn wrong_parent(&self, name: &str, parent: &str, of_spec: bool) -> Option<String> {
+        let file = format!("{parent}.md");
+        if file == name {
+            return Some("names the record itself".into());
+        }
+        Some(match self.find(parent) {
+            Some(spec) => match (&spec.parent, of_spec) {
+                (Some(above), true) => format!(
+                    "{parent} is itself a part of {above}: an epic is one level deep, so name {above} or \
+                     remove one of the two"
+                ),
+                _ => return None,
+            },
+            None if self.problems.contains_key(&in_work(&file)) => {
+                format!("{parent} is left out of the index files itself: fix it first")
+            }
+            None => format!(
+                "names no spec in docs/work/: {parent} (a work item or a guide is not a spec)"
+            ),
+        })
     }
 }
 
@@ -119,8 +158,8 @@ fn in_work(name: &str) -> String {
 
 /// Every document of `docs/work/` (file name -> text): the work items, specs and guides that pass, and why the others
 /// do not, checked one by one and against each other. A record whose area is not among `areas` does not pass, and a
-/// spec is left out of the index files when its relation to its epic is undefined: the epic is missing, is itself, or
-/// is a part of another.
+/// record is left out of the index files when its relation to its parent is undefined: the parent is missing, is not
+/// a spec, is the record itself, or, for a spec, is a part of another.
 pub fn work(docs: &Docs, areas: &[String]) -> Work {
     let mut out = Work::default();
     for (name, text) in docs {
@@ -147,36 +186,32 @@ pub fn work(docs: &Docs, areas: &[String]) -> Work {
             }
         }
     }
-    let mut left = Problems::new();
-    for (name, (spec, _)) in &out.specs {
-        let Some(epic) = &spec.epic else {
-            continue;
-        };
-        let file = format!("{epic}.md");
-        let why = if file == *name {
-            "names the spec itself".to_string()
-        } else {
-            match out.find(epic) {
-                Some(epic_spec) => match &epic_spec.epic {
-                    Some(above) => format!(
-                        "{epic} is itself a part of {above}: an epic is one level deep, so name {above} or \
-                         remove one of the two"
-                    ),
-                    None => continue,
-                },
-                None if out.problems.contains_key(&in_work(&file)) => {
-                    format!("{epic} is left out of the index files itself: fix it first")
-                }
-                None => format!(
-                    "names no spec in docs/work/: {epic} (a work item or a guide is not a spec)"
-                ),
-            }
-        };
-        left.insert(name.clone(), format!("epic: {why}"));
-    }
+    // The specs first: a work item whose spec is left out is then told to fix the spec first
+    let left: Problems = out
+        .specs
+        .iter()
+        .filter_map(|(name, (spec, _))| {
+            let why = out.wrong_parent(name, spec.parent.as_ref()?, true)?;
+            Some((name.clone(), why))
+        })
+        .collect();
     for (name, why) in left {
         out.specs.remove(&name);
-        out.problems.insert(in_work(&name), why);
+        out.problems
+            .insert(in_work(&name), format!("parent: {why}"));
+    }
+    let left: Problems = out
+        .items
+        .iter()
+        .filter_map(|(name, (item, _))| {
+            let why = out.wrong_parent(name, item.parent.as_ref()?, false)?;
+            Some((name.clone(), why))
+        })
+        .collect();
+    for (name, why) in left {
+        out.items.remove(&name);
+        out.problems
+            .insert(in_work(&name), format!("parent: {why}"));
     }
     out
 }
@@ -286,56 +321,108 @@ pub fn first_sentence(text: &str) -> &str {
     first
 }
 
+/// One record of `docs/work/` as the index lists it.
+struct Entry<'a> {
+    name: &'a str,
+    tag: &'a str,
+    parent: Option<&'a String>,
+    closed: bool,
+    /// Specs before work items under the same heading or parent; work items by filing date
+    order: (bool, Option<NaiveDate>),
+    /// The line without its parent, which is added when the entry is not listed under it
+    line: String,
+}
+
 /// The index of `work/` (an OKF index.md): the guides, the open records by area in the order `areas` declares them,
-/// and the closed records last under `# Closed`, so they do not bury the open ones. Under each heading the specs come
-/// first, then the work items.
+/// and the closed records last under `# Closed`, so they do not bury the open ones.
+///
+/// A record in the same area as its parent, and open or closed as its parent is, is listed under it, indented: the
+/// parts of an epic and the work items of a spec. Any other record with a parent is listed on its own with its parent
+/// after its line, so each record appears once. Under a heading or a parent, the specs come first, then the work items
+/// by filing date.
 ///
 /// Each entry has the OKF form `* [title](target) - description`, with the frontmatter's `description`, and adds after
-/// ` | ` what a reader needs: an open spec its status, an open item the date of the last measurement, the first
-/// sentence of its state and its deadline, and a closed record its resolution. The separator is a symbol so the parts
-/// stay apart in any language.
+/// ` | ` what a reader needs: an open spec its status; an open item its status when nobody has sorted it yet, the date
+/// of the last measurement, the first sentence of its state and its deadline; a closed record its resolution. The
+/// separator is a symbol so the parts stay apart in any language.
 pub fn render_work(work: &Work, areas: &[String]) -> String {
-    let mut out = vec![GENERATED.to_string()];
-    out.extend(guide_section(&work.guides));
-    let section = |heading: &str, mut lines: Vec<String>| {
-        if lines.is_empty() {
-            return lines;
+    let specs = work.specs.iter().map(|(name, (spec, sections))| {
+        let after = if spec.status == Status::Deprecated {
+            format!("Resolution: {}", first_sentence(&sections[CLOSED_SECTION]))
+        } else {
+            format!("Status: {}.", spec.status.name())
+        };
+        Entry {
+            name,
+            tag: &spec.tag,
+            parent: spec.parent.as_ref(),
+            closed: spec.status == Status::Deprecated,
+            order: (false, None),
+            line: format!(
+                "* [{}]({name}) - {} | {after}",
+                link_text(&spec.title),
+                spec.description
+            ),
         }
-        lines.splice(0..0, ["".into(), format!("# {heading}"), "".into()]);
+    });
+    let items = work.items.iter().map(|(name, (item, sections))| Entry {
+        name,
+        tag: &item.tag,
+        parent: item.parent.as_ref(),
+        closed: !item.is_open(),
+        order: (true, Some(item.filed)),
+        line: item_line(name, item, sections),
+    });
+    let mut entries: Vec<Entry> = specs.chain(items).collect();
+    entries.sort_by_key(|entry| (entry.order, entry.name));
+    // The parent an entry is listed under, in this index
+    let nested_in = |entry: &Entry| -> Option<String> {
+        let name = format!("{}.md", entry.parent?);
+        let (spec, _) = work.specs.get(&name)?;
+        (spec.tag == entry.tag && (spec.status == Status::Deprecated) == entry.closed)
+            .then_some(name)
+    };
+    let line = |entry: &Entry| match entry.parent {
+        Some(parent) if nested_in(entry).is_none() => {
+            let spec = work
+                .find(parent)
+                .expect("work leaves out a record whose parent it cannot find");
+            format!(
+                "{} | Parent: [{}]({parent}.md)",
+                entry.line,
+                link_text(&spec.title)
+            )
+        }
+        _ => entry.line.clone(),
+    };
+    // Each entry `keep` takes that is not listed under a parent, with its children under it
+    let section = |heading: &str, keep: &dyn Fn(&Entry) -> bool| {
+        let mut lines = Vec::new();
+        let mut under = vec![];
+        for entry in entries.iter().rev() {
+            if keep(entry) && nested_in(entry).is_none() {
+                under.push((entry, 0));
+            }
+        }
+        while let Some((entry, depth)) = under.pop() {
+            lines.push(format!("{}{}", "  ".repeat(depth), line(entry)));
+            for child in entries.iter().rev() {
+                if nested_in(child).as_deref() == Some(entry.name) {
+                    under.push((child, depth + 1));
+                }
+            }
+        }
+        if !lines.is_empty() {
+            lines.splice(0..0, ["".into(), format!("# {heading}"), "".into()]);
+        }
         lines
     };
+    let mut out = vec![GENERATED.to_string()];
+    out.extend(guide_section(&work.guides));
     for area in areas {
-        let mut lines = spec_lines(work, &|spec| {
-            &spec.tag == area && spec.status != Status::Deprecated
-        });
-        let mut items: Vec<_> = work
-            .items
-            .iter()
-            .filter(|(_, (item, _))| &item.tag == area && item.status == Status::Stable)
-            .collect();
-        items.sort_by_key(|(name, (item, _))| (item.filed, *name));
-        lines.extend(
-            items
-                .into_iter()
-                .map(|(name, (item, sections))| open_line(name, item, sections)),
-        );
-        out.extend(section(area, lines));
+        out.extend(section(area, &|entry| entry.tag == area && !entry.closed));
     }
-    let mut closed = spec_lines(work, &|spec| spec.status == Status::Deprecated);
-    closed.extend(
-        work.items
-            .iter()
-            .filter(|(_, (item, _))| item.status == Status::Deprecated)
-            .map(|(name, (item, sections))| {
-                format!(
-                    "* [{}]({name}) - {} | Resolution: {}",
-                    link_text(&item.title),
-                    item.description,
-                    first_sentence(&sections[CLOSED_SECTION])
-                )
-            }),
-    );
-    out.extend(section("Closed", closed));
+    out.extend(section("Closed", &|entry| entry.closed));
     out.join("\n") + "\n"
 }
 
@@ -355,11 +442,28 @@ fn guide_section(guides: &BTreeMap<String, Guide>) -> Vec<String> {
     out
 }
 
-fn open_line(name: &str, item: &Item, sections: &Sections) -> String {
+/// The index line of a work item, without its parent.
+fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
+    let start = format!(
+        "* [{}]({name}) - {}",
+        link_text(&item.title),
+        item.description
+    );
+    if !item.is_open() {
+        return format!(
+            "{start} | Resolution: {}",
+            first_sentence(&sections[CLOSED_SECTION])
+        );
+    }
     // Only the date, in the time zone of the measurement: the time of day would not change what a reader does.
     // Whether stale_after has passed is not shown: the index would then depend on today's date, and the check that
     // compares it with the generated text would pass on some days and fail on others
     let measured = item.last_verified().at.date_naive();
+    let unsorted = if item.status == Status::Draft {
+        " | Status: draft."
+    } else {
+        ""
+    };
     let deadline = match item.deadline_kind {
         DeadlineKind::Until => format!("Deadline: {}", item.deadline),
         DeadlineKind::NoDeadline => "No deadline.".to_string(),
@@ -369,63 +473,9 @@ fn open_line(name: &str, item: &Item, sections: &Sections) -> String {
         .map(|at| format!(" | Re-measure after {}.", at.date_naive()))
         .unwrap_or_default();
     format!(
-        "* [{}]({name}) - {} | State ({measured}): {} | {deadline}{stale}",
-        link_text(&item.title),
-        item.description,
+        "{start}{unsorted} | State ({measured}): {} | {deadline}{stale}",
         first_sentence(&sections["State"])
     )
-}
-
-/// The index lines of the specs that `keep` takes, for one heading of the index of `work/`. An open spec shows its
-/// status; a closed one its resolution.
-///
-/// A part in the same area as its epic, and open or closed as its epic is, is listed under it, indented. Any other part
-/// is listed on its own with its epic after its line, so each spec appears once.
-fn spec_lines(all: &Work, keep: &dyn Fn(&Spec) -> bool) -> Vec<String> {
-    let here = &all.specs;
-    let closed = |spec: &Spec| spec.status == Status::Deprecated;
-    // The epic a part is listed under, in this index
-    let nested_in = |spec: &Spec| -> Option<String> {
-        let epic = spec.epic.as_ref()?;
-        let name = format!("{epic}.md");
-        let (epic_spec, _) = here.get(&name)?;
-        (epic_spec.tag == spec.tag && closed(epic_spec) == closed(spec)).then_some(name)
-    };
-    let line = |name: &str, spec: &Spec, sections: &Sections| {
-        let after = if spec.status == Status::Deprecated {
-            format!("Resolution: {}", first_sentence(&sections[CLOSED_SECTION]))
-        } else {
-            format!("Status: {}.", spec.status.name())
-        };
-        let epic = match &spec.epic {
-            Some(epic) if nested_in(spec).is_none() => {
-                let epic_spec = all
-                    .find(epic)
-                    .expect("work leaves out a part whose epic it cannot find");
-                format!(" | Epic: [{}]({epic}.md)", link_text(&epic_spec.title))
-            }
-            _ => String::new(),
-        };
-        format!(
-            "* [{}]({name}) - {} | {after}{epic}",
-            link_text(&spec.title),
-            spec.description
-        )
-    };
-    // Each top-level spec that `keep` takes, with its parts under it
-    let mut lines = Vec::new();
-    let top = here
-        .iter()
-        .filter(|(_, (spec, _))| keep(spec) && nested_in(spec).is_none());
-    for (name, (spec, sections)) in top {
-        lines.push(line(name, spec, sections));
-        for (part_name, (part, part_sections)) in here {
-            if nested_in(part).as_ref() == Some(name) {
-                lines.push(format!("  {}", line(part_name, part, part_sections)));
-            }
-        }
-    }
-    lines
 }
 
 /// The knowledge index: the guides, the documents that hold by area in the order `areas` declares them, and the
@@ -525,9 +575,7 @@ pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
 pub fn stale(items: &BTreeMap<String, (Item, Sections)>, now: Time) -> Vec<String> {
     items
         .iter()
-        .filter(|(_, (item, _))| {
-            item.status == Status::Stable && item.stale_after.is_some_and(|at| now >= at)
-        })
+        .filter(|(_, (item, _))| item.is_open() && item.stale_after.is_some_and(|at| now >= at))
         .map(|(name, _)| name.clone())
         .collect()
 }
@@ -543,7 +591,7 @@ type: Work Item
 title: Some problem
 description: Something is wrong.
 tags: [operations]
-status: stable
+status: draft
 filed: 2026-09-27
 verified: {by: human:someone, at: 2026-09-28T08:00:00+09:00}
 deadline_kind: until
@@ -598,9 +646,25 @@ Not yet. Measured by hand.
     fn an_open_item_shows_its_state_and_deadline() {
         // Measured at 08:00 in +09:00, which is the day before in UTC: the date is the one where it was measured
         let index = render_work(&parsed(&[("good.md", GOOD.into())]), &areas());
-        let line = "* [Some problem](good.md) - Something is wrong. | State (2026-09-28): Not yet. | Deadline: until \
-                    the next deploy";
+        // Nobody has sorted it yet, and the line says so
+        let line = "* [Some problem](good.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet. \
+                    | Deadline: until the next deploy";
         assert_eq!(index, format!("{GENERATED}\n\n# operations\n\n{line}\n"));
+        // Sorted, it is listed under its spec without a status
+        let (spec_name, spec) = spec_doc("big", "operations", None, false);
+        let sorted = GOOD.replace("status: draft", "status: stable\nparent: big");
+        let index = render_work(
+            &parsed(&[("good.md", sorted), (&spec_name, spec)]),
+            &areas(),
+        );
+        let line = "  * [Some problem](good.md) - Something is wrong. | State (2026-09-28): Not yet. | Deadline: \
+                    until the next deploy";
+        assert_eq!(
+            index,
+            format!(
+                "{GENERATED}\n\n# operations\n\n* [big](big.md) - D. | Status: stable.\n{line}\n"
+            )
+        );
     }
 
     #[test]
@@ -863,8 +927,8 @@ Not yet. Measured by hand.
     }
 
     /// A spec titled after its slug, open or closed.
-    fn spec_doc(slug: &str, tag: &str, epic: Option<&str>, closed: bool) -> (String, String) {
-        let epic = epic.map(|e| format!("epic: {e}\n")).unwrap_or_default();
+    fn spec_doc(slug: &str, tag: &str, parent: Option<&str>, closed: bool) -> (String, String) {
+        let parent = parent.map(|p| format!("parent: {p}\n")).unwrap_or_default();
         let (status, resolution) = if closed {
             ("deprecated", "\n# Resolution\n\nDone.\n")
         } else {
@@ -873,7 +937,7 @@ Not yet. Measured by hand.
         (
             format!("{slug}.md"),
             format!(
-                "---\ntype: Spec\ntitle: {slug}\ndescription: D.\ntags: [{tag}]\nstatus: {status}\n{epic}---\n{resolution}"
+                "---\ntype: Spec\ntitle: {slug}\ndescription: D.\ntags: [{tag}]\nstatus: {status}\n{parent}---\n{resolution}"
             ),
         )
     }
@@ -907,7 +971,7 @@ Not yet. Measured by hand.
             &areas(),
         );
         assert!(all.problems.is_empty(), "{:?}", all.problems);
-        assert_eq!(all.closed_before_its_parts(), Vec::<String>::new());
+        assert_eq!(all.closed_before_its_children(), Vec::<String>::new());
         let index = render_work(&all, &areas());
         assert_eq!(
             index
@@ -921,11 +985,11 @@ Not yet. Measured by hand.
                 "  * [part-a](part-a.md) - D. | Status: stable.",
                 "  * [part-b](part-b.md) - D. | Status: stable.",
                 "# billing",
-                "* [part-c](part-c.md) - D. | Status: stable. | Epic: [big](big.md)",
+                "* [part-c](part-c.md) - D. | Status: stable. | Parent: [big](big.md)",
                 "# Closed",
                 "* [old](old.md) - D. | Resolution: Done.",
                 "  * [old-part](old-part.md) - D. | Resolution: Done.",
-                "* [part-d](part-d.md) - D. | Resolution: Done. | Epic: [big](big.md)",
+                "* [part-d](part-d.md) - D. | Resolution: Done. | Parent: [big](big.md)",
             ]
         );
     }
@@ -941,10 +1005,10 @@ Not yet. Measured by hand.
         );
         // The open part stays listed, naming its closed epic, and the check names the order
         assert!(all.problems.is_empty(), "{:?}", all.problems);
-        assert!(render_work(&all, &areas()).contains("| Epic: [big](big.md)"));
-        let found = all.closed_before_its_parts();
+        assert!(render_work(&all, &areas()).contains("| Parent: [big](big.md)"));
+        let found = all.closed_before_its_children();
         assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].starts_with("work/part.md: its epic big is closed"));
+        assert!(found[0].starts_with("work/part.md: its parent big is closed"));
     }
 
     #[test]
@@ -968,7 +1032,7 @@ Not yet. Measured by hand.
             (
                 "itself",
                 spec_doc("p", "operations", Some("p"), false),
-                "names the spec itself",
+                "names the record itself",
             ),
             (
                 "a part",
@@ -1009,9 +1073,174 @@ Not yet. Measured by hand.
                 .map(String::as_str)
                 .unwrap_or("");
             assert!(
-                why.starts_with("epic: ") && why.contains(said),
+                why.starts_with("parent: ") && why.contains(said),
                 "{name}: {why:?}"
             );
         }
+    }
+
+    /// A work item titled after its slug: sorted into `parent`, a draft without one, or closed.
+    fn item_doc(slug: &str, tag: &str, parent: Option<&str>, closed: bool) -> (String, String) {
+        let text = GOOD
+            .replace("title: Some problem", &format!("title: {slug}"))
+            .replace("tags: [operations]", &format!("tags: [{tag}]"));
+        let text = match parent {
+            Some(parent) => text.replace(
+                "status: draft",
+                &format!("status: stable\nparent: {parent}"),
+            ),
+            None => text,
+        };
+        let text = if closed {
+            crate::schema::closed_record(&text, "Fixed.")
+        } else {
+            text
+        };
+        (format!("{slug}.md"), text)
+    }
+
+    #[test]
+    fn a_work_item_is_listed_under_its_spec_or_names_it() {
+        let all = work(
+            &spec_docs(
+                vec![
+                    spec_doc("big", "operations", None, false),
+                    spec_doc("part", "operations", Some("big"), false),
+                    // Under the epic, after its parts
+                    item_doc("step-of-big", "operations", Some("big"), false),
+                    // Under the part, one level deeper
+                    item_doc("step-of-part", "operations", Some("part"), false),
+                    // Another area: under its own area, naming the spec
+                    item_doc("billing-step", "billing", Some("part"), false),
+                    // Nobody has sorted it yet: in its area, after the specs
+                    item_doc("unsorted", "operations", None, false),
+                ],
+                vec![
+                    // Done while the spec is open: under Closed, naming it
+                    item_doc("done-step", "operations", Some("big"), true),
+                    spec_doc("old", "operations", None, true),
+                    item_doc("old-step", "operations", Some("old"), true),
+                ],
+            ),
+            &areas(),
+        );
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        assert_eq!(all.closed_before_its_children(), Vec::<String>::new());
+        assert_eq!(
+            outline(&render_work(&all, &areas())),
+            [
+                "# operations",
+                "* [big](big.md",
+                "  * [part](part.md",
+                "    * [step-of-part](step-of-part.md",
+                "  * [step-of-big](step-of-big.md",
+                "* [unsorted](unsorted.md",
+                "# billing",
+                "* [billing-step](billing-step.md",
+                "# Closed",
+                "* [old](old.md",
+                "  * [old-step](old-step.md",
+                "* [done-step](done-step.md",
+            ]
+        );
+        let index = render_work(&all, &areas());
+        for (slug, parent) in [("billing-step", "part"), ("done-step", "big")] {
+            assert!(
+                index.contains(&format!("({slug}.md) - Something is wrong.")),
+                "{index}"
+            );
+            let line = index
+                .lines()
+                .find(|l| l.contains(&format!("({slug}.md)")))
+                .unwrap();
+            assert!(
+                line.ends_with(&format!("| Parent: [{parent}]({parent}.md)")),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_spec_closes_after_its_work_items() {
+        let all = work(
+            &spec_docs(
+                vec![item_doc("step", "operations", Some("big"), false)],
+                vec![spec_doc("big", "operations", None, true)],
+            ),
+            &areas(),
+        );
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        let found = all.closed_before_its_children();
+        assert_eq!(
+            found,
+            [
+                "work/step.md: its parent big is closed while this work item is open. Close the work item first (as \
+              dropped, if it was), or reopen the parent"
+            ]
+        );
+        // A draft names no parent, and closes whenever it is dealt with
+        let all = work(
+            &spec_docs(
+                vec![item_doc("unsorted", "operations", None, false)],
+                vec![spec_doc("big", "operations", None, true)],
+            ),
+            &areas(),
+        );
+        assert_eq!(all.closed_before_its_children(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_undefined_parent_leaves_the_work_item_out() {
+        let cases = [
+            ("no such spec", "nowhere", "names no spec"),
+            ("another work item", "other-item", "names no spec"),
+            ("itself", "p", "names the record itself"),
+            ("a spec that fails", "broken", "left out of the index"),
+            (
+                "a spec whose own parent is undefined",
+                "lost",
+                "left out of the index",
+            ),
+        ];
+        for (name, parent, said) in cases {
+            let all = work(
+                &spec_docs(
+                    vec![
+                        item_doc("p", "operations", Some(parent), false),
+                        item_doc("other-item", "operations", None, false),
+                        (
+                            "broken.md".to_string(),
+                            "---\ntype: Spec\ntitle: B\n---\n".to_string(),
+                        ),
+                        spec_doc("lost", "operations", Some("nowhere"), false),
+                    ],
+                    vec![],
+                ),
+                &areas(),
+            );
+            assert!(!all.items.contains_key("p.md"), "{name}: still listed");
+            let why = all
+                .problems
+                .get("work/p.md")
+                .map(String::as_str)
+                .unwrap_or("");
+            assert!(
+                why.starts_with("parent: ") && why.contains(said),
+                "{name}: {why:?}"
+            );
+        }
+        // A part of an epic is a spec, and a work item may be a part of it
+        let all = work(
+            &spec_docs(
+                vec![
+                    spec_doc("top", "operations", None, false),
+                    spec_doc("mid", "operations", Some("top"), false),
+                    item_doc("p", "operations", Some("mid"), false),
+                ],
+                vec![],
+            ),
+            &areas(),
+        );
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
     }
 }

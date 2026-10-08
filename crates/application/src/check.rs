@@ -14,8 +14,8 @@
 //!   a work item's `# Details` resolves, and every work item the log points to exists.
 //! - **Every record has one declared area**: the areas in `.config/rotproof.toml` are distinct headings, and the one
 //!   tag of every work item, spec and knowledge document is one of them.
-//! - **An epic closes after its parts**: a part's `epic` names another spec, one level deep, and no closed epic has
-//!   an open part.
+//! - **A parent closes after its children**: a spec's `parent` names an epic, which has no parent of its own, a work
+//!   item's `parent` names a spec, and no closed spec has an open child.
 //! - **`docs/` is one OKF bundle**: every document is a known type in the directory for its type, every file Rotproof
 //!   generates (the index files and the rules) equals what `rotproof index` writes, and no spec sits at the root.
 //! - **The log keeps the OKF log structure**: every second-level heading is a date, newest first, and the entries
@@ -276,8 +276,8 @@ fn records(
         pairs(&bundle.read_knowledge()?.problems),
     );
     add(
-        "an epic closes after its parts",
-        work.closed_before_its_parts(),
+        "a parent closes after its children",
+        work.closed_before_its_children(),
     );
     let (files, _) = bundle.expected()?;
     let stale: Vec<String> = files

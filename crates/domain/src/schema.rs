@@ -22,11 +22,12 @@ pub type Time = DateTime<FixedOffset>;
 /// Body headings every work item needs. A closed item also needs `CLOSED_SECTION`
 pub const SECTIONS: [&str; 3] = ["Trigger", "State", "Details"];
 pub const CLOSED_SECTION: &str = "Resolution";
-/// The fields only one type reads, with that type: a work item's `filed`, `deadline_kind` and `deadline`, and a
-/// spec's `epic`. Found from the readers, so a field added to a type is in it with no list to update. On another type,
-/// one is not an extension: it is a sign of the wrong `type`, under which the item's trigger and deadline, or the
-/// spec's place in its epic, would go unchecked
-static OWN_FIELDS: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|| {
+/// The fields some types read and others do not, each with the types that read it: a work item's `filed`,
+/// `deadline_kind` and `deadline`, the `parent` of a work item and a spec, and a knowledge document's `follows`. Found
+/// from the readers, so a field added to a type is in it with no list to update. On a type that does not read it, one
+/// is not an extension: it is a sign of the wrong `type`, under which the item's trigger and deadline, or the record's
+/// place in the tree, would go unchecked
+static OWN_FIELDS: LazyLock<Vec<(&'static str, Vec<&'static str>)>> = LazyLock::new(|| {
     let readers = [
         (
             "work item",
@@ -53,19 +54,28 @@ static OWN_FIELDS: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|
             }),
         ),
     ];
-    let mut own = Vec::new();
-    for (kind, keys) in &readers {
+    let mut own: Vec<(&'static str, Vec<&'static str>)> = Vec::new();
+    for (_, keys) in &readers {
         for key in keys {
-            let elsewhere = readers
+            let kinds: Vec<&'static str> = readers
                 .iter()
-                .any(|(other, keys)| other != kind && keys.contains(key));
-            if !elsewhere {
-                own.push((*key, *kind));
+                .filter(|(_, keys)| keys.contains(key))
+                .map(|(kind, _)| *kind)
+                .collect();
+            if kinds.len() < readers.len() && !own.iter().any(|(known, _)| known == key) {
+                own.push((*key, kinds));
             }
         }
     }
     own
 });
+
+/// Fields Rotproof read once and reads no more, each with what to write instead. One left in a record would otherwise
+/// pass as an extension, and what it said would go unchecked without a word
+const RETIRED: [(&str, &str); 1] = [(
+    "epic",
+    "no longer read; write the slug of the epic in parent",
+)];
 
 // OKF actors (section 7): `<producer>/<version>` for an agent, `human:<id>` for a person, `process:<id>`. OKF does not
 // limit the characters of `<id>` (its own samples use `human:jsmith@acme`), so only whitespace is excluded
@@ -127,8 +137,12 @@ pub struct Item {
     pub description: String,
     /// The area. The index groups items by it
     pub tag: String,
-    /// `Stable` = open / `Deprecated` = closed. A closed item stays, so references to it keep working
+    /// `Draft` = open, nobody has sorted it yet / `Stable` = open, sorted into a spec / `Deprecated` = closed. A closed
+    /// item stays, so references to it keep working
     pub status: Status,
+    /// The slug of the spec it is a part of: required once it is sorted (`Stable`). Whether it names one is checked
+    /// against the other records, which the document alone does not know (`bundle.rs`)
+    pub parent: Option<String>,
     pub filed: NaiveDate,
     /// Never empty. As in OKF, written as one mapping or a list of them
     pub verified: Vec<Stamp>,
@@ -140,6 +154,11 @@ pub struct Item {
 }
 
 impl Item {
+    /// Whether the item is open: nobody has sorted it yet, or it is sorted and not closed.
+    pub fn is_open(&self) -> bool {
+        self.status != Status::Deprecated
+    }
+
     /// The last measurement: the newest `at`. On a tie, the one written first.
     pub fn last_verified(&self) -> &Stamp {
         // `max_by_key` keeps the last of equal keys, so search from the end to keep the first
@@ -166,9 +185,9 @@ pub struct Spec {
     /// The area. The index files group specs by it
     pub tag: String,
     pub status: Status,
-    /// The slug of the spec this one is a part of. Whether it names one is checked against the other specs, which the
-    /// document alone does not know (`bundle.rs`)
-    pub epic: Option<String>,
+    /// The slug of the epic this spec is a part of. Whether it names one is checked against the other records, which
+    /// the document alone does not know (`bundle.rs`)
+    pub parent: Option<String>,
 }
 
 /// A document of how things are now, or why: it never closes while it holds, and is edited in place.
@@ -229,7 +248,9 @@ pub fn work_doc(text: &str) -> Result<WorkDoc, String> {
 /// body.
 #[cfg(test)]
 pub(crate) fn closed_record(text: &str, resolution: &str) -> String {
-    let text = text.replace("status: stable", "status: deprecated");
+    let text = text
+        .replace("status: stable", "status: deprecated")
+        .replace("status: draft", "status: deprecated");
     let end = text[4..]
         .find("\n---\n")
         .expect("a record with frontmatter")
@@ -332,7 +353,7 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
         status(&[Status::Draft, Status::Stable, Status::Deprecated]),
     );
     let tag = fields.required("tags", one_tag);
-    let epic = fields.optional("epic", slug);
+    let parent = fields.optional("parent", slug);
     fields.optional("verified", stamps);
     fields.optional("stale_after", time);
     okf_optional(fields);
@@ -341,7 +362,7 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
         description: description?,
         tag: tag?,
         status: status?,
-        epic: epic?,
+        parent: parent?,
     })
 }
 
@@ -398,7 +419,11 @@ fn item(fields: &mut Fields) -> Option<Item> {
     let title = fields.required("title", one_line);
     let description = fields.required("description", one_line);
     let tag = fields.required("tags", one_tag);
-    let status = fields.required("status", status(&[Status::Stable, Status::Deprecated]));
+    let status = fields.required(
+        "status",
+        status(&[Status::Draft, Status::Stable, Status::Deprecated]),
+    );
+    let parent = fields.optional("parent", slug);
     let filed = fields.required("filed", date);
     let verified = fields.required("verified", stamps);
     let deadline_kind = fields.required("deadline_kind", deadline_kind);
@@ -410,12 +435,20 @@ fn item(fields: &mut Fields) -> Option<Item> {
         description: description?,
         tag: tag?,
         status: status?,
+        parent: parent?,
         filed: filed?,
         verified: verified?,
         deadline_kind: deadline_kind?,
         deadline: deadline?,
         stale_after: stale_after?,
     };
+    if item.status == Status::Stable && item.parent.is_none() {
+        fields.wrong(
+            "parent",
+            "missing: a sorted work item (status: stable) is a part of a spec; one nobody has sorted yet is \
+             status: draft",
+        );
+    }
     if DATE_ONLY.is_match(&item.deadline) {
         fields.wrong(
             "deadline",
@@ -550,14 +583,22 @@ impl<'a> Fields<'a> {
             match key {
                 Yaml::String(name) if self.read.contains(&name.as_str()) => {}
                 Yaml::String(name) => {
-                    if let Some(meant) = self.read.iter().find(|known| misspelled(name, known)) {
+                    if let Some((_, instead)) = RETIRED
+                        .iter()
+                        .find(|(retired, _)| misspelled(name, retired))
+                    {
+                        self.errors.push(format!("{name}: {instead}"));
+                    } else if let Some(meant) =
+                        self.read.iter().find(|known| misspelled(name, known))
+                    {
                         self.errors
                             .push(format!("unknown field: {name}; did you mean {meant}?"));
-                    } else if let Some((theirs, kind)) =
+                    } else if let Some((theirs, kinds)) =
                         OWN_FIELDS.iter().find(|(field, _)| misspelled(name, field))
                     {
                         self.errors.push(format!(
-                            "unknown field: {name}; {theirs} is a field of a {kind}, not of this type"
+                            "unknown field: {name}; {theirs} is a field of a {}, not of this type",
+                            kinds.join(" or a ")
                         ));
                     }
                 }
@@ -824,6 +865,7 @@ title: Some problem
 description: Something is wrong.
 tags: [operations]
 status: stable
+parent: big-work
 filed: 2026-09-27
 verified: {by: human:someone, at: 2026-09-28T10:00:00+09:00}
 deadline_kind: until
@@ -870,6 +912,40 @@ Not yet.
     fn the_good_input_passes() {
         // If the valid item did not pass, a failure below would not show that the one change was caught
         assert!(work_doc(GOOD).is_ok(), "{:?}", work_doc(GOOD).err());
+    }
+
+    #[test]
+    fn a_sorted_item_has_a_parent_and_an_unsorted_one_is_a_draft() {
+        let unsorted = good("status: stable\nparent: big-work", "status: draft");
+        let Ok(WorkDoc::Item(item, _)) = work_doc(&unsorted) else {
+            panic!("{:?}", work_doc(&unsorted).err());
+        };
+        assert!(item.is_open());
+        assert_eq!((item.status, item.parent), (Status::Draft, None));
+        // Sorted into a spec before anyone wrote down that it was sorted: a draft may name its spec already
+        assert!(work_doc(&good("status: stable", "status: draft")).is_ok());
+        let Some(why) = work_doc(&good("parent: big-work\n", "")).err() else {
+            panic!("a sorted item without a parent passed");
+        };
+        assert!(
+            why.contains("parent: missing: a sorted work item (status: stable)"),
+            "{why}"
+        );
+        // Closed, it needs none: an item closed with nothing found was never sorted
+        let dropped = closed_record(&good("parent: big-work\n", ""), "Nothing found.");
+        assert!(work_doc(&dropped).is_ok(), "{:?}", work_doc(&dropped).err());
+        for (name, text) in [
+            (
+                "a path",
+                good("parent: big-work", "parent: /work/big-work.md"),
+            ),
+            (
+                "the retired field",
+                good("parent: big-work", "epic: big-work"),
+            ),
+        ] {
+            assert!(work_doc(&text).is_err(), "{name} passed");
+        }
     }
 
     const KNOWLEDGE: &str = "---
@@ -922,10 +998,10 @@ Text.
                 KNOWLEDGE.replace("status: stable", "status: deprecated")
                     + "\n# Resolution\n\nGone.\n",
             ),
-            // A spec's own field: the wrong type
+            // A field of a work item and a spec: the wrong type
             (
-                "an epic",
-                KNOWLEDGE.replace("status: stable", "status: stable\nepic: big"),
+                "a parent",
+                KNOWLEDGE.replace("status: stable", "status: stable\nparent: big"),
             ),
             ("a misspelled title", KNOWLEDGE.replace("title:", "titel:")),
         ];
@@ -965,11 +1041,11 @@ Text.
         assert_eq!(
             *OWN_FIELDS,
             [
-                ("filed", "work item"),
-                ("deadline_kind", "work item"),
-                ("deadline", "work item"),
-                ("epic", "spec"),
-                ("follows", "knowledge document"),
+                ("parent", vec!["work item", "spec"]),
+                ("filed", vec!["work item"]),
+                ("deadline_kind", vec!["work item"]),
+                ("deadline", vec!["work item"]),
+                ("follows", vec!["knowledge document"]),
             ]
         );
         // Every field the item reads is found, optional ones included
@@ -991,21 +1067,30 @@ Text.
     fn a_type_s_own_field_fails_on_every_other_type() {
         let guide = "---\ntype: Guide\ntitle: Rules\ndescription: What goes here.\n---\n\n# What goes here\n";
         assert!(OWN_FIELDS.len() >= 4, "{:?}", *OWN_FIELDS);
-        for (field, kind) in OWN_FIELDS.iter() {
+        for (field, kinds) in OWN_FIELDS.iter() {
+            let said = format!("a field of a {}", kinds.join(" or a "));
             let on_guide = guide.replace("type: Guide", &format!("type: Guide\n{field}: x"));
             assert!(work_doc(&on_guide).is_err(), "{field} passed on a guide");
-            if *kind != "spec" {
+            if !kinds.contains(&"spec") {
                 let on_spec =
                     SPEC.replace("status: stable", &format!("status: stable\n{field}: x"));
                 assert!(spec(&on_spec).is_err(), "{field} passed on a spec");
             }
-            if *kind != "work item" {
+            if !kinds.contains(&"knowledge document") {
+                let on_knowledge =
+                    KNOWLEDGE.replace("status: stable", &format!("status: stable\n{field}: x"));
+                let why = knowledge_doc(&on_knowledge).err();
+                assert!(
+                    why.as_ref().is_some_and(|why| why.contains(&said)),
+                    "{field} on a knowledge document: {why:?}"
+                );
+            }
+            if !kinds.contains(&"work item") {
                 let on_item =
                     GOOD.replace("status: stable", &format!("status: stable\n{field}: x"));
                 let why = work_doc(&on_item).err();
                 assert!(
-                    why.as_ref()
-                        .is_some_and(|why| why.contains(&format!("a field of a {kind}"))),
+                    why.as_ref().is_some_and(|why| why.contains(&said)),
                     "{field} on a work item: {why:?}"
                 );
             }
@@ -1437,9 +1522,9 @@ Something.
     #[test]
     fn a_good_spec_passes() {
         assert!(spec(SPEC).is_ok(), "{:?}", spec(SPEC).err());
-        let part = SPEC.replace("status: stable", "status: stable\nepic: big-work");
+        let part = SPEC.replace("status: stable", "status: stable\nparent: big-work");
         assert_eq!(
-            spec(&part).map(|(spec, _)| spec.epic),
+            spec(&part).map(|(spec, _)| spec.parent),
             Ok(Some("big-work".into()))
         );
         let closed = closed_record(SPEC, "Done.");
@@ -1474,26 +1559,31 @@ Something.
             ),
             // A spec has exactly one area, as a work item does
             ("no tag", SPEC.replace("tags: [operations]\n", "")),
-            // An epic is named by its slug, not by a path
+            // A parent is named by its slug, not by a path
             (
-                "an epic named by its path",
-                SPEC.replace("status: stable", "status: stable\nepic: /specs/big.md"),
+                "a parent named by its path",
+                SPEC.replace("status: stable", "status: stable\nparent: /work/big.md"),
             ),
             (
-                "an epic named by its path without .md",
-                SPEC.replace("status: stable", "status: stable\nepic: specs/big"),
+                "a parent named by its path without .md",
+                SPEC.replace("status: stable", "status: stable\nparent: work/big"),
             ),
             (
-                "an epic named by its file name",
-                SPEC.replace("status: stable", "status: stable\nepic: big.md"),
+                "a parent named by its file name",
+                SPEC.replace("status: stable", "status: stable\nparent: big.md"),
             ),
             (
-                "an empty epic",
-                SPEC.replace("status: stable", "status: stable\nepic: \"\""),
+                "an empty parent",
+                SPEC.replace("status: stable", "status: stable\nparent: \"\""),
             ),
             (
-                "a misspelled epic",
-                SPEC.replace("status: stable", "status: stable\nepik: big"),
+                "a misspelled parent",
+                SPEC.replace("status: stable", "status: stable\nparnet: big"),
+            ),
+            // The field before parent
+            (
+                "an epic",
+                SPEC.replace("status: stable", "status: stable\nepic: big"),
             ),
             (
                 "two tags",

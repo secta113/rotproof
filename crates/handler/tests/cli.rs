@@ -86,7 +86,7 @@ fn a_record_with_a_byte_order_mark_passes() {
     let docs = root.path().join("docs");
     fs::write(
         docs.join("work/x.md"),
-        "\u{feff}---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\
+        "\u{feff}---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: draft\nfiled: 2026-10-01\n\
          verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
          # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n",
     )
@@ -111,7 +111,7 @@ fn a_record_with_a_byte_order_mark_passes() {
 fn each_broken_rule_fails_under_its_check() {
     let item = |details: &str| {
         format!(
-            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\
+            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: draft\nfiled: 2026-10-01\n\
              verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
              # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n{details}\n"
         )
@@ -284,31 +284,48 @@ fn a_name_in_another_case_is_missing() {
 }
 
 #[test]
-fn an_epic_and_its_parts_are_checked_together() {
-    let spec = |epic: &str, status: &str| {
+fn a_parent_and_its_children_are_checked_together() {
+    let spec = |parent: &str, status: &str| {
         format!(
-            "---\ntype: Spec\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: {status}\n{epic}---\n\n\
+            "---\ntype: Spec\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: {status}\n{parent}---\n\n\
              # Resolution\n\nDone.\n"
         )
     };
-    // (the check that must name it, the epic's status, the slug the part names)
+    let item = |parent: &str| {
+        format!(
+            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nparent: {parent}\n\
+             filed: 2026-10-01\nverified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\ndeadline_kind: none\n\
+             deadline: an alarm\n---\n\n# Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
+        )
+    };
+    // (the check that must name it, the parent's status, the child)
     let cases = [
-        ("an epic closes after its parts", "deprecated", "big"),
+        (
+            "a parent closes after its children",
+            "deprecated",
+            spec("parent: big\n", "stable"),
+        ),
+        (
+            "a parent closes after its children",
+            "deprecated",
+            item("big"),
+        ),
         (
             "every document in docs/work/ keeps the format",
             "stable",
-            "no-such-spec",
+            spec("parent: no-such-spec\n", "stable"),
+        ),
+        (
+            "every document in docs/work/ keeps the format",
+            "stable",
+            item("no-such-spec"),
         ),
     ];
-    for (check, status, named) in cases {
+    for (check, status, child) in cases {
         let root = clean_repo();
         let r = root.path();
         fs::write(r.join("docs/work/big.md"), spec("", status)).unwrap();
-        fs::write(
-            r.join("docs/work/part.md"),
-            spec(&format!("epic: {named}\n"), "stable"),
-        )
-        .unwrap();
+        fs::write(r.join("docs/work/child.md"), child).unwrap();
         // The index files are current, so only the relation can fail
         assert!(run(&["--root", &root_arg(r), "index"]).status.success());
         let out = run(&["--root", &root_arg(r), "check"]);
@@ -376,7 +393,7 @@ type: Work Item
 title: Old
 description: Measured long ago.
 tags: [operations]
-status: stable
+status: draft
 filed: 2020-01-01
 verified: {by: human:someone, at: 2020-01-02T10:00:00+09:00}
 stale_after: 2021-01-01T00:00:00+09:00
@@ -793,7 +810,7 @@ fn create_makes_layers_only_with_yes() {
 fn record(kind: &str, tag: &str) -> String {
     match kind {
         "item" => format!(
-            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: stable\nfiled: 2026-10-01\n\
+            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: draft\nfiled: 2026-10-01\n\
              verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
              # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
         ),

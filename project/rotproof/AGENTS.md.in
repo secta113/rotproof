@@ -29,8 +29,8 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   item is only seen when someone opens it. After measuring an item's state, update it right away.
 - **How each record is written is in the `rules.md` of its directory,** which Rotproof writes. The project's own rules
   for a directory go in another guide in the same directory.
-- **A finding is recorded, never left in a comment.** Write it as a work item in `docs/work/`, or in the spec it
-  belongs to. `rotproof check` fails on `TODO`, `FIXME`, `XXX`, `HACK` and `NOTE` in comments in the code.
+- **A finding is recorded, never left in a comment.** Write it as a draft work item in `docs/work/`, or in the
+  spec it belongs to. `rotproof check` fails on `TODO`, `FIXME`, `XXX`, `HACK` and `NOTE` in comments in the code.
 - **A closed record stays where it is and opens with `# Resolution`.** Closing a spec or a work item sets
   `status: deprecated` and puts `# Resolution` first; nothing moves.
 - **When a task is done, add one entry to `docs/log.md`, under a `## YYYY-MM-DD` heading for the day, newest first.**

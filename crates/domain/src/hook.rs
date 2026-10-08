@@ -121,8 +121,8 @@ pub fn open_in(input: &str) -> Result<Vec<&'static str>, String> {
 pub fn send_back(found: &[&str]) -> String {
     let quoted: Vec<String> = found.iter().map(|phrase| format!("\"{phrase}\"")).collect();
     let text = format!(
-        "Your last message says {} and nothing in docs/ changed. If it leaves a finding open, record it now: an \
-         item in docs/work/ (docs/work/rules.md), or the spec it belongs to. If it is already recorded, or is not \
+        "Your last message says {} and nothing in docs/ changed. If it leaves a finding open, record it now: a \
+         draft work item in docs/work/ (docs/work/rules.md), or the spec it belongs to. If it is already recorded, or is not \
          a finding, say where or why in one line, then stop.",
         quoted.join(", ")
     );

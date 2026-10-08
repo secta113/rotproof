@@ -271,17 +271,19 @@ docs/
   work/             every spec and work item, open or closed
     rules.md        generated: the rules of both types (type: Guide)
     index.md        generated
-    <slug>.md       one record per file (type: Spec, status: draft, stable or deprecated;
-                    or type: Work Item, status: stable or deprecated)
+    <slug>.md       one record per file (type: Spec or Work Item, status: draft, stable or deprecated)
   knowledge/        how things are now, and why (type: Knowledge, status: stable or deprecated)
     rules.md        generated: the knowledge rules (type: Guide)
     index.md        generated
 ```
 
-The two directories hold records that are handled differently. `work/` holds what is being changed and what is open:
-specs and work items, closed once implemented, dealt with or dropped, and never moved. `knowledge/` holds how things
-are now, edited in place and deprecated only when it no longer holds. A closed spec is history; what it built is described in `knowledge/`, an API or a data
-model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
+The two directories hold records that are handled differently. `work/` holds what was decided and the work waiting on
+it, closed once implemented, done or dropped, and never moved. Which type a sentence belongs to is one question: if
+the work were finished today, would it be false? A spec holds what stays true (what was decided, why, what was
+rejected); a work item holds what would then be false (what is not done or measured yet, and how far it has come).
+Whether a record is decided is its `status`: a draft spec is not agreed yet, a draft work item is not sorted yet.
+`knowledge/` holds how things are now, edited in place and deprecated only when it no longer holds. A closed spec is
+history; what it built is described in `knowledge/`, an API or a data model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
 contents, under the label `**Knowledge**` (`* **Knowledge**: knowledge/api.md@a3f9c1d2`), and `rotproof check` fails
 an edit the log does not name. A knowledge document that describes code names it in `follows`, each with its hash when
 the document was last reviewed: a file in any language, and in Python also a function or class
@@ -305,22 +307,25 @@ declared area that no record uses passes, so an area is declared before its firs
 `areas` and the tag of every record in it, closed ones included: the tag is frontmatter for the index, not history.
 Guides keep their optional tags, which name no area.
 
-A large piece of work is split into specs that are parts of an epic. The epic is a spec like any other, with goals and
-an order of work of its own; a part names it by slug (its file name without `.md`) in `epic`:
+The records form a tree: an epic, its parts, and the work items of each. A record names the spec it is a part of by
+slug (its file name without `.md`) in `parent`. A large piece of work is split into specs that are parts of an epic,
+which is a spec like any other, with goals and decisions of its own; the work a spec waits on is its work items, each
+with its own state, instead of a list of steps in its body:
 
 ```yaml
 type: Spec
 title: Publish Rotproof for every stack
 status: stable
 tags: [rotproof]
-epic: template-multi-stack
+parent: template-multi-stack
 ```
 
-The two are independent: an area says where a record belongs and never closes, an epic says which piece of work a
-spec is part of and closes when the work is finished. A part may be in another area than its epic. A spec that cannot
-name one area mixes two, so it is split into one part per area, and the epic ties the parts back into one piece of
-work. In an index, a part in the same area as its epic, and open or closed as its epic is, is listed under it,
-indented; any other part is listed on its own with `Epic: [<title>](...)` after its line, so each spec appears once.
+The area and the parent are independent: an area says where a record belongs and never closes, a parent says which
+piece of work a record is part of and closes after its children. A part may be in another area than its epic. A spec
+that cannot name one area mixes two, so it is split into one part per area, and the epic ties the parts back into one
+piece of work. In an index, a record in the same area as its parent, and open or closed as its parent is, is listed
+under it, indented; any other record with a parent is listed on its own with `Parent: [<title>](...)` after its line,
+so each record appears once.
 
 A work item has this frontmatter and these body headings:
 
@@ -328,9 +333,10 @@ A work item has this frontmatter and these body headings:
 ---
 type: Work Item
 title: Some problem
-description: One sentence: what the problem is.
+description: One sentence: what is waiting.
 tags: [area]                  # exactly one, declared in areas; the index groups items by it
-status: stable                # stable = open, deprecated = closed
+status: stable                # draft = open and not sorted yet, stable = open and sorted, deprecated = closed
+parent: some-spec             # the spec it is a part of; required for stable
 filed: 2026-10-01
 verified: {by: human:someone, at: 2026-10-01T10:00:00+09:00}
 deadline_kind: until          # until, or none with the reason in deadline
@@ -416,11 +422,12 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   (`README.md:secret`) or a short name (`README~1.MD`). Linux and GitHub find none of them, so each fails, and the
   message says what the disk has.
 - **The areas are distinct headings:** none is empty, has a space at either end or a line break, and no two differ only in case.
-- **Every work item keeps the format:** the fields above with their types, and non-empty Trigger, State and Details
-  (and Resolution when closed, as the first heading). A field Rotproof does not know passes as an extension, as OKF allows, unless it looks
-  like a misspelling of a field the document type has (`stale_afer`, `staleAfter`, `Title`), or is a field only
-  another type has (a work item's `deadline` on a spec, a spec's `epic` on a work item): those fail, in every
-  document type, as a misspelled optional field would otherwise be silently dropped. A deadline is an event or a reason, never only a date
+- **Every work item keeps the format:** the fields above with their types, a `parent` once it is `stable`, and
+  non-empty Trigger, State and Details (and Resolution when closed, as the first heading). A field Rotproof does not know passes as an extension, as OKF allows, unless it looks
+  like a misspelling of a field the document type has (`stale_afer`, `staleAfter`, `Title`), or is a field
+  other types have and this one does not (a work item's `deadline` on a spec, the `parent` of a spec or a work item on
+  a knowledge document), or is a field Rotproof no longer reads (`epic`, which says to write `parent`): those fail, in
+  every document type, as a misspelled optional field would otherwise be silently dropped. A deadline is an event or a reason, never only a date
   (`2026-10-31`, `2026/10/31`, `31.10.2026`, `2026年10月31日` or a month alone); an event may contain a date. Every
   time has a time zone. `stale_after` is later than the last `verified`. A required text is not blank (spaces alone
   are empty), in every document type, and no tag is empty. What the index lists (`title`, `description`, `deadline`
@@ -439,17 +446,18 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   (`render_index()`) or a dotted path (`Bundle.render`); when it names nothing, the message says which name to write
   or lists the names the file defines.
 - **Every spec keeps the format:** `title`, `description`, `status` and exactly one declared area in `tags`, and a
-  non-empty `# Resolution` as the first heading once it is closed. `epic`, when present, is the slug of another spec in `docs/work/` (not
-  a path, not a work item or a guide, not the spec itself), and that spec has no `epic` of its own: one level only.
-  A spec that breaks one of these is left out of the index files.
-- **An epic closes after its parts:** no closed epic has an open part. A part that is dropped closes as dropped, as
-  any spec does.
+  non-empty `# Resolution` as the first heading once it is closed. `parent`, when present, is the slug of another spec in `docs/work/`
+  (not a path, not a work item or a guide, not the spec itself), and that spec has no `parent` of its own: one level
+  only. The `parent` of a work item is the slug of any spec. A record that breaks one of these is left out of the index
+  files.
+- **A parent closes after its children:** no closed spec has an open part or an open work item. A child that is
+  dropped closes as dropped, as any record does.
 - **The log exists, points only at work items that exist** (`work/<slug>.md`, or `backlog/<slug>.md` as entries
   written before `docs/work/` name them, written with `/` or `\`, the slug percent-encoded or not), and its second-level headings are dates, newest first. Below the title, the log is
   a flat list of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented
   lines (wrapped text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the
   first date fails. A new log, with only its title and HTML comments, passes.
-- **Every knowledge document keeps the format,** as a spec does (without `epic`, and `status` `stable` or
+- **Every knowledge document keeps the format,** as a spec does (without `parent`, and `status` `stable` or
   `deprecated`), and **the log names it as it is now:** some `**Knowledge**` field of a log entry, with its wrapped
   lines, names it with the first 8 hex digits of SHA-256 of the whole file (every line ending as `\n`). An edit the
   log does not name fails, and the failure prints the line to write. A `**Knowledge**` field that names a document
