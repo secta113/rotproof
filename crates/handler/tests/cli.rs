@@ -302,12 +302,12 @@ fn a_parent_and_its_children_are_checked_together() {
     let cases = [
         (
             "a parent closes after its children",
-            "deprecated",
+            "deprecated\nclosed_as: done",
             spec("parent: big\n", "stable"),
         ),
         (
             "a parent closes after its children",
-            "deprecated",
+            "deprecated\nclosed_as: done",
             item("big"),
         ),
         (
@@ -815,7 +815,7 @@ fn record(kind: &str, tag: &str) -> String {
              # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
         ),
         _ => format!(
-            "---\ntype: Spec\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: deprecated\n---\n\n# Resolution\n\nDone.\n"
+            "---\ntype: Spec\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: deprecated\nclosed_as: done\n---\n\n# Resolution\n\nDone.\n"
         ),
     }
 }

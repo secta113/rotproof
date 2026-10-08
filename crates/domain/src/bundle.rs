@@ -10,8 +10,8 @@ use chrono::NaiveDate;
 
 use crate::layers::DECLARATION;
 use crate::schema::{
-    CLOSED_SECTION, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, Spec, Status, Time,
-    WorkDoc, knowledge_doc, work_doc,
+    CLOSED_SECTION, ClosedAs, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, Spec, Status,
+    Time, WorkDoc, knowledge_doc, work_doc,
 };
 use utils::frontmatter::{Sections, split};
 use yaml_rust2::Yaml;
@@ -343,12 +343,13 @@ struct Entry<'a> {
 ///
 /// Each entry has the OKF form `* [title](target) - description`, with the frontmatter's `description`, and adds after
 /// ` | ` what a reader needs: an open spec its status; an open item its status when nobody has sorted it yet, the date
-/// of the last measurement, the first sentence of its state and its deadline; a closed record its resolution. The
-/// separator is a symbol so the parts stay apart in any language.
+/// of the last measurement, the first sentence of its state and its deadline; a closed record how it closed (`Done:`
+/// or `Dropped:`) and the first sentence of its resolution. The separator is a symbol so the parts stay apart in any
+/// language.
 pub fn render_work(work: &Work, areas: &[String]) -> String {
     let specs = work.specs.iter().map(|(name, (spec, sections))| {
-        let after = if spec.status == Status::Deprecated {
-            format!("Resolution: {}", first_sentence(&sections[CLOSED_SECTION]))
+        let after = if let Some(closed_as) = spec.closed_as {
+            resolution(closed_as, sections)
         } else {
             format!("Status: {}.", spec.status.name())
         };
@@ -442,6 +443,15 @@ fn guide_section(guides: &BTreeMap<String, Guide>) -> Vec<String> {
     out
 }
 
+/// How a closed record of `docs/work/` ends its index line: how it closed, and the first sentence of its resolution.
+fn resolution(closed_as: ClosedAs, sections: &Sections) -> String {
+    let how = match closed_as {
+        ClosedAs::Done => "Done",
+        ClosedAs::Dropped => "Dropped",
+    };
+    format!("{how}: {}", first_sentence(&sections[CLOSED_SECTION]))
+}
+
 /// The index line of a work item, without its parent.
 fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
     let start = format!(
@@ -449,11 +459,8 @@ fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
         link_text(&item.title),
         item.description
     );
-    if !item.is_open() {
-        return format!(
-            "{start} | Resolution: {}",
-            first_sentence(&sections[CLOSED_SECTION])
-        );
+    if let Some(closed_as) = item.closed_as {
+        return format!("{start} | {}", resolution(closed_as, sections));
     }
     // Only the date, in the time zone of the measurement: the time of day would not change what a reader does.
     // Whether stale_after has passed is not shown: the index would then depend on today's date, and the check that
@@ -930,7 +937,10 @@ Not yet. Measured by hand.
     fn spec_doc(slug: &str, tag: &str, parent: Option<&str>, closed: bool) -> (String, String) {
         let parent = parent.map(|p| format!("parent: {p}\n")).unwrap_or_default();
         let (status, resolution) = if closed {
-            ("deprecated", "\n# Resolution\n\nDone.\n")
+            (
+                "deprecated\nclosed_as: done",
+                "\n# Resolution\n\nImplemented.\n",
+            )
         } else {
             ("stable", "")
         };
@@ -940,6 +950,12 @@ Not yet. Measured by hand.
                 "---\ntype: Spec\ntitle: {slug}\ndescription: D.\ntags: [{tag}]\nstatus: {status}\n{parent}---\n{resolution}"
             ),
         )
+    }
+
+    /// The record closed as dropped instead of done.
+    fn dropped((name, text): (String, String)) -> (String, String) {
+        assert!(text.contains("closed_as: done"), "{text}");
+        (name, text.replace("closed_as: done", "closed_as: dropped"))
     }
 
     /// `docs/work/` holding the open and the closed specs together.
@@ -961,8 +977,8 @@ Not yet. Measured by hand.
                     spec_doc("alone", "operations", None, false),
                 ],
                 vec![
-                    // Finished part of an open epic: under Closed, naming it
-                    spec_doc("part-d", "operations", Some("big"), true),
+                    // Dropped part of an open epic: under Closed, naming it
+                    dropped(spec_doc("part-d", "operations", Some("big"), true)),
                     // A closed epic and its closed part: under Closed, the part under its epic
                     spec_doc("old", "operations", None, true),
                     spec_doc("old-part", "operations", Some("old"), true),
@@ -987,9 +1003,9 @@ Not yet. Measured by hand.
                 "# billing",
                 "* [part-c](part-c.md) - D. | Status: stable. | Parent: [big](big.md)",
                 "# Closed",
-                "* [old](old.md) - D. | Resolution: Done.",
-                "  * [old-part](old-part.md) - D. | Resolution: Done.",
-                "* [part-d](part-d.md) - D. | Resolution: Done. | Parent: [big](big.md)",
+                "* [old](old.md) - D. | Done: Implemented.",
+                "  * [old-part](old-part.md) - D. | Done: Implemented.",
+                "* [part-d](part-d.md) - D. | Dropped: Implemented. | Parent: [big](big.md)",
             ]
         );
     }

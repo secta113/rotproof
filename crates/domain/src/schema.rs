@@ -129,6 +129,25 @@ pub enum DeadlineKind {
     NoDeadline,
 }
 
+/// How a record of `docs/work/` closed. The status of a closed record is `deprecated` whichever it was: OKF fixes the
+/// values of `status`, which says where the document is in its life, not what became of the work
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosedAs {
+    /// Done, implemented, or happened
+    Done,
+    /// Dropped or withdrawn: what waited on it did not get it
+    Dropped,
+}
+
+impl ClosedAs {
+    pub fn name(self) -> &'static str {
+        match self {
+            ClosedAs::Done => "done",
+            ClosedAs::Dropped => "dropped",
+        }
+    }
+}
+
 /// The frontmatter of one work item.
 #[derive(Debug, Clone)]
 pub struct Item {
@@ -140,6 +159,8 @@ pub struct Item {
     /// `Draft` = open, nobody has sorted it yet / `Stable` = open, sorted into a spec / `Deprecated` = closed. A closed
     /// item stays, so references to it keep working
     pub status: Status,
+    /// How it closed: present exactly when `status` is `Deprecated`
+    pub closed_as: Option<ClosedAs>,
     /// The slug of the spec it is a part of: required once it is sorted (`Stable`). Whether it names one is checked
     /// against the other records, which the document alone does not know (`bundle.rs`)
     pub parent: Option<String>,
@@ -185,6 +206,8 @@ pub struct Spec {
     /// The area. The index files group specs by it
     pub tag: String,
     pub status: Status,
+    /// How it closed: present exactly when `status` is `Deprecated`
+    pub closed_as: Option<ClosedAs>,
     /// The slug of the epic this spec is a part of. Whether it names one is checked against the other records, which
     /// the document alone does not know (`bundle.rs`)
     pub parent: Option<String>,
@@ -248,9 +271,15 @@ pub fn work_doc(text: &str) -> Result<WorkDoc, String> {
 /// body.
 #[cfg(test)]
 pub(crate) fn closed_record(text: &str, resolution: &str) -> String {
+    // A record of docs/work/ says how it closed; a knowledge document only that it no longer holds
+    let closed = if text.contains("\ntype: Knowledge\n") {
+        "status: deprecated"
+    } else {
+        "status: deprecated\nclosed_as: done"
+    };
     let text = text
-        .replace("status: stable", "status: deprecated")
-        .replace("status: draft", "status: deprecated");
+        .replace("status: stable", closed)
+        .replace("status: draft", closed);
     let end = text[4..]
         .find("\n---\n")
         .expect("a record with frontmatter")
@@ -353,6 +382,7 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
         status(&[Status::Draft, Status::Stable, Status::Deprecated]),
     );
     let tag = fields.required("tags", one_tag);
+    let closed_as = closed_as(fields, status);
     let parent = fields.optional("parent", slug);
     fields.optional("verified", stamps);
     fields.optional("stale_after", time);
@@ -362,8 +392,41 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
         description: description?,
         tag: tag?,
         status: status?,
+        closed_as: closed_as?,
         parent: parent?,
     })
+}
+
+/// How a record with `status` closed: required once it is closed, and wrong while it is open. When the status itself
+/// could not be read, only the value is checked.
+fn closed_as(fields: &mut Fields, status: Option<Status>) -> Read<Option<ClosedAs>> {
+    let closed_as = fields.optional("closed_as", |value| match text(value)?.as_str() {
+        "done" => Ok(ClosedAs::Done),
+        "dropped" => Ok(ClosedAs::Dropped),
+        other => Err(format!("{other:?} is not one of [\"done\", \"dropped\"]")),
+    })?;
+    match (status?, closed_as) {
+        (Status::Deprecated, None) => {
+            fields.wrong(
+                "closed_as",
+                "missing: a closed record says how it closed, done (implemented, done or happened) or dropped \
+                 (dropped or withdrawn)",
+            );
+            None
+        }
+        (Status::Deprecated, found) => Some(found),
+        (open, Some(_)) => {
+            fields.wrong(
+                "closed_as",
+                format!(
+                    "only a closed record (status: deprecated) says how it closed; this one is {}",
+                    open.name()
+                ),
+            );
+            None
+        }
+        (_, None) => Some(None),
+    }
 }
 
 fn knowledge_fields(fields: &mut Fields) -> Option<Knowledge> {
@@ -423,6 +486,7 @@ fn item(fields: &mut Fields) -> Option<Item> {
         "status",
         status(&[Status::Draft, Status::Stable, Status::Deprecated]),
     );
+    let closed_as = closed_as(fields, status);
     let parent = fields.optional("parent", slug);
     let filed = fields.required("filed", date);
     let verified = fields.required("verified", stamps);
@@ -435,6 +499,7 @@ fn item(fields: &mut Fields) -> Option<Item> {
         description: description?,
         tag: tag?,
         status: status?,
+        closed_as: closed_as?,
         parent: parent?,
         filed: filed?,
         verified: verified?,
@@ -915,6 +980,66 @@ Not yet.
     }
 
     #[test]
+    fn a_closed_record_says_how_it_closed() {
+        for (closed_as, expected) in [("done", ClosedAs::Done), ("dropped", ClosedAs::Dropped)] {
+            let item = closed_record(GOOD, "Nothing found.")
+                .replace("closed_as: done", &format!("closed_as: {closed_as}"));
+            let Ok(WorkDoc::Item(item, _)) = work_doc(&item) else {
+                panic!("{:?}", work_doc(&item).err());
+            };
+            assert_eq!(item.closed_as, Some(expected));
+            let spec_text = closed_record(SPEC, "Dropped.")
+                .replace("closed_as: done", &format!("closed_as: {closed_as}"));
+            assert_eq!(
+                spec(&spec_text).map(|(spec, _)| spec.closed_as),
+                Ok(Some(expected))
+            );
+        }
+        let bad = [
+            (
+                "closed without it",
+                closed_record(GOOD, "Fixed.").replace("closed_as: done\n", ""),
+                "closed_as: missing: a closed record says how it closed",
+            ),
+            (
+                "a spec closed without it",
+                closed_record(SPEC, "Done.").replace("closed_as: done\n", ""),
+                "closed_as: missing",
+            ),
+            (
+                "open with it",
+                good("status: stable", "status: stable\nclosed_as: done"),
+                "closed_as: only a closed record (status: deprecated) says how it closed; this one is stable",
+            ),
+            (
+                "a draft with it",
+                good(
+                    "status: stable\nparent: big-work",
+                    "status: draft\nclosed_as: dropped",
+                ),
+                "this one is draft",
+            ),
+            (
+                "another value",
+                closed_record(GOOD, "Fixed.").replace("closed_as: done", "closed_as: fixed"),
+                "closed_as: \"fixed\" is not one of [\"done\", \"dropped\"]",
+            ),
+        ];
+        for (name, text, said) in bad {
+            let why = work_doc(&text).err().unwrap_or_default();
+            assert!(why.contains(said), "{name}: {why:?}");
+        }
+        // A knowledge document only stops holding: it has no work to finish or drop
+        let knowledge = closed_record(KNOWLEDGE, "Replaced.")
+            .replace("status: deprecated", "status: deprecated\nclosed_as: done");
+        let why = knowledge_doc(&knowledge).err().unwrap_or_default();
+        assert!(
+            why.contains("closed_as is a field of a work item or a spec"),
+            "{why:?}"
+        );
+    }
+
+    #[test]
     fn a_sorted_item_has_a_parent_and_an_unsorted_one_is_a_draft() {
         let unsorted = good("status: stable\nparent: big-work", "status: draft");
         let Ok(WorkDoc::Item(item, _)) = work_doc(&unsorted) else {
@@ -1022,8 +1147,8 @@ Text.
     fn a_closed_item_opens_with_its_resolution() {
         let closed = closed_record(GOOD, "Fixed.");
         assert!(work_doc(&closed).is_ok(), "{:?}", work_doc(&closed).err());
-        let at_the_end =
-            good("status: stable", "status: deprecated") + "\n# Resolution\n\nFixed.\n";
+        let at_the_end = good("status: stable", "status: deprecated\nclosed_as: done")
+            + "\n# Resolution\n\nFixed.\n";
         assert_eq!(
             work_doc(&at_the_end).err(),
             Some(
@@ -1041,6 +1166,7 @@ Text.
         assert_eq!(
             *OWN_FIELDS,
             [
+                ("closed_as", vec!["work item", "spec"]),
                 ("parent", vec!["work item", "spec"]),
                 ("filed", vec!["work item"]),
                 ("deadline_kind", vec!["work item"]),
@@ -1530,8 +1656,8 @@ Something.
         let closed = closed_record(SPEC, "Done.");
         assert!(spec(&closed).is_ok(), "{:?}", spec(&closed).err());
         // The Resolution at the end, as it was written before it had to come first
-        let at_the_end =
-            SPEC.replace("status: stable", "status: deprecated") + "\n# Resolution\n\nDone.\n";
+        let at_the_end = SPEC.replace("status: stable", "status: deprecated\nclosed_as: done")
+            + "\n# Resolution\n\nDone.\n";
         assert_eq!(
             spec(&at_the_end).err(),
             Some(

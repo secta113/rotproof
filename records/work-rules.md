@@ -34,6 +34,7 @@ names one record of either type. The frontmatter holds the fields used for filte
 | `description` | One sentence: what the spec changes |
 | `tags` | Exactly one area, one of the `areas` declared in `.config/rotproof.toml`. The index groups records by it, in that order |
 | `status` | `draft` (not agreed yet), `stable` (agreed) or `deprecated` (closed) |
+| `closed_as` | Only when closed, and then required: `done` (implemented) or `dropped`. See "Closed records" |
 | `parent` | Optional. The slug of the epic this spec is a part of. See "Parents" |
 
 The body is free, except that a closed spec opens with `# Resolution`: its first heading.
@@ -45,8 +46,8 @@ The body is free, except that a closed spec opens with `# Resolution`: its first
   out of date unnoticed. Why one step comes before another is a decision, and goes in the spec.
 - **Whether work is left is not the spec's status.** `stable` says only that the spec was agreed; the open work items
   under it say what is left.
-- **Closing a spec leaves it where it is.** Set `status: deprecated` and write `# Resolution` as its first heading:
-  implemented or dropped, and how the implementation differs from the spec. From then on it is history. A spec closes
+- **Closing a spec leaves it where it is.** Set `status: deprecated` and `closed_as`, and write `# Resolution` as its
+  first heading: implemented or dropped, and how the implementation differs from the spec. From then on it is history. A spec closes
   after its children (see "Parents").
 
 # Work items
@@ -58,6 +59,7 @@ The body is free, except that a closed spec opens with `# Resolution`: its first
 | `description` | One sentence: what is waiting |
 | `tags` | Exactly one area, one of the `areas` declared in `.config/rotproof.toml`. The index groups records by it, in that order |
 | `status` | `draft` (open, nobody has sorted it yet), `stable` (open, sorted into a spec) or `deprecated` (closed) |
+| `closed_as` | Only when closed, and then required: `done` or `dropped`. See "Closed records" |
 | `parent` | The slug of the spec it is a part of. Required for `stable`; a draft may have none. See "Parents" |
 | `filed` | Date the item was filed |
 | `verified` | Who measured the state and when: `{by, at}`, or a list of them. `at` is a datetime with a time zone. `by` is `human:<id>` for a person, `<producer>/<version>` for an agent (example: `claude-code/claude-opus-5-5`), or `process:<id>` |
@@ -99,8 +101,8 @@ decides it, in one of four ways:
 1. **Into an existing spec:** set `parent` to the spec and `status: stable`. The item stays, as a part of the spec.
 2. **Into a new spec:** write the spec, then do as in 1.
 3. **Postponed:** keep it a draft, with a new trigger and deadline.
-4. **Nothing to do:** close it (`status: deprecated`), and say in `# Resolution` that nothing was found or why it was
-   dropped. A closed item needs no parent.
+4. **Nothing to do:** close it (`status: deprecated`, `closed_as: dropped`), and say in `# Resolution` that nothing
+   was found or why it was dropped. A closed item needs no parent.
 
 ## Re-measuring
 
@@ -135,10 +137,15 @@ more than one area (see "Areas"). A spec that has grown in one area is split the
 
 # Closed records
 
-**A closed record stays where it is.** Set `status: deprecated` and write `# Resolution` as the first heading, so a
-reader who opens the record from a link, or an agent reading from the top, meets the closing first; the index lists
-it under `# Closed`. Deleting or moving a record breaks every link to it, and rewriting the links puts lines that have
+**A closed record stays where it is.** Set `status: deprecated`, say how it closed in `closed_as`, and write
+`# Resolution` as the first heading, so a reader who opens the record from a link, or an agent reading from the top,
+meets the closing first; the index lists it under `# Closed`. Deleting or moving a record breaks every link to it, and rewriting the links puts lines that have
 nothing to do with the closing into its review.
+
+**A closed record says how it closed:** `closed_as: done` when it was implemented or done, `closed_as: dropped` when it
+was dropped. The status of both is `deprecated`, as OKF fixes the values of `status`: it says where the document is in
+its life, not what became of the work. What waits on a record needs to know which it was: work that waits for a
+dropped record does not get what it waited for. `closed_as` is written only when the record is closed.
 
 **Links between documents are markdown links.**
 
@@ -152,7 +159,8 @@ spec per area, and tie them back together as parts of an epic.
 [index.md](index.md) is generated: the open records by area, then the closed records under `# Closed`. A record in the
 same area as its parent, and open or closed as its parent is, is listed under it, indented; any other record with a
 parent is listed on its own with `Parent: [<title>](...)` after its line. Under a heading or a parent, the specs come
-first, then the work items. An item nobody has sorted yet says `Status: draft.`
+first, then the work items. An item nobody has sorted yet says `Status: draft.`, and a closed record says how it
+closed, `Done:` or `Dropped:`, before the first sentence of its resolution.
 
 After adding or changing a record, run `rotproof index`. `rotproof check` fails when the index differs from what
 `rotproof index` writes.
@@ -161,6 +169,7 @@ After adding or changing a record, run `rotproof index`. `rotproof check` fails 
 
 - `parent` is an extension field, which OKF allows. OKF expresses relations between documents with links and the
   prose around them; `parent` is a field so that Rotproof can check it. The index writes it as a link.
+- `closed_as` is an extension field. OKF's `status: deprecated` says that a document is closed; `closed_as` says how.
 - A field that looks like a misspelling of a known field (`stale_afer`, `staleAfter`, `Title`) fails the check, so a
   misspelled optional field is not silently dropped. So does a field Rotproof no longer reads (`epic`), with what to
   write instead. OKF tells readers not to reject unknown fields; this is a check on the writer's side. Any other

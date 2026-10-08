@@ -296,9 +296,10 @@ says to read the changes first (a hash says only that the code changed), asks fo
 shell has none), writes the new hashes, and prints the log lines to write. What is gone is left for the person to
 edit. No LLM judges whether the meaning changed: the agent that refactors is usually one.
 
-A record stays where it was written when it closes: its status says it is closed, and the index lists it under
-`# Closed`. Its path, and every link to it, never changes, so closing a record is a change to that record and its
-index line only.
+A record stays where it was written when it closes: its status says it is closed, `closed_as` says how (`done` or
+`dropped`), and the index lists it under `# Closed`. Its path, and every link to it, never changes, so closing a record
+is a change to that record and its index line only. How it closed is a field and not only words in its resolution, as
+work that waits on a dropped record does not get what it waited for; `status` cannot say it, as OKF fixes its values.
 
 Every spec, work item and knowledge document belongs to exactly one area: its only tag, one of the `areas` the
 declaration lists. The index files group by area, in the order of `areas`, so the project puts the largest or most
@@ -336,6 +337,7 @@ title: Some problem
 description: One sentence: what is waiting.
 tags: [area]                  # exactly one, declared in areas; the index groups items by it
 status: stable                # draft = open and not sorted yet, stable = open and sorted, deprecated = closed
+closed_as: done               # only when closed, and then required: done or dropped
 parent: some-spec             # the spec it is a part of; required for stable
 filed: 2026-10-01
 verified: {by: human:someone, at: 2026-10-01T10:00:00+09:00}
@@ -445,8 +447,9 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   does not count. The text is one name exactly as defined (``[`render_index`](../tests/bundle.py)``), not a call
   (`render_index()`) or a dotted path (`Bundle.render`); when it names nothing, the message says which name to write
   or lists the names the file defines.
-- **Every spec keeps the format:** `title`, `description`, `status` and exactly one declared area in `tags`, and a
-  non-empty `# Resolution` as the first heading once it is closed. `parent`, when present, is the slug of another spec in `docs/work/`
+- **Every spec keeps the format:** `title`, `description`, `status` and exactly one declared area in `tags`, and,
+  once it is closed, `closed_as` and a non-empty `# Resolution` as the first heading. `closed_as` is `done` or `dropped`,
+  and only a closed spec or work item has it. `parent`, when present, is the slug of another spec in `docs/work/`
   (not a path, not a work item or a guide, not the spec itself), and that spec has no `parent` of its own: one level
   only. The `parent` of a work item is the slug of any spec. A record that breaks one of these is left out of the index
   files.
