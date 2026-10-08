@@ -128,7 +128,7 @@ fn a_record_with_a_byte_order_mark_passes() {
     fs::write(
         docs.join("work/x.md"),
         "\u{feff}---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: draft\nfiled: 2026-10-01\n\
-         verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
+         verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\nuntil: [next-milestone]\n---\n\n\
          # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n",
     )
     .unwrap();
@@ -153,22 +153,33 @@ fn each_broken_rule_fails_under_its_check() {
     let item = |details: &str| {
         format!(
             "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: draft\nfiled: 2026-10-01\n\
-             verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
+             verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\nuntil: [next-milestone]\n---\n\n\
              # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n{details}\n"
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 21] = [
+    let cases: [(&str, &str, String); 23] = [
         // Done before the milestone it comes after
         (
             "the arrows keep their order",
             "docs/work/x.md",
             item("[log](/log.md)")
-                .replace(
-                    "status: draft",
-                    "status: deprecated\nclosed_as: done\nafter: [next-milestone]",
-                )
+                .replace("status: draft", "status: deprecated\nclosed_as: done")
+                .replace("until: [next-milestone]", "after: [next-milestone]")
                 .replace("# Trigger", "# Resolution\n\nDone.\n\n# Trigger"),
+        ),
+        // Open, with no parent and nothing after it: nothing says by when it is done
+        (
+            "every open record has a parent or something after it",
+            "docs/work/x.md",
+            item("[log](/log.md)").replace("until: [next-milestone]\n", ""),
+        ),
+        // A deadline in words, from before the milestones
+        (
+            "every document in docs/work/ keeps the format",
+            "docs/work/x.md",
+            item("[log](/log.md)")
+                .replace("until: [next-milestone]", "deadline: until the next deploy"),
         ),
         ("the bundle is seen", "docs/work/rules.md", String::new()),
         (
@@ -346,8 +357,7 @@ fn a_parent_and_its_children_are_checked_together() {
     let item = |parent: &str| {
         format!(
             "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nparent: {parent}\n\
-             filed: 2026-10-01\nverified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\ndeadline_kind: none\n\
-             deadline: an alarm\n---\n\n# Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
+             filed: 2026-10-01\nverified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\n---\n\n# Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
         )
     };
     // (the check that must name it, the parent's status, the child)
@@ -543,8 +553,6 @@ status: draft
 filed: 2020-01-01
 verified: {by: human:someone, at: 2020-01-02T10:00:00+09:00}
 stale_after: 2021-01-01T00:00:00+09:00
-deadline_kind: none
-deadline: an alarm
 ---
 
 # Trigger
@@ -969,7 +977,7 @@ fn record(kind: &str, tag: &str) -> String {
     match kind {
         "item" => format!(
             "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: draft\nfiled: 2026-10-01\n\
-             verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\ndeadline_kind: none\ndeadline: an alarm\n---\n\n\
+             verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\nuntil: [next-milestone]\n---\n\n\
              # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
         ),
         _ => format!(

@@ -18,6 +18,8 @@
 //!   item's `parent` names a spec, and no closed spec has an open child.
 //! - **The arrows keep their order** (`arrows.rs`): an arrow is written once, the later record closes after the earlier
 //!   one, nothing waits for or is bounded by a dropped record, and the arrows and the parents make no cycle.
+//! - **Every open record has a parent or something after it** (`arrows.rs`): an open spec or work item without a
+//!   parent is bounded by an arrow, its own `until` or another record's `after`, so all open work reaches a milestone.
 //! - **A milestone is open**: there is always a next moment for the work to wait for. A milestone whose `date` has
 //!   passed fails nothing; `rotproof index` lists it.
 //! - **`docs/` is one OKF bundle**: every document is a known type in the directory for its type, every file Rotproof
@@ -286,6 +288,10 @@ fn records(
     add(
         "the arrows keep their order",
         domain::arrows::problems(&work),
+    );
+    add(
+        "every open record has a parent or something after it",
+        domain::arrows::unbounded(&work),
     );
     add(
         "a milestone is open",

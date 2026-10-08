@@ -20,13 +20,16 @@ use utils::frontmatter::{Sections, first_heading, split};
 pub type Time = DateTime<FixedOffset>;
 
 /// Body headings every work item needs. A closed item also needs `CLOSED_SECTION`
-pub const SECTIONS: [&str; 3] = ["Trigger", "State", "Details"];
+pub const SECTIONS: [&str; 2] = ["State", "Details"];
+/// A body heading a work item may have: what starts it, when that is not a record its `after` can name. Not empty when
+/// it is there
+pub const TRIGGER_SECTION: &str = "Trigger";
 pub const CLOSED_SECTION: &str = "Resolution";
-/// The fields some types read and others do not, each with the types that read it: a work item's `filed`,
-/// `deadline_kind` and `deadline`, the `parent` of a work item and a spec, and a knowledge document's `follows`. Found
-/// from the readers, so a field added to a type is in it with no list to update. On a type that does not read it, one
-/// is not an extension: it is a sign of the wrong `type`, under which the item's trigger and deadline, or the record's
-/// place in the tree, would go unchecked
+/// The fields some types read and others do not, each with the types that read it: a work item's `filed`, the
+/// `parent` of a work item and a spec, the arrows of the records of `docs/work/`, a milestone's `date` and a knowledge
+/// document's `follows`. Found from the readers, so a field added to a type is in it with no list to update. On a type
+/// that does not read it, one is not an extension: it is a sign of the wrong `type`, under which the record's place in
+/// the tree or in the order of the work would go unchecked
 static OWN_FIELDS: LazyLock<Vec<(&'static str, Vec<&'static str>)>> = LazyLock::new(|| {
     let readers = [
         (
@@ -78,30 +81,25 @@ static OWN_FIELDS: LazyLock<Vec<(&'static str, Vec<&'static str>)>> = LazyLock::
 
 /// Fields Rotproof read once and reads no more, each with what to write instead. One left in a record would otherwise
 /// pass as an extension, and what it said would go unchecked without a word
-const RETIRED: [(&str, &str); 1] = [(
-    "epic",
-    "no longer read; write the slug of the epic in parent",
-)];
+const RETIRED: [(&str, &str); 3] = [
+    (
+        "epic",
+        "no longer read; write the slug of the epic in parent",
+    ),
+    (
+        "deadline_kind",
+        "no longer read; write the moment the deadline names as a milestone, and its slug in until",
+    ),
+    (
+        "deadline",
+        "no longer read; write the moment it names as a milestone, and its slug in until",
+    ),
+];
 
 // OKF actors (section 7): `<producer>/<version>` for an agent, `human:<id>` for a person, `process:<id>`. OKF does not
 // limit the characters of `<id>` (its own samples use `human:jsmith@acme`), so only whitespace is excluded
 static ACTOR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:human:\S+|process:\S+|[^\s:/]+/\S+)$").unwrap());
-// A deadline that is only a date or a datetime. Deadlines are events, and the reason for having none is not a date
-// either. Only the notation of the date is read, not the words around it, so an event in any language passes: the
-// language of the content is left to the project
-static DATE_ONLY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?x)^\s*(?:
-            \d{4}-\d{1,2}(?:-\d{1,2})?            # 2026-10-31, 2026-10
-          | \d{4}/\d{1,2}(?:/\d{1,2})?            # 2026/10/31, 2026/10
-          | \d{4}\.\d{1,2}\.\d{1,2}                # 2026.10.31 (2026.10 alone reads as a version)
-          | \d{1,2}[-/.]\d{1,2}[-/.]\d{4}          # 31.10.2026, 10/31/2026
-          | \d{4}\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?  # 2026年10月31日, 2026年10月
-        )(?:[T\ ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?\s*$",
-    )
-    .unwrap()
-});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -125,14 +123,6 @@ impl Status {
 pub struct Stamp {
     pub by: String,
     pub at: Time,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeadlineKind {
-    /// Dropped if the trigger has not happened by the event in `deadline`
-    Until,
-    /// No deadline, with the reason in `deadline`
-    NoDeadline,
 }
 
 /// How a record of `docs/work/` closed. The status of a closed record is `deprecated` whichever it was: OKF fixes the
@@ -174,10 +164,8 @@ pub struct Item {
     pub filed: NaiveDate,
     /// Never empty. As in OKF, written as one mapping or a list of them
     pub verified: Vec<Stamp>,
-    pub deadline_kind: DeadlineKind,
-    pub deadline: String,
     /// When the recorded state goes out of date with time alone, the time after which it should be measured again.
-    /// Unlike the deadline, it does not end the item, and passing it does not fail the check
+    /// It does not end the item, and passing it does not fail the check
     pub stale_after: Option<Time>,
 }
 
@@ -311,9 +299,15 @@ pub fn work_doc(text: &str) -> Result<WorkDoc, String> {
         .iter()
         .copied()
         .chain((item.status == Status::Deprecated).then_some(CLOSED_SECTION));
-    let empty: Vec<&str> = required
+    let mut empty: Vec<&str> = required
         .filter(|s| sections.get(*s).is_none_or(|text| text.is_empty()))
         .collect();
+    if sections
+        .get(TRIGGER_SECTION)
+        .is_some_and(|text| text.is_empty())
+    {
+        empty.insert(0, TRIGGER_SECTION);
+    }
     if !empty.is_empty() {
         return Err(format!("body headings missing or empty: {empty:?}"));
     }
@@ -575,8 +569,6 @@ fn item(fields: &mut Fields) -> Option<Item> {
     let arrows = arrows(fields);
     let filed = fields.required("filed", date);
     let verified = fields.required("verified", stamps);
-    let deadline_kind = fields.required("deadline_kind", deadline_kind);
-    let deadline = fields.required("deadline", one_line);
     let stale_after = fields.optional("stale_after", time);
     okf_optional(fields);
     let item = Item {
@@ -589,8 +581,6 @@ fn item(fields: &mut Fields) -> Option<Item> {
         arrows: arrows?,
         filed: filed?,
         verified: verified?,
-        deadline_kind: deadline_kind?,
-        deadline: deadline?,
         stale_after: stale_after?,
     };
     if item.status == Status::Stable && item.parent.is_none() {
@@ -598,12 +588,6 @@ fn item(fields: &mut Fields) -> Option<Item> {
             "parent",
             "missing: a sorted work item (status: stable) is a part of a spec; one nobody has sorted yet is \
              status: draft",
-        );
-    }
-    if DATE_ONLY.is_match(&item.deadline) {
-        fields.wrong(
-            "deadline",
-            format!("is an event or a reason, not a date: {}", item.deadline),
         );
     }
     if item.verified.is_empty() {
@@ -825,14 +809,6 @@ fn status(allowed: &'static [Status]) -> impl Fn(&Yaml) -> Result<Status, String
     }
 }
 
-fn deadline_kind(value: &Yaml) -> Result<DeadlineKind, String> {
-    match text(value)?.as_str() {
-        "until" => Ok(DeadlineKind::Until),
-        "none" => Ok(DeadlineKind::NoDeadline),
-        other => Err(format!("{other:?} is not one of [\"until\", \"none\"]")),
-    }
-}
-
 fn date(value: &Yaml) -> Result<NaiveDate, String> {
     let s = text(value)?;
     NaiveDate::parse_from_str(&s, "%Y-%m-%d").map_err(|_| format!("not a date (YYYY-MM-DD): {s}"))
@@ -1050,8 +1026,7 @@ status: stable
 parent: big-work
 filed: 2026-09-27
 verified: {by: human:someone, at: 2026-09-28T10:00:00+09:00}
-deadline_kind: until
-deadline: until the next deploy
+until: [next-release]
 ---
 
 # Trigger
@@ -1170,9 +1145,9 @@ The release workflow of tag v0.3.0 passes every job.
                 "parent is a field of a work item or a spec",
             ),
             (
-                "a trigger and a deadline",
+                "a deadline",
                 MILESTONE.replace("status: stable", "status: stable\ndeadline: x"),
-                "deadline is a field of a work item",
+                "deadline: no longer read",
             ),
         ];
         for (name, text, said) in bad {
@@ -1187,10 +1162,29 @@ The release workflow of tag v0.3.0 passes every job.
     }
 
     #[test]
+    fn a_trigger_is_written_only_when_an_arrow_cannot_say_it() {
+        // What starts most work is a record before it, which after names; the trigger is for what is no record
+        let without = good("# Trigger\n\nThe next deploy\n\n", "");
+        assert!(work_doc(&without).is_ok(), "{:?}", work_doc(&without).err());
+        let empty = good("# Trigger\n\nThe next deploy\n", "# Trigger\n");
+        assert_eq!(
+            work_doc(&empty).err(),
+            Some("body headings missing or empty: [\"Trigger\"]".into())
+        );
+        // The state is measured and the history linked, whatever started the work
+        for heading in [
+            "# State\n\nNot yet.\n",
+            "# Details\n\n[somewhere](/log.md)\n",
+        ] {
+            assert!(work_doc(&good(heading, "")).is_err(), "{heading}");
+        }
+    }
+
+    #[test]
     fn an_arrow_is_a_list_of_slugs() {
         let Ok(WorkDoc::Item(item, _)) = work_doc(&good(
-            "parent: big-work",
-            "parent: big-work\nafter: [a, b]\nuntil: [release]",
+            "until: [next-release]",
+            "after: [a, b]\nuntil: [release]",
         )) else {
             panic!("a list of slugs did not pass");
         };
@@ -1220,7 +1214,7 @@ The release workflow of tag v0.3.0 passes every job.
             ),
         ];
         for (name, field, said) in bad {
-            let text = good("parent: big-work", &format!("parent: big-work\n{field}"));
+            let text = good("until: [next-release]", field);
             let why = work_doc(&text).err().unwrap_or_default();
             assert!(why.contains(said), "{name}: {why:?}");
         }
@@ -1418,8 +1412,6 @@ Text.
                 ("after", vec!["work item", "spec", "milestone"]),
                 ("until", vec!["work item", "spec", "milestone"]),
                 ("filed", vec!["work item"]),
-                ("deadline_kind", vec!["work item"]),
-                ("deadline", vec!["work item"]),
                 ("date", vec!["milestone"]),
                 ("follows", vec!["knowledge document"]),
             ]
@@ -1568,26 +1560,8 @@ Text.
             ),
             // The content may be in any language
             (
-                "a deadline in Japanese",
-                good(
-                    "deadline: until the next deploy",
-                    "deadline: 次のデプロイまで",
-                ),
-            ),
-            // An event may carry a date; only a date alone is not an event
-            (
-                "an event with a date in it",
-                good(
-                    "deadline: until the next deploy",
-                    "deadline: until the release planned for 2026/10/31",
-                ),
-            ),
-            (
-                "an event with a Japanese date in it",
-                good(
-                    "deadline: until the next deploy",
-                    "deadline: 2026年10月31日のリリースまで",
-                ),
+                "a title in Japanese",
+                good("title: Some problem", "title: 次のデプロイで直す"),
             ),
             // Quoting does not change a value (YAML 1.2). PyYAML read a quoted datetime as a string, and it failed
             (
@@ -1603,10 +1577,6 @@ Text.
                 "an actor with an at sign",
                 good("human:someone", "human:jsmith@acme"),
             ),
-            (
-                "no deadline, with the reason",
-                good("deadline_kind: until", "deadline_kind: none"),
-            ),
         ];
         let failed = failing(&okf);
         assert!(failed.is_empty(), "{failed:?}");
@@ -1620,7 +1590,6 @@ Text.
     #[test]
     fn a_broken_document_is_caught() {
         let bad = [
-            ("no trigger", good("# Trigger\n\nThe next deploy\n\n", "")),
             ("empty state", good("Not yet.\n", "")),
             // A reader of the rendered page sees neither a comment nor what a code block holds
             (
@@ -1676,68 +1645,18 @@ Text.
                 "actor with a space",
                 good("human:someone", "'human:some one'"),
             ),
+            // The fields before arrows and milestones: each says what to write instead
             (
-                "deadline is a date",
-                good("deadline: until the next deploy", "deadline: 2026-12-31"),
-            ),
-            (
-                "deadline is a quoted date",
+                "a deadline",
                 good(
-                    "deadline: until the next deploy",
-                    "deadline: \"2026-12-31\"",
+                    "status: stable",
+                    "status: stable\ndeadline: until the next deploy",
                 ),
             ),
             (
-                "deadline is a datetime",
-                good(
-                    "deadline: until the next deploy",
-                    "deadline: \"2026-12-31T00:00:00+09:00\"",
-                ),
+                "a deadline kind",
+                good("status: stable", "status: stable\ndeadline_kind: none"),
             ),
-            // A date in another notation is still only a date
-            (
-                "deadline is a date with slashes",
-                good("deadline: until the next deploy", "deadline: 2026/10/31"),
-            ),
-            (
-                "deadline is a date with dots, day first",
-                good("deadline: until the next deploy", "deadline: 31.10.2026"),
-            ),
-            (
-                "deadline is a date, month first",
-                good("deadline: until the next deploy", "deadline: 10/31/2026"),
-            ),
-            (
-                "deadline is a month",
-                good("deadline: until the next deploy", "deadline: 2026-10"),
-            ),
-            (
-                "deadline is a date in Japanese",
-                good(
-                    "deadline: until the next deploy",
-                    "deadline: 2026年10月31日",
-                ),
-            ),
-            (
-                "deadline is a month in Japanese",
-                good("deadline: until the next deploy", "deadline: 2026年10月"),
-            ),
-            (
-                "deadline is a date and a time with slashes",
-                good(
-                    "deadline: until the next deploy",
-                    "deadline: \"2026/10/31 18:00\"",
-                ),
-            ),
-            // The reason for having no deadline is not a date either
-            (
-                "no deadline, with a date for the reason",
-                good(
-                    "deadline_kind: until\ndeadline: until the next deploy",
-                    "deadline_kind: none\ndeadline: 2026-12-31",
-                ),
-            ),
-            ("no deadline kind", good("deadline_kind: until\n", "")),
             (
                 "unknown field",
                 good("status: stable", "status: stable\nstatu: stable"),
@@ -1808,10 +1727,6 @@ Text.
             ),
             // Spaces alone are as empty as nothing
             ("a blank title", good("title: Some problem", "title: \" \"")),
-            (
-                "a blank deadline",
-                good("deadline: until the next deploy", "deadline: \"  \""),
-            ),
             ("an empty tag", good("tags: [operations]", "tags: [\"\"]")),
             ("a blank tag", good("tags: [operations]", "tags: [\" \"]")),
             // The index lists each of these on one line: a line break would end the entry and start another
@@ -1825,13 +1740,6 @@ Text.
             (
                 "a title on two lines",
                 good("title: Some problem", "title: \"Some\\nproblem\""),
-            ),
-            (
-                "a deadline on two lines",
-                good(
-                    "deadline: until the next deploy",
-                    "deadline: \"until\\r\\nthe next deploy\"",
-                ),
             ),
             (
                 "a tag on two lines",
@@ -1851,21 +1759,15 @@ Text.
             ),
             (
                 "stale_after equal to the verified time",
-                good(
-                    "deadline_kind:",
-                    "stale_after: 2026-09-28T10:00:00+09:00\ndeadline_kind:",
-                ),
+                good("filed:", "stale_after: 2026-09-28T10:00:00+09:00\nfiled:"),
             ),
             (
                 "stale_after date only",
-                good("deadline_kind:", "stale_after: 2027-03-31\ndeadline_kind:"),
+                good("filed:", "stale_after: 2027-03-31\nfiled:"),
             ),
             (
                 "stale_after not a date",
-                good(
-                    "deadline_kind:",
-                    "stale_after: in six months\ndeadline_kind:",
-                ),
+                good("filed:", "stale_after: in six months\nfiled:"),
             ),
             (
                 "a work item's fields under type Spec",

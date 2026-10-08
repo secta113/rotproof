@@ -10,8 +10,8 @@ use chrono::NaiveDate;
 
 use crate::layers::DECLARATION;
 use crate::schema::{
-    CLOSED_SECTION, ClosedAs, DeadlineKind, Guide, Item, Knowledge, KnowledgeDoc, Milestone, Spec,
-    Status, Time, WorkDoc, knowledge_doc, work_doc,
+    CLOSED_SECTION, ClosedAs, Guide, Item, Knowledge, KnowledgeDoc, Milestone, Spec, Status, Time,
+    WorkDoc, knowledge_doc, work_doc,
 };
 use utils::frontmatter::{Sections, split};
 use yaml_rust2::Yaml;
@@ -413,9 +413,9 @@ struct Entry<'a> {
 ///
 /// Each entry has the OKF form `* [title](target) - description`, with the frontmatter's `description`, and adds after
 /// ` | ` what a reader needs: an open spec its status; an open item its status when nobody has sorted it yet, the date
-/// of the last measurement, the first sentence of its state and its deadline; a closed record how it closed (`Done:`
-/// or `Dropped:`) and the first sentence of its resolution. The separator is a symbol so the parts stay apart in any
-/// language.
+/// of the last measurement and the first sentence of its state; an open record its arrows (what it waits for, and what
+/// waits for it); a closed record how it closed (`Done:` or `Dropped:`) and the first sentence of its resolution. The
+/// separator is a symbol so the parts stay apart in any language.
 pub fn render_work(work: &Work, areas: &[String]) -> String {
     let records = crate::arrows::records(work);
     let waiting = crate::arrows::waiting(work);
@@ -621,16 +621,12 @@ fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
     } else {
         ""
     };
-    let deadline = match item.deadline_kind {
-        DeadlineKind::Until => format!("Deadline: {}", item.deadline),
-        DeadlineKind::NoDeadline => "No deadline.".to_string(),
-    };
     let stale = item
         .stale_after
         .map(|at| format!(" | Re-measure after {}.", at.date_naive()))
         .unwrap_or_default();
     format!(
-        "{start}{unsorted} | State ({measured}): {} | {deadline}{stale}",
+        "{start}{unsorted} | State ({measured}): {}{stale}",
         first_sentence(&sections["State"])
     )
 }
@@ -751,8 +747,6 @@ tags: [operations]
 status: draft
 filed: 2026-09-27
 verified: {by: human:someone, at: 2026-09-28T08:00:00+09:00}
-deadline_kind: until
-deadline: until the next deploy
 ---
 
 # Trigger
@@ -800,12 +794,11 @@ Not yet. Measured by hand.
     }
 
     #[test]
-    fn an_open_item_shows_its_state_and_deadline() {
+    fn an_open_item_shows_its_state() {
         // Measured at 08:00 in +09:00, which is the day before in UTC: the date is the one where it was measured
         let index = render_work(&parsed(&[("good.md", GOOD.into())]), &areas());
         // Nobody has sorted it yet, and the line says so
-        let line = "* [Some problem](good.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet. \
-                    | Deadline: until the next deploy";
+        let line = "* [Some problem](good.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet.";
         assert_eq!(index, format!("{GENERATED}\n\n# operations\n\n{line}\n"));
         // Sorted, it is listed under its spec without a status
         let (spec_name, spec) = spec_doc("big", "operations", None, false);
@@ -814,8 +807,8 @@ Not yet. Measured by hand.
             &parsed(&[("good.md", sorted), (&spec_name, spec)]),
             &areas(),
         );
-        let line = "  * [Some problem](good.md) - Something is wrong. | State (2026-09-28): Not yet. | Deadline: \
-                    until the next deploy";
+        let line =
+            "  * [Some problem](good.md) - Something is wrong. | State (2026-09-28): Not yet.";
         assert_eq!(
             index,
             format!(
@@ -849,10 +842,7 @@ Not yet. Measured by hand.
     fn the_stale_date_is_listed_but_not_judged() {
         // The index shows the stale_after date; whether it has passed is answered by `stale`, given the current time
         // (OKF: stale when now >= stale_after)
-        let fresh = GOOD.replace(
-            "deadline_kind:",
-            "stale_after: 2027-03-31T00:00:00+09:00\ndeadline_kind:",
-        );
+        let fresh = GOOD.replace("filed:", "stale_after: 2027-03-31T00:00:00+09:00\nfiled:");
         let parsed = parsed(&[("fresh.md", fresh), ("plain.md", GOOD.into())]);
         assert!(render_work(&parsed, &areas()).contains("| Re-measure after 2027-03-31."));
         let cutoff = FixedOffset::east_opt(9 * 3600)
@@ -1458,8 +1448,7 @@ Not yet. Measured by hand.
                 "* [later](later.md) - D. | Status: draft. | Date: 2026-12-01.",
                 "* [undated](undated.md) - D.",
                 "# operations",
-                "* [unsorted](unsorted.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet. \
-                 | Deadline: until the next deploy",
+                "* [unsorted](unsorted.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet.",
                 "# Closed",
                 "* [past](past.md) - D. | Done: Pushed.",
                 "* [old](old.md) - D. | Done: Implemented.",

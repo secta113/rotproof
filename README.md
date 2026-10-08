@@ -9,7 +9,7 @@ two structures:
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
   of dependencies stays what it was meant to be.
 - **The specs and records:** what is open, what is being changed, how things are now, and why. Specs and work items
-  (open defects and postponed work, each with a trigger, a state and a deadline), knowledge documents (an API, a data
+  (open defects and postponed work, each with a state and a moment it is done by), knowledge documents (an API, a data
   model, a decision, edited in place and named in the log at every edit), and a log, each kept to strict rules. A
   finding does not stay outside them: a `TODO` or `NOTE` in a code comment fails the check, and a stop hook sends an
   agent back when its last message leaves something open that it did not record.
@@ -34,7 +34,7 @@ direction: from the imports in Python and TypeScript, and from the dependencies 
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 (its `SPEC.md` as of commit `ad30107`): every document has YAML frontmatter with a `type`, `index.md` and `log.md` are
 reserved names, and the log's headings are dates. An OKF reader can read the records as a bundle. The rules on top of
-that format (a work item's trigger, state and deadline, a closed record opening with its resolution, a knowledge
+that format (a work item's state and what it is bounded by, a closed record opening with its resolution, a knowledge
 document's hash in the log, the shape of a log entry) are Rotproof's own, stricter than OKF, and not part of it.
 Rotproof is not an OKF validator.
 
@@ -354,13 +354,11 @@ after: [design]               # optional: the records that come before it
 until: [release-0-3-0]        # optional: the records that come after it, often a milestone
 filed: 2026-10-01
 verified: {by: human:someone, at: 2026-10-01T10:00:00+09:00}
-deadline_kind: until          # until, or none with the reason in deadline
-deadline: until the next deploy
 stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state again
 ---
 
 # Resolution    (only when closed, and then first)
-# Trigger
+# Trigger       (optional: what starts it, when no record after can name holds it)
 # State
 # Details
 ```
@@ -438,15 +436,15 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   message says what the disk has.
 - **The areas are distinct headings:** none is empty, has a space at either end or a line break, and no two differ only in case.
 - **Every work item keeps the format:** the fields above with their types, a `parent` once it is `stable`, and
-  non-empty Trigger, State and Details (and Resolution when closed, as the first heading). A field Rotproof does not know passes as an extension, as OKF allows, unless it looks
+  non-empty State and Details (and Resolution when closed, as the first heading); a Trigger, when there is one, is not
+  empty either. A field Rotproof does not know passes as an extension, as OKF allows, unless it looks
   like a misspelling of a field the document type has (`stale_afer`, `staleAfter`, `Title`), or is a field
-  other types have and this one does not (a work item's `deadline` on a spec, the `parent` of a spec or a work item on
-  a knowledge document), or is a field Rotproof no longer reads (`epic`, which says to write `parent`): those fail, in
-  every document type, as a misspelled optional field would otherwise be silently dropped. A deadline is an event or a reason, never only a date
-  (`2026-10-31`, `2026/10/31`, `31.10.2026`, `2026年10月31日` or a month alone); an event may contain a date. Every
-  time has a time zone. `stale_after` is later than the last `verified`. A required text is not blank (spaces alone
-  are empty), in every document type, and no tag is empty. What the index lists (`title`, `description`, `deadline`
-  and the tags) is on one line: a line break would end the entry and start a heading or an entry of its own. A
+  other types have and this one does not (a work item's `filed` on a spec, the `parent` of a spec or a work item on
+  a knowledge document), or is a field Rotproof no longer reads (`epic`, which says to write `parent`; `deadline_kind`
+  and `deadline`, which say to write the moment as a milestone and name it in `until`): those fail, in every document
+  type, as a misspelled optional field would otherwise be silently dropped. Every time has a time zone. `stale_after` is later than the last `verified`. A required text is not blank (spaces alone
+  are empty), in every document type, and no tag is empty. What the index lists (`title`, `description` and the
+  tags) is on one line: a line break would end the entry and start a heading or an entry of its own. A
   title is written into the index with `[`, `]` and `\` escaped, so it stays the text of its own link. The one tag
   is a declared area, and the message lists the declared ones.
 - **Every link in `# Details` resolves,** with heading anchors computed as GitHub computes them. A path with a drive
@@ -469,6 +467,9 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
 - **A milestone is open,** and every milestone keeps the format: `title`, `description`, `status` and exactly one
   declared area, a non-empty `# Condition`, and once it is closed `closed_as` and a non-empty `# Resolution` as the first
   heading. `date` is a day (`YYYY-MM-DD`). A milestone has no `parent`, and no record names one as its parent.
+- **Every open record has a parent or something after it:** an open spec or work item without a parent has an
+  `until` of its own, or is named in another record's `after`. So every open record reaches a milestone, by its parent
+  or its arrows, and a milestone cannot close while work bounded by it is open: that is the deadline, as records.
 - **The arrows keep their order:** `after` and `until` are lists of slugs of records that pass (not a guide, not the
   record itself). An arrow is written once, on either side; the later record is not closed as done while the earlier
   one is open; no open record comes after, or before, a dropped one; and the arrows and the parents (a child before

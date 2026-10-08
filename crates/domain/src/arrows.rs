@@ -15,6 +15,7 @@ use crate::schema::{Arrows, ClosedAs};
 #[derive(Debug, Clone, Copy)]
 pub struct Record<'a> {
     pub title: &'a str,
+    pub milestone: bool,
     /// `None` while the record is open
     pub closed_as: Option<ClosedAs>,
     pub arrows: &'a Arrows,
@@ -34,6 +35,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
             name.as_str(),
             Record {
                 title: &spec.title,
+                milestone: false,
                 closed_as: spec.closed_as,
                 arrows: &spec.arrows,
                 parent: spec.parent.as_ref(),
@@ -45,6 +47,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
             name.as_str(),
             Record {
                 title: &item.title,
+                milestone: false,
                 closed_as: item.closed_as,
                 arrows: &item.arrows,
                 parent: item.parent.as_ref(),
@@ -56,6 +59,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
             name.as_str(),
             Record {
                 title: &milestone.title,
+                milestone: true,
                 closed_as: milestone.closed_as,
                 arrows: &milestone.arrows,
                 parent: None,
@@ -176,6 +180,30 @@ pub fn problems(work: &Work) -> Vec<String> {
     found
 }
 
+/// The open specs and work items that have no parent and nothing after them, each with what to write. Every other open
+/// record reaches a milestone by its parent or its arrows: an open parent is itself held by its own parent or by what
+/// comes after it, the arrows make no cycle, and a later record is open while an earlier one is (or the arrow fails).
+/// So the work never waits on nothing, and a milestone cannot close while work bounded by it is open.
+pub fn unbounded(work: &Work) -> Vec<String> {
+    let records = records(work);
+    let written = arrows(work);
+    records
+        .iter()
+        .filter(|(name, record)| {
+            record.is_open()
+                && !record.milestone
+                && record.parent.is_none()
+                && !written.keys().any(|(before, _)| before == *name)
+        })
+        .map(|(name, _)| {
+            format!(
+                "work/{name}: has no parent and nothing after it, so nothing says by when it is done: name the \
+                 moment it waits for in until (a milestone: until: [<slug>]), or give it a parent"
+            )
+        })
+        .collect()
+}
+
 /// The sets of records that wait on each other, each sorted, through the arrows and the parents: a child comes before
 /// its parent. Found by which records each one reaches, which is enough for the size of a project's records.
 fn cycles(records: &BTreeMap<&str, Record<'_>>, written: &Written) -> Vec<Vec<String>> {
@@ -281,8 +309,7 @@ mod tests {
             "milestone" => ("Milestone", "", "# Condition\n\nThe tag is pushed.\n"),
             _ => (
                 "Work Item",
-                "filed: 2026-10-01\nverified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\ndeadline_kind: none\n\
-                 deadline: an alarm\n",
+                "filed: 2026-10-01\nverified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\n",
                 "# Trigger\n\nX.\n\n# State\n\nNot yet.\n\n# Details\n\n[log](/log.md)\n",
             ),
         };
@@ -500,6 +527,44 @@ mod tests {
             record("item", "step", "open", "parent: design\nuntil: [design]\n"),
         ]);
         assert_eq!(problems(&all), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_open_record_without_a_parent_has_something_after_it() {
+        let all = read(vec![
+            record("milestone", "release", "open", ""),
+            // Nothing holds these two
+            record("item", "loose", "open", ""),
+            record("spec", "loose-spec", "open", ""),
+            // Its own until, or another's after, or a parent
+            record("item", "bounded", "open", "until: [release]\n"),
+            record("item", "awaited", "open", ""),
+            record(
+                "item",
+                "waiting",
+                "open",
+                "after: [awaited]\nuntil: [release]\n",
+            ),
+            record("spec", "epic", "open", "until: [release]\n"),
+            record("spec", "part", "open", "parent: epic\n"),
+            record("item", "step", "open", "parent: part\n"),
+            // A closed record waits for nothing, and a milestone is what the work waits for
+            record("item", "done-step", "done", ""),
+            record("milestone", "later", "open", ""),
+        ]);
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        let found = unbounded(&all);
+        assert_eq!(
+            found
+                .iter()
+                .map(|line| line.split(':').next().unwrap())
+                .collect::<Vec<_>>(),
+            ["work/loose-spec.md", "work/loose.md"]
+        );
+        assert!(
+            found[0].ends_with("name the moment it waits for in until (a milestone: until: [<slug>]), or give it a parent"),
+            "{found:?}"
+        );
     }
 
     #[test]

@@ -50,9 +50,11 @@ The body is free, except that a closed spec opens with `# Resolution`: its first
   out of date unnoticed. Why one step comes before another is a decision, and goes in the spec.
 - **Whether work is left is not the spec's status.** `stable` says only that the spec was agreed; the open work items
   under it say what is left.
+- **A spec without a parent says by when it is done.** An epic, or a spec that is no part of one, names in `until`
+  the moment it waits for, often a milestone (see "Every open record is bounded").
 - **Closing a spec leaves it where it is.** Set `status: deprecated` and `closed_as`, and write `# Resolution` as its
-  first heading: implemented or dropped, and how the implementation differs from the spec. From then on it is history. A spec closes
-  after its children (see "Parents").
+  first heading: implemented or dropped, and how the implementation differs from the spec. From then on it is history.
+  A spec closes after its children (see "Parents").
 
 # Work items
 
@@ -68,26 +70,24 @@ The body is free, except that a closed spec opens with `# Resolution`: its first
 | `after`, `until` | Optional. Lists of slugs: the records that come before this one, and after it. See "Arrows" |
 | `filed` | Date the item was filed |
 | `verified` | Who measured the state and when: `{by, at}`, or a list of them. `at` is a datetime with a time zone. `by` is `human:<id>` for a person, `<producer>/<version>` for an agent (example: `claude-code/claude-opus-5-5`), or `process:<id>` |
-| `deadline_kind`, `deadline` | `until` with an event ("... until X"), or `none` with the reason |
 | `stale_after` | Optional. A datetime after which the state should be measured again. See "Re-measuring" |
 
 Body headings:
 
 | Heading | Content |
 |---|---|
-| `# Trigger` | The event that makes the item ready to act on |
-| `# State` | How far the trigger has progressed: the measured value and how to measure it again |
+| `# Trigger` | Optional, and not empty when it is there. What starts the work, when that is not a record `after` can name |
+| `# State` | How far it has come: the measured value and how to measure it again |
 | `# Details` | Where the history is (see below) |
-| `# Resolution` | Only when closed, and then the first heading. How it was closed: done, nothing found, or dropped at its deadline |
+| `# Resolution` | Only when closed, and then the first heading. How it was closed: done, nothing found, or dropped |
 
-- **Every item has a trigger.** An item without one will never be picked up. If the item is dropped, close it and say
-  so. For an item nobody has sorted yet, "when someone sorts the drafts" is a valid trigger.
+- **What starts the work is an arrow when it can be.** A record before it goes in `after`, and the index says `Ready.`
+  once it is done. `# Trigger` is for what no record holds: a symptom, a measurement crossing a threshold.
 - **State is a measurement.** Write the value and how to measure it. The time and who measured go in `verified`, not
-  in the body. Update the state whenever you measure, including when the trigger has not happened yet. Without a
-  recorded state, every reader has to measure every item again, and the items stop being read.
-- **Deadlines are events, not dates.** If the trigger has not happened by that event, the item is dropped. An item
-  with no deadline has `deadline_kind: none` and the reason in `deadline`. Example reasons: it is an alarm that only
-  matters when a symptom appears, or the trigger is certain to happen.
+  in the body. Update the state whenever you measure, including when nothing has changed. Without a recorded state,
+  every reader has to measure every item again, and the items stop being read.
+- **By when it is done is a record, not words.** A sorted item has its parent, and closes before it. An item nobody
+  has sorted yet names in `until` the moment it waits for, usually a milestone (see "Every open record is bounded").
 - **Details point to the history; they do not copy it.** Copies drift. Write markdown links: `/` starts a path
   inside `docs/` (`[...](/work/<slug>.md#<anchor>)`), and a relative path reaches outside it
   (`[...](../../README.md#<anchor>)`). A heading's anchor is the one GitHub gives it. The log's only headings are its
@@ -105,16 +105,18 @@ decides it, in one of four ways:
 
 1. **Into an existing spec:** set `parent` to the spec and `status: stable`. The item stays, as a part of the spec.
 2. **Into a new spec:** write the spec, then do as in 1.
-3. **Postponed:** keep it a draft, with a new trigger and deadline.
+3. **Postponed:** keep it a draft, and point its `until` at a later milestone. A milestone cannot close while a draft
+   bounded by it is open, so every draft is decided, at the latest, when its milestone comes: sorted, closed, or
+   postponed again on purpose.
 4. **Nothing to do:** close it (`status: deprecated`, `closed_as: dropped`), and say in `# Resolution` that nothing
    was found or why it was dropped. A closed item needs no parent.
 
 ## Re-measuring
 
 `stale_after` is optional. Use it when the state records a fact that goes out of date with time alone, such as an
-external price, an API's behaviour or another service's status. It is different from `deadline`: `deadline` ends the
-item, `stale_after` only says when to measure the state again. Passing `stale_after` does not fail the check, because
-a check that fails on a date alone turns CI red without any change to the code. The index shows the date, and
+external price, an API's behaviour or another service's status. It does not end the item: it only says when to measure
+the state again. Passing `stale_after` does not fail the check, because a check that fails on a date alone turns CI red
+without any change to the code. The index shows the date, and
 `rotproof index` lists the items past it.
 
 # Milestones
@@ -190,6 +192,14 @@ and may name a spec, a work item or a milestone.
 The parents are not arrows for the rest: a record does not wait for its parent, and a parent is not ready because its
 children are done.
 
+# Every open record is bounded
+
+An open spec or work item without a parent has something after it: its own `until`, or another record's `after` that
+names it. A record with a parent is held by its parent, which is held the same way. The arrows make no cycle, and a
+record closes after those before it, so every open record reaches a milestone, by its parent or its arrows: work
+never waits on nothing, and a milestone cannot come while work bounded by it is open. This is what a deadline is;
+there is no field for one in words.
+
 # Closed records
 
 **A closed record stays where it is.** Set `status: deprecated`, say how it closed in `closed_as`, and write
@@ -231,7 +241,7 @@ After adding or changing a record, run `rotproof index`. `rotproof check` fails 
 - `closed_as`, `after`, `until` and a milestone's `date` are extension fields. OKF's `status: deprecated` says that a document is
   closed; `closed_as` says how.
 - A field that looks like a misspelling of a known field (`stale_afer`, `staleAfter`, `Title`) fails the check, so a
-  misspelled optional field is not silently dropped. So does a field Rotproof no longer reads (`epic`), with what to
-  write instead. OKF tells readers not to reject unknown fields; this is a check on the writer's side. Any other
+  misspelled optional field is not silently dropped. So does a field Rotproof no longer reads (`epic`, `deadline_kind`,
+  `deadline`), with what to write instead. OKF tells readers not to reject unknown fields; this is a check on the writer's side. Any other
   unknown field passes as an extension, and the fields OKF defines (`generated`, `sources`, `resource`,
   `usage_window`) pass as OKF writes them.
