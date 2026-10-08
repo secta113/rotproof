@@ -50,6 +50,9 @@ spec per area, and tie them back together as parts of an epic.
 An epic says which piece of work a spec is part of, and closes when the work is finished. It is not a document type
 of its own: a spec that other specs name in `epic` is an epic, and keeps its own goals, decisions and order of work.
 
+A piece of work is split into parts of an epic for one of two reasons: it is too large for one spec, or it spans
+more than one area (see "Areas"). A spec that has grown in one area is split the same way.
+
 - **A part names its epic by slug,** not by path. The slug names a spec in `docs/specs/`: a backlog item or a guide
   is not a spec, and a spec is not its own epic.
 - **One level only.** An epic has no `epic` of its own.
