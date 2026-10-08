@@ -287,9 +287,12 @@ mod tests {
             init(&tree, &tree, Some("none"), "x", "0.2.0"),
             Ok(Initialized::Declared(_))
         ));
-        let declaration = tree
-            .text(DECLARATION)
-            .unwrap()
+        // Up to 0.2.0 whatever this Rotproof is: the declaration is written with its version
+        let written = tree.text(DECLARATION).unwrap();
+        let running = format!("files = \"{}\"", domain::upgrade::VERSION);
+        assert!(written.contains(&running), "{written}");
+        let declaration = written
+            .replace(&running, "files = \"0.2.0\"")
             .replace("areas = []", "areas = [\"a\"]");
         tree.write(DECLARATION, &declaration).unwrap();
         let item = "---\ntype: Backlog Item\ntitle: X\ndescription: D.\ntags: [a]\nstatus: stable\nfiled: 2026-10-01\n\

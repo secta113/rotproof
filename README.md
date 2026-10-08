@@ -46,7 +46,7 @@ Rotproof is released for Windows x86_64 and Linux x86_64 (glibc 2.17 or newer). 
 upgrade, which can bring new rules, is a commit of its own:
 
 ```sh
-pip install rotproof==0.2.0
+pip install rotproof==0.3.0
 ```
 
 The wheel carries only the binary; no Python code runs. Without Python, take the archive for your platform from
