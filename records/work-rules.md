@@ -228,7 +228,8 @@ closed record that no longer holds still says `deprecated`. The two agree as fol
   before the records before it close.
 
 **A closed record stays where it is.** Write `# Resolution` as its first heading, so a reader who opens the record
-from a link, or an agent reading from the top, meets the closing first; the index lists it under `# Closed`.
+from a link, or an agent reading from the top, meets the closing first; it is listed in [closed.md](closed.md), or
+in the index under its parent while the parent is open (see "Index").
 Deleting or moving a record breaks every link to it, and rewriting the links puts lines that have nothing to do with
 the closing into its review.
 
@@ -244,19 +245,25 @@ spec per area, and tie them back together as parts of an epic.
 
 # Index
 
-[index.md](index.md) is generated: the open milestones under `# Milestones`, by date and those without one last, as
-they are what the work of every area waits for; then the open records by area; then the closed records under
-`# Closed`, milestones first. A record in the
-same area as its parent, and open or closed as its parent is, is listed under it, indented; any other record with a
-parent is listed on its own with `Parent: [<title>](...)` after its line. Under a heading or a parent, the specs come
-first, then the work items. An item nobody has sorted yet says `Status: draft.`, and a closed record says how it
+[index.md](index.md) is generated, and read before every piece of work: the guides; the open milestones under
+`# Milestones`, by date and those without one last, as they are what the work of every area waits for; then by area
+the open records, and the closed records whose parent is open, so an open spec shows which of its steps are done.
+Every other closed record is in [closed.md](closed.md), also generated and listed among the guides: the closed
+milestones, then the closed records by area. So the index grows with the open work, not with the history; read the
+closed list when you need to know why something was decided. A record moves from one list to the other when it or
+its parent closes; the file itself never moves.
+
+In both lists, a record in the same area as its parent is listed under it, indented, except an open record of a
+closed parent; any other record with a parent is listed on its own with `Parent: [<title>](...)` after its line.
+Under a heading or a parent, the specs come first, then the work items. An item nobody has sorted yet says `Status: draft.`, and a closed record says how it
 closed, `Done:` or `Dropped:`, before the first sentence of its resolution. An open record whose work has started
 says `Started.`. An open record with arrows says `Ready.` when every record before it is done and its work has not
 started, names the records before it still open after `Waits for:`, and those after it still open after `Until:`; a
 milestone counts the records it waits for instead of naming them.
 
-After adding or changing a record, run `rotproof index`. `rotproof check` fails when the index differs from what
-`rotproof index` writes.
+After adding or changing a record, run `rotproof index`. `rotproof check` fails when the index or the closed list
+differs from what `rotproof index` writes. `closed.md` is a name Rotproof writes, as `rules.md` is: no record is named
+so.
 
 # Differences from OKF
 

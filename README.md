@@ -20,7 +20,10 @@ two structures:
 
 - **The declaration is the truth, and Rotproof does not repair.** The structure a project declares is the structure. A
   tree that differs from it fails, either way, and someone decides whether the tree or the declaration is wrong;
-  Rotproof changes the tree only when asked.
+  Rotproof changes the tree only when asked. It rewrites what a person wrote in one case only: when a version of
+  Rotproof changes the format it reads, `rotproof init` carries the files across that change, doing what a machine can
+  without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That is not a repair of drift:
+  the files were right under the old format, and Rotproof is what changed.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
 - **A check with nothing to check fails.** A check that passes on an empty tree protects nothing.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
@@ -67,7 +70,7 @@ rotproof --root <repository> init --stack python  # write .config/rotproof.toml,
 rotproof --root <repository> init    # after upgrading Rotproof: update the project's files (see "Upgrading Rotproof")
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
-rotproof --root <repository> index   # write every generated file in docs/ (the index files and the rules)
+rotproof --root <repository> index   # write every generated file in docs/ (the index files, the closed list and the rules)
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
@@ -100,7 +103,7 @@ then `rotproof init --stack typescript` and `rotproof create --yes` in it, which
 
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
-(below), a milestone when `docs/work/` has none, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files and rules in `docs/`). It never
+(below), a milestone when `docs/work/` has none, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files, the closed list and the rules in `docs/`). It never
 overwrites a file it does not generate, and never moves or deletes one. Nothing runs it on its own, so a layer removed
   `xtask/src/layers.rs` in place of the file, and reads the comments of `xtask/` for markers too, which the layout
   leaves out; the records are kept outside, so they are not checked here.
@@ -143,7 +146,8 @@ that has a declaration:
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
   `.rotproof/AGENTS.md`, the generated files in `docs/`), and sets `files` to the running version. It never changes
   the declaration's other values, and run twice it changes nothing the second time.
-- **An update only adds,** and does nothing when its file has it already. What it cannot do without a person (its file
+- **An update only adds,** and does nothing when its file has it already. A move across a change of format (below) is
+  not an update: it rewrites, and cannot be declined. What it cannot do without a person (its file
   is missing, or not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by
   hand, or decline the update by its name in `declined`, and run `rotproof init` again.
 
@@ -284,7 +288,8 @@ docs/
   log.md            what was done, newest first
   work/             every spec, work item and milestone, open or closed
     rules.md        generated: the rules of the three types (type: Guide)
-    index.md        generated
+    index.md        generated: the open records, and the closed parts of open ones
+    closed.md       generated: every other closed record (type: Guide)
     <slug>.md       one record per file (type: Spec, Work Item or Milestone; status: draft, stable or deprecated;
                     progress: started, done or dropped)
   knowledge/        how things are now, and why (type: Knowledge, status: stable or deprecated)
@@ -326,9 +331,11 @@ it would stay open forever. The knowledge index lists the alarms first, under `#
 is seen and the strings: whoever meets a message searches `docs/` for it, and reading the index before work watches
 for them.
 
-A record stays where it was written when it closes: its `progress` says it is closed and how (`done` or `dropped`),
-and the index lists it under `# Closed`. Its path, and every link to it, never changes, so closing a record is a
-change to that record and its index line only. How it closed is a field and not only words in its resolution, as work
+A record stays where it was written when it closes: its `progress` says it is closed and how (`done` or `dropped`).
+Its path, and every link to it, never changes, so closing a record is a change to that record and its lines in the
+generated lists only. The index, read before every piece of work, keeps the open records and the closed parts of open
+ones; every other closed record is listed in `docs/work/closed.md`, generated next to it and linked from it, so the
+index grows with the open work and not with the history. How it closed is a field and not only words in its resolution, as work
 that waits on a dropped record does not get what it waited for. `status` keeps the meaning OKF gives it, whether the
 document is current, as a reader that knows only OKF reads `status` alone: a done work item and anything dropped are
 `deprecated`, while a done spec that still describes how things are stays `stable`. `progress: started` says that
@@ -534,8 +541,8 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   The names OKF reserves appear only where Rotproof writes and reads them: `index.md` in `docs/` and in each directory
   of documents, `log.md` in `docs/`. A markdown file is named `.md`, in lowercase: GitHub shows a `.MD` file, but
   Rotproof would not read it.
-- **Every file Rotproof generates equals what `rotproof index` writes:** the index files, so nobody maintains a list by
-  hand, and `docs/work/rules.md` and `docs/knowledge/rules.md`, so the rules a project reads are the rules its Rotproof
+- **Every file Rotproof generates equals what `rotproof index` writes:** the index files and `docs/work/closed.md`, so
+  nobody maintains a list by hand, and `docs/work/rules.md` and `docs/knowledge/rules.md`, so the rules a project reads are the rules its Rotproof
   checks. A project's own rules go in another guide in the same directory.
 - **No spec sits at the repository root.**
 

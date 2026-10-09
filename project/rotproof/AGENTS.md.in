@@ -12,20 +12,24 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
 - **`rotproof check` checks {checked}, and fails when one breaks a rule.**
   It is the project's CI. It prints what it did not check, and why.
 - **`rotproof create` makes what `.config/rotproof.toml` declares and the tree lacks, and rewrites the files Rotproof
-  generates:** this file, and the `index.md` and `rules.md` files in `docs/`. It never changes another file, apart
-  from adding the fields the declaration lacks, and never moves or deletes one. Nothing runs it on its own.
-- **`rotproof index` rewrites the `index.md` files in `docs/`** after a record changes. Never edit them by hand.
+  generates:** this file, and in `docs/` the `index.md` and `rules.md` files and `docs/work/closed.md`. It never
+  changes another file, apart from adding the fields the declaration lacks, and never moves or deletes one. Nothing
+  runs it on its own.
+- **`rotproof index` rewrites the `index.md` files in `docs/` and `docs/work/closed.md`** after a record changes.
+  Never edit them by hand.
 - **Upgrade Rotproof in a commit of its own:** change the pinned version, install it, run `rotproof init`, then
   `rotproof check`. `rotproof init` applies what the new version brings to the files `rotproof create` wrote once
   (except the updates `declined` lists in `.config/rotproof.toml`), rewrites this file, and sets `files` there to the
   new version. Until it has run, `rotproof check` fails. What an update cannot do without a person, it says: do it by
-  hand, or decline it by its name in `declined`.
+  hand, or decline it by its name in `declined`. When the new version changes the format of the records (0.3.0 moved
+  them to `docs/work/`), `rotproof init` also rewrites the records as far as a machine can and says the rest; that
+  cannot be declined, so review its diff before committing.
 {layers}
 ## The records
 
 - **Before starting work or deploying, read `docs/work/index.md` and `docs/knowledge/index.md`, and open only the
-  specs, work items and documents that concern the work.** Read the closed records (under `# Closed` in
-  `docs/work/index.md`) and `docs/log.md` when you need to know why something was decided. The index says which open
+  specs, work items and documents that concern the work.** Read the closed records (`docs/work/closed.md`) and
+  `docs/log.md` when you need to know why something was decided. The index says which open
   records are `Ready.`, which were `Started.` and which milestones are near, and is only seen when someone opens it.
   Continue a started record from its `# State` rather than starting it again. When you start a record's work, set
   `progress: started`; after measuring an item's state, update it right away.

@@ -98,10 +98,10 @@ enum Command {
     /// .gitattributes, Claude Code's settings with the hook and the rule that denies editing the approvals file, for
     /// python and none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml), each when it
     /// does not exist.
-    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files and rules in
-    /// docs/. Adds the fields the declaration lacks, keeping its comments and values. Never overwrites another file,
-    /// and never moves or deletes one. Run it when a project starts, and after editing the declaration; after upgrading
-    /// Rotproof, `rotproof init` does what it does, without making a layer.
+    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files, the closed
+    /// list and the rules in docs/. Adds the fields the declaration lacks, keeping its comments and values. Never
+    /// overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing the
+    /// declaration; after upgrading Rotproof, `rotproof init` does what it does, without making a layer.
     /// Makes layers only with --yes: without it, a run that would make one lists them, writes nothing and exits 2, so
     /// the layers the project does not have are declared absent first. Exits 2 too when the declaration cannot be read
     /// or a file cannot be written.
@@ -162,8 +162,9 @@ enum Command {
     },
     /// Write every index.md in docs/ from the frontmatter
     ///
-    /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, and the rules.md Rotproof keeps
-    /// there, from the frontmatter of the documents. Run it after a record changes; never edit an index.md by hand.
+    /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, the list of closed records in
+    /// docs/work/closed.md, and the rules.md Rotproof keeps there, from the frontmatter of the documents. Run it after
+    /// a record changes; never edit these by hand.
     /// Lists the documents it left out and why, the work items past their stale_after, and the open milestones past
     /// their date. Exits 2 when the declaration or a document cannot be read.
     Index,
