@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::bundle::{Problems, Work};
-use crate::schema::{Arrows, ClosedAs};
+use crate::schema::{Arrows, ClosedAs, Progress};
 
 /// A record of `docs/work/` as the arrows see it.
 #[derive(Debug, Clone, Copy)]
@@ -18,6 +18,8 @@ pub struct Record<'a> {
     pub milestone: bool,
     /// `None` while the record is open
     pub closed_as: Option<ClosedAs>,
+    /// Open, and its work started. A milestone never is
+    pub started: bool,
     pub arrows: &'a Arrows,
     pub parent: Option<&'a String>,
 }
@@ -37,6 +39,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
                 title: &spec.title,
                 milestone: false,
                 closed_as: spec.progress.closed_as(),
+                started: spec.progress == Progress::Started,
                 arrows: &spec.arrows,
                 parent: spec.parent.as_ref(),
             },
@@ -49,6 +52,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
                 title: &item.title,
                 milestone: false,
                 closed_as: item.progress.closed_as(),
+                started: item.progress == Progress::Started,
                 arrows: &item.arrows,
                 parent: item.parent.as_ref(),
             },
@@ -61,6 +65,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
                 title: &milestone.title,
                 milestone: true,
                 closed_as: milestone.progress.closed_as(),
+                started: false,
                 arrows: &milestone.arrows,
                 parent: None,
             },
@@ -624,5 +629,63 @@ mod tests {
             line("release").ends_with(" | Waits for 2 open records."),
             "{index}"
         );
+    }
+
+    /// Started replaces Ready, and a record may start before its earlier records close: an arrow orders the closing.
+    #[test]
+    fn the_index_says_which_open_records_started() {
+        let started = "progress: started\n";
+        let all = read(vec![
+            record("milestone", "release", "open", ""),
+            record("spec", "design", "done", "until: [release]\n"),
+            record(
+                "item",
+                "build",
+                "open",
+                &format!("{started}after: [design]\nuntil: [release]\n"),
+            ),
+            record(
+                "item",
+                "docs",
+                "open",
+                &format!("{started}after: [build]\nuntil: [release]\n"),
+            ),
+            record(
+                "spec",
+                "plan",
+                "open",
+                &format!("{started}until: [release]\n"),
+            ),
+            record("item", "step", "open", &format!("{started}parent: plan\n")),
+        ]);
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        assert_eq!(problems(&all), Vec::<String>::new());
+        let index = render_work(&all, &["a".to_string()]);
+        let line = |slug: &str| {
+            index
+                .lines()
+                .find(|line| {
+                    line.trim_start()
+                        .starts_with(&format!("* [{slug}]({slug}.md)"))
+                })
+                .unwrap()
+                .to_string()
+        };
+        assert!(
+            line("build").ends_with(" | Started. | Until: [docs](docs.md), [release](release.md)"),
+            "{index}"
+        );
+        assert!(
+            line("docs").ends_with(
+                " | Started. | Waits for: [build](build.md) | Until: [release](release.md)"
+            ),
+            "{index}"
+        );
+        assert!(
+            line("plan").ends_with(" | Status: stable. | Started. | Until: [release](release.md)"),
+            "{index}"
+        );
+        // With no arrow at all, it still says it started
+        assert!(line("step").ends_with(" | Started."), "{index}");
     }
 }

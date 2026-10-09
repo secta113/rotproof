@@ -133,6 +133,8 @@ pub enum Progress {
     /// No `progress`: open, not started
     #[default]
     NotStarted,
+    /// Open, and someone has started its work. Who and when are in `# State` and `verified`
+    Started,
     /// Closed, done or dropped
     Closed(ClosedAs),
 }
@@ -142,7 +144,7 @@ impl Progress {
     pub fn closed_as(self) -> Option<ClosedAs> {
         match self {
             Progress::Closed(closed_as) => Some(closed_as),
-            Progress::NotStarted => None,
+            Progress::NotStarted | Progress::Started => None,
         }
     }
 }
@@ -496,7 +498,7 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
         status(&[Status::Draft, Status::Stable, Status::Deprecated]),
     );
     let tag = fields.required("tags", one_tag);
-    let progress = progress(fields, status, true);
+    let progress = progress(fields, status, WorkKind::Spec);
     let parent = fields.optional("parent", slug);
     let arrows = arrows(fields);
     fields.optional("verified", stamps);
@@ -513,38 +515,53 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
     })
 }
 
+/// The type of a record of `docs/work/`, as far as its `progress` depends on it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkKind {
+    Spec,
+    Item,
+    Milestone,
+}
+
 /// How far the work of a record with `status` has come, and whether the two agree: a deprecated record is closed, a
-/// dropped one is deprecated, and a done one is deprecated unless `done_may_stay_current` (a spec or a milestone, which
-/// may still describe how things are). When the status itself could not be read, only the value is checked.
-fn progress(
-    fields: &mut Fields,
-    status: Option<Status>,
-    done_may_stay_current: bool,
-) -> Read<Progress> {
+/// dropped one is deprecated, a done one is deprecated unless it is a spec or a milestone (which may still describe
+/// how things are), and a milestone is never started. When the status itself could not be read, only the value is
+/// checked.
+fn progress(fields: &mut Fields, status: Option<Status>, kind: WorkKind) -> Read<Progress> {
     let progress = fields.optional("progress", |value| match text(value)?.as_str() {
+        "started" => Ok(Progress::Started),
         "done" => Ok(Progress::Closed(ClosedAs::Done)),
         "dropped" => Ok(Progress::Closed(ClosedAs::Dropped)),
-        other => Err(format!("{other:?} is not one of [\"done\", \"dropped\"]")),
+        other => Err(format!(
+            "{other:?} is not one of [\"started\", \"done\", \"dropped\"]"
+        )),
     })?;
     let progress = progress.unwrap_or_default();
-    let wrong = match (status?, progress.closed_as()) {
-        (Status::Deprecated, None) => Some(
+    let done_may_stay_current = kind != WorkKind::Item;
+    let wrong = match (status?, progress) {
+        (Status::Deprecated, Progress::NotStarted) => Some(
             "missing: a deprecated record is closed, and says how: done (implemented, done or happened) or dropped \
              (dropped or withdrawn)"
                 .to_string(),
         ),
-        (Status::Deprecated, Some(_)) | (_, None) => None,
-        (status, Some(ClosedAs::Dropped)) => Some(format!(
+        (Status::Deprecated, Progress::Started) => Some(
+            "a deprecated record is closed, and says how: done or dropped; started is open".to_string(),
+        ),
+        (_, Progress::Started) if kind == WorkKind::Milestone => Some(
+            "a milestone is never started: while it is open, it is the moment the work waits for".to_string(),
+        ),
+        (Status::Deprecated, Progress::Closed(_)) | (_, Progress::NotStarted | Progress::Started) => None,
+        (status, Progress::Closed(ClosedAs::Dropped)) => Some(format!(
             "a dropped record is status: deprecated, so it does not read as current; this one is {}",
             status.name()
         )),
-        (Status::Stable, Some(ClosedAs::Done)) if done_may_stay_current => None,
-        (status, Some(ClosedAs::Done)) if done_may_stay_current => Some(format!(
+        (Status::Stable, Progress::Closed(ClosedAs::Done)) if done_may_stay_current => None,
+        (status, Progress::Closed(ClosedAs::Done)) if done_may_stay_current => Some(format!(
             "a done record is status: stable (still current) or deprecated (replaced, kept as history); this one \
              is {}",
             status.name()
         )),
-        (status, Some(ClosedAs::Done)) => Some(format!(
+        (status, Progress::Closed(ClosedAs::Done)) => Some(format!(
             "a done work item is status: deprecated: what it waited for no longer holds; this one is {}",
             status.name()
         )),
@@ -567,7 +584,7 @@ fn milestone_fields(fields: &mut Fields) -> Option<Milestone> {
         "status",
         status(&[Status::Draft, Status::Stable, Status::Deprecated]),
     );
-    let progress = progress(fields, status, true);
+    let progress = progress(fields, status, WorkKind::Milestone);
     let date = fields.optional("date", date);
     let arrows = arrows(fields);
     fields.optional("verified", stamps);
@@ -671,7 +688,7 @@ fn item(fields: &mut Fields) -> Option<Item> {
         "status",
         status(&[Status::Draft, Status::Stable, Status::Deprecated]),
     );
-    let progress = progress(fields, status, false);
+    let progress = progress(fields, status, WorkKind::Item);
     let parent = fields.optional("parent", slug);
     let arrows = arrows(fields);
     let filed = fields.required("filed", date);
@@ -1362,7 +1379,7 @@ The release workflow of tag v0.3.0 passes every job.
             (
                 "another value",
                 closed_record(GOOD, "Fixed.").replace("progress: done", "progress: fixed"),
-                "progress: \"fixed\" is not one of [\"done\", \"dropped\"]",
+                "progress: \"fixed\" is not one of [\"started\", \"done\", \"dropped\"]",
             ),
         ];
         for (name, text, said) in bad {
@@ -1402,6 +1419,24 @@ The release workflow of tag v0.3.0 passes every job.
             (Status::Stable, false),
             "a done spec that still holds is closed and current"
         );
+        // Started: open, whether sorted or agreed yet or not
+        for status in ["draft", "stable"] {
+            let started = |text: &str| {
+                text.replace(
+                    "status: stable",
+                    &format!("status: {status}\nprogress: started"),
+                )
+            };
+            let Ok(WorkDoc::Item(item, _)) = work_doc(&started(GOOD)) else {
+                panic!("{status}: {:?}", work_doc(&started(GOOD)).err());
+            };
+            assert_eq!((item.progress, item.is_open()), (Progress::Started, true));
+            assert_eq!(
+                spec(&started(SPEC)).map(|(spec, _)| spec.is_open()),
+                Ok(true),
+                "{status}"
+            );
+        }
         let milestone =
             closed_record(MILESTONE, "Released.").replace("status: deprecated", "status: stable");
         assert!(
@@ -1442,6 +1477,17 @@ The release workflow of tag v0.3.0 passes every job.
                 "a stable milestone dropped",
                 work_doc(&milestone.replace("progress: done", "progress: dropped")).err(),
                 "a dropped record is status: deprecated",
+            ),
+            (
+                "a started milestone",
+                work_doc(&MILESTONE.replace("status: stable", "status: stable\nprogress: started"))
+                    .err(),
+                "progress: a milestone is never started",
+            ),
+            (
+                "a deprecated item started",
+                work_doc(&closed_item("deprecated", "started")).err(),
+                "progress: a deprecated record is closed, and says how: done or dropped; started is open",
             ),
             // A spec that stays current still says where it closed, first
             (

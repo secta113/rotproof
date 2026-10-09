@@ -409,17 +409,21 @@ struct Entry<'a> {
 ///
 /// Each entry has the OKF form `* [title](target) - description`, with the frontmatter's `description`, and adds after
 /// ` | ` what a reader needs: an open spec its status; an open item its status when nobody has sorted it yet, the date
-/// of the last measurement and the first sentence of its state; an open record its arrows (what it waits for, and what
-/// waits for it); a closed record how it closed (`Done:` or `Dropped:`) and the first sentence of its resolution. The
-/// separator is a symbol so the parts stay apart in any language.
+/// of the last measurement and the first sentence of its state; an open record `Started.` once its work has started,
+/// and its arrows (what it waits for, and what waits for it); a closed record how it closed (`Done:` or `Dropped:`)
+/// and the first sentence of its resolution. The separator is a symbol so the parts stay apart in any language.
 pub fn render_work(work: &Work, areas: &[String]) -> String {
     let records = crate::arrows::records(work);
     let waiting = crate::arrows::waiting(work);
-    // What an open record waits for and what waits for it, after its line. A milestone collects the arrows of much of
-    // the work, so it says how many records it waits for instead of naming them
+    // Whether an open record's work has started, then what it waits for and what waits for it, after its line. Started
+    // replaces Ready: an arrow orders the closing, not the start, so a record may start before its earlier records
+    // close, and is listed with what it still waits for. A milestone collects the arrows of much of the work, so it
+    // says how many records it waits for instead of naming them
     let arrows = |name: &str, milestone: bool| -> String {
+        let started = records.get(name).is_some_and(|record| record.started);
+        let started = if started { " | Started." } else { "" };
         let Some(waiting) = waiting.get(name) else {
-            return String::new();
+            return started.to_string();
         };
         let links = |names: &[String]| -> String {
             let links: Vec<String> = names
@@ -428,8 +432,8 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
                 .collect();
             links.join(", ")
         };
-        let mut out = String::new();
-        if waiting.ready {
+        let mut out = started.to_string();
+        if waiting.ready && started.is_empty() {
             out.push_str(" | Ready.");
         }
         match waiting.before.len() {
