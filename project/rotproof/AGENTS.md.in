@@ -22,8 +22,9 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   (except the updates `declined` lists in `.config/rotproof.toml`), rewrites this file, and sets `files` there to the
   new version. Until it has run, `rotproof check` fails. What an update cannot do without a person, it says: do it by
   hand, or decline it by its name in `declined`. When the new version changes the format of the records (0.3.0 moved
-  them to `docs/work/`), `rotproof init` also rewrites the records as far as a machine can and says the rest; that
-  cannot be declined, so review its diff before committing.
+  them to `docs/work/`), `rotproof init` also rewrites the records, and the links to them in the markdown files, as
+  far as a machine can and says the rest; that cannot be declined, so review its diff before committing, and search
+  the files it does not read (code, comments, configuration) for the old paths.
 {layers}
 ## The records
 

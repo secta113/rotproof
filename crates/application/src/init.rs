@@ -123,7 +123,8 @@ fn upgrade(
 }
 
 /// Move the records of a project made before 0.3.0 into `docs/work/` (`migrate.rs` in `domain`): every file under
-/// `docs/` read, the move planned whole, then written. A move that cannot be planned changes nothing.
+/// `docs/` and every markdown file elsewhere read, the move planned whole, then written. A move that cannot be planned
+/// changes nothing.
 fn move_records(tree: &dyn Tree, out: &dyn Writer, upgraded: &mut Upgraded) -> Result<(), String> {
     if tree.found(DOCS) != Some(true) {
         return Ok(());
@@ -144,6 +145,14 @@ fn move_records(tree: &dyn Tree, out: &dyn Writer, upgraded: &mut Upgraded) -> R
                 };
                 files.insert(path, text);
             }
+        }
+    }
+    // The markdown files elsewhere in the repository, as AGENTS.md and READMEs link to the records. Those the
+    // project's .gitignore excludes are not the project's, and are not read
+    for path in tree.files("").map_err(|e| format!("the repository: {e}"))? {
+        if path.ends_with(".md") && !path.starts_with(&format!("{DOCS}/")) {
+            let text = read_text(tree, &path).map_err(|e| format!("{path}: {e}"))?;
+            files.insert(path, text);
         }
     }
     let plan = migrate::plan(&files)?;
@@ -322,10 +331,20 @@ mod tests {
     #[test]
     fn the_upgrade_to_0_3_moves_the_records_once() {
         let tree = made_by_0_2();
+        // A README of the project's own links to a record, as AGENTS.md may
+        tree.write(
+            "src/README.md",
+            "See [the item](../docs/backlog/item.md).\n",
+        )
+        .unwrap();
         let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.3.0") else {
             panic!("upgraded");
         };
         assert_eq!(upgraded.moved, 2);
+        assert_eq!(
+            tree.text("src/README.md").unwrap(),
+            "See [the item](../docs/work/item.md).\n"
+        );
         for gone in [
             "docs/backlog",
             "docs/specs",

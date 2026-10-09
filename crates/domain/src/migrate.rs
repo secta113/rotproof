@@ -3,10 +3,12 @@
 //!
 //! Before 0.3.0 the specs were in `docs/specs/` and the backlog items in `docs/backlog/`. The move is what a machine
 //! can do without reading the records: each document to `docs/work/` under its own name, every link that reached one
-//! pointed at its new place, `type: Backlog Item` as `Work Item`, `epic` as `parent`, an open item with no parent as a
-//! draft (an open item was any item not closed; a stable one is now one sorted into a spec), and the deadline of a
-//! closed item, which binds nothing any more, dropped. What needs a person stays and is said: how each closed record
-//! closed (`progress`), and the deadline of each open item, which becomes a milestone named in `until`.
+//! pointed at its new place (in `docs/`, and in every markdown file elsewhere in the repository, such as `AGENTS.md`),
+//! `type: Backlog Item` as `Work Item`, `epic` as `parent`, an open item with no parent as a draft (an open item was
+//! any item not closed; a stable one is now one sorted into a spec), and the deadline of a closed item, which binds
+//! nothing any more, dropped. What needs a person stays and is said: how each closed record closed (`progress`), the
+//! deadline of each open item, which becomes a milestone named in `until`, and the words outside `docs/` that name
+//! the old directories.
 //!
 //! The move is planned whole before anything is written: a name in both directories, or a file the move would not
 //! know where to put, stops it with nothing changed. It cannot be declined: Rotproof from 0.3.0 reads no other place.
@@ -56,8 +58,10 @@ pub struct Plan {
     pub by_hand: Vec<String>,
 }
 
-/// The move, from every file under `docs/` (path from the root -> text; a file that is not markdown with any text),
-/// or why it cannot be made. Nothing to move gives an empty plan.
+/// The move, from every file under `docs/` and every markdown file elsewhere in the repository (path from the root ->
+/// text; a file that is not markdown with any text), or why it cannot be made. Nothing to move gives an empty plan.
+/// The links of a markdown file outside `docs/` are pointed at the new places too, as `AGENTS.md` and `README.md`
+/// link to the records; any other file is not read, and the README says to search it.
 pub fn plan(files: &BTreeMap<String, String>) -> Result<Plan, String> {
     let mut plan = Plan::default();
     let mut moves: BTreeMap<String, String> = BTreeMap::new();
@@ -102,6 +106,7 @@ pub fn plan(files: &BTreeMap<String, String>) -> Result<Plan, String> {
         return Ok(Plan::default());
     }
     let (mut closed_unsaid, mut deadlines, mut drafts) = (Vec::new(), Vec::new(), Vec::new());
+    let mut in_words = Vec::new();
     for (path, text) in files {
         if !path.ends_with(".md") || plan.removes.contains(path) {
             continue;
@@ -124,10 +129,17 @@ pub fn plan(files: &BTreeMap<String, String>) -> Result<Plan, String> {
                 plan.removes.push(path.clone());
                 plan.moved += 1;
             }
-            None if linked != *text => {
-                plan.writes.insert(path.clone(), linked);
+            None => {
+                // Outside docs/, words that name an old directory describe the project as it was: a person rewrites
+                // them, or keeps them as history. Inside, the log's words stay as written, and the records are read
+                // anew
+                if !path.starts_with("docs/") && OLD.iter().any(|old| linked.contains(old)) {
+                    in_words.push(path.clone());
+                }
+                if linked != *text {
+                    plan.writes.insert(path.clone(), linked);
+                }
             }
-            None => {}
         }
     }
     plan.removes.sort();
@@ -165,13 +177,23 @@ pub fn plan(files: &BTreeMap<String, String>) -> Result<Plan, String> {
             listed(&drafts)
         ));
     }
+    if !in_words.is_empty() {
+        plan.by_hand.push(format!(
+            "{} files outside docs/ still name {} in words, not as links: point what describes the project now at \
+             {WORK}/ ({})",
+            in_words.len(),
+            OLD.map(|old| format!("{old}/")).join(" or "),
+            listed(&in_words)
+        ));
+    }
     Ok(plan)
 }
 
 /// `text`, a document that was in the directory `from` and is in `at` (both from the root), with every link target
 /// that reached a record in an old directory pointed at its place in `docs/work/`, in the form it was written: from the
-/// bundle root, or relative to `at`. A moved document stays at the same depth (`docs/backlog/` and `docs/work/` are
-/// siblings), so its other relative links still reach what they reached.
+/// root of the bundle (in `docs/`) or of the repository (elsewhere, as GitHub reads `/` there), or relative to `at`. A
+/// moved document stays at the same depth (`docs/backlog/` and `docs/work/` are siblings), so its other relative links
+/// still reach what they reached.
 pub fn repoint_links(text: &str, from: &str, at: &str) -> String {
     let repoint = |caps: &Captures| -> String {
         let written = &caps[2];
@@ -200,8 +222,14 @@ fn repoint_target(target: &str, from: &str, at: &str) -> Option<String> {
     if path.is_empty() {
         return None;
     }
+    // `/` starts at the root of the bundle inside `docs/`, and at the root of the repository elsewhere
+    let base = if at == "docs" || at.starts_with("docs/") {
+        "docs/"
+    } else {
+        ""
+    };
     let reached = match path.strip_prefix('/') {
-        Some(in_bundle) => normalize(&format!("docs/{in_bundle}"))?,
+        Some(from_base) => normalize(&format!("{base}{from_base}"))?,
         None => normalize(&format!("{from}/{path}"))?,
     };
     let rest = OLD
@@ -211,9 +239,7 @@ fn repoint_target(target: &str, from: &str, at: &str) -> Option<String> {
     let written = if path.starts_with('/') {
         format!(
             "/{}",
-            moved_to
-                .strip_prefix("docs/")
-                .expect("docs/work/ is in docs/")
+            moved_to.strip_prefix(base).expect("docs/work/ is in docs/")
         )
     } else {
         relative(at, &moved_to)
@@ -327,6 +353,12 @@ mod tests {
             ("docs/work", "../specs/a.md#x", "a.md#x"),
             ("docs", "backlog/a.md", "work/a.md"),
             ("docs/specs", "a.md", "../work/a.md"),
+            // Outside docs/: relative, or from the root of the repository, as GitHub reads `/` there
+            ("", "docs/specs/a.md", "docs/work/a.md"),
+            ("", "./docs/backlog/a.md#x", "docs/work/a.md#x"),
+            ("src/api", "../../docs/backlog/a.md", "../../docs/work/a.md"),
+            ("", "/docs/specs/a.md", "/docs/work/a.md"),
+            ("src", "/docs/backlog/a.md#x", "/docs/work/a.md#x"),
         ];
         for (dir, target, expected) in cases {
             assert_eq!(
@@ -342,6 +374,9 @@ mod tests {
             ("docs/knowledge", "#backlog"),
             ("docs/knowledge", "/knowledge/backlog.md"),
             ("docs", "../../backlog/a.md"),
+            // Outside docs/, `/` is the root of the repository, not of the bundle
+            ("", "/specs/a.md"),
+            ("", "../docs/specs/a.md"),
         ] {
             assert_eq!(
                 repoint_target(target, dir, dir),
@@ -356,6 +391,49 @@ mod tests {
             repoint_links(text, "docs/knowledge", "docs/knowledge"),
             "See [a](/work/a.md \"title\"), ![b](<../work/b c.md>), docs/backlog/a.md in words,\n\n\
              [ref]: /work/c.md\n"
+        );
+    }
+
+    /// AGENTS.md and the READMEs link to the records too: their links move, and their words that name the old places
+    /// are left to a person.
+    #[test]
+    fn the_markdown_outside_docs_follows_the_records() {
+        let docs = files(&[
+            ("docs/backlog/open.md", ITEM),
+            (
+                "AGENTS.md",
+                "Read [the item](docs/backlog/open.md) and docs/backlog/index.md.\n",
+            ),
+            ("README.md", "[z](/docs/backlog/open.md)\n"),
+            ("src/README.md", "[y](../docs/backlog/open.md#state)\n"),
+            ("CHANGELOG.md", "Nothing about the records.\n"),
+        ]);
+        let plan = plan(&docs).unwrap();
+        assert_eq!(
+            plan.writes.keys().collect::<Vec<_>>(),
+            [
+                "AGENTS.md",
+                "README.md",
+                "docs/work/open.md",
+                "src/README.md"
+            ]
+        );
+        assert_eq!(
+            plan.writes["AGENTS.md"],
+            "Read [the item](docs/work/open.md) and docs/backlog/index.md.\n"
+        );
+        assert_eq!(plan.writes["README.md"], "[z](/docs/work/open.md)\n");
+        assert_eq!(
+            plan.writes["src/README.md"],
+            "[y](../docs/work/open.md#state)\n"
+        );
+        let words = plan.by_hand.last().unwrap();
+        assert!(
+            words.starts_with(
+                "1 files outside docs/ still name docs/backlog/ or docs/specs/ in words, not as links"
+            ) && words.ends_with("(AGENTS.md)"),
+            "{:?}",
+            plan.by_hand
         );
     }
 

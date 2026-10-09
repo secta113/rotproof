@@ -158,11 +158,16 @@ that has a declaration:
 **Crossing 0.3.0, `rotproof init` first moves the records.** Before 0.3.0 the specs were in `docs/specs/` and the
 backlog items in `docs/backlog/`; from 0.3.0 both are in `docs/work/`, and nothing reads the old places, so the move
 cannot be declined. It is what a machine can do without reading the records: each record to `docs/work/` under its own
-name; every link in `docs/` that reached one pointed at its new place (in the log too, whose words stay as they were
-written); `type: Backlog Item` as `Work Item` and `epic` as `parent`; an open item with no parent as a draft, as a
+name; every link that reached one pointed at its new place, in `docs/` (in the log too, whose words stay as they were
+written) and in every markdown file elsewhere in the repository that `.gitignore` does not exclude, such as
+`AGENTS.md` and the READMEs, where a link starting with `/` is read from the root of the repository, as GitHub reads
+it; `type: Backlog Item` as `Work Item` and `epic` as `parent`; an open item with no parent as a draft, as a
 stable item is now one sorted into a spec; and the deadline of a closed item dropped, as it binds nothing. The rest it
 says, and `rotproof check` names it record by record: how each closed record closed (`progress`), and the deadline of
-each open item, which becomes a milestone named in `until`. The move is planned whole first: a name in both old
+each open item, which becomes a milestone named in `until`. It also names the markdown files outside `docs/` that
+still name `docs/backlog/` or `docs/specs/` in words, which a person points at `docs/work/` where they describe the
+project now. Files other than markdown (code and its comments, configuration) are not read: search them for the old
+paths after the move. The move is planned whole first: a name in both old
 directories, or a file it would not know where to put, stops it with nothing changed, and is renamed or moved by hand.
 Until it has run, `rotproof check` says only that the records are in the old places.
 
