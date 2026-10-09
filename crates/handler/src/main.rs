@@ -29,8 +29,8 @@ Start a project:
                                      layers it would make and writes nothing)
   4. rotproof check                  check them; this is the project's CI
 
-Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files), then
-`rotproof check`.
+Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files, and
+moves the records when the new version changes their format), then `rotproof check`.
 
 The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has run; `rotproof guide --stack <stack>`
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
@@ -160,7 +160,7 @@ enum Command {
         #[arg(long)]
         reviewed: bool,
     },
-    /// Write every index.md in docs/ from the frontmatter
+    /// Write every index.md in docs/, and docs/work/closed.md, from the frontmatter
     ///
     /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, the list of closed records in
     /// docs/work/closed.md, and the rules.md Rotproof keeps there, from the frontmatter of the documents. Run it after

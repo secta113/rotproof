@@ -144,12 +144,14 @@ that has a declaration:
   or not an update applies, so every upgrade runs `rotproof init` once.
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
-  `.rotproof/AGENTS.md`, the generated files in `docs/`), and sets `files` to the running version. It never changes
-  the declaration's other values, and run twice it changes nothing the second time.
-- **An update only adds,** and does nothing when its file has it already. A move across a change of format (below) is
-  not an update: it rewrites, and cannot be declined. What it cannot do without a person (its file
+  `.rotproof/AGENTS.md`, the generated files in `docs/`), and sets `files` to the running version. Crossing a version
+  that changes the format of the records, it first moves them (below). It never changes the declaration's other
+  values, and once it has set `files`, running it again changes nothing.
+- **An update only adds,** and does nothing when its file has it already. What it cannot do without a person (its file
   is missing, or not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by
-  hand, or decline the update by its name in `declined`, and run `rotproof init` again.
+  hand, or decline the update by its name in `declined`, and run `rotproof init` again. A move across a change of
+  format (below) is not an update: it rewrites, cannot be declined, and leaves `files` as it was in the same way while
+  it leaves something to a person.
 
 | Update | Version | File | What it adds |
 |---|---|---|---|
