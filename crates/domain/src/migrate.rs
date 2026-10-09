@@ -6,7 +6,7 @@
 //! pointed at its new place, `type: Backlog Item` as `Work Item`, `epic` as `parent`, an open item with no parent as a
 //! draft (an open item was any item not closed; a stable one is now one sorted into a spec), and the deadline of a
 //! closed item, which binds nothing any more, dropped. What needs a person stays and is said: how each closed record
-//! closed (`closed_as`), and the deadline of each open item, which becomes a milestone named in `until`.
+//! closed (`progress`), and the deadline of each open item, which becomes a milestone named in `until`.
 //!
 //! The move is planned whole before anything is written: a name in both directories, or a file the move would not
 //! know where to put, stops it with nothing changed. It cannot be declined: Rotproof from 0.3.0 reads no other place.
@@ -137,7 +137,7 @@ pub fn plan(files: &BTreeMap<String, String>) -> Result<Plan, String> {
     let listed = |names: &[String]| names.join(", ");
     if !closed_unsaid.is_empty() {
         plan.by_hand.push(format!(
-            "{} closed records in {WORK}/ do not say how they closed: write closed_as: done or closed_as: dropped in \
+            "{} closed records in {WORK}/ do not say how they closed: write progress: done or progress: dropped in \
              each, as its # Resolution says ({})",
             closed_unsaid.len(),
             listed(&closed_unsaid)
@@ -228,7 +228,7 @@ fn relative(from: &str, to: &str) -> String {
 /// One record, its frontmatter rewritten for `docs/work/`, and what that left to a person.
 struct Moved {
     text: String,
-    /// Closed, with no `closed_as`
+    /// Closed, with no `progress`
     closed_unsaid: bool,
     /// An open work item that keeps its deadline in words
     deadline_kept: bool,
@@ -286,7 +286,7 @@ impl Moved {
                 _ => out.push(line.to_string()),
             }
         }
-        moved.closed_unsaid = closed && !has("closed_as");
+        moved.closed_unsaid = closed && !has("progress");
         moved.deadline_kept = item && !closed && (has("deadline") || has("deadline_kind"));
         moved.text = format!("---\n{}{body}", out.join("\n"));
         moved

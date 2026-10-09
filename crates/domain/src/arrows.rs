@@ -36,7 +36,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
             Record {
                 title: &spec.title,
                 milestone: false,
-                closed_as: spec.closed_as,
+                closed_as: spec.progress.closed_as(),
                 arrows: &spec.arrows,
                 parent: spec.parent.as_ref(),
             },
@@ -48,7 +48,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
             Record {
                 title: &item.title,
                 milestone: false,
-                closed_as: item.closed_as,
+                closed_as: item.progress.closed_as(),
                 arrows: &item.arrows,
                 parent: item.parent.as_ref(),
             },
@@ -60,7 +60,7 @@ pub fn records(work: &Work) -> BTreeMap<&str, Record<'_>> {
             Record {
                 title: &milestone.title,
                 milestone: true,
-                closed_as: milestone.closed_as,
+                closed_as: milestone.progress.closed_as(),
                 arrows: &milestone.arrows,
                 parent: None,
             },
@@ -319,7 +319,7 @@ mod tests {
                 "status: draft".to_string()
             }
             "open" => "status: stable".to_string(),
-            closed => format!("status: deprecated\nclosed_as: {closed}"),
+            closed => format!("status: deprecated\nprogress: {closed}"),
         };
         let resolution = if how == "open" {
             ""

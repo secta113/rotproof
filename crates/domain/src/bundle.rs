@@ -116,17 +116,13 @@ impl Work {
     }
 
     /// The open children of a closed spec: the parts of an epic and the work items of a spec. A parent closes after its
-    /// children, so one of the two has the wrong status. They stay in the index files: the relation is clear, and
+    /// children, so one of the two has the wrong progress. They stay in the index files: the relation is clear, and
     /// leaving the open child out would hide open work.
     pub fn closed_before_its_children(&self) -> Vec<String> {
-        let specs = self.specs.iter().map(|(name, (spec, _))| {
-            (
-                name,
-                "spec",
-                spec.parent.as_ref(),
-                spec.status != Status::Deprecated,
-            )
-        });
+        let specs = self
+            .specs
+            .iter()
+            .map(|(name, (spec, _))| (name, "spec", spec.parent.as_ref(), spec.is_open()));
         let items = self
             .items
             .iter()
@@ -135,7 +131,7 @@ impl Work {
             .chain(items)
             .filter_map(|(name, kind, parent, open)| {
                 let parent_spec = self.find(parent?)?;
-                (open && parent_spec.status == Status::Deprecated).then(|| {
+                (open && !parent_spec.is_open()).then(|| {
                     format!(
                         "{}: its parent {} is closed while this {kind} is open. Close the {kind} first (as \
                          dropped, if it was), or reopen the parent",
@@ -153,7 +149,7 @@ impl Work {
         let open = self
             .milestones
             .values()
-            .any(|(milestone, _)| milestone.status != Status::Deprecated);
+            .any(|(milestone, _)| milestone.is_open());
         (!open).then(|| {
             "no open milestone in docs/work/: write the next moment the work waits for (a release, a deploy, something \
              outside the project) as a milestone; docs/work/rules.md says how"
@@ -166,7 +162,7 @@ impl Work {
     pub fn past_their_date(&self, today: NaiveDate) -> Vec<(String, NaiveDate)> {
         self.milestones
             .iter()
-            .filter(|(_, (milestone, _))| milestone.status != Status::Deprecated)
+            .filter(|(_, (milestone, _))| milestone.is_open())
             .filter_map(|(name, (milestone, _))| {
                 let date = milestone.date?;
                 (date < today).then(|| (name.clone(), date))
@@ -448,7 +444,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
         out
     };
     let specs = work.specs.iter().map(|(name, (spec, sections))| {
-        let after = if let Some(closed_as) = spec.closed_as {
+        let after = if let Some(closed_as) = spec.progress.closed_as() {
             resolution(closed_as, sections)
         } else {
             format!("Status: {}.", spec.status.name())
@@ -457,7 +453,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
             name,
             tag: &spec.tag,
             parent: spec.parent.as_ref(),
-            closed: spec.status == Status::Deprecated,
+            closed: !spec.is_open(),
             order: (false, None),
             line: format!(
                 "* [{}]({name}) - {} | {after}{}",
@@ -481,8 +477,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
     let nested_in = |entry: &Entry| -> Option<String> {
         let name = format!("{}.md", entry.parent?);
         let (spec, _) = work.specs.get(&name)?;
-        (spec.tag == entry.tag && (spec.status == Status::Deprecated) == entry.closed)
-            .then_some(name)
+        (spec.tag == entry.tag && !spec.is_open() == entry.closed).then_some(name)
     };
     let line = |entry: &Entry| match entry.parent {
         Some(parent) if nested_in(entry).is_none() => {
@@ -529,7 +524,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
         (milestone.date.is_none(), milestone.date, name.as_str())
     });
     let milestone_line = |name: &str, milestone: &Milestone, sections: &Sections| {
-        let after = match milestone.closed_as {
+        let after = match milestone.progress.closed_as() {
             Some(closed_as) => format!(" | {}", resolution(closed_as, sections)),
             None => {
                 let proposed = if milestone.status == Status::Draft {
@@ -554,7 +549,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
         .into_iter()
         .map(|(name, (milestone, sections))| {
             (
-                milestone.status == Status::Deprecated,
+                !milestone.is_open(),
                 milestone_line(name, milestone, sections),
             )
         })
@@ -609,7 +604,7 @@ fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
         link_text(&item.title),
         item.description
     );
-    if let Some(closed_as) = item.closed_as {
+    if let Some(closed_as) = item.progress.closed_as() {
         return format!("{start} | {}", resolution(closed_as, sections));
     }
     // Only the date, in the time zone of the measurement: the time of day would not change what a reader does.
@@ -1174,7 +1169,7 @@ Not yet. Measured by hand.
         let parent = parent.map(|p| format!("parent: {p}\n")).unwrap_or_default();
         let (status, resolution) = if closed {
             (
-                "deprecated\nclosed_as: done",
+                "deprecated\nprogress: done",
                 "\n# Resolution\n\nImplemented.\n",
             )
         } else {
@@ -1190,8 +1185,8 @@ Not yet. Measured by hand.
 
     /// The record closed as dropped instead of done.
     fn dropped((name, text): (String, String)) -> (String, String) {
-        assert!(text.contains("closed_as: done"), "{text}");
-        (name, text.replace("closed_as: done", "closed_as: dropped"))
+        assert!(text.contains("progress: done"), "{text}");
+        (name, text.replace("progress: done", "progress: dropped"))
     }
 
     /// `docs/work/` holding the open and the closed specs together.
@@ -1261,6 +1256,40 @@ Not yet. Measured by hand.
         let found = all.closed_before_its_children();
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].starts_with("work/part.md: its parent big is closed"));
+    }
+
+    /// Whether a record is closed is its progress, not its status: a done spec that still describes how things are
+    /// stays stable, and is closed all the same.
+    #[test]
+    fn a_done_spec_that_stays_current_is_closed() {
+        let current = |(name, text): (String, String)| {
+            (name, text.replace("status: deprecated", "status: stable"))
+        };
+        let (next, text) = spec_doc("next", "operations", None, false);
+        let next = (
+            next,
+            text.replace("status: stable", "status: stable\nafter: [big]"),
+        );
+        let all = work(
+            &spec_docs(
+                vec![spec_doc("part", "operations", Some("big"), false), next],
+                vec![current(spec_doc("big", "operations", None, true))],
+            ),
+            &areas(),
+        );
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        let found = all.closed_before_its_children();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].starts_with("work/part.md: its parent big is closed"));
+        let index = render_work(&all, &areas());
+        assert!(
+            index.contains("# Closed\n\n* [big](big.md) - D. | Done: Implemented."),
+            "{index}"
+        );
+        assert!(
+            index.contains("* [next](next.md) - D. | Status: stable. | Ready."),
+            "{index}"
+        );
     }
 
     #[test]

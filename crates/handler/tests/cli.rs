@@ -164,7 +164,7 @@ fn each_broken_rule_fails_under_its_check() {
             "the arrows keep their order",
             "docs/work/x.md",
             item("[log](/log.md)")
-                .replace("status: draft", "status: deprecated\nclosed_as: done")
+                .replace("status: draft", "status: deprecated\nprogress: done")
                 .replace("until: [next-milestone]", "after: [next-milestone]")
                 .replace("# Trigger", "# Resolution\n\nDone.\n\n# Trigger"),
         ),
@@ -364,12 +364,12 @@ fn a_parent_and_its_children_are_checked_together() {
     let cases = [
         (
             "a parent closes after its children",
-            "deprecated\nclosed_as: done",
+            "deprecated\nprogress: done",
             spec("parent: big\n", "stable"),
         ),
         (
             "a parent closes after its children",
-            "deprecated\nclosed_as: done",
+            "deprecated\nprogress: done",
             item("big"),
         ),
         (
@@ -489,7 +489,7 @@ fn create_leaves_a_milestone_for_a_person_to_write() {
     // Once the project has a milestone, create never writes another, closed or not: the next one is the project's
     let closed = fs::read_to_string(&milestone)
         .unwrap()
-        .replace("status: draft", "status: deprecated\nclosed_as: done")
+        .replace("status: draft", "status: deprecated\nprogress: done")
         .replace(
             "# Condition",
             "# Resolution\n\nPushed on 2026-10-09.\n\n# Condition",
@@ -981,7 +981,7 @@ fn record(kind: &str, tag: &str) -> String {
              # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
         ),
         _ => format!(
-            "---\ntype: Spec\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: deprecated\nclosed_as: done\n---\n\n# Resolution\n\nDone.\n"
+            "---\ntype: Spec\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: deprecated\nprogress: done\n---\n\n# Resolution\n\nDone.\n"
         ),
     }
 }
