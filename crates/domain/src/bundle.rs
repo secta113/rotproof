@@ -28,6 +28,16 @@ pub const WORK_RULES: &str = include_str!("../../../records/work-rules.md");
 pub const KNOWLEDGE_RULES: &str = include_str!("../../../records/knowledge-rules.md");
 /// The log as `rotproof create` makes it. From then on it is the project's
 pub const LOG: &str = include_str!("../../../records/log.md");
+/// The closed list of `docs/work/`, written by Rotproof next to the index: the closed records that are no part of open
+/// work, apart from the index, which is read before every piece of work
+pub const CLOSED_LIST: &str = "closed.md";
+/// The frontmatter of the closed list: a guide, so the index links to it next to the rules. Fixed; the list follows
+const CLOSED_HEAD: &str = "---
+type: Guide
+title: Closed records
+description: The closed specs, work items and milestones of docs/work/ that are no part of open work, by area. What was decided and done, and why, kept as history; read it when you need to know why.
+---
+";
 /// Where `rotproof create` writes a milestone when `docs/work/` has none
 pub const FIRST_MILESTONE: &str = "docs/work/next-milestone.md";
 
@@ -316,6 +326,10 @@ pub fn expected(
         (in_docs("work/rules.md"), WORK_RULES.into()),
         (in_docs("index.md"), render_root()),
         (in_docs("work/index.md"), render_work(&work, areas)),
+        (
+            in_docs(&format!("work/{CLOSED_LIST}")),
+            render_closed(&work, areas),
+        ),
     ];
     let mut problems = work.problems;
     let read = knowledge_with_rules(knowledge_docs, areas);
@@ -340,11 +354,13 @@ pub fn knowledge_with_rules(docs: &Docs, areas: &[String]) -> KnowledgeFolder {
     knowledge(&docs, areas)
 }
 
-/// The documents of `docs/work/`, from those read there, with the rules read as Rotproof writes them, so the index
-/// lists them on the run that writes them.
+/// The documents of `docs/work/`, from those read there, with the rules and the closed list read as Rotproof writes
+/// them, so the index lists them on the run that writes them. The closed list is read by its frontmatter alone, which
+/// is all the index needs of it.
 pub fn work_with_rules(docs: &Docs, areas: &[String]) -> Work {
     let mut docs = docs.clone();
     docs.insert("rules.md".into(), WORK_RULES.into());
+    docs.insert(CLOSED_LIST.into(), CLOSED_HEAD.into());
     work(&docs, areas)
 }
 
@@ -392,27 +408,42 @@ struct Entry<'a> {
     tag: &'a str,
     parent: Option<&'a String>,
     closed: bool,
+    /// Listed in the index, as open or a part of open work; otherwise in the closed list
+    in_index: bool,
     /// Specs before work items under the same heading or parent; work items by filing date
     order: (bool, Option<NaiveDate>),
     /// The line without its parent, which is added when the entry is not listed under it
     line: String,
 }
 
-/// The index of `work/` (an OKF index.md): the guides, the open milestones under `# Milestones`, the open records by
-/// area in the order `areas` declares them, and the closed records last under `# Closed`, milestones first, so they do
-/// not bury the open ones. A milestone is listed across the areas: it is the moment the work of every area waits for.
+/// The index of `work/` (an OKF index.md): the guides, the open milestones under `# Milestones`, and by area in the
+/// order `areas` declares them the open records and the closed ones that are a part of an open record. A milestone is
+/// listed across the areas: it is the moment the work of every area waits for. The other closed records are in the
+/// closed list (`render_closed`), which the index links to as a guide, so the index grows with the open work and not
+/// with the history.
+pub fn render_work(work: &Work, areas: &[String]) -> String {
+    render_lists(work, areas).0
+}
+
+/// The closed list of `work/` (`closed.md`, a guide): the closed milestones, then by area the closed records that are
+/// no part of an open record, as the index lists records.
+pub fn render_closed(work: &Work, areas: &[String]) -> String {
+    render_lists(work, areas).1
+}
+
+/// The index of `work/` and its closed list.
 ///
-/// A record in the same area as its parent, and open or closed as its parent is, is listed under it, indented: the
-/// parts of an epic and the work items of a spec. Any other record with a parent is listed on its own with its parent
-/// after its line, so each record appears once. Under a heading or a parent, the specs come first, then the work items
-/// by filing date.
+/// A record in the same area as its parent is listed under it, indented: the parts of an epic and the work items of a
+/// spec, and in the index the closed ones of an open parent too, so an open spec shows which of its steps are done.
+/// Any other record with a parent is listed on its own with its parent after its line, so each record appears once.
+/// Under a heading or a parent, the specs come first, then the work items by filing date.
 ///
 /// Each entry has the OKF form `* [title](target) - description`, with the frontmatter's `description`, and adds after
 /// ` | ` what a reader needs: an open spec its status; an open item its status when nobody has sorted it yet, the date
 /// of the last measurement and the first sentence of its state; an open record `Started.` once its work has started,
 /// and its arrows (what it waits for, and what waits for it); a closed record how it closed (`Done:` or `Dropped:`)
 /// and the first sentence of its resolution. The separator is a symbol so the parts stay apart in any language.
-pub fn render_work(work: &Work, areas: &[String]) -> String {
+fn render_lists(work: &Work, areas: &[String]) -> (String, String) {
     let records = crate::arrows::records(work);
     let waiting = crate::arrows::waiting(work);
     // Whether an open record's work has started, then what it waits for and what waits for it, after its line. Started
@@ -458,6 +489,7 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
             tag: &spec.tag,
             parent: spec.parent.as_ref(),
             closed: !spec.is_open(),
+            in_index: true,
             order: (false, None),
             line: format!(
                 "* [{}]({name}) - {} | {after}{}",
@@ -472,16 +504,27 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
         tag: &item.tag,
         parent: item.parent.as_ref(),
         closed: !item.is_open(),
+        in_index: true,
         order: (true, Some(item.filed)),
         line: format!("{}{}", item_line(name, item, sections), arrows(name, false)),
     });
     let mut entries: Vec<Entry> = specs.chain(items).collect();
     entries.sort_by_key(|entry| (entry.order, entry.name));
-    // The parent an entry is listed under, in this index
+    // The index lists the open records, and the closed ones that are a part of open work; the closed list the rest
+    let parent_open = |parent: Option<&String>| {
+        parent
+            .and_then(|parent| work.specs.get(&format!("{parent}.md")))
+            .is_some_and(|(spec, _)| spec.is_open())
+    };
+    for entry in &mut entries {
+        entry.in_index = !entry.closed || parent_open(entry.parent);
+    }
+    // The parent an entry is listed under, in the same list: any parent in the same area, except a closed one of an
+    // open record, which is listed on its own so the open record stays in the index
     let nested_in = |entry: &Entry| -> Option<String> {
         let name = format!("{}.md", entry.parent?);
         let (spec, _) = work.specs.get(&name)?;
-        (spec.tag == entry.tag && !spec.is_open() == entry.closed).then_some(name)
+        (spec.tag == entry.tag && (spec.is_open() || entry.closed)).then_some(name)
     };
     let line = |entry: &Entry| match entry.parent {
         Some(parent) if nested_in(entry).is_none() => {
@@ -561,19 +604,22 @@ pub fn render_work(work: &Work, areas: &[String]) -> String {
     let lines = |pairs: Vec<(bool, String)>| -> Vec<String> {
         pairs.into_iter().map(|(_, line)| line).collect()
     };
-    let mut out = vec![GENERATED.to_string()];
-    out.extend(guide_section(&work.guides));
-    out.extend(section("Milestones", lines(open_milestones)));
+    let mut index = vec![GENERATED.to_string()];
+    index.extend(guide_section(&work.guides));
+    index.extend(section("Milestones", lines(open_milestones)));
+    let mut closed = vec![CLOSED_HEAD.to_string(), GENERATED.to_string()];
+    closed.extend(section("Milestones", lines(closed_milestones)));
     for area in areas {
-        out.extend(section(
+        index.extend(section(
             area,
-            tree(&|entry| entry.tag == area && !entry.closed),
+            tree(&|entry| entry.tag == area && entry.in_index),
+        ));
+        closed.extend(section(
+            area,
+            tree(&|entry| entry.tag == area && !entry.in_index),
         ));
     }
-    let mut closed = lines(closed_milestones);
-    closed.extend(tree(&|entry| entry.closed));
-    out.extend(section("Closed", closed));
-    out.join("\n") + "\n"
+    (index.join("\n") + "\n", closed.join("\n") + "\n")
 }
 
 /// The guides of a directory, first in its index so the rules are found before the records. Nothing when it has none.
@@ -991,16 +1037,22 @@ Not yet. Measured by hand.
     }
 
     #[test]
-    fn a_closed_item_leaves_the_open_list() {
+    fn a_closed_item_leaves_the_index_for_the_closed_list() {
         let closed = crate::schema::closed_record(GOOD, "Fixed.");
-        let index = render_work(&parsed(&[("closed.md", closed)]), &areas());
+        let work = parsed(&[("fixed.md", closed)]);
+        let index = render_work(&work, &areas());
         assert!(
-            index.contains("# Closed") && index.contains("Fixed."),
-            "{index}"
+            !index.contains("fixed.md") && !index.contains("# operations"),
+            "a closed item is still in the index: {index}"
         );
+        let list = render_closed(&work, &areas());
         assert!(
-            !index.contains("# operations"),
-            "a closed item is still listed under its area"
+            list.starts_with(CLOSED_HEAD)
+                && list.contains(GENERATED)
+                && list.contains("# operations\n\n* [")
+                && list.contains("(fixed.md) - ")
+                && list.contains("| Done: Fixed."),
+            "{list}"
         );
     }
 
@@ -1036,19 +1088,26 @@ Not yet. Measured by hand.
                 "docs/work/rules.md",
                 "docs/index.md",
                 "docs/work/index.md",
+                "docs/work/closed.md",
                 "docs/knowledge/rules.md",
                 "docs/knowledge/index.md",
             ]
         );
         assert!(problems.is_empty(), "{problems:?}");
-        // The rules are listed on the run that writes them
+        // The rules, and the closed list, are listed on the run that writes them
         let index = |path: &str| &files.iter().find(|(p, _)| p == path).unwrap().1;
-        for (path, rules) in [
-            ("docs/work/index.md", "rules.md"),
-            ("docs/knowledge/index.md", "rules.md"),
+        for (path, guide) in [
+            ("docs/work/index.md", "](rules.md) - "),
+            ("docs/work/index.md", "* [Closed records](closed.md) - "),
+            ("docs/knowledge/index.md", "](rules.md) - "),
         ] {
-            assert!(index(path).contains(rules), "{path}");
+            assert!(index(path).contains(guide), "{path}: {guide}");
         }
+        // The closed list is a guide that passes, with nothing closed yet
+        assert!(matches!(
+            crate::schema::work_doc(index("docs/work/closed.md")),
+            Ok(crate::schema::WorkDoc::Guide(_))
+        ));
         assert!(is_document("a.md", false));
         assert!(!is_document("index.md", false) && !is_document("log.md", false));
         assert!(!is_document("a.md", true) && !is_document("a.txt", false));
@@ -1148,20 +1207,25 @@ Not yet. Measured by hand.
                 crate::schema::closed_record(GOOD, "Fixed."),
             ),
             spec_doc("old-spec", "operations", None, true),
-            ("rules.md".to_string(), WORK_RULES.to_string()),
         ]
         .into();
-        let all = work(&docs, &areas());
+        let all = work_with_rules(&docs, &areas());
         assert!(all.problems.is_empty(), "{:?}", all.problems);
         assert_eq!(
             outline(&render_work(&all, &areas())),
             [
                 "# Guides",
+                "* [Closed records](closed.md",
                 "* [Work rules](rules.md",
                 "# operations",
                 "* [spec](spec.md",
                 "* [Some problem](item.md",
-                "# Closed",
+            ]
+        );
+        assert_eq!(
+            outline(&render_closed(&all, &areas())),
+            [
+                "# operations",
                 "* [old-spec](old-spec.md",
                 "* [Some problem](old-item.md",
             ]
@@ -1212,9 +1276,9 @@ Not yet. Measured by hand.
                     spec_doc("alone", "operations", None, false),
                 ],
                 vec![
-                    // Dropped part of an open epic: under Closed, naming it
+                    // Dropped part of an open epic: in the index, under the epic
                     dropped(spec_doc("part-d", "operations", Some("big"), true)),
-                    // A closed epic and its closed part: under Closed, the part under its epic
+                    // A closed epic and its closed part: in the closed list, the part under its epic
                     spec_doc("old", "operations", None, true),
                     spec_doc("old-part", "operations", Some("old"), true),
                 ],
@@ -1223,24 +1287,31 @@ Not yet. Measured by hand.
         );
         assert!(all.problems.is_empty(), "{:?}", all.problems);
         assert_eq!(all.closed_before_its_children(), Vec::<String>::new());
-        let index = render_work(&all, &areas());
-        assert_eq!(
-            index
-                .lines()
+        let listed = |text: String| -> Vec<String> {
+            text.lines()
                 .filter(|l| l.contains("](") || l.starts_with('#'))
-                .collect::<Vec<_>>(),
+                .map(String::from)
+                .collect()
+        };
+        assert_eq!(
+            listed(render_work(&all, &areas())),
             [
                 "# operations",
                 "* [alone](alone.md) - D. | Status: stable.",
                 "* [big](big.md) - D. | Status: stable.",
                 "  * [part-a](part-a.md) - D. | Status: stable.",
                 "  * [part-b](part-b.md) - D. | Status: stable.",
+                "  * [part-d](part-d.md) - D. | Dropped: Implemented.",
                 "# billing",
                 "* [part-c](part-c.md) - D. | Status: stable. | Parent: [big](big.md)",
-                "# Closed",
+            ]
+        );
+        assert_eq!(
+            listed(render_closed(&all, &areas())),
+            [
+                "# operations",
                 "* [old](old.md) - D. | Done: Implemented.",
                 "  * [old-part](old-part.md) - D. | Done: Implemented.",
-                "* [part-d](part-d.md) - D. | Dropped: Implemented. | Parent: [big](big.md)",
             ]
         );
     }
@@ -1286,9 +1357,11 @@ Not yet. Measured by hand.
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].starts_with("work/part.md: its parent big is closed"));
         let index = render_work(&all, &areas());
+        let list = render_closed(&all, &areas());
         assert!(
-            index.contains("# Closed\n\n* [big](big.md) - D. | Done: Implemented."),
-            "{index}"
+            list.contains("# operations\n\n* [big](big.md) - D. | Done: Implemented.")
+                && !index.contains("(big.md) - "),
+            "{list}"
         );
         assert!(
             index.contains("* [next](next.md) - D. | Status: stable. | Ready."),
@@ -1401,8 +1474,11 @@ Not yet. Measured by hand.
                     item_doc("unsorted", "operations", None, false),
                 ],
                 vec![
-                    // Done while the spec is open: under Closed, naming it
+                    // Done while the spec is open: in the index, under the spec
                     item_doc("done-step", "operations", Some("big"), true),
+                    // Done while the spec is open, in another area: in the index, in its area, naming the spec
+                    item_doc("billing-done", "billing", Some("big"), true),
+                    // A closed spec and its closed step: in the closed list
                     spec_doc("old", "operations", None, true),
                     item_doc("old-step", "operations", Some("old"), true),
                 ],
@@ -1418,18 +1494,28 @@ Not yet. Measured by hand.
                 "* [big](big.md",
                 "  * [part](part.md",
                 "    * [step-of-part](step-of-part.md",
+                "  * [done-step](done-step.md",
                 "  * [step-of-big](step-of-big.md",
                 "* [unsorted](unsorted.md",
                 "# billing",
+                "* [billing-done](billing-done.md",
                 "* [billing-step](billing-step.md",
-                "# Closed",
+            ]
+        );
+        assert_eq!(
+            outline(&render_closed(&all, &areas())),
+            [
+                "# operations",
                 "* [old](old.md",
                 "  * [old-step](old-step.md",
-                "* [done-step](done-step.md",
             ]
         );
         let index = render_work(&all, &areas());
-        for (slug, parent) in [("billing-step", "part"), ("done-step", "big")] {
+        assert!(
+            index.contains("  * [done-step](done-step.md) - Something is wrong. | Done: "),
+            "{index}"
+        );
+        for (slug, parent) in [("billing-step", "part"), ("billing-done", "big")] {
             assert!(
                 index.contains(&format!("({slug}.md) - Something is wrong.")),
                 "{index}"
@@ -1565,12 +1651,14 @@ Not yet. Measured by hand.
             &areas(),
         );
         assert!(all.problems.is_empty(), "{:?}", all.problems);
-        let index = render_work(&all, &areas());
-        assert_eq!(
-            index
-                .lines()
+        let listed = |text: String| -> Vec<String> {
+            text.lines()
                 .filter(|l| l.contains("](") || l.starts_with('#'))
-                .collect::<Vec<_>>(),
+                .map(String::from)
+                .collect()
+        };
+        assert_eq!(
+            listed(render_work(&all, &areas())),
             [
                 "# Milestones",
                 "* [sooner](sooner.md) - D. | Date: 2026-11-01.",
@@ -1578,8 +1666,15 @@ Not yet. Measured by hand.
                 "* [undated](undated.md) - D.",
                 "# operations",
                 "* [unsorted](unsorted.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet.",
-                "# Closed",
+            ]
+        );
+        // The closed milestones come first in the closed list too
+        assert_eq!(
+            listed(render_closed(&all, &areas())),
+            [
+                "# Milestones",
                 "* [past](past.md) - D. | Done: Pushed.",
+                "# operations",
                 "* [old](old.md) - D. | Done: Implemented.",
             ]
         );

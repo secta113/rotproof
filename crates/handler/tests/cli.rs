@@ -413,6 +413,7 @@ fn index_writes_every_index_file() {
         "docs/work/rules.md",
         "docs/index.md",
         "docs/work/index.md",
+        "docs/work/closed.md",
         "docs/knowledge/rules.md",
         "docs/knowledge/index.md",
     ] {
@@ -425,8 +426,25 @@ fn index_writes_every_index_file() {
     }
     let work = fs::read_to_string(root.path().join("docs/work/index.md")).unwrap();
     assert!(
-        work.contains("# Guides\n\n* [Work rules](rules.md) - What goes in docs/work/"),
+        work.contains(
+            "# Guides\n\n* [Closed records](closed.md) - The closed specs, work items and milestones"
+        ) && work.contains("\n* [Work rules](rules.md) - What goes in docs/work/"),
         "{work}"
+    );
+    // The closed list is checked as the index is: changed by hand, the check fails
+    let closed = root.path().join("docs/work/closed.md");
+    let written = fs::read_to_string(&closed).unwrap();
+    fs::write(
+        &closed,
+        format!("{written}\n* [Hand](hand.md) - Written by hand.\n"),
+    )
+    .unwrap();
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert!(!out.status.success());
+    assert!(
+        stdout(&out).contains("docs/work/closed.md"),
+        "{}",
+        stdout(&out)
     );
 }
 

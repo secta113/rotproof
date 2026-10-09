@@ -16,6 +16,7 @@ use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
 
+use crate::bundle::CLOSED_LIST;
 use utils::paths::{file_name, normalize, parent};
 
 /// The version that brings the move.
@@ -72,6 +73,11 @@ pub fn plan(files: &BTreeMap<String, String>) -> Result<Plan, String> {
             ));
         } else if GENERATED.contains(&name) {
             plan.removes.push(path.clone());
+        } else if name == CLOSED_LIST {
+            stopped.push(format!(
+                "{path}: {WORK}/{CLOSED_LIST} is the list of closed records Rotproof writes: rename the record by \
+                 hand (and the links to it)"
+            ));
         } else {
             let to = format!("{WORK}/{name}");
             if let Some((from, _)) = moves.iter().find(|(_, other)| **other == to) {
@@ -364,7 +370,7 @@ mod tests {
         let sorted = ITEM.replace("status: stable", "status: stable\nparent: design");
         let docs = files(&[
             ("docs/backlog/open.md", ITEM),
-            ("docs/backlog/closed.md", &closed),
+            ("docs/backlog/fixed.md", &closed),
             ("docs/backlog/sorted.md", &sorted),
             ("docs/backlog/index.md", "generated"),
             ("docs/backlog/rules.md", "generated"),
@@ -393,8 +399,8 @@ mod tests {
             [
                 "docs/knowledge/api.md",
                 "docs/log.md",
-                "docs/work/closed.md",
                 "docs/work/design.md",
+                "docs/work/fixed.md",
                 "docs/work/open.md",
                 "docs/work/sorted.md",
             ]
@@ -402,7 +408,7 @@ mod tests {
         assert_eq!(
             plan.removes,
             [
-                "docs/backlog/closed.md",
+                "docs/backlog/fixed.md",
                 "docs/backlog/index.md",
                 "docs/backlog/open.md",
                 "docs/backlog/rules.md",
@@ -426,7 +432,7 @@ mod tests {
             "{open}"
         );
         // A closed item drops its deadline, which binds nothing, and keeps its status
-        let closed = &plan.writes["docs/work/closed.md"];
+        let closed = &plan.writes["docs/work/fixed.md"];
         assert!(
             closed.contains("\nstatus: deprecated\n") && !closed.contains("deadline"),
             "{closed}"
@@ -447,7 +453,7 @@ mod tests {
         assert_eq!(plan.by_hand.len(), 3, "{:?}", plan.by_hand);
         assert!(
             plan.by_hand[0].starts_with("1 closed records")
-                && plan.by_hand[0].ends_with("(closed.md)")
+                && plan.by_hand[0].ends_with("(fixed.md)")
         );
         assert!(
             plan.by_hand[1].starts_with("2 open work items keep their deadline")
@@ -481,6 +487,11 @@ mod tests {
                 "a deeper directory",
                 files(&[("docs/specs/old/x.md", ITEM)]),
                 "docs/specs/old/x.md: not a record",
+            ),
+            (
+                "a record named as the closed list",
+                files(&[("docs/backlog/closed.md", ITEM)]),
+                "docs/backlog/closed.md: docs/work/closed.md is the list of closed records Rotproof writes",
             ),
         ];
         for (name, docs, said) in cases {
