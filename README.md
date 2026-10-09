@@ -157,7 +157,7 @@ cannot be declined. It is what a machine can do without reading the records: eac
 name; every link in `docs/` that reached one pointed at its new place (in the log too, whose words stay as they were
 written); `type: Backlog Item` as `Work Item` and `epic` as `parent`; an open item with no parent as a draft, as a
 stable item is now one sorted into a spec; and the deadline of a closed item dropped, as it binds nothing. The rest it
-says, and `rotproof check` names it record by record: how each closed record closed (`closed_as`), and the deadline of
+says, and `rotproof check` names it record by record: how each closed record closed (`progress`), and the deadline of
 each open item, which becomes a milestone named in `until`. The move is planned whole first: a name in both old
 directories, or a file it would not know where to put, stops it with nothing changed, and is renamed or moved by hand.
 Until it has run, `rotproof check` says only that the records are in the old places.
@@ -285,7 +285,8 @@ docs/
   work/             every spec, work item and milestone, open or closed
     rules.md        generated: the rules of the three types (type: Guide)
     index.md        generated
-    <slug>.md       one record per file (type: Spec, Work Item or Milestone; status: draft, stable or deprecated)
+    <slug>.md       one record per file (type: Spec, Work Item or Milestone; status: draft, stable or deprecated;
+                    progress: started, done or dropped)
   knowledge/        how things are now, and why (type: Knowledge, status: stable or deprecated)
     rules.md        generated: the knowledge rules (type: Guide)
     index.md        generated
@@ -295,14 +296,16 @@ The two directories hold records that are handled differently. `work/` holds wha
 it, closed once implemented, done or dropped, and never moved. Which type a sentence belongs to is one question: if
 the work were finished today, would it be false? A spec holds what stays true (what was decided, why, what was
 rejected); a work item holds what would then be false (what is not done or measured yet, and how far it has come).
-Whether a record is decided is its `status`: a draft spec is not agreed yet, a draft work item is not sorted yet. A
+Whether a record is decided is its `status`: a draft spec is not agreed yet, a draft work item is not sorted yet. How
+far its work has come is its `progress`: `started`, then `done` or `dropped` once it is closed. A
 milestone holds neither: it is a moment the work waits for (a release, an agreement, something outside the project),
 with a `# Condition` that says what to look at to know it came, and an optional `date` that fails nothing when it
 passes. A project always has an open one, its next moment: `rotproof create` writes `next-milestone.md` when
 `docs/work/` has none, with a condition that is only a comment, so the check fails until a person writes what the next
 moment is. The index lists the open milestones first, across the areas, by date.
-`knowledge/` holds how things are now, edited in place and deprecated only when it no longer holds. A closed spec is
-history; what it built is described in `knowledge/`, an API or a data model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
+`knowledge/` holds how things are now, edited in place and deprecated only when it no longer holds. A done spec says
+what was decided and stays current until a later one replaces it; what it built is described in `knowledge/`, an API
+or a data model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
 contents, under the label `**Knowledge**` (`* **Knowledge**: knowledge/api.md@a3f9c1d2`), and `rotproof check` fails
 an edit the log does not name. A knowledge document that describes code names it in `follows`, each with its hash when
 the document was last reviewed: a file in any language, and in Python also a function or class
@@ -323,10 +326,14 @@ it would stay open forever. The knowledge index lists the alarms first, under `#
 is seen and the strings: whoever meets a message searches `docs/` for it, and reading the index before work watches
 for them.
 
-A record stays where it was written when it closes: its status says it is closed, `closed_as` says how (`done` or
-`dropped`), and the index lists it under `# Closed`. Its path, and every link to it, never changes, so closing a record
-is a change to that record and its index line only. How it closed is a field and not only words in its resolution, as
-work that waits on a dropped record does not get what it waited for; `status` cannot say it, as OKF fixes its values.
+A record stays where it was written when it closes: its `progress` says it is closed and how (`done` or `dropped`),
+and the index lists it under `# Closed`. Its path, and every link to it, never changes, so closing a record is a
+change to that record and its index line only. How it closed is a field and not only words in its resolution, as work
+that waits on a dropped record does not get what it waited for. `status` keeps the meaning OKF gives it, whether the
+document is current, as a reader that knows only OKF reads `status` alone: a done work item and anything dropped are
+`deprecated`, while a done spec that still describes how things are stays `stable`. `progress: started` says that
+someone has started an open record's work, and the index says `Started.`, so the next reader continues it instead of
+starting again.
 
 Every spec, work item and knowledge document belongs to exactly one area: its only tag, one of the `areas` the
 declaration lists. The index files group by area, in the order of `areas`, so the project puts the largest or most
@@ -359,7 +366,8 @@ The order of the work is a third, independent thing: arrows. `after: [a]` on B, 
 B", between any two records, a milestone included: the deadline of a work item is `until: [release-0-3-0]`. The later
 record closes after the earlier one; one that waits for a dropped record is pointed elsewhere; the arrows and the
 parents make no cycle. The index shows what each open record waits for, and says `Ready.` once all of it is done, so
-work whose conditions came true is seen instead of waiting for someone to notice.
+work whose conditions came true is seen instead of waiting for someone to notice; once its work has started, it says
+`Started.` instead. An arrow orders the closing, not the start.
 
 A work item has this frontmatter and these body headings:
 
@@ -370,7 +378,7 @@ title: Some problem
 description: One sentence: what is waiting.
 tags: [area]                  # exactly one, declared in areas; the index groups items by it
 status: stable                # draft = open and not sorted yet, stable = open and sorted, deprecated = closed
-closed_as: done               # only when closed, and then required: done or dropped
+progress: started             # optional while open: started; once closed, required: done or dropped
 parent: some-spec             # the spec it is a part of; required for stable
 after: [design]               # optional: the records that come before it
 until: [release-0-3-0]        # optional: the records that come after it, often a milestone
@@ -483,21 +491,25 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   (`render_index()`) or a dotted path (`Bundle.render`); when it names nothing, the message says which name to write
   or lists the names the file defines.
 - **Every spec keeps the format:** `title`, `description`, `status` and exactly one declared area in `tags`, and,
-  once it is closed, `closed_as` and a non-empty `# Resolution` as the first heading. `closed_as` is `done` or `dropped`,
-  and only a closed spec or work item has it. `parent`, when present, is the slug of another spec in `docs/work/`
+  once it is closed (`progress: done` or `dropped`), a non-empty `# Resolution` as the first heading. `progress` is
+  `started`, `done` or `dropped`, and agrees with `status`: a deprecated record is closed, anything dropped is
+  deprecated, a done work item is deprecated, and a done spec is stable (still current) or deprecated (replaced); a
+  knowledge document has no `progress`. `parent`, when present, is the slug of another spec in `docs/work/`
   (not a path, not a work item or a guide, not the spec itself), and that spec has no `parent` of its own: one level
   only. The `parent` of a work item is the slug of any spec. A record that breaks one of these is left out of the index
   files.
 - **A milestone is open,** and every milestone keeps the format: `title`, `description`, `status` and exactly one
-  declared area, a non-empty `# Condition`, and once it is closed `closed_as` and a non-empty `# Resolution` as the first
-  heading. `date` is a day (`YYYY-MM-DD`). A milestone has no `parent`, and no record names one as its parent.
+  declared area, a non-empty `# Condition`, and once it is closed (`progress: done` or `dropped`) a non-empty
+  `# Resolution` as the first heading. A milestone is never `started`; one that came is stable or deprecated, and one
+  withdrawn is deprecated. `date` is a day (`YYYY-MM-DD`). A milestone has no `parent`, and no record names one as its parent.
 - **Every open record has a parent or something after it:** an open spec or work item without a parent has an
   `until` of its own, or is named in another record's `after`. So every open record reaches a milestone, by its parent
   or its arrows, and a milestone cannot close while work bounded by it is open: that is the deadline, as records.
 - **The arrows keep their order:** `after` and `until` are lists of slugs of records that pass (not a guide, not the
   record itself). An arrow is written once, on either side; the later record is not closed as done while the earlier
   one is open; no open record comes after, or before, a dropped one; and the arrows and the parents (a child before
-  its parent) make no cycle. The index says `Ready.` on an open record whose earlier records are all done.
+  its parent) make no cycle. The index says `Ready.` on an open record whose earlier records are all done, and
+  `Started.` in its place once its work has started; a record may start before its earlier records close.
 - **A parent closes after its children:** no closed spec has an open part or an open work item. A child that is
   dropped closes as dropped, as any record does.
 - **The log exists, points only at work items that exist** (`work/<slug>.md`, or `backlog/<slug>.md` as entries

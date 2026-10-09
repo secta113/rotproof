@@ -26,14 +26,16 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
 - **Before starting work or deploying, read `docs/work/index.md` and `docs/knowledge/index.md`, and open only the
   specs, work items and documents that concern the work.** Read the closed records (under `# Closed` in
   `docs/work/index.md`) and `docs/log.md` when you need to know why something was decided. The index says which open
-  records are `Ready.` and which milestones are near, and is only seen when someone opens it. After measuring an
-  item's state, update it right away.
+  records are `Ready.`, which were `Started.` and which milestones are near, and is only seen when someone opens it.
+  Continue a started record from its `# State` rather than starting it again. When you start a record's work, set
+  `progress: started`; after measuring an item's state, update it right away.
 - **How each record is written is in the `rules.md` of its directory,** which Rotproof writes. The project's own rules
   for a directory go in another guide in the same directory.
 - **A finding is recorded, never left in a comment.** Write it as a draft work item in `docs/work/`, with `until`
   naming the milestone it waits for, or in the spec it belongs to. `rotproof check` fails on `TODO`, `FIXME`, `XXX`, `HACK` and `NOTE` in comments in the code.
 - **A closed record stays where it is and opens with `# Resolution`.** Closing a spec, a work item or a milestone
-  sets `status: deprecated` and `closed_as` (`done` or `dropped`), and puts `# Resolution` first; nothing moves.
+  sets `progress` (`done` or `dropped`) and puts `# Resolution` first; nothing moves. `status: deprecated` follows
+  for a work item and for anything dropped; a done spec that still describes how things are stays `stable`.
 - **When a task is done, add one entry to `docs/log.md`, under a `## YYYY-MM-DD` heading for the day, newest first.**
   The log is a flat list of entries under the dates (OKF 0.2, section 9): one list item per task, with its fields as
   nested items, and no other headings. `rotproof check` fails on anything else.

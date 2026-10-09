@@ -13,14 +13,15 @@ three types of records. Which of the first two a sentence belongs to is decided 
 finished today, would the sentence be false?**
 
 - **No: a spec** (`type: Spec`) holds what was decided. What it changes, why, how it was decided, and the designs
-  that were rejected. Once the work is done, it is still true, as history.
+  that were rejected. Once the work is done, it is still true: the description of how things are, until a later
+  spec replaces it.
 - **Yes: a work item** (`type: Work Item`) holds what is waiting. What is not done or not measured yet, and how far it
   has come (its state). Once the work is done, it closes.
 - **Neither, but a moment: a milestone** (`type: Milestone`) holds no work and no decision, only whether a moment has
   come: a release, an agreement, something outside the project. Once it comes, it closes.
 
 A topic that holds both is written as both: a spec, and work items whose parent is the spec. Whether a record is
-decided is its `status`, never the directory it is in.
+current is its `status`, and how far its work has come its `progress`; never the directory it is in.
 
 How things are now goes in `docs/knowledge/`, and what was done in `docs/log.md`. Start from [index.md](index.md).
 
@@ -36,8 +37,8 @@ one record of any of them. The frontmatter holds the fields used for filtering. 
 | `title` | Display name |
 | `description` | One sentence: what the spec changes |
 | `tags` | Exactly one area, one of the `areas` declared in `.config/rotproof.toml`. The index groups records by it, in that order |
-| `status` | `draft` (not agreed yet), `stable` (agreed) or `deprecated` (closed) |
-| `closed_as` | Only when closed, and then required: `done` (implemented) or `dropped`. See "Closed records" |
+| `status` | `draft` (not agreed yet), `stable` (agreed, and once done, still current) or `deprecated` (dropped, or done and replaced) |
+| `progress` | Optional while open: `started` once someone has started the work. Required once closed: `done` (implemented) or `dropped`. See "Progress" |
 | `parent` | Optional. The slug of the epic this spec is a part of. See "Parents" |
 | `after`, `until` | Optional. Lists of slugs: the records that come before this one, and after it. See "Arrows" |
 
@@ -52,9 +53,10 @@ The body is free, except that a closed spec opens with `# Resolution`: its first
   under it say what is left.
 - **A spec without a parent says by when it is done.** An epic, or a spec that is no part of one, names in `until`
   the moment it waits for, often a milestone (see "Every open record is bounded").
-- **Closing a spec leaves it where it is.** Set `status: deprecated` and `closed_as`, and write `# Resolution` as its
-  first heading: implemented or dropped, and how the implementation differs from the spec. From then on it is history.
-  A spec closes after its children (see "Parents").
+- **Closing a spec leaves it where it is.** Set `progress: done` or `dropped`, and write `# Resolution` as its first
+  heading: implemented or dropped, by which commits, and how the implementation differs from the spec. A done spec
+  that still describes how things are stays `stable`: it is the description of the current state. One replaced by a
+  later spec, and every dropped one, is `deprecated`, history. A spec closes after its children (see "Parents").
 
 # Work items
 
@@ -65,7 +67,7 @@ The body is free, except that a closed spec opens with `# Resolution`: its first
 | `description` | One sentence: what is waiting |
 | `tags` | Exactly one area, one of the `areas` declared in `.config/rotproof.toml`. The index groups records by it, in that order |
 | `status` | `draft` (open, nobody has sorted it yet), `stable` (open, sorted into a spec) or `deprecated` (closed) |
-| `closed_as` | Only when closed, and then required: `done` or `dropped`. See "Closed records" |
+| `progress` | Optional while open: `started` once someone has started the work. Required once closed: `done` or `dropped`. See "Progress" |
 | `parent` | The slug of the spec it is a part of. Required for `stable`; a draft may have none. See "Parents" |
 | `after`, `until` | Optional. Lists of slugs: the records that come before this one, and after it. See "Arrows" |
 | `filed` | Date the item was filed |
@@ -83,6 +85,9 @@ Body headings:
 
 - **What starts the work is an arrow when it can be.** A record before it goes in `after`, and the index says `Ready.`
   once it is done. `# Trigger` is for what no record holds: a symptom, a measurement crossing a threshold.
+- **Say that the work has started.** Set `progress: started` when you start, and write in `# State` how far it has
+  come. The index then says `Started.`, so the next reader, or the next session, continues the work instead of
+  starting it again.
 - **State is a measurement.** Write the value and how to measure it. The time and who measured go in `verified`, not
   in the body. Update the state whenever you measure, including when nothing has changed. Without a recorded state,
   every reader has to measure every item again, and the items stop being read.
@@ -108,7 +113,7 @@ decides it, in one of four ways:
 3. **Postponed:** keep it a draft, and point its `until` at a later milestone. A milestone cannot close while a draft
    bounded by it is open, so every draft is decided, at the latest, when its milestone comes: sorted, closed, or
    postponed again on purpose.
-4. **Nothing to do:** close it (`status: deprecated`, `closed_as: dropped`), and say in `# Resolution` that nothing
+4. **Nothing to do:** close it (`status: deprecated`, `progress: dropped`), and say in `# Resolution` that nothing
    was found or why it was dropped. A closed item needs no parent.
 
 ## Re-measuring
@@ -127,8 +132,8 @@ without any change to the code. The index shows the date, and
 | `title` | Display name |
 | `description` | One sentence: what the moment is |
 | `tags` | Exactly one area, one of the `areas` declared in `.config/rotproof.toml` |
-| `status` | `draft` (proposed), `stable` (placed) or `deprecated` (closed) |
-| `closed_as` | Only when closed, and then required: `done` (it came) or `dropped` (it was withdrawn). See "Closed records" |
+| `status` | `draft` (proposed), `stable` (placed, and once it came, still current) or `deprecated` (withdrawn, or came and kept as history) |
+| `progress` | Only when closed, and then required: `done` (it came) or `dropped` (it was withdrawn). A milestone is never `started`. See "Progress" |
 | `date` | Optional. The day it is planned or announced for, `YYYY-MM-DD` |
 | `after`, `until` | Optional. Lists of slugs: the records that come before this one, and after it. See "Arrows" |
 
@@ -200,17 +205,35 @@ record closes after those before it, so every open record reaches a milestone, b
 never waits on nothing, and a milestone cannot come while work bounded by it is open. This is what a deadline is;
 there is no field for one in words.
 
-# Closed records
+# Progress
 
-**A closed record stays where it is.** Set `status: deprecated`, say how it closed in `closed_as`, and write
-`# Resolution` as the first heading, so a reader who opens the record from a link, or an agent reading from the top,
-meets the closing first; the index lists it under `# Closed`. Deleting or moving a record breaks every link to it, and rewriting the links puts lines that have
-nothing to do with the closing into its review.
+`progress` says how far the work of a record has come: absent while nobody has started it, `started` once someone
+has, and `done` (implemented or done, or the moment came) or `dropped` (dropped or withdrawn) once it is closed.
+**Whether a record is closed is its `progress`, not its `status`.** `status` keeps the meaning OKF gives it, whether
+the document is current: `draft` not yet reviewed, `stable` ready to be used as it is, `deprecated` kept for links and
+history. A reader that knows only OKF reads `status` alone, and OKF reads a document without one as `stable`, so a
+closed record that no longer holds still says `deprecated`. The two agree as follows; any other pair fails:
 
-**A closed record says how it closed:** `closed_as: done` when it was implemented or done, or the moment came;
-`closed_as: dropped` when it was dropped or withdrawn. The status of both is `deprecated`, as OKF fixes the values of `status`: it says where the document is in
-its life, not what became of the work. What waits on a record needs to know which it was: work that waits for a
-dropped record does not get what it waited for. `closed_as` is written only when the record is closed.
+| `progress` | Spec | Work item | Milestone |
+|---|---|---|---|
+| none, or `started` | `draft` or `stable` | `draft` or `stable` | `draft` or `stable`; never `started` |
+| `done` | `stable` (still current) or `deprecated` (replaced) | `deprecated` | `stable` or `deprecated` |
+| `dropped` | `deprecated` | `deprecated` | `deprecated` |
+
+- **A done work item is `deprecated`.** It holds what was waiting, which is no longer true once it is done.
+- **A dropped record is `deprecated`.** A dropped design left `stable` is read as correct by the next reader.
+- **A milestone that came is usually `deprecated`:** it was there to be waited for. The latest one may stay `stable`,
+  as the moment that is still current.
+- **`started` orders nothing.** An arrow says which record closes first, not which starts first, so work may start
+  before the records before it close.
+
+**A closed record stays where it is.** Write `# Resolution` as its first heading, so a reader who opens the record
+from a link, or an agent reading from the top, meets the closing first; the index lists it under `# Closed`.
+Deleting or moving a record breaks every link to it, and rewriting the links puts lines that have nothing to do with
+the closing into its review.
+
+**What waits on a record needs to know how it closed:** work that waits for a dropped record does not get what it
+waited for (see "Arrows").
 
 **Links between documents are markdown links.**
 
@@ -227,9 +250,10 @@ they are what the work of every area waits for; then the open records by area; t
 same area as its parent, and open or closed as its parent is, is listed under it, indented; any other record with a
 parent is listed on its own with `Parent: [<title>](...)` after its line. Under a heading or a parent, the specs come
 first, then the work items. An item nobody has sorted yet says `Status: draft.`, and a closed record says how it
-closed, `Done:` or `Dropped:`, before the first sentence of its resolution. An open record with arrows says
-`Ready.` when every record before it is done, names the records before it still open after `Waits for:`, and those
-after it still open after `Until:`; a milestone counts the records it waits for instead of naming them.
+closed, `Done:` or `Dropped:`, before the first sentence of its resolution. An open record whose work has started
+says `Started.`. An open record with arrows says `Ready.` when every record before it is done and its work has not
+started, names the records before it still open after `Waits for:`, and those after it still open after `Until:`; a
+milestone counts the records it waits for instead of naming them.
 
 After adding or changing a record, run `rotproof index`. `rotproof check` fails when the index differs from what
 `rotproof index` writes.
@@ -238,8 +262,8 @@ After adding or changing a record, run `rotproof index`. `rotproof check` fails 
 
 - `parent` is an extension field, which OKF allows. OKF expresses relations between documents with links and the
   prose around them; `parent` is a field so that Rotproof can check it. The index writes it as a link.
-- `closed_as`, `after`, `until` and a milestone's `date` are extension fields. OKF's `status: deprecated` says that a document is
-  closed; `closed_as` says how.
+- `progress`, `after`, `until` and a milestone's `date` are extension fields. `status` keeps OKF's meaning, whether
+  the document is current; `progress` says how far the work has come, and whether the record is closed.
 - A field that looks like a misspelling of a known field (`stale_afer`, `staleAfter`, `Title`) fails the check, so a
   misspelled optional field is not silently dropped. So does a field Rotproof no longer reads (`epic`, `deadline_kind`,
   `deadline`), with what to write instead. OKF tells readers not to reject unknown fields; this is a check on the writer's side. Any other
