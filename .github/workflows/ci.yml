@@ -37,6 +37,10 @@ jobs:
       # The wheel installs, and its binary runs, as it will for a user
       - run: pip install --find-links dist rotproof
       - run: rotproof --version
+      # Run as a user runs it, as release.yml does, so a change of behaviour that breaks it is seen on the push that
+      # makes it, not on the day of a tag
+      - run: bash .github/smoke.sh
+        shell: bash
       - uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.os }}
