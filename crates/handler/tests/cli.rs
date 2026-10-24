@@ -1617,9 +1617,19 @@ fn the_levels_inside_a_rust_crate_and_its_entry_file_are_judged() {
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
+    // The crate may depend on domain, and its inbound level may not use it
+    write(
+        "crates/infrastructure/Cargo.toml",
+        "[package]\nname = \"infrastructure\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\n\
+         domain = { path = \"../domain\" }\n",
+    );
     write(
         "crates/infrastructure/src/inbound/cli.rs",
-        "use crate::outbound::Db;\nuse super::args;\n",
+        "use crate::outbound::Db;\nuse super::args;\nuse domain::Song;\n",
+    );
+    write(
+        "crates/infrastructure/src/outbound/mod.rs",
+        "use domain::Song;\n",
     );
     write(
         "crates/infrastructure/src/lib.rs",
@@ -1640,6 +1650,7 @@ fn the_levels_inside_a_rust_crate_and_its_entry_file_are_judged() {
     for line in [
         "crates/infrastructure/src/inbound/cli.rs:1: uses crate::outbound::Db, in infrastructure.outbound; \
          infrastructure.inbound may import `protocol.inbound`",
+        "crates/infrastructure/src/inbound/cli.rs:3: uses domain::Song, in domain; ",
         "crates/infrastructure/src/lib.rs:5: the root of a crate with levels only declares their modules",
         "code in infrastructure outside its levels: crates/infrastructure/src/shared.rs",
         "Cargo.toml:8: depends on application (crates/application), in application; src/main.rs may import \
@@ -1647,7 +1658,7 @@ fn the_levels_inside_a_rust_crate_and_its_entry_file_are_judged() {
     ] {
         assert!(said.contains(line), "{line}:\n{said}");
     }
-    assert_eq!(said.matches(": uses ").count(), 1, "{said}");
+    assert_eq!(said.matches(": uses ").count(), 2, "{said}");
     assert_eq!(said.matches(": depends on ").count(), 1, "{said}");
 }
 

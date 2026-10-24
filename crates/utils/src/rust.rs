@@ -70,16 +70,16 @@ pub fn tokens(code: &str) -> Vec<(usize, Token)> {
     out
 }
 
-/// Every path the code alone ([`code`]) names from `crate`, `super` or `self`, as its segments, with the offset where
-/// it starts: in `use`, in an expression or a type, and in the tokens of a macro alike. A `use` group is spread into a
-/// path per item (`crate::{a, b::c}` is `crate::a` and `crate::b::c`), `self` in a group stays a segment of its own, a
-/// glob ends in `*`, and a rename (`as x`) is dropped.
-pub fn paths(code: &str) -> Vec<(usize, Vec<String>)> {
+/// Every path the code alone ([`code`]) names from one of the words `starts` (such as `crate`, `super`, `self` or the
+/// name of a dependency), as its segments, with the offset where it starts: in `use`, in an expression or a type, and
+/// in the tokens of a macro alike. A `use` group is spread into a path per item (`crate::{a, b::c}` is `crate::a` and
+/// `crate::b::c`), `self` in a group stays a segment of its own, a glob ends in `*`, and a rename (`as x`) is dropped.
+pub fn paths(code: &str, starts: &[&str]) -> Vec<(usize, Vec<String>)> {
     let tokens = tokens(code);
     let mut out = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        let starts = matches!(&tokens[i].1, Token::Word(w) if w == "crate" || w == "super" || w == "self")
+        let starts = matches!(&tokens[i].1, Token::Word(w) if starts.contains(&w.as_str()))
             && (i == 0 || tokens[i - 1].1 != Token::PathSep)
             && tokens.get(i + 1).map(|(_, t)| t) == Some(&Token::PathSep);
         if !starts {
@@ -447,7 +447,7 @@ let k = '/'; let l = 'é'; let m = '\u{2F}'; // four
     }
 
     fn named(source: &str) -> Vec<String> {
-        paths(&code(source))
+        paths(&code(source), &["crate", "super", "self"])
             .into_iter()
             .map(|(_, segments)| segments.join("::"))
             .collect()
@@ -474,7 +474,15 @@ let k = '/'; let l = 'é'; let m = '\u{2F}'; // four
             ]
         );
         // Each with where it starts
-        assert_eq!(paths(&code("use crate::a;"))[0].0, 4);
+        assert_eq!(paths(&code("use crate::a;"), &["crate"])[0].0, 4);
+        // From the name of a dependency, and not from one inside a path
+        assert_eq!(
+            paths(
+                &code("use domain::x;\nlet y = a::domain::z;\n"),
+                &["domain"]
+            ),
+            [(4, vec!["domain".to_string(), "x".to_string()])]
+        );
     }
 
     #[test]

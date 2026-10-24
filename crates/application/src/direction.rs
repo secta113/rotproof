@@ -9,7 +9,7 @@ use crate::tree::{code_files, exactly, read_code, resolved};
 use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
 use domain::direction::{Forbidden, judged, place_of, workspace_dirs};
 use domain::layers::{Declared, Language, Layout, Place, table};
-use domain::modules::judged_crate;
+use domain::modules::{Dependency, judged_crate};
 use domain::tree::Tree;
 use utils::paths::{join, parent};
 use utils::rust::is_source as is_rust;
@@ -58,6 +58,8 @@ fn rust(
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
     let mut manifests = Manifests::new(parsers);
+    // Each manifest's dependencies that land in a place, by the name the crate's code uses
+    let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
     let mut crates: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
@@ -122,6 +124,10 @@ fn rust(
             let Some(to) = place_of(&target, places) else {
                 continue;
             };
+            depends
+                .entry(path.clone())
+                .or_default()
+                .push((name.clone(), to));
             forbidden.extend(judged(
                 &path,
                 dependency.line,
@@ -148,7 +154,23 @@ fn rust(
                 files.push((path, source));
             }
         }
-        let inside = judged_crate(&files, layer, &levels);
+        // What the crate depends on in other layers, by the name its code uses
+        let dependencies: Vec<Dependency> = depends
+            .get(&join(&layer.path, "Cargo.toml"))
+            .into_iter()
+            .flatten()
+            .filter(|(_, to)| to.name != layer.name)
+            .map(|(name, to)| Dependency {
+                name: name.replace('-', "_"),
+                layer: to,
+                levels: places
+                    .iter()
+                    .copied()
+                    .filter(|p| p.parent.as_ref() == Some(&to.name))
+                    .collect(),
+            })
+            .collect();
+        let inside = judged_crate(&files, layer, &levels, &dependencies);
         found.extend(inside.problems);
         forbidden.extend(inside.forbidden);
     }

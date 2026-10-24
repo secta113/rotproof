@@ -6,6 +6,10 @@
 //!   path from the crate's root, through the modules with a body it sits in (`mod tests { use super::*; }`). A path
 //!   that lands in another level is judged as an import of that level; one that lands at the root (`crate::*`, an item
 //!   of the root) is an import of the layer beside its levels.
+//! - **A file of a level names another layer only as its level may.** The manifest says what the whole crate may
+//!   depend on, which is more than each level may: `infrastructure` depends on `protocol` and `domain`, and its
+//!   `inbound` may use `protocol::inbound` alone. So a path from the name of a dependency on another layer is judged
+//!   too, as an import of that layer, or of its level when the path names one (`protocol::inbound::Commands`).
 //! - **The crate's root (`src/lib.rs`) only declares the modules of its levels** (`pub mod inbound;`), with its inner
 //!   attributes (`#![...]`). Anything else there, a re-export (`pub use outbound::*`) above all, would let a level
 //!   reach another by a name of the root, and sits beside the levels.
@@ -28,10 +32,25 @@ pub struct Found {
     pub forbidden: Vec<Forbidden>,
 }
 
+/// A dependency of a crate on another layer: the name its code uses for it (the key in `Cargo.toml`, with `-` as `_`),
+/// the layer it lands in, and that layer's levels.
+pub struct Dependency<'a> {
+    pub name: String,
+    pub layer: &'a Place,
+    pub levels: Vec<&'a Place>,
+}
+
 /// Every finding in the `.rs` files of the crate of `layer` (path from the root, and source) that sit in its `src/`,
-/// whose levels are `levels`.
-pub fn judged_crate(files: &[(String, String)], layer: &Place, levels: &[&Place]) -> Found {
+/// whose levels are `levels`, and whose dependencies on other layers are `dependencies`.
+pub fn judged_crate(
+    files: &[(String, String)],
+    layer: &Place,
+    levels: &[&Place],
+    dependencies: &[Dependency],
+) -> Found {
     let mut found = Found::default();
+    let mut starts = vec!["crate", "super", "self"];
+    starts.extend(dependencies.iter().map(|d| d.name.as_str()));
     let src = format!("{}/src/", layer.path);
     let names: Vec<(&str, &Place)> = levels
         .iter()
@@ -79,22 +98,33 @@ pub fn judged_crate(files: &[(String, String)], layer: &Place, levels: &[&Place]
             continue;
         };
         let bodies = inline_modules(&code);
-        for (at, segments) in paths(&code) {
-            // The module the path is written in: the file's, then each module with a body around it
-            let mut base = module.clone();
-            base.extend(
-                bodies
+        for (at, segments) in paths(&code, &starts) {
+            let to = match dependencies.iter().find(|d| d.name == segments[0]) {
+                // Another layer's crate: one of its levels when the path names one, or the layer
+                Some(dependency) => dependency
+                    .levels
                     .iter()
-                    .filter(|(_, open, close)| *open < at && at < *close)
-                    .map(|(name, _, _)| name.clone()),
-            );
-            let Some(target) = resolved(&base, &segments) else {
-                continue;
+                    .copied()
+                    .find(|level| segments.get(1).map(String::as_str) == Some(directory(level)))
+                    .unwrap_or(dependency.layer),
+                None => {
+                    // The module the path is written in: the file's, then each module with a body around it
+                    let mut base = module.clone();
+                    base.extend(
+                        bodies
+                            .iter()
+                            .filter(|(_, open, close)| *open < at && at < *close)
+                            .map(|(name, _, _)| name.clone()),
+                    );
+                    let Some(target) = resolved(&base, &segments) else {
+                        continue;
+                    };
+                    names
+                        .iter()
+                        .find(|(name, _)| target.first().map(String::as_str) == Some(*name))
+                        .map_or(layer, |(_, place)| *place)
+                }
             };
-            let to = names
-                .iter()
-                .find(|(name, _)| target.first().map(String::as_str) == Some(*name))
-                .map_or(layer, |(_, place)| *place);
             let written = segments.join("::");
             found.forbidden.extend(judged(
                 path,
@@ -236,7 +266,51 @@ mod tests {
             .iter()
             .map(|(p, s)| (format!("crates/infrastructure/{p}"), s.to_string()))
             .collect();
-        judged_crate(&files, &layer, &levels)
+        // The crate depends on the two layers it may, one of them under another name
+        let places = layout("rust").unwrap().places(&table());
+        let place = |name: &str| places.iter().find(|p| p.name == name).unwrap();
+        let dependencies = [
+            Dependency {
+                name: "protocol".into(),
+                layer: place("protocol"),
+                levels: vec![place("protocol.inbound"), place("protocol.outbound")],
+            },
+            Dependency {
+                name: "core".into(),
+                layer: place("domain"),
+                levels: Vec::new(),
+            },
+        ];
+        judged_crate(&files, &layer, &levels, &dependencies)
+    }
+
+    #[test]
+    fn a_level_names_another_layer_only_as_the_level_may() {
+        let said = details(&found(&[
+            (
+                "src/inbound/mod.rs",
+                "use protocol::inbound::Commands;\nuse protocol::outbound::Tree;\nuse core::Layer;\n\
+                 fn f() { protocol::Version::new(); }\nuse std::io;\n",
+            ),
+            (
+                "src/outbound/mod.rs",
+                "use protocol::outbound::Tree;\nuse core::Layer;\nuse protocol::{inbound::Commands, outbound::Writer};\n",
+            ),
+        ]));
+        for line in [
+            "crates/infrastructure/src/inbound/mod.rs:2: uses protocol::outbound::Tree, in protocol.outbound; \
+             infrastructure.inbound may import `protocol.inbound`",
+            "crates/infrastructure/src/inbound/mod.rs:3: uses core::Layer, in domain; ",
+            "crates/infrastructure/src/inbound/mod.rs:4: uses protocol::Version::new, in protocol; ",
+            "crates/infrastructure/src/outbound/mod.rs:3: uses protocol::inbound::Commands, in protocol.inbound; \
+             infrastructure.outbound may import `protocol.outbound` and `domain`",
+        ] {
+            assert!(
+                said.iter().any(|s| s.starts_with(line)),
+                "{line}:\n{said:#?}"
+            );
+        }
+        assert_eq!(said.len(), 4, "{said:#?}");
     }
 
     fn details(found: &Found) -> Vec<String> {
