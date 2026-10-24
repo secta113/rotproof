@@ -135,9 +135,12 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 
 ## Rules for every change
 
-- **A layer or a stack changes in `layers/`, not in code.** The table says what the layers are once; a layout says
-  only where they live in one stack. The tests read every definition, so a layout that names a layer the table lacks
-  fails.
+- **A layer changes in `layers/`, not in code; a stack, in `layers/` and in three tables of code.** The table says
+  what the layers are once; a layout says only where they live in one stack. A new stack is also named in `STACKS`
+  (`crates/domain/src/layers.rs`, which builds its layout into the binary), in `GITIGNORE` with its file in
+  `project/gitignore/`, and in `PYPI` when it installs Rotproof from PyPI (both in `crates/domain/src/project.rs`).
+  The tests read every definition and every one of those tables, so a layout that names a layer the table lacks
+  fails, and so does a stack left out of a table.
 - **Write Rotproof where prose names the tool, and `rotproof` for the command, the package, the crate and file
   names,** as Ruff and `ruff` are written. A sentence that starts with the command still writes it in backticks.
 - **Wrap a line that holds a comment at 120 characters.** rustfmt wraps code, not comments; `cargo xtask ci` fails on
