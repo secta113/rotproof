@@ -1,8 +1,9 @@
 //! The direction check: every layer imports only what the table (`layers/table.toml`) allows.
 //!
-//! - An import from layer A of layer B fails unless B is in A's `imports`. Inside `ui`, a level may import the levels
-//!   below it and the layers in its own `imports`, and not `ui` beside its levels. A place may always import itself,
-//!   and a layer the levels inside it.
+//! - An import from layer A of layer B fails unless B is in A's `imports`. An entry of `imports` names a layer, which
+//!   takes in its levels, or one level of another layer (`protocol.inbound`). A level may import what its own
+//!   `imports` name, and the levels below it in an ordered layer (`ui`); not the levels beside it otherwise, nor its
+//!   layer beside the levels. A place may always import itself, and a layer the levels inside it.
 //! - Only direct imports are judged. What the table allows is closed under chaining (a test keeps it so), so a chain
 //!   of allowed imports never reaches what its first module may not import.
 //! - An import of a module in no layer present (the standard library, a third-party package, a layer declared absent)
@@ -79,19 +80,24 @@ fn layer_name(place: &Place) -> &str {
     place.parent.as_deref().unwrap_or(&place.name)
 }
 
+/// Whether an entry of a place's imports takes in the place `to`: a layer with its levels, or one level.
+fn covers(import: &str, to: &Place) -> bool {
+    import == to.name || import == layer_name(to)
+}
+
 /// Whether the place `from` may import the place `to`.
 fn allowed(from: &Place, to: &Place) -> bool {
     if from.name == to.name {
         return true;
     }
-    let imports = &from.imports;
+    let imported = |to: &Place| from.imports.iter().any(|i| covers(i, to));
     match &from.parent {
-        // A layer may import itself, the levels inside it included, and the layers in its imports with their levels
-        None => layer_name(to) == from.name || imports.iter().any(|i| i == layer_name(to)),
-        // A level may import the levels below it, and the layers in its imports; not its layer beside the levels
+        // A layer may import itself, the levels inside it included, and what its imports name
+        None => layer_name(to) == from.name || imported(to),
+        // A level may import the levels below it, and what its imports name; not its layer beside the levels
         Some(parent) => {
             if layer_name(to) != parent {
-                return imports.iter().any(|i| i == layer_name(to));
+                return imported(to);
             }
             from.below.contains(&to.name)
         }
@@ -150,6 +156,64 @@ mod tests {
             }
         }
         assert!(chains > places.len(), "{chains} chains");
+    }
+
+    #[test]
+    fn levels_beside_each_other_never_import_each_other_and_an_import_may_name_one_level() {
+        let table: crate::layers::Table = toml::from_str(
+            r#"
+            [[layer]]
+            name = "edge"
+            imports = ["port"]
+            role = "x"
+            [[layer.level]]
+            name = "in"
+            imports = ["port.in"]
+            role = "x"
+            [[layer.level]]
+            name = "out"
+            imports = ["port.out", "core"]
+            role = "x"
+
+            [[layer]]
+            name = "port"
+            imports = ["core"]
+            role = "x"
+            [[layer.level]]
+            name = "in"
+            imports = []
+            role = "x"
+            [[layer.level]]
+            name = "out"
+            imports = ["core"]
+            role = "x"
+
+            [[layer]]
+            name = "core"
+            imports = []
+            role = "x"
+            "#,
+        )
+        .unwrap();
+        let places = layout("python").unwrap().places(&table);
+        let place = |name: &str| places.iter().find(|p| p.name == name).unwrap();
+        let may = |from: &str, to: &str| allowed(place(from), place(to));
+        assert_eq!(place("port.out").path, "port/out");
+        assert!(place("port.out").below.is_empty());
+        // One level named takes in that level alone
+        assert!(may("edge.in", "port.in"));
+        assert!(!may("edge.in", "port.out") && !may("edge.in", "port") && !may("edge.in", "core"));
+        // A layer named takes in its levels
+        assert!(may("edge", "port.in") && may("edge", "port.out"));
+        // Levels beside each other, in either direction, and the layer beside its levels
+        assert!(!may("edge.in", "edge.out") && !may("edge.out", "edge.in"));
+        assert!(!may("port.in", "port.out") && !may("port.out", "port"));
+        assert!(may("edge.out", "port.out") && may("edge.out", "core"));
+        assert!(may("port", "port.in"));
+        assert_eq!(
+            what_it_may_import(place("edge.in")),
+            "edge.in may import `port.in`"
+        );
     }
 
     #[test]

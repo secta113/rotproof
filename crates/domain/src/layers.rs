@@ -36,23 +36,38 @@ pub const STACKS: [(&str, &str); 3] = [
     ("rust", include_str!("../../../layers/rust.toml")),
 ];
 
-/// One layer, or one atomic level of `ui`, as the table describes it.
+/// One level of a layer, as the table describes it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Entry {
+pub struct Level {
     pub name: String,
+    /// Layers, or levels of other layers as `<layer>.<level>`
     pub imports: Vec<String>,
     pub role: String,
+}
+
+/// One layer, as the table describes it, with its levels.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Layer {
+    pub name: String,
+    /// Layers, or levels of other layers as `<layer>.<level>`
+    pub imports: Vec<String>,
+    pub role: String,
+    /// Whether a level may import the levels below it, as listed (the atomic levels of `ui`). Otherwise the levels
+    /// never import each other
+    #[serde(default)]
+    pub ordered: bool,
+    /// Its levels, top first. A layer with levels holds nothing beside them
+    #[serde(default, rename = "level")]
+    pub levels: Vec<Level>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Table {
     #[serde(rename = "layer")]
-    pub layers: Vec<Entry>,
-    /// The atomic levels of `ui`, top first
-    #[serde(rename = "level")]
-    pub levels: Vec<Entry>,
+    pub layers: Vec<Layer>,
 }
 
 /// The table built into Rotproof.
@@ -97,7 +112,8 @@ pub struct Layout {
     #[serde(default)]
     pub without: Vec<String>,
     pub layer: Shape,
-    /// The atomic levels of `ui`. Required unless `ui` is in `without`
+    /// The levels of the layers that have them: in `path`, `{layer}` is the layer's name and `{name}` the level's.
+    /// Required while this stack has a layer with levels
     pub level: Option<Shape>,
     /// Layer -> files that replace the ones in `layer`
     #[serde(default)]
@@ -129,21 +145,22 @@ pub enum Language {
     Rust,
 }
 
-/// One place in the tree a layout makes: a layer (`domain`) or a level of `ui` (`ui.pages`).
+/// One place in the tree a layout makes: a layer (`domain`) or a level of a layer (`ui.pages`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Place {
     /// The name `absent` uses: `domain`, `ui.pages`
     pub name: String,
     /// From the root, with `/`
     pub path: String,
-    /// The layer it sits in, for a level of `ui`
+    /// The layer it sits in, for a level
     pub parent: Option<String>,
     /// Its role, as the table writes it
     pub role: String,
-    /// The layers it may import besides itself, as the table lists them, without those this stack does not have
+    /// The layers, and levels of other layers, it may import besides itself, as the table lists them, without those
+    /// this stack does not have
     pub imports: Vec<String>,
-    /// For a level of `ui`, the levels below it, which it may import too: `ui.molecules` and `ui.atoms` for
-    /// `ui.organisms`. Empty for a layer
+    /// For a level of an ordered layer, the levels below it, which it may import too: `ui.molecules` and `ui.atoms`
+    /// for `ui.organisms`. Empty otherwise
     pub below: Vec<String>,
     /// Path from the root -> text
     pub files: Vec<(String, String)>,
@@ -166,10 +183,13 @@ impl Layout {
     /// this, so they cannot disagree.
     pub fn places(&self, table: &Table) -> Vec<Place> {
         let mut out = Vec::new();
-        // A place imports only the layers this stack has: a Rust crate cannot import `ui`
-        let has = |name: &String| !self.without.contains(name);
-        let imports = |entry: &Entry| -> Vec<String> {
-            entry.imports.iter().filter(|n| has(n)).cloned().collect()
+        // A place imports only the layers this stack has, and their levels: a Rust crate cannot import `ui`
+        let has = |name: &str| {
+            let layer = name.split_once('.').map_or(name, |(layer, _)| layer);
+            !self.without.iter().any(|w| w == layer)
+        };
+        let imports = |imports: &[String]| -> Vec<String> {
+            imports.iter().filter(|n| has(n)).cloned().collect()
         };
         for layer in table.layers.iter().filter(|l| has(&l.name)) {
             let files = self
@@ -181,7 +201,7 @@ impl Layout {
                 path: self.layer.path.replace("{name}", &layer.name),
                 parent: None,
                 role: layer.role.clone(),
-                imports: imports(layer),
+                imports: imports(&layer.imports),
                 below: Vec::new(),
                 files: Vec::new(),
             };
@@ -193,30 +213,38 @@ impl Layout {
                 &doc(&place),
             );
             out.push(place);
-            if layer.name != "ui" {
+            if layer.levels.is_empty() {
                 continue;
             }
-            let level = self
+            let shape = self
                 .level
                 .as_ref()
-                .expect("a layout with ui has its levels: a test reads every layout");
-            for (i, entry) in table.levels.iter().enumerate() {
-                let mut place = Place {
-                    name: format!("ui.{}", entry.name),
-                    path: level.path.replace("{name}", &entry.name),
-                    parent: Some("ui".into()),
-                    role: entry.role.clone(),
-                    imports: imports(entry),
-                    below: table.levels[i + 1..]
+                .expect("a layout with a layer that has levels says where they live: a test reads every layout");
+            for (i, level) in layer.levels.iter().enumerate() {
+                let below = if layer.ordered {
+                    layer.levels[i + 1..]
                         .iter()
-                        .map(|lower| format!("ui.{}", lower.name))
-                        .collect(),
+                        .map(|lower| format!("{}.{}", layer.name, lower.name))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let mut place = Place {
+                    name: format!("{}.{}", layer.name, level.name),
+                    path: shape
+                        .path
+                        .replace("{layer}", &layer.name)
+                        .replace("{name}", &level.name),
+                    parent: Some(layer.name.clone()),
+                    role: level.role.clone(),
+                    imports: imports(&level.imports),
+                    below,
                     files: Vec::new(),
                 };
                 place.files = render(
-                    &level.files,
+                    &shape.files,
                     &place.path,
-                    &entry.name,
+                    &level.name,
                     &self.doc_prefix,
                     &doc(&place),
                 );
@@ -574,21 +602,44 @@ mod tests {
     #[test]
     fn every_definition_reads() {
         let table = table();
-        assert!(table.layers.len() >= 5 && table.levels.len() == 5);
-        let names: Vec<&str> = table
+        let levels: usize = table.layers.iter().map(|l| l.levels.len()).sum();
+        assert!(table.layers.len() >= 5 && levels >= 5, "{levels} levels");
+        // What an import may name: a layer, or a level as `<layer>.<level>`
+        let names: Vec<String> = table
             .layers
             .iter()
-            .chain(&table.levels)
-            .map(|e| e.name.as_str())
+            .flat_map(|layer| {
+                std::iter::once(layer.name.clone()).chain(
+                    layer
+                        .levels
+                        .iter()
+                        .map(|level| format!("{}.{}", layer.name, level.name)),
+                )
+            })
             .collect();
-        for entry in table.layers.iter().chain(&table.levels) {
-            assert!(!entry.role.trim().is_empty(), "{} has no role", entry.name);
-            for import in &entry.imports {
-                assert!(
-                    names.contains(&import.as_str()),
-                    "{} imports unknown {import}",
-                    entry.name
-                );
+        for layer in &table.layers {
+            assert!(!layer.role.trim().is_empty(), "{} has no role", layer.name);
+            assert!(
+                !layer.ordered || !layer.levels.is_empty(),
+                "{} is ordered with no levels",
+                layer.name
+            );
+            let own = |import: &String| {
+                import == &layer.name || import.starts_with(&format!("{}.", layer.name))
+            };
+            let entries = std::iter::once((&layer.name, &layer.imports, &layer.role)).chain(
+                layer
+                    .levels
+                    .iter()
+                    .map(|level| (&level.name, &level.imports, &level.role)),
+            );
+            for (name, imports, role) in entries {
+                assert!(!role.trim().is_empty(), "{name} has no role");
+                for import in imports {
+                    assert!(names.contains(import), "{name} imports unknown {import}");
+                    // A level reaches the levels beside it only by `ordered`, and a layer holds its own levels
+                    assert!(!own(import), "{name} names its own layer: {import}");
+                }
             }
         }
         for (stack, _) in STACKS {

@@ -177,9 +177,13 @@ fn layers_section(layout: &Layout) -> String {
         "| Layer | Where | May import |".to_string(),
         "|---|---|---|".to_string(),
     ];
-    for place in layout.places(&table()) {
-        let importable = importable(&place);
-        let imports = if place.name == "ui" {
+    let places = layout.places(&table());
+    for place in &places {
+        let importable = importable(place);
+        let has_levels = places
+            .iter()
+            .any(|p| p.parent.as_ref() == Some(&place.name));
+        let imports = if has_levels {
             "Nothing: it holds only its levels".to_string()
         } else if importable.is_empty() {
             "No other layer".to_string()

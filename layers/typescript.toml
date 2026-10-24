@@ -1,7 +1,7 @@
 # Where the layers live in a TypeScript project (React for `ui`). What the layers are is in table.toml.
 #
-# A layer is a directory in `src/` with an `index.ts`, with the role as its doc comment. A level of `ui` is a directory
-# inside it.
+# A layer is a directory in `src/` with an `index.ts`, with the role as its doc comment. A level is a directory inside
+# its layer.
 
 # Code is any file in `src/`, outside `.gitignore` and hidden directories. Code outside every layer fails, unless the
 # project lists it in `unchecked`. Nothing outside `src/` is looked at.
@@ -27,7 +27,7 @@ export {};
 ''' }]
 
 [level]
-path = "src/ui/{name}"
+path = "src/{layer}/{name}"
 files = [{ path = "index.ts", text = '''
 /**
 {doc}

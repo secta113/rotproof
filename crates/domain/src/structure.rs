@@ -4,9 +4,9 @@
 //! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`) and the paths the
 //!   project lists in `unchecked`. A path in `unchecked` exists and holds no layer, so a layer cannot be switched
 //!   off by listing it.
-//! - `ui` holds only its levels: code in it beside them fails, except the files the layout makes for `ui` itself. A
-//!   part there would have no place in the order of levels, and an import through it (`atoms → ui/helpers.py →
-//!   domain`) would pass every direct check of the direction.
+//! - A layer with levels (`ui`) holds only its levels: code in it beside them fails, except the files the layout
+//!   makes for the layer itself. A part there would have no place among the levels, and an import through it
+//!   (`atoms → ui/helpers.py → domain`) would pass every direct check of the direction.
 //!
 //! The floor: at least one layer is present. A project with every layer declared absent would check nothing. A
 //! repository that keeps records only declares `stack = "none"`, and the check says that it skipped the layers.
@@ -70,7 +70,7 @@ pub fn listed(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> 
     dirs
 }
 
-/// Each layer with levels (`ui`) that is there and not declared absent, with its levels.
+/// Each layer with levels that is there and not declared absent, with its levels.
 fn with_levels<'a>(declared: &'a Declared, seen: &Seen) -> Vec<(&'a Place, Vec<&'a Place>)> {
     let mut found = Vec::new();
     for layer in declared.places.iter().filter(|p| p.parent.is_none()) {
@@ -180,11 +180,17 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
         ));
     }
     for (layer, levels) in with_levels(declared, seen) {
+        // Where a part of the UI goes needs saying; elsewhere the levels say it by their names
+        let goes = if layer.name == "ui" {
+            where_ui_parts_go(&declared.places)
+        } else {
+            let paths: Vec<String> = levels.iter().map(|l| format!("{}/", l.path)).collect();
+            crate::layers::listed(&paths)
+        };
         for beside in beside_levels(seen.code(&layer.path), layer, &levels) {
             found.push(format!(
-                "code in {} outside its levels: {beside} (move it into a level or a layer: {})",
+                "code in {} outside its levels: {beside} (move it into a level or a layer: {goes})",
                 layer.name,
-                where_ui_parts_go(&declared.places)
             ));
         }
     }
@@ -212,7 +218,7 @@ fn first_entry(path: &str, dir: &str) -> String {
     join(dir, first)
 }
 
-/// The code in a layer with levels (`ui`) that sits beside its levels, of the code files `code` in it, as entries
+/// The code in a layer with levels that sits beside its levels, of the code files `code` in it, as entries
 /// directly in the layer: the layer's own files (`ui/__init__.py`) are not counted. Every level counts as a level
 /// here, absent or not: an absent level that exists has a finding of its own.
 fn beside_levels(code: &[String], layer: &Place, levels: &[&Place]) -> BTreeSet<String> {

@@ -5,6 +5,11 @@
 # after the role, so the two are written once. A role is written for every stack: a port is "an interface", which a
 # stack writes as a Protocol, an interface or a trait.
 #
+# A layer may have levels (`[[layer.level]]`), each a place of its own inside the layer. A level's `imports` names
+# layers, or a level of another layer as `<layer>.<level>`. With `ordered = true` a level may also import the levels
+# below it, as listed (the atomic levels of `ui`); otherwise the levels of a layer never import each other. A layer
+# with levels holds nothing beside them.
+#
 # Order matters: `rotproof create` makes the layers in this order, and the documentation lists the imports in it.
 
 [[layer]]
@@ -28,6 +33,49 @@ is responsible for presentation, not for features: split by level first, and by 
 
 Every part of the UI sits in a level, and nothing sits beside them: what the whole UI shares goes in the lowest
 level that may know what it knows."""
+# The atomic levels, top first
+ordered = true
+
+[[layer.level]]
+name = "pages"
+imports = ["application", "domain", "utils"]
+role = """
+One screen each. The only part of `ui` that calls `application`; `handler` builds the use cases and passes
+them in."""
+
+[[layer.level]]
+name = "templates"
+imports = ["domain", "utils"]
+role = """
+Layout: how organisms are arranged. Does not call `application`; actions come in as callbacks."""
+
+[[layer.level]]
+name = "organisms"
+imports = ["domain", "utils"]
+role = """
+Meaningful groups, such as a list or a control panel. They may know `domain` types but do not call
+`application`; actions come in as callbacks.
+
+A provider that hands `domain` values to its children, such as the signed-in user, sits here too, with the hook
+that reads it. It takes the function that loads the values as a callback, and `handler` passes the use case in."""
+
+[[layer.level]]
+name = "molecules"
+imports = ["utils"]
+role = """
+Combinations of atoms, such as an input with a button. Like atoms, they know no project concept: they import
+neither `domain` nor `application`."""
+
+[[layer.level]]
+name = "atoms"
+imports = ["utils"]
+role = """
+The smallest parts, visible or not: one button, one label, a design value (a colour, a spacing, a font, an
+animation), one behaviour (following the width of the screen, detecting a click outside), a provider that hands
+a theme to its children. They know no project concept: they import neither `domain` nor `application`, and take
+only plain values.
+
+If a part cannot be named without referring to where it is used, it is not an atom."""
 
 [[layer]]
 name = "application"
@@ -65,45 +113,3 @@ General-purpose parts that know no project concept.
 
 A part that can be named only by referring to where it is used, or that knows a project concept, belongs in
 `domain`."""
-
-# The atomic levels of `ui`, top first. A level may import the levels below it, and the layers in its `imports`.
-[[level]]
-name = "pages"
-imports = ["application", "domain", "utils"]
-role = """
-One screen each. The only part of `ui` that calls `application`; `handler` builds the use cases and passes
-them in."""
-
-[[level]]
-name = "templates"
-imports = ["domain", "utils"]
-role = """
-Layout: how organisms are arranged. Does not call `application`; actions come in as callbacks."""
-
-[[level]]
-name = "organisms"
-imports = ["domain", "utils"]
-role = """
-Meaningful groups, such as a list or a control panel. They may know `domain` types but do not call
-`application`; actions come in as callbacks.
-
-A provider that hands `domain` values to its children, such as the signed-in user, sits here too, with the hook
-that reads it. It takes the function that loads the values as a callback, and `handler` passes the use case in."""
-
-[[level]]
-name = "molecules"
-imports = ["utils"]
-role = """
-Combinations of atoms, such as an input with a button. Like atoms, they know no project concept: they import
-neither `domain` nor `application`."""
-
-[[level]]
-name = "atoms"
-imports = ["utils"]
-role = """
-The smallest parts, visible or not: one button, one label, a design value (a colour, a spacing, a font, an
-animation), one behaviour (following the width of the screen, detecting a click outside), a provider that hands
-a theme to its children. They know no project concept: they import neither `domain` nor `application`, and take
-only plain values.
-
-If a part cannot be named without referring to where it is used, it is not an atom."""

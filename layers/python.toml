@@ -1,7 +1,7 @@
 # Where the layers live in a Python project. What the layers are is in table.toml.
 #
-# A layer is a package at the root: `<layer>/__init__.py`, with the role as its docstring. A level of `ui` is a
-# package inside it.
+# A layer is a package at the root: `<layer>/__init__.py`, with the role as its docstring. A level is a
+# package inside its layer.
 
 # Code is a `.py` file anywhere at the root, outside `.gitignore` and hidden directories. Code outside every layer
 # fails, unless it sits in a path below or the project lists it in `unchecked`.
@@ -21,7 +21,7 @@ files = [{ path = "__init__.py", text = '''
 ''' }]
 
 [level]
-path = "ui/{name}"
+path = "{layer}/{name}"
 files = [{ path = "__init__.py", text = '''
 """{doc}
 """
