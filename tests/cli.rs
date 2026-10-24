@@ -1184,6 +1184,17 @@ fn each_difference_from_the_declaration_fails() {
             "code outside the layers: main.py",
             Box::new(|r| plant_file(r, "main.py")),
         ),
+        // A layer of the table before 0.4.0 says where its code goes, on every run until it is moved
+        (
+            "code outside the layers: handler (the layer handler of the table before 0.4.0, which is gone: its entry \
+             points go in infrastructure.inbound",
+            Box::new(|r| plant_file(r, "handler/__init__.py")),
+        ),
+        (
+            "code outside the layers: utils (the layer utils of the table before 0.4.0, which is gone: each part goes \
+             in the layer whose concept it speaks",
+            Box::new(|r| plant_file(r, "utils/text.py")),
+        ),
         // Windows runs it with Python all the same
         (
             "code outside the layers: stray.PY",

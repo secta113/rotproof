@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::layers::{DECLARATION, Declared, Layout, Place};
+use crate::layers::{DECLARATION, Declared, Layout, ONION, Place, retired};
 use crate::paths::{join, within};
 
 /// What the structure check reads from the tree.
@@ -167,7 +167,17 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
         .where_code_goes
         .as_ref()
         .map_or(",".to_string(), |goes| format!(": {goes};"));
+    let retired = retired(layout);
     for outside in outside(seen.code(&layout.scope), &layout.scope, &places, &skipped) {
+        // A layer of the table before 0.4.0 says where its code goes, on every run until it is moved
+        if let Some((name, _, where_it_goes)) = retired.iter().find(|(_, path, _)| *path == outside)
+        {
+            found.push(format!(
+                "code outside the layers: {outside} (the layer {name} of the table before {ONION}, which is gone: \
+                 {where_it_goes})"
+            ));
+            continue;
+        }
         found.push(format!(
             "code outside the layers: {outside} (move it into a layer{goes} or list it in unchecked in {DECLARATION})"
         ));

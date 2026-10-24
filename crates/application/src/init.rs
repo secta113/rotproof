@@ -16,7 +16,9 @@ use std::collections::BTreeMap;
 use crate::create::refresh;
 use crate::tree::{exactly, read_text};
 use domain::bundle::DOCS;
-use domain::layers::{DECLARATION, declaration_text, known_stacks};
+use domain::layers::{
+    DECLARATION, ONION, PORTS_MOVED, crosses_onion, declaration_text, known_stacks, layout, retired,
+};
 use domain::migrate;
 use domain::upgrade::{FIRST, Update, fields, pending, with_files};
 use protocol::inbound::{Initialized, Upgraded};
@@ -83,6 +85,9 @@ fn upgrade(
     for update in pending(&from, running, &declared.declined)? {
         apply(tree, out, update, &mut upgraded)?;
     }
+    if crosses_onion(&from, running) {
+        upgraded.moves = onion_moves(tree, declared.stack.as_deref());
+    }
     upgraded.made = refresh(tree, out, name)?;
     if upgraded.by_hand.is_empty() && declared.files.as_deref() != Some(running) {
         // Read again: the refresh may have added a field the declaration lacked
@@ -96,6 +101,25 @@ fn upgrade(
         upgraded.files_set = true;
     }
     Ok(upgraded)
+}
+
+/// How to move the code of a project of `stack` onto the onion table: each retired layer that is there, with where its
+/// code goes, and what moved inside the layers that stay. Nothing for a repository of records only.
+fn onion_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
+    let Some(layout) = stack.and_then(layout) else {
+        return Vec::new();
+    };
+    let mut moves: Vec<String> = retired(&layout)
+        .into_iter()
+        .filter(|(_, path, _)| tree.found(path) == Some(true))
+        .map(|(name, path, goes)| {
+            format!(
+                "{path}/ holds the layer {name} of the table before {ONION}, which is gone: {goes}"
+            )
+        })
+        .collect();
+    moves.push(format!("in the layers that stay, {PORTS_MOVED}"));
+    moves
 }
 
 /// Move the records of a project made before 0.3.0 into `docs/work/` (`migrate.rs` in `domain`): every file under
@@ -369,6 +393,43 @@ mod tests {
             "{:?}",
             again.by_hand
         );
+    }
+
+    #[test]
+    fn crossing_the_onion_table_says_how_to_move_the_layers_once_and_moves_nothing() {
+        let tree = Fake::default();
+        assert!(matches!(
+            init(&tree, &tree, Some("python"), "x", "0.3.0"),
+            Ok(Initialized::Declared(_))
+        ));
+        tree.write("handler/__init__.py", "").unwrap();
+        tree.write("utils/text.py", "").unwrap();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.4.0") else {
+            panic!("upgraded");
+        };
+        assert_eq!(upgraded.moves.len(), 3, "{:#?}", upgraded.moves);
+        assert!(
+            upgraded.moves[0]
+                .starts_with("handler/ holds the layer handler of the table before 0.4.0")
+        );
+        assert!(upgraded.moves[1].starts_with("utils/ holds the layer utils"));
+        assert!(upgraded.moves[2].contains("protocol.outbound"));
+        // It keeps nothing behind, and moves nothing
+        assert!(upgraded.files_set && upgraded.by_hand.is_empty());
+        assert_eq!(tree.text("handler/__init__.py").as_deref(), Some(""));
+        // Said once: the next run does not cross 0.4.0
+        let Ok(Initialized::Upgraded(again)) = init(&tree, &tree, None, "x", "0.4.0") else {
+            panic!("upgraded");
+        };
+        assert!(again.moves.is_empty(), "{:#?}", again.moves);
+
+        // A repository of records only has no layers to move
+        let records = Fake::default();
+        assert!(init(&records, &records, Some("none"), "x", "0.3.0").is_ok());
+        let Ok(Initialized::Upgraded(none)) = init(&records, &records, None, "x", "0.4.0") else {
+            panic!("upgraded");
+        };
+        assert!(none.moves.is_empty());
     }
 
     #[test]

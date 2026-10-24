@@ -51,6 +51,9 @@ pub struct Upgraded {
     pub moved: usize,
     /// What each update that could not be applied leaves to a person
     pub by_hand: Vec<String>,
+    /// How to move the project's code where the new version's layers want it, which no machine can do: said once,
+    /// and it keeps nothing behind (`rotproof check` names what is not moved)
+    pub moves: Vec<String>,
     /// What `rotproof create` would have done after the upgrade, without a layer
     pub made: Made,
     /// Whether `files` was set to the running version

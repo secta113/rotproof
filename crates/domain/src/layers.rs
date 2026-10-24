@@ -20,6 +20,43 @@ pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotpro
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
 
+/// The version whose table is built on the onion architecture. Crossing it, `rotproof init` says how to move a
+/// project's layers, and moves nothing: an entry point and its wiring may sit in one file of `handler`, and each part
+/// of `utils` goes where its concept is, which no machine can tell.
+pub const ONION: &str = "0.4.0";
+
+/// The layers of the table before [`ONION`], each with where its code goes now.
+pub const RETIRED: [(&str, &str); 2] = [
+    (
+        "handler",
+        "its entry points go in infrastructure.inbound, each calling an input port of protocol.inbound; the wiring \
+         in composition; and the start of the program in the entry file, which calls composition alone",
+    ),
+    (
+        "utils",
+        "each part goes in the layer whose concept it speaks, and a general procedure comes from the standard library \
+         or an external one",
+    ),
+];
+
+/// What moved at [`ONION`] inside layers that are still there, which no directory shows.
+pub const PORTS_MOVED: &str = "the ports (the interfaces to the outside) move from domain to protocol.outbound, and \
+                               the use cases the entry points call get interfaces in protocol.inbound, with plain data";
+
+/// Whether an upgrade from `files` to `running` crosses [`ONION`].
+pub fn crosses_onion(files: &str, running: &str) -> bool {
+    let at = crate::upgrade::version(ONION);
+    crate::upgrade::version(files) < at && at <= crate::upgrade::version(running)
+}
+
+/// Where the layout would hold each retired layer, with where its code goes now.
+pub fn retired(layout: &Layout) -> Vec<(&'static str, String, &'static str)> {
+    RETIRED
+        .iter()
+        .map(|(name, goes)| (*name, layout.layer.path.replace("{name}", name), *goes))
+        .collect()
+}
+
 /// What every command says of a declaration that cannot be read, for `why`.
 pub fn unreadable(why: &str) -> String {
     format!("{DECLARATION}: {why}")

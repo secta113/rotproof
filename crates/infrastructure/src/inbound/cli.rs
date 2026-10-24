@@ -74,8 +74,10 @@ enum Command {
     /// from docs/backlog/ and docs/specs/ to docs/work/ and points every link in docs/ that reached one at its new
     /// place; the move cannot be declined, says what it leaves to a person (how each closed record closed, the deadline
     /// of each open item), and stops with nothing changed when a name is in both directories or a file there is no
-    /// record. Exits 2 too for an unknown stack, a stack other than the declared one, a move that stopped, or a file
-    /// that cannot be read or written.
+    /// record. Crossing 0.4.0, which builds the layer table on the onion architecture, it says where the code of the
+    /// layers that are gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left
+    /// until it is moved. Exits 2 too for an unknown stack, a stack other than the declared one, a move that stopped,
+    /// or a file that cannot be read or written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
         #[arg(long)]
@@ -275,6 +277,9 @@ fn init(
     }
     for (name, path) in &upgraded.applied {
         println!("updated {path}: {name}");
+    }
+    for how in &upgraded.moves {
+        println!("move by hand: {how}");
     }
     report_made(names, &upgraded.made);
     if !upgraded.by_hand.is_empty() {
