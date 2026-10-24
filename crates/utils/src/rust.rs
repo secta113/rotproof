@@ -37,6 +37,180 @@ pub fn code(source: &str) -> String {
     String::from_utf8(bytes).expect("only whole characters are blanked, each byte with a space")
 }
 
+/// One token of the code alone, as [`code`] leaves it: an identifier or a keyword, `::`, or any other byte that is not
+/// space.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Token {
+    Word(String),
+    PathSep,
+    Punct(char),
+}
+
+/// The tokens of the code alone ([`code`]), each with its byte offset.
+pub fn tokens(code: &str) -> Vec<(usize, Token)> {
+    let b = code.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_whitespace() {
+            i += 1;
+        } else if is_identifier(c) {
+            let end = i + b[i..].iter().take_while(|&&c| is_identifier(c)).count();
+            out.push((i, Token::Word(code[i..end].to_string())));
+            i = end;
+        } else if c == b':' && b.get(i + 1) == Some(&b':') {
+            out.push((i, Token::PathSep));
+            i += 2;
+        } else {
+            out.push((i, Token::Punct(c as char)));
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Every path the code alone ([`code`]) names from `crate`, `super` or `self`, as its segments, with the offset where
+/// it starts: in `use`, in an expression or a type, and in the tokens of a macro alike. A `use` group is spread into a
+/// path per item (`crate::{a, b::c}` is `crate::a` and `crate::b::c`), `self` in a group stays a segment of its own, a
+/// glob ends in `*`, and a rename (`as x`) is dropped.
+pub fn paths(code: &str) -> Vec<(usize, Vec<String>)> {
+    let tokens = tokens(code);
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let starts = matches!(&tokens[i].1, Token::Word(w) if w == "crate" || w == "super" || w == "self")
+            && (i == 0 || tokens[i - 1].1 != Token::PathSep)
+            && tokens.get(i + 1).map(|(_, t)| t) == Some(&Token::PathSep);
+        if !starts {
+            i += 1;
+            continue;
+        }
+        let at = tokens[i].0;
+        let mut found = Vec::new();
+        i = path_tree(&tokens, i, Vec::new(), &mut found);
+        out.extend(found.into_iter().map(|segments| (at, segments)));
+    }
+    out
+}
+
+/// The paths of one path, or of one item of a `use` group, that starts at token `i` after `prefix`, into `out`.
+/// Where the tokens after it start.
+fn path_tree(
+    t: &[(usize, Token)],
+    mut i: usize,
+    prefix: Vec<String>,
+    out: &mut Vec<Vec<String>>,
+) -> usize {
+    let mut segments = prefix;
+    loop {
+        match t.get(i).map(|(_, token)| token) {
+            Some(Token::Word(word)) => {
+                segments.push(word.clone());
+                i += 1;
+                if t.get(i).map(|(_, token)| token) != Some(&Token::PathSep) {
+                    out.push(segments);
+                    // A rename names nothing more
+                    if matches!(t.get(i).map(|(_, token)| token), Some(Token::Word(w)) if w == "as")
+                    {
+                        i += 2;
+                    }
+                    return i;
+                }
+                i += 1;
+            }
+            Some(Token::Punct('*')) => {
+                segments.push("*".into());
+                out.push(segments);
+                return i + 1;
+            }
+            Some(Token::Punct('{')) => {
+                i += 1;
+                loop {
+                    match t.get(i).map(|(_, token)| token) {
+                        None => return i,
+                        Some(Token::Punct('}')) => return i + 1,
+                        Some(Token::Punct(',')) => i += 1,
+                        Some(_) => {
+                            let before = i;
+                            i = path_tree(t, i, segments.clone(), out);
+                            // A token no item starts with is passed, so a group never stops the reading
+                            if i == before {
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            // `crate::` before a generic or nothing names what is read so far
+            _ => {
+                if !segments.is_empty() {
+                    out.push(segments);
+                }
+                return i;
+            }
+        }
+    }
+}
+
+/// Every module the code alone ([`code`]) declares with a body (`mod tests { ... }`): its name, and the offsets of its
+/// opening and closing braces. One left open runs to the end.
+pub fn inline_modules(code: &str) -> Vec<(String, usize, usize)> {
+    let tokens = tokens(code);
+    let mut out = Vec::new();
+    for (i, window) in tokens.windows(3).enumerate() {
+        let [
+            (_, Token::Word(keyword)),
+            (_, Token::Word(name)),
+            (open, Token::Punct('{')),
+        ] = window
+        else {
+            continue;
+        };
+        if keyword != "mod" {
+            continue;
+        }
+        let mut depth = 0;
+        let mut close = code.len();
+        for (at, token) in &tokens[i + 2..] {
+            match token {
+                Token::Punct('{') => depth += 1,
+                Token::Punct('}') => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = *at;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        out.push((name.clone(), *open, close));
+    }
+    out
+}
+
+/// The offsets of every attribute named `name` in the code alone ([`code`]), outer (`#[name]`) or inner (`#![name]`).
+pub fn attributes(code: &str, name: &str) -> Vec<usize> {
+    let tokens = tokens(code);
+    let mut out = Vec::new();
+    for (i, (at, token)) in tokens.iter().enumerate() {
+        if token != &Token::Punct('#') {
+            continue;
+        }
+        let mut j = i + 1;
+        if tokens.get(j).map(|(_, t)| t) == Some(&Token::Punct('!')) {
+            j += 1;
+        }
+        if tokens.get(j).map(|(_, t)| t) == Some(&Token::Punct('['))
+            && matches!(tokens.get(j + 1).map(|(_, t)| t), Some(Token::Word(w)) if w == name)
+        {
+            out.push(*at);
+        }
+    }
+    out
+}
+
 /// What the scanner sets apart from the code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -269,6 +443,57 @@ let k = '/'; let l = 'é'; let m = '\u{2F}'; // four
         assert_eq!(
             code,
             "let s =         ;       \nlet c =    ; let l: &'a str =       ;     \n    f(    );\n"
+        );
+    }
+
+    fn named(source: &str) -> Vec<String> {
+        paths(&code(source))
+            .into_iter()
+            .map(|(_, segments)| segments.join("::"))
+            .collect()
+    }
+
+    #[test]
+    fn every_path_from_the_crate_is_read_wherever_it_is_written() {
+        let source = "use crate::outbound::db::Db;\nuse super::{self, inner::{a, b as c}, *};\n\
+                      fn f() { let x = crate::outbound::Db::new(); let y: self::T = todo!(); }\n\
+                      pub(crate) fn g() {}\nm!(crate::outbound::x);\nuse std::io;\n\
+                      let s = \"crate::outbound\"; // crate::outbound\nlet v = crate::Repo::<u8>::new();\n";
+        assert_eq!(
+            named(source),
+            [
+                "crate::outbound::db::Db",
+                "super::self",
+                "super::inner::a",
+                "super::inner::b",
+                "super::*",
+                "crate::outbound::Db::new",
+                "self::T",
+                "crate::outbound::x",
+                "crate::Repo",
+            ]
+        );
+        // Each with where it starts
+        assert_eq!(paths(&code("use crate::a;"))[0].0, 4);
+    }
+
+    #[test]
+    fn a_module_with_a_body_is_read_with_its_braces() {
+        let source = "mod a;\nmod tests {\n    fn f() { {} }\n}\nfn g() {}\n";
+        let modules = inline_modules(&code(source));
+        assert_eq!(modules.len(), 1);
+        let (name, open, close) = &modules[0];
+        assert_eq!(name, "tests");
+        assert_eq!(&source[*open..=*open], "{");
+        assert_eq!(*close, source.find("}\nfn").unwrap());
+    }
+
+    #[test]
+    fn an_attribute_is_found_by_its_name_outer_or_inner() {
+        let source = "#[path = \"x.rs\"]\nmod a;\n#![path = \"y\"]\n#[cfg(test)]\n// #[path]\n";
+        assert_eq!(
+            attributes(&code(source), "path"),
+            [0, source.find("#![").unwrap()]
         );
     }
 

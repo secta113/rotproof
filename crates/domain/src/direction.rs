@@ -8,14 +8,18 @@
 //!   of allowed imports never reaches what its first module may not import.
 //! - An import of a module in no layer present (the standard library, a third-party package, a layer declared absent)
 //!   is not judged. Imports built at run time (`importlib.import_module`, `__import__`) are not seen.
+//! - The entry file, which is no layer, is judged as a place of its own that may import what the table's `entry` lists.
+//!   Nothing may import it.
 //!
 //! The layout's `language` says how the code is read. For `python`, a module is named by its dotted name
 //! (`python.rs`), and its parts joined with `/` are its path. For `typescript`, an import is resolved to a path
 //! (`typescript.rs`). For `rust`, a crate's code file is its `Cargo.toml`, and each dependency it declares
 //! (`cargo.rs`) is resolved to the path it names, directly or through its workspace; Cargo compiles a crate only
-//! against the crates it declares, so the declarations are its imports. In every language, the path sits in the place
-//! it lands in as the operating system resolves it (on Windows, another case, dots and spaces at the end and short
-//! names too), so a spelling that builds on the machine that runs the check is judged there.
+//! against the crates it declares, so the declarations are its imports. The levels inside a crate are its modules,
+//! judged from its code (`modules.rs`), and the entry file through the manifest of its package. In every language,
+//! the path sits in the place it lands in as the operating system resolves it (on Windows, another case, dots and
+//! spaces at the end and short names too), so a spelling that builds on the machine that runs the check is judged
+//! there.
 //!
 //! The rules here judge an import once it is resolved to a place; `application` reads the code and resolves it.
 

@@ -708,11 +708,23 @@ mod tests {
                     !places.iter().any(|p| within(path, &p.path)),
                     "{stack}: the entry file {path} sits in a layer"
                 );
-                assert!(
-                    (layout.scope.is_empty() || within(path, &layout.scope))
-                        && layout.is_code(path),
-                    "{stack}: the entry file {path} is not code in the scope"
-                );
+                if layout.language == Language::Rust {
+                    // Read through the manifest of its package, which the layout writes with it
+                    let manifest = layout.files.iter().find(|f| f.path == "Cargo.toml");
+                    assert!(
+                        path == "src/main.rs"
+                            && layout.files.iter().any(|f| &f.path == path)
+                            && manifest.is_some_and(|m| m.text.contains("[package]")
+                                && m.text.contains("composition = ")),
+                        "{stack}: the entry file {path} has no package that depends on composition"
+                    );
+                } else {
+                    assert!(
+                        (layout.scope.is_empty() || within(path, &layout.scope))
+                            && layout.is_code(path),
+                        "{stack}: the entry file {path} is not code in the scope"
+                    );
+                }
                 assert!(
                     !entry.imports.is_empty(),
                     "{stack}: the entry imports nothing"

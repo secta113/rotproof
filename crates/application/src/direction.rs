@@ -9,8 +9,10 @@ use crate::tree::{code_files, exactly, read_code, resolved};
 use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
 use domain::direction::{Forbidden, judged, place_of, workspace_dirs};
 use domain::layers::{Declared, Language, Layout, Place, table};
+use domain::modules::judged_crate;
 use domain::tree::Tree;
 use utils::paths::{join, parent};
+use utils::rust::is_source as is_rust;
 
 /// What the direction check found.
 #[derive(Debug, Default)]
@@ -56,68 +58,99 @@ fn rust(
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
     let mut manifests = Manifests::new(parsers);
+    let mut crates: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
-            let Some(from) = place_of(&path, places) else {
-                continue;
-            };
-            let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
-                continue;
-            };
-            let dir = parent(&path);
-            for dependency in &manifest.dependencies {
-                let at = format!("{path}:{}", dependency.line);
-                let name = &dependency.name;
-                let (target, through) = match &dependency.origin {
-                    Origin::Path(rel) => (tree.landed(dir, rel), ""),
-                    Origin::Workspace => {
-                        let Some((workspace, entry)) =
-                            manifests.workspace(tree, dir, &manifest, &mut found)?
-                        else {
-                            let looked = match &manifest.workspace {
-                                Some(rel) => format!(
-                                    "{rel}, which [package] workspace names, is no workspace"
-                                ),
-                                None => {
-                                    format!("no Cargo.toml from {dir} up to the root declares one")
-                                }
-                            };
-                            found.push(format!(
-                                "{at}: {name} comes from the workspace, and {looked}, so it is not checked"
-                            ));
-                            continue;
-                        };
-                        let Some(rel) = entry.workspace_dependencies.get(name) else {
-                            found.push(format!(
-                                "{at}: {name} comes from the workspace, and {} has no {name} in \
-                                 [workspace.dependencies], so it is not checked",
-                                join(&workspace, "Cargo.toml")
-                            ));
-                            continue;
-                        };
-                        // One from a registry or git names no place
-                        let Some(rel) = rel else {
-                            continue;
-                        };
-                        (tree.landed(&workspace, rel), ", from the workspace")
-                    }
-                };
-                let Some(target) = target else {
-                    continue;
-                };
-                let Some(to) = place_of(&target, places) else {
-                    continue;
-                };
-                forbidden.extend(judged(
-                    &path,
-                    dependency.line,
-                    name,
-                    &format!("depends on {name} ({target}{through})"),
-                    from,
-                    to,
-                ));
+            if let Some(from) = place_of(&path, places) {
+                crates.push((path, from));
             }
         }
+    }
+    // Cargo compiles the entry file against what the manifest of its package declares
+    let entry = layout.entry(&table());
+    if let Some(entry) = &entry {
+        let manifest = join(parent(parent(&entry.path)), "Cargo.toml");
+        if exactly(tree, &manifest).is_ok_and(|(_, is_dir)| !is_dir) {
+            crates.push((manifest, entry));
+        }
+    }
+    for (path, from) in crates {
+        let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
+            continue;
+        };
+        let dir = parent(&path);
+        for dependency in &manifest.dependencies {
+            let at = format!("{path}:{}", dependency.line);
+            let name = &dependency.name;
+            let (target, through) = match &dependency.origin {
+                Origin::Path(rel) => (tree.landed(dir, rel), ""),
+                Origin::Workspace => {
+                    let Some((workspace, entry)) =
+                        manifests.workspace(tree, dir, &manifest, &mut found)?
+                    else {
+                        let looked = match &manifest.workspace {
+                            Some(rel) => {
+                                format!("{rel}, which [package] workspace names, is no workspace")
+                            }
+                            None => {
+                                format!("no Cargo.toml from {dir} up to the root declares one")
+                            }
+                        };
+                        found.push(format!(
+                                "{at}: {name} comes from the workspace, and {looked}, so it is not checked"
+                            ));
+                        continue;
+                    };
+                    let Some(rel) = entry.workspace_dependencies.get(name) else {
+                        found.push(format!(
+                            "{at}: {name} comes from the workspace, and {} has no {name} in \
+                                 [workspace.dependencies], so it is not checked",
+                            join(&workspace, "Cargo.toml")
+                        ));
+                        continue;
+                    };
+                    // One from a registry or git names no place
+                    let Some(rel) = rel else {
+                        continue;
+                    };
+                    (tree.landed(&workspace, rel), ", from the workspace")
+                }
+            };
+            let Some(target) = target else {
+                continue;
+            };
+            let Some(to) = place_of(&target, places) else {
+                continue;
+            };
+            forbidden.extend(judged(
+                &path,
+                dependency.line,
+                name,
+                &format!("depends on {name} ({target}{through})"),
+                from,
+                to,
+            ));
+        }
+    }
+    // The levels inside a crate, which its manifest cannot tell apart: its code is read
+    for layer in places.iter().filter(|p| p.parent.is_none()) {
+        let levels: Vec<&Place> = places
+            .iter()
+            .copied()
+            .filter(|p| p.parent.as_ref() == Some(&layer.name))
+            .collect();
+        if levels.is_empty() {
+            continue;
+        }
+        let mut files = Vec::new();
+        for path in code_files(tree, &join(&layer.path, "src"), is_rust)? {
+            if let Some(source) = read_code(tree, &path, "paths", &mut found)? {
+                files.push((path, source));
+            }
+        }
+        let inside = judged_crate(&files, layer, &levels);
+        found.extend(inside.problems);
+        forbidden.extend(inside.forbidden);
     }
     Ok(Direction {
         problems: found,

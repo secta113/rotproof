@@ -88,14 +88,14 @@ pub fn project_files<'a>(
         (".gitignore", gitignore.to_string()),
         (".gitattributes", GITATTRIBUTES_TEXT.to_string()),
     ];
-    // What the stack's toolchain needs at the root: the workspace of a Rust project
+    // What the stack's toolchain needs at the root: the workspace and the root package of a Rust project
     if let Some(layout) = &declared.layout {
-        files.extend(
-            layout
-                .files
-                .iter()
-                .map(|file| (file.path.as_str(), file.text.trim_start().to_string())),
-        );
+        files.extend(layout.files.iter().map(|file| {
+            (
+                file.path.as_str(),
+                file.text.trim_start().replace("{package}", &package(name)),
+            )
+        }));
     }
     if !pypi {
         return (
@@ -109,6 +109,26 @@ pub fn project_files<'a>(
     files.push(("requirements-dev.txt", fill(PYPI_REQUIREMENTS)));
     files.push((".github/workflows/ci.yml", PYPI_WORKFLOW.to_string()));
     (files, None)
+}
+
+/// The project's name as a package name, which Cargo takes only of letters, digits, `-` and `_`: every other
+/// character becomes `_`, and a name that starts with no letter starts with `app_`.
+fn package(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        name
+    } else {
+        format!("app_{name}")
+    }
 }
 
 /// The rows of the map for the layers present in the declaration, each with the first line of its role, which the

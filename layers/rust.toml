@@ -9,18 +9,37 @@ scope = "crates"
 code = "Cargo.toml"
 not_layers = []
 doc_prefix = "//! "
-# Rust UI is written with very different tools (Leptos, Dioxus, egui, ratatui), and the atomic levels inside one crate
-# could only be checked by reading `use` statements. `ui` joins this layout with its tool and its check
+# Rust UI is written with very different tools (Leptos, Dioxus, egui, ratatui). `ui` joins this layout with its tool;
+# its atomic levels would be read as the levels of `infrastructure` are
 without = ["ui"]
-# What Rotproof reads the code as: the dependencies each crate declares in its `Cargo.toml` for the direction check,
-# and the comments of the `.rs` files in `crates/` for the marker check
+# What Rotproof reads the code as: the dependencies each crate declares in its `Cargo.toml` and, for a crate with
+# levels, the paths its `.rs` files name, for the direction check; and the comments of the `.rs` files in `crates/` for
+# the marker check
 language = "rust"
-# The workspace, written once at the root with the project's files, so `cargo build` builds every crate in `crates/`
+# The entry file, of the root package. Cargo compiles it against what the package's `Cargo.toml` declares, so that
+# manifest is what the direction check reads for it
+entry = "src/main.rs"
+# Written once at the root with the project's files: the root package, which holds the entry file, and the workspace,
+# so `cargo build` builds every crate in `crates/`. `{package}` is the project's name as a package name
 files = [
     { path = "Cargo.toml", text = '''
+[package]
+name = "{package}"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+composition = { path = "crates/composition" }
+
 [workspace]
 members = ["crates/*"]
 resolver = "3"
+''' },
+    { path = "src/main.rs", text = '''
+//! The entry file: it calls `composition` to build the program, and starts it. No layer.
+
+fn main() {}
 ''' },
 ]
 

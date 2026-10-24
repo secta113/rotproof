@@ -1607,6 +1607,50 @@ fn every_form_of_rust_dependency_is_judged() {
     );
 }
 
+#[test]
+fn the_levels_inside_a_rust_crate_and_its_entry_file_are_judged() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let write = |path: &str, text: &str| fs::write(r.join(path), text).unwrap();
+    // A fresh project passes: the root package, its entry file and the levels as modules
+    let arg = root_arg(r);
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    write(
+        "crates/infrastructure/src/inbound/cli.rs",
+        "use crate::outbound::Db;\nuse super::args;\n",
+    );
+    write(
+        "crates/infrastructure/src/lib.rs",
+        "//! Doc\n\npub mod inbound;\npub mod outbound;\npub use outbound::*;\n",
+    );
+    write("crates/infrastructure/src/shared.rs", "pub fn f() {}\n");
+    let manifest = fs::read_to_string(r.join("Cargo.toml")).unwrap();
+    write(
+        "Cargo.toml",
+        &manifest.replace(
+            "[dependencies]\n",
+            "[dependencies]\napplication = { path = \"crates/application\" }\n",
+        ),
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    for line in [
+        "crates/infrastructure/src/inbound/cli.rs:1: uses crate::outbound::Db, in infrastructure.outbound; \
+         infrastructure.inbound may import `protocol.inbound`",
+        "crates/infrastructure/src/lib.rs:5: the root of a crate with levels only declares their modules",
+        "code in infrastructure outside its levels: crates/infrastructure/src/shared.rs",
+        "Cargo.toml:8: depends on application (crates/application), in application; src/main.rs may import \
+         `composition`",
+    ] {
+        assert!(said.contains(line), "{line}:\n{said}");
+    }
+    assert_eq!(said.matches(": uses ").count(), 1, "{said}");
+    assert_eq!(said.matches(": depends on ").count(), 1, "{said}");
+}
+
 /// Make the domain crate of the Rust project at `r` depend on each of `paths`, one line each from line 7, as `d0`,
 /// `d1` and so on, and say what check says.
 fn check_depending_on(r: &Path, paths: &[String]) -> String {
