@@ -167,12 +167,19 @@ static PUBLIC_FIELD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^\s*pub\s+[A-Za-z_][A-Za-z0-9_]*\s*:.*$").expect("a valid pattern")
 });
 
+/// A type the file declares itself: a `type`, `struct` or `enum`
+static DECLARED: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b(?:type|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)").expect("a valid pattern")
+});
+
 /// What the forms are read in, in one file of `domain`
 struct Read {
     /// The code, with the tests and the trait blocks blanked too
     code: String,
     /// The traits the file declares
     traits: BTreeSet<String>,
+    /// The other types the file declares, whose names are the file's own and not `std::io`'s (`type Read<T>`)
+    declared: BTreeSet<String>,
     /// The byte ranges `application` can reach
     reached: Vec<(usize, usize)>,
 }
@@ -198,6 +205,10 @@ fn read(source: &str) -> Read {
         }
     }
     let code = String::from_utf8(bytes).expect("only ASCII spaces were written");
+    let declared = DECLARED
+        .captures_iter(&code)
+        .map(|found| found[1].to_string())
+        .collect();
     let mut reached = Vec::new();
     for found in PUBLIC_ITEM.captures_iter(&code) {
         let start = found.get(0).expect("a match").start();
@@ -212,8 +223,20 @@ fn read(source: &str) -> Read {
     Read {
         code,
         traits,
+        declared,
         reached,
     }
+}
+
+/// Whether the form matched as `text` names a type of the file's own: written bare, without `io::`, and declared in
+/// the file. `io::Read` is `std::io`'s whatever the file declares.
+fn own_type(text: &str, declared: &BTreeSet<String>) -> bool {
+    let name = text
+        .trim_start_matches(|c: char| !c.is_ascii_alphabetic())
+        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|part| !part.is_empty())
+        .unwrap_or_default();
+    !text.contains("io::") && declared.contains(name)
 }
 
 /// The findings in one file of `domain` at `path`: on each line, the first form found.
@@ -234,6 +257,7 @@ fn in_file(path: &str, source: &str, read: &Read, ports: &[Form]) -> Vec<String>
                 .find(|m| {
                     !(form.returned_passes && line[..m.start()].trim_end().ends_with("->"))
                         && (!form.reached_only || reached(m))
+                        && !own_type(m.as_str(), &read.declared)
                 })
                 .map(|m| (form.what, m.as_str().trim()))
         });
@@ -340,6 +364,16 @@ mod tests {
                     .to_string()
             })
             .collect()
+    }
+
+    #[test]
+    fn a_type_the_file_names_after_a_reader_is_its_own() {
+        // As schema.rs names the value a field reads: `Read<Status>` there is no reader
+        let own = "type Read<T> = Option<T>;\nfn f(s: Read<u8>) {}\nfn g(r: &mut dyn io::Read) {}\n\
+                   fn h(r: impl io::Read) {}\n";
+        assert_eq!(named(own), ["3: does I/O", "4: does I/O"]);
+        // Without the file's own type, the same name is std's
+        assert_eq!(named("fn f(s: Read<u8>) {}\n"), ["1: does I/O"]);
     }
 
     #[test]
