@@ -1201,10 +1201,6 @@ fn each_difference_from_the_declaration_fails() {
             Box::new(|r| plant_file(r, "stray.PY")),
         ),
         (
-            "missing: .config/rotproof.toml",
-            Box::new(|r| fs::remove_file(r.join(".config/rotproof.toml")).unwrap()),
-        ),
-        (
             "unknown stack",
             Box::new(|r| declare(r, "stack = \"cobol\"\nareas = [\"a\"]\n")),
         ),
@@ -1289,6 +1285,30 @@ fn each_difference_from_the_declaration_fails() {
         );
         assert!(stdout(&out).contains(said), "{said}: {}", stdout(&out));
     }
+}
+
+/// Without a declaration nothing can be checked against it: no broken rule, as a file that cannot be read is none, so
+/// CI tells a project that has not adopted Rotproof from one that breaks its rules
+#[test]
+fn check_without_a_declaration_exits_2_and_says_how_to_write_one() {
+    let root = clean_repo();
+    fs::remove_file(root.path().join(".config/rotproof.toml")).unwrap();
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains(
+            "missing: .config/rotproof.toml. Write it with `rotproof init --stack <stack>`"
+        ),
+        "{said}"
+    );
+    // A declaration that is there but breaks a rule is still a broken rule
+    declare(
+        root.path(),
+        "stack = \"python\"\nareas = [\"a\"]\nextra = 1\n",
+    );
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
 }
 
 /// A declaration whose stack does not fit still names the areas the records are grouped by, so the records are checked
@@ -2186,10 +2206,12 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         "{init_help}"
     );
     let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(2));
     assert!(
-        stdout(&out).contains("rotproof init --stack <stack>` (python, typescript, rust, or none"),
+        String::from_utf8_lossy(&out.stderr)
+            .contains("rotproof init --stack <stack>` (python, typescript, rust, or none"),
         "{}",
-        stdout(&out)
+        String::from_utf8_lossy(&out.stderr)
     );
 
     // Each command names the next

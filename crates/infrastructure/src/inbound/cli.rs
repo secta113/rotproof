@@ -27,9 +27,9 @@ The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has r
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
-when a file cannot be read or written, the command line is wrong, `rotproof create` would make layers without --yes,
-`rotproof init` leaves an update of the project's files to a person or cannot move the records, or `rotproof approve`
-is not run on a terminal or not answered y.";
+when there is no .config/rotproof.toml to work from, a file cannot be read or written, the command line is wrong,
+`rotproof create` would make layers without --yes, `rotproof init` leaves an update of the project's files to a
+person or cannot move the records, or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -45,7 +45,7 @@ updates them), that \
 older project), and that every record in docs/ keeps its rules (the rules.md of each directory), a knowledge document \
 matching the code it follows among them. \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
-a rule is broken, 2 when a file cannot be read.";
+a rule is broken, 2 when there is no .config/rotproof.toml or a file cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
 /// import which) and the records an agent works from (specs, work items, milestones, knowledge and log in docs/).

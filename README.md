@@ -428,8 +428,9 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
 
 ## What `rotproof check` checks
 
-- **The tree matches `.config/rotproof.toml`, either way:** the declaration exists and names a known stack, and only
-  layers that stack has in `absent` (a misspelled field fails). Every layer of the stack is present or declared
+- **The tree matches `.config/rotproof.toml`, either way:** the declaration names a known stack, and only layers that
+  stack has in `absent` (a misspelled field fails). Without a declaration nothing is checked, and `rotproof check`
+  exits 2, not 1: CI tells a project that has not adopted Rotproof from one that breaks a rule. Every layer of the stack is present or declared
   absent, and no layer declared absent is present. No code sits outside the layers, the stack's own paths (`tests/`)
   and `unchecked`. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.

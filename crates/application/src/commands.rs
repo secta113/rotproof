@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use domain::approvals::{APPROVALS, Approved, Kept};
-use domain::layers::{DECLARATION, RECORDS_ONLY};
+use domain::layers::{DECLARATION, MISSING, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
 use domain::upgrade::VERSION;
 use protocol::inbound::{Commands, Drift, Indexed, Initialized, Made, Names, Removed, Report};
@@ -44,6 +44,14 @@ impl Commands for Rotproof<'_> {
 
     fn check(&self, root: &Path) -> Result<Report, String> {
         let files = self.machine.files(root);
+        // Without a declaration nothing can be checked against it: that is no broken rule, as a file that cannot be
+        // read is none, and CI tells a project that has not adopted Rotproof from one that breaks its rules
+        if crate::layers::declaration(&*files)
+            .map_err(|e| e.to_string())?
+            .is_none()
+        {
+            return Err(MISSING.into());
+        }
         crate::check::check(&*files, self.machine.parsers()).map_err(|e| e.to_string())
     }
 
