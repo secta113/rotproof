@@ -201,6 +201,13 @@ fn layers_section(layout: &Layout) -> String {
             place.name, place.path
         ));
     }
+    if let Some(entry) = layout.entry(&table()) {
+        rows.push(format!(
+            "| The entry file, no layer | `{}` | {} |",
+            entry.path,
+            listed(&entry.imports)
+        ));
+    }
     let not_layers = if layout.not_layers.is_empty() {
         String::new()
     } else {
@@ -285,10 +292,14 @@ mod tests {
         let text = guide("python", Some(&layout));
         for row in [
             "| `ui` | `ui/` | Nothing: it holds only its levels |",
-            "| `ui.molecules` | `ui/molecules/` | The levels below it, and `utils` |",
-            "| `ui.atoms` | `ui/atoms/` | `utils` |",
-            "| `domain` | `domain/` | `utils` |",
-            "| `utils` | `utils/` | No other layer |",
+            "| `ui.organisms` | `ui/organisms/` | The levels below it, and `domain` |",
+            "| `ui.molecules` | `ui/molecules/` | The levels below it |",
+            "| `ui.atoms` | `ui/atoms/` | No other layer |",
+            "| `infrastructure` | `infrastructure/` | Nothing: it holds only its levels |",
+            "| `infrastructure.inbound` | `infrastructure/inbound/` | `protocol.inbound` |",
+            "| `protocol.outbound` | `protocol/outbound/` | `domain` |",
+            "| `domain` | `domain/` | No other layer |",
+            "| The entry file, no layer | `__main__.py` | `composition` |",
         ] {
             assert!(text.contains(row), "no row {row}:\n{text}");
         }

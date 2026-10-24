@@ -12,6 +12,8 @@ not_layers = ["tests"]
 doc_prefix = ""
 # What Rotproof reads the code as: its imports for the direction check, its comments for the marker check
 language = "python"
+# The entry file, which `python .` runs
+entry = "__main__.py"
 
 [layer]
 path = "{name}"

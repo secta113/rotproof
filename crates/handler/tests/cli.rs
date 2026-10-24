@@ -640,27 +640,28 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
         (
             "python",
             &[
-                "handler/__init__.py",
+                "composition/__init__.py",
                 "ui/atoms/__init__.py",
-                "utils/__init__.py",
+                "infrastructure/inbound/__init__.py",
             ],
-            &[],
+            // The entry file is no layer, so it is not made
+            &["__main__.py", "handler", "utils"],
         ),
         (
             "typescript",
             &[
-                "src/handler/index.ts",
+                "src/composition/index.ts",
                 "src/ui/pages/index.ts",
-                "src/domain/index.ts",
+                "src/protocol/outbound/index.ts",
             ],
-            &[],
+            &["src/main.tsx"],
         ),
         (
             "rust",
             &[
-                "crates/handler/src/main.rs",
+                "crates/composition/src/lib.rs",
                 "crates/domain/Cargo.toml",
-                "crates/domain/src/lib.rs",
+                "crates/infrastructure/src/inbound/mod.rs",
             ],
             &["crates/ui"],
         ),
@@ -728,7 +729,7 @@ fn create_writes_the_projects_files_once() {
         let absent = if stack == "none" {
             ""
         } else {
-            "absent = [\"utils\"]\n"
+            "absent = [\"application\"]\n"
         };
         fs::write(
             root.join(".config/rotproof.toml"),
@@ -764,11 +765,11 @@ fn create_writes_the_projects_files_once() {
         );
         // The map has the layers present, and not the one declared absent
         assert_eq!(
-            agents.contains("handler/` | Entry points"),
+            agents.contains("composition/` | The composition root"),
             stack != "none",
             "{stack}: {agents}"
         );
-        assert!(!agents.contains("utils/` |"), "{stack}: {agents}");
+        assert!(!agents.contains("application/` |"), "{stack}: {agents}");
         let requirements = root.join("requirements-dev.txt");
         let workflow = root.join(".github/workflows/ci.yml");
         if pinned {
@@ -811,13 +812,13 @@ fn create_writes_the_projects_files_once() {
                 "{}",
                 String::from_utf8_lossy(&out.stderr)
             );
-            for crate_name in ["handler", "application", "infrastructure", "domain"] {
+            for crate_name in ["composition", "infrastructure", "protocol", "domain"] {
                 assert!(
                     metadata.contains(&format!("\"name\":\"{crate_name}\"")),
                     "{crate_name}: {metadata}"
                 );
             }
-            assert!(!metadata.contains("\"name\":\"utils\""), "{metadata}");
+            assert!(!metadata.contains("\"name\":\"application\""), "{metadata}");
         }
         assert!(run(&["--root", &arg, "check"]).status.success());
 
@@ -1249,18 +1250,18 @@ fn each_difference_from_the_declaration_fails() {
             "no layer is present",
             Box::new(|r| {
                 for layer in [
-                    "handler",
-                    "application",
+                    "composition",
                     "infrastructure",
+                    "application",
+                    "protocol",
                     "domain",
-                    "utils",
                 ] {
                     fs::remove_dir_all(r.join(layer)).unwrap();
                 }
                 declare(
                     r,
-                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"handler\", \"ui\", \"application\", \"infrastructure\", \
-                     \"domain\", \"utils\"]\n",
+                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"composition\", \"ui\", \"infrastructure\", \
+                     \"application\", \"protocol\", \"domain\"]\n",
                 );
             }),
         ),
@@ -1380,36 +1381,45 @@ fn ui_parts_in_a_level_pass() {
 }
 
 /// Every place of the Python layout, in the order of the grid below.
-const PLACES: [&str; 11] = [
-    "handler",
+const PLACES: [&str; 15] = [
+    "composition",
     "ui",
     "ui.pages",
     "ui.templates",
     "ui.organisms",
     "ui.molecules",
     "ui.atoms",
-    "application",
     "infrastructure",
+    "infrastructure.inbound",
+    "infrastructure.outbound",
+    "application",
+    "protocol",
+    "protocol.inbound",
+    "protocol.outbound",
     "domain",
-    "utils",
 ];
 
 /// Whether the place of a row may import the place of a column: the rule `layers/table.toml` states (each layer's
-/// `imports`, and a level of `ui` the levels below it), written out again by hand rather than computed by the check.
-/// A change to the table or to the check that moves any pair fails here, so moving one is a decision made twice.
-const MAY_IMPORT: [&str; 11] = [
-    // h  ui pg tp or mo at ap in do ut
-    "Y Y Y Y Y Y Y Y Y Y Y", // handler
-    "N Y Y Y Y Y Y Y N Y Y", // ui
-    "N N Y Y Y Y Y Y N Y Y", // ui.pages
-    "N N N Y Y Y Y N N Y Y", // ui.templates
-    "N N N N Y Y Y N N Y Y", // ui.organisms
-    "N N N N N Y Y N N N Y", // ui.molecules
-    "N N N N N N Y N N N Y", // ui.atoms
-    "N N N N N N N Y N Y Y", // application
-    "N N N N N N N N Y Y Y", // infrastructure
-    "N N N N N N N N N Y Y", // domain
-    "N N N N N N N N N N Y", // utils
+/// `imports`, which may name one level of another layer, and a level of `ui` the levels below it), written out again
+/// by hand rather than computed by the check. A change to the table or to the check that moves any pair fails here,
+/// so moving one is a decision made twice.
+const MAY_IMPORT: [&str; 15] = [
+    // co ui pg tp or mo at if ii io ap pr pi po do
+    "Y Y Y Y Y Y Y Y Y Y Y Y Y Y Y", // composition
+    "N Y Y Y Y Y Y N N N Y Y Y Y Y", // ui
+    "N N Y Y Y Y Y N N N Y Y Y Y Y", // ui.pages
+    "N N N Y Y Y Y N N N N N N N Y", // ui.templates
+    "N N N N Y Y Y N N N N N N N Y", // ui.organisms
+    "N N N N N Y Y N N N N N N N N", // ui.molecules
+    "N N N N N N Y N N N N N N N N", // ui.atoms
+    "N N N N N N N Y Y Y N Y Y Y Y", // infrastructure
+    "N N N N N N N N Y N N N Y N N", // infrastructure.inbound
+    "N N N N N N N N N Y N N N Y Y", // infrastructure.outbound
+    "N N N N N N N N N N Y Y Y Y Y", // application
+    "N N N N N N N N N N N Y Y Y Y", // protocol
+    "N N N N N N N N N N N N Y N N", // protocol.inbound
+    "N N N N N N N N N N N N N Y Y", // protocol.outbound
+    "N N N N N N N N N N N N N N Y", // domain
 ];
 
 #[test]
@@ -1433,7 +1443,7 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
             import: |to| format!("import {to}\n"),
             said_as: |to| format!("imports {to}"),
             verb: "imports",
-            forbidden: 68,
+            forbidden: 152,
         },
         Stack {
             name: "typescript",
@@ -1445,10 +1455,10 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
                 format!("imports /src/{path} (src/{path})")
             },
             verb: "imports",
-            forbidden: 68,
+            forbidden: 152,
         },
         Stack {
-            // No ui: a crate per layer
+            // No ui, and a crate per layer: the levels inside a crate are judged by another test
             name: "rust",
             file: |from| format!("crates/{from}/Cargo.toml"),
             head: "[package]\nname = \"place\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\n",
@@ -1462,7 +1472,8 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
         let name = stack.name;
         let root = repo_with_ui(name, "");
         let r = root.path();
-        let has = |place: &&str| name != "rust" || !place.starts_with("ui");
+        let has =
+            |place: &&str| name != "rust" || !(place.starts_with("ui") || place.contains('.'));
         let places: Vec<(usize, &str)> = PLACES
             .iter()
             .copied()
@@ -1538,12 +1549,12 @@ fn every_form_of_rust_dependency_is_judged() {
             "{}\n[dependencies]\n\
              serde = {{ workspace = true }}\n\
              application.workspace = true\n\
-             utils = {{ path = \"../utils\" }}\n\
+             proto = {{ path = \"../protocol\", package = \"protocol\" }}\n\
              infra = {{ path = \"../infrastructure\", package = \"infrastructure\" }}\n\
              regex = \"1\"\n\
              missing = {{ workspace = true }}\n\
-             \n[build-dependencies]\nhandler = {{ path = \"../handler\" }}\n\
-             \n[dev-dependencies]\nhandler = {{ path = \"../handler\" }}\n\
+             \n[build-dependencies]\ncomposition = {{ path = \"../composition\" }}\n\
+             \n[dev-dependencies]\ncomposition = {{ path = \"../composition\" }}\n\
              \n[target.'cfg(windows)'.dependencies]\n\
              app = {{ path = \"../../crates/./application/\", package = \"application\" }}\n\
              outside = {{ path = \"../../..\" }}\n\
@@ -1553,10 +1564,10 @@ fn every_form_of_rust_dependency_is_judged() {
     );
     // A member that names its workspace, and one whose named workspace is none
     write(
-        "crates/utils/Cargo.toml",
+        "crates/protocol/Cargo.toml",
         &format!(
-            "{}workspace = \"../..\"\n\n[dependencies]\ncore.workspace = true\n",
-            package("utils")
+            "{}workspace = \"../..\"\n\n[dependencies]\napplication.workspace = true\n",
+            package("protocol")
         ),
     );
     write(
@@ -1573,21 +1584,22 @@ fn every_form_of_rust_dependency_is_judged() {
     assert_eq!(out.status.code(), Some(1), "{said}");
     for line in [
         "crates/domain/Cargo.toml:8: depends on application (crates/application, from the workspace), in application; \
-         domain may import `utils`",
+         domain imports no other layer",
+        "crates/domain/Cargo.toml:9: depends on proto (crates/protocol), in protocol; ",
         "crates/domain/Cargo.toml:10: depends on infra (crates/infrastructure), in infrastructure; ",
         "crates/domain/Cargo.toml:12: missing comes from the workspace, and Cargo.toml has no missing in \
          [workspace.dependencies], so it is not checked",
-        "crates/domain/Cargo.toml:15: depends on handler (crates/handler), in handler; ",
+        "crates/domain/Cargo.toml:15: depends on composition (crates/composition), in composition; ",
         "crates/domain/Cargo.toml:21: depends on app (crates/application), in application; ",
-        "crates/utils/Cargo.toml:8: depends on core (crates/domain, from the workspace), in domain; utils imports no \
-         other layer",
+        "crates/protocol/Cargo.toml:8: depends on application (crates/application, from the workspace), in \
+         application; protocol may import `domain`",
         "crates/infrastructure/Cargo.toml:8: core comes from the workspace, and .., which [package] workspace names, \
          is no workspace, so it is not checked",
         "crates/application/Cargo.toml:1: cannot be read as TOML (",
     ] {
         assert!(said.contains(line), "{line}:\n{said}");
     }
-    assert_eq!(said.matches(": depends on ").count(), 5, "{said}");
+    assert_eq!(said.matches(": depends on ").count(), 6, "{said}");
     assert_eq!(
         said.matches("comes from the workspace").count(),
         2,
@@ -1730,7 +1742,7 @@ fn every_form_of_typescript_import_is_judged() {
     write(
         "src/domain/song.ts",
         "import React from 'react';\nimport type { Play } from '../application/play';\nexport * from '@/infrastructure/db';\n\
-         export const load = () => import('../handler/main');\nconst x = require(`../utils/x`);\n",
+         export const load = () => import('../composition/main');\nconst x = require(`../vendor/x`);\n",
     );
     write(
         "src/ui/molecules/Row.tsx",
@@ -1738,19 +1750,19 @@ fn every_form_of_typescript_import_is_judged() {
          import logo from '../../domain/logo.svg?url';\nexport const Row = () => <p>{/* ../pages */}</p>;\n",
     );
     // Not a source file, ignored by git, or hidden: not read
-    write("src/domain/notes.md", "import '../handler'\n");
+    write("src/domain/notes.md", "import '../composition'\n");
     write(".gitignore", "src/domain/generated/\n");
-    write("src/domain/generated/x.ts", "import '../../handler';\n");
-    write("src/domain/.cache/x.ts", "import '../../handler';\n");
+    write("src/domain/generated/x.ts", "import '../../composition';\n");
+    write("src/domain/.cache/x.ts", "import '../../composition';\n");
     let out = run(&["--root", &root_arg(r), "check"]);
     let said = stdout(&out);
     for line in [
-        "src/domain/song.ts:2: imports ../application/play (src/application/play), in application; domain may \
-         import `utils`",
+        "src/domain/song.ts:2: imports ../application/play (src/application/play), in application; domain imports \
+         no other layer",
         "src/domain/song.ts:3: imports @/infrastructure/db (src/infrastructure/db), in infrastructure; ",
-        "src/domain/song.ts:4: imports ../handler/main (src/handler/main), in handler; ",
+        "src/domain/song.ts:4: imports ../composition/main (src/composition/main), in composition; ",
         "src/ui/molecules/Row.tsx:2: imports ../organisms/List (src/ui/organisms/List), in ui.organisms; \
-         ui.molecules may import the levels below it, and `utils`",
+         ui.molecules may import the levels below it",
         "src/ui/molecules/Row.tsx:3: imports ../index.css (src/ui/index.css), in ui outside its levels; ",
         "src/ui/molecules/Row.tsx:4: imports ../../domain/logo.svg?url (src/domain/logo.svg), in domain; ",
     ] {
@@ -1803,7 +1815,7 @@ fn vites_starter_keeps_its_entry_point_and_says_where_the_rest_goes() {
     let out = run(&["--root", &arg, "check"]);
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{said}");
-    // main.tsx is handler's; the rest is named, with where it goes
+    // main.tsx is the entry file; the rest is named, with where it goes
     for outside in ["src/App.css", "src/App.tsx", "src/assets", "src/index.css"] {
         assert!(
             said.contains(&format!(
@@ -1816,8 +1828,8 @@ fn vites_starter_keeps_its_entry_point_and_says_where_the_rest_goes() {
     }
     assert!(!said.contains("src/main.tsx"), "{said}");
 
-    // Moved as the finding says, with main.tsx's imports following: everything passes, and main.tsx is read as
-    // handler's, which may import ui
+    // Moved as the finding says, with what main.tsx imported moved into composition, which main.tsx calls: everything
+    // passes
     fs::remove_file(r.join("src/App.tsx")).unwrap();
     fs::remove_file(r.join("src/App.css")).unwrap();
     fs::remove_file(r.join("src/index.css")).unwrap();
@@ -1831,14 +1843,18 @@ fn vites_starter_keeps_its_entry_point_and_says_where_the_rest_goes() {
     write("src/ui/atoms/index.css", ":root {}\n");
     write("src/ui/atoms/assets/react.svg", "<svg/>\n");
     write(
+        "src/composition/app.tsx",
+        "import '../ui/atoms/index.css'\nimport App from '../ui/pages/App.tsx'\nexport { App }\n",
+    );
+    write(
         "src/main.tsx",
-        "import './ui/atoms/index.css'\nimport App from './ui/pages/App.tsx'\nexport { App }\n",
+        "import { App } from './composition/app'\nexport { App }\n",
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
     write(
         "src/main.tsx",
-        "import App from './ui/pages/App.tsx'\nconst = ;\n",
+        "import { App } from './composition/app'\nconst = ;\n",
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(
@@ -1847,19 +1863,30 @@ fn vites_starter_keeps_its_entry_point_and_says_where_the_rest_goes() {
         stdout(&out)
     );
 
-    // Without handler, main.tsx belongs nowhere: code outside the layers like any other
-    write("src/main.tsx", "export {}\n");
-    fs::remove_dir_all(r.join("src/handler")).unwrap();
-    declare(
-        r,
-        "stack = \"typescript\"\nareas = [\"a\"]\nabsent = [\"handler\"]\n",
+    // As the starter wrote it, main.tsx imports the UI itself, which only composition may
+    write(
+        "src/main.tsx",
+        "import './ui/atoms/index.css'\nimport App from './ui/pages/App.tsx'\nexport { App }\n",
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(
-        stdout(&out).contains("code outside the layers: src/main.tsx"),
+        stdout(&out).contains(
+            "src/main.tsx:2: imports ./ui/pages/App.tsx (src/ui/pages/App.tsx), in ui.pages; src/main.tsx may \
+             import `composition`"
+        ),
         "{}",
         stdout(&out)
     );
+
+    // The entry file is no layer: with composition declared absent, it is still not code outside the layers
+    write("src/main.tsx", "export {}\n");
+    fs::remove_dir_all(r.join("src/composition")).unwrap();
+    declare(
+        r,
+        "stack = \"typescript\"\nareas = [\"a\"]\nabsent = [\"composition\"]\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
 }
 
 #[test]
@@ -1900,24 +1927,29 @@ fn every_form_of_import_is_judged() {
         "ui/molecules/row.py",
         "from .. import organisms\nfrom ..atoms import button\nfrom . import field\nfrom ui import pages\nimport ui\n",
     );
+    // The entry file, outside the layers, is read too
+    write(
+        "__main__.py",
+        "import composition\nfrom application import play\n",
+    );
     // Not a layer, ignored by git, or hidden: not read
-    write("tests/test_x.py", "import handler\n");
+    write("tests/test_x.py", "import composition\n");
     write(".gitignore", "domain/generated/\n");
-    write("domain/generated/x.py", "import handler\n");
-    write("domain/.cache/x.py", "import handler\n");
+    write("domain/generated/x.py", "import composition\n");
+    write("domain/.cache/x.py", "import composition\n");
     let out = run(&["--root", &root_arg(r), "check"]);
     let said = stdout(&out);
     for line in [
-        "domain/model.py:5: imports application.play, in application; domain may import `utils`",
+        "domain/model.py:5: imports application.play, in application; domain imports no other layer",
         "domain/model.py:7: imports infrastructure.db, in infrastructure; ",
-        "ui/molecules/row.py:1: imports ui.organisms, in ui.organisms; ui.molecules may import the levels below it, \
-         and `utils`",
+        "ui/molecules/row.py:1: imports ui.organisms, in ui.organisms; ui.molecules may import the levels below it\n",
         "ui/molecules/row.py:4: imports ui.pages, in ui.pages; ",
         "ui/molecules/row.py:5: imports ui, in ui outside its levels; ",
+        "__main__.py:2: imports application.play, in application; __main__.py may import `composition`",
     ] {
         assert!(said.contains(line), "{line}:\n{said}");
     }
-    assert_eq!(said.matches(": imports ").count(), 5, "{said}");
+    assert_eq!(said.matches(": imports ").count(), 6, "{said}");
 }
 
 #[test]
@@ -1930,17 +1962,17 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
     assert!(out.status.success(), "{}", stdout(&out));
 
     fs::write(
-        r.join("utils/broken.py"),
-        "import os\ndef (:\nimport handler\n",
+        r.join("domain/broken.py"),
+        "import os\ndef (:\nimport composition\n",
     )
     .unwrap();
-    fs::write(r.join("utils/latin.py"), b"x = '\xff'\n").unwrap();
+    fs::write(r.join("domain/latin.py"), b"x = '\xff'\n").unwrap();
     let out = run(&["--root", &root_arg(r), "check"]);
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{said}");
     let error = said
         .lines()
-        .find(|line| line.contains("utils/broken.py:2: cannot be read as Python ("))
+        .find(|line| line.contains("domain/broken.py:2: cannot be read as Python ("))
         .unwrap_or_else(|| panic!("{said}"));
     // The parser recovers, and the imports after the error are judged all the same: what it says has to fit that
     assert!(
@@ -1948,11 +1980,11 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
         "{error}"
     );
     assert!(
-        said.contains("utils/broken.py:3: imports handler, in handler; "),
+        said.contains("domain/broken.py:3: imports composition, in composition; "),
         "{said}"
     );
     assert!(
-        said.contains("utils/latin.py: cannot be read as UTF-8"),
+        said.contains("domain/latin.py: cannot be read as UTF-8"),
         "{said}"
     );
 }
@@ -2448,7 +2480,7 @@ fn a_marker_in_a_rust_comment_fails() {
         "/* FIXME\n   and HACK */\n#[test]\nfn t() {}\n",
     );
     write(
-        "crates/handler/build.rs",
+        "crates/composition/build.rs",
         "/// NOTE on the build\nfn main() {}\n",
     );
     // A string, a character, a lifetime, a manifest's comment, code outside `crates/`, and a path the project lists:
@@ -2459,8 +2491,8 @@ fn a_marker_in_a_rust_comment_fails() {
          &'a str { x } // a plain comment\n",
     );
     write(
-        "crates/utils/Cargo.toml",
-        "# TODO in a manifest\n[package]\nname = \"utils\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        "crates/protocol/Cargo.toml",
+        "# TODO in a manifest\n[package]\nname = \"protocol\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
     );
     write(
         "xtask/src/main.rs",
@@ -2490,7 +2522,7 @@ fn a_marker_in_a_rust_comment_fails() {
         "  crates/domain/src/song.rs:2\n    // TODO: split this\n",
         "  crates/domain/tests/song.rs:1\n    /* FIXME\n",
         "  crates/domain/tests/song.rs:2\n    and HACK */\n",
-        "  crates/handler/build.rs:1\n    /// NOTE on the build\n",
+        "  crates/composition/build.rs:1\n    /// NOTE on the build\n",
     ] {
         assert!(said.contains(found), "{found}:\n{said}");
     }
@@ -2498,7 +2530,7 @@ fn a_marker_in_a_rust_comment_fails() {
     for path in [
         "crates/domain/src/song.rs",
         "crates/domain/tests/song.rs",
-        "crates/handler/build.rs",
+        "crates/composition/build.rs",
     ] {
         write(path, "// A plain comment\n");
     }
@@ -2878,7 +2910,7 @@ fn approve_refuses_without_a_terminal_and_prune_removes_only_what_matches_nothin
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
 
     // Pruning never lets through what failed: with the import fixed, its entry goes and the check passes
-    fs::write(r.join("domain/model.py"), "import utils\n").unwrap();
+    fs::write(r.join("domain/model.py"), "import os\n").unwrap();
     let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
     assert!(!fs::read_to_string(&path).unwrap().contains("[[kept]]"));

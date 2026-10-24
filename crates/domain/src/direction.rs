@@ -162,6 +162,10 @@ mod tests {
     fn levels_beside_each_other_never_import_each_other_and_an_import_may_name_one_level() {
         let table: crate::layers::Table = toml::from_str(
             r#"
+            [entry]
+            imports = ["edge"]
+            role = "x"
+
             [[layer]]
             name = "edge"
             imports = ["port"]
@@ -237,12 +241,19 @@ mod tests {
     fn the_message_says_what_a_place_may_import() {
         let places = python_places();
         let say = |name: &str| what_it_may_import(places.iter().find(|p| p.name == name).unwrap());
-        assert_eq!(say("utils"), "utils imports no other layer");
-        assert_eq!(say("domain"), "domain may import `utils`");
-        assert_eq!(say("ui.atoms"), "ui.atoms may import `utils`");
+        assert_eq!(say("domain"), "domain imports no other layer");
         assert_eq!(
-            say("ui.molecules"),
-            "ui.molecules may import the levels below it, and `utils`"
+            say("protocol.outbound"),
+            "protocol.outbound may import `domain`"
+        );
+        assert_eq!(
+            say("infrastructure.inbound"),
+            "infrastructure.inbound may import `protocol.inbound`"
+        );
+        assert_eq!(say("ui.atoms"), "ui.atoms imports no other layer");
+        assert_eq!(
+            say("ui.organisms"),
+            "ui.organisms may import the levels below it, and `domain`"
         );
     }
 

@@ -63,9 +63,18 @@ pub struct Layer {
     pub levels: Vec<Level>,
 }
 
+/// The file the program starts from, as the table describes it: no layer, and nothing imports it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Entry {
+    pub imports: Vec<String>,
+    pub role: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Table {
+    pub entry: Entry,
     #[serde(rename = "layer")]
     pub layers: Vec<Layer>,
 }
@@ -118,10 +127,10 @@ pub struct Layout {
     /// Layer -> files that replace the ones in `layer`
     #[serde(default)]
     pub layers: BTreeMap<String, Override>,
-    /// Files a toolchain's starter puts outside the layers, each with the layer it belongs to by what it holds: path
-    /// from the root -> layer. Such a file is that layer's while the layer is present
+    /// The file the program starts from, from the root: code outside the layers that imports only what the table's
+    /// `entry` allows. `None` while this stack has none
     #[serde(default)]
-    pub belongs: BTreeMap<String, String>,
+    pub entry: Option<String>,
     /// Where code outside the layers goes in this stack, said in the finding for it
     #[serde(default)]
     pub where_code_goes: Option<String>,
@@ -254,6 +263,27 @@ impl Layout {
         out
     }
 
+    /// The entry file as a place of its own, named by its path, for the direction check and the guide: it may import
+    /// what the table's `entry` lists. No place's imports take it in, and no check asks for it to be there.
+    pub fn entry(&self, table: &Table) -> Option<Place> {
+        let path = self.entry.as_ref()?;
+        Some(Place {
+            name: path.clone(),
+            path: path.clone(),
+            parent: None,
+            role: table.entry.role.clone(),
+            imports: table
+                .entry
+                .imports
+                .iter()
+                .filter(|n| !self.without.contains(n))
+                .cloned()
+                .collect(),
+            below: Vec::new(),
+            files: Vec::new(),
+        })
+    }
+
     /// Whether a file name is code in this stack.
     ///
     /// Case does not count: Windows runs `stray.PY` with Python and reads `cargo.toml` as `Cargo.toml`, so either is
@@ -279,7 +309,7 @@ pub fn listed(names: &[String]) -> String {
 }
 
 /// What a place may import, as one phrase for its documentation, the guide's table and the direction check:
-/// "the levels below it, and `utils`". Empty when it imports no other layer.
+/// "the levels below it, and `domain`". Empty when it imports no other layer.
 pub fn importable(place: &Place) -> String {
     match (place.below.is_empty(), place.imports.is_empty()) {
         (true, true) => String::new(),
@@ -604,6 +634,13 @@ mod tests {
         let table = table();
         let levels: usize = table.layers.iter().map(|l| l.levels.len()).sum();
         assert!(table.layers.len() >= 5 && levels >= 5, "{levels} levels");
+        assert!(!table.entry.role.trim().is_empty(), "the entry has no role");
+        for import in &table.entry.imports {
+            assert!(
+                table.layers.iter().any(|l| &l.name == import),
+                "the entry imports unknown {import}"
+            );
+        }
         // What an import may name: a layer, or a level as `<layer>.<level>`
         let names: Vec<String> = table
             .layers
@@ -664,24 +701,21 @@ mod tests {
             }
             let places = layout.places(&table);
             assert!(places.len() >= 5, "{stack} makes {} places", places.len());
-            // A file a starter puts outside the layers belongs to a layer of this stack, and sits outside every layer
-            // in the scope where code is looked for
-            for (path, layer) in &layout.belongs {
+            // The entry file sits outside every layer, as code in the scope where code is looked for
+            if let Some(entry) = layout.entry(&table) {
+                let path = &entry.path;
                 assert!(
-                    places
-                        .iter()
-                        .any(|p| p.parent.is_none() && &p.name == layer),
-                    "{stack}: {path} belongs to {layer}, which the stack does not have"
+                    !places.iter().any(|p| within(path, &p.path)),
+                    "{stack}: the entry file {path} sits in a layer"
                 );
                 assert!(
-                    !places
-                        .iter()
-                        .any(|p| path.starts_with(&format!("{}/", p.path))),
-                    "{stack}: {path} sits in a layer already"
+                    (layout.scope.is_empty() || within(path, &layout.scope))
+                        && layout.is_code(path),
+                    "{stack}: the entry file {path} is not code in the scope"
                 );
                 assert!(
-                    path.starts_with(&format!("{}/", layout.scope)) && layout.is_code(path),
-                    "{stack}: {path} is not code in the scope"
+                    !entry.imports.is_empty(),
+                    "{stack}: the entry imports nothing"
                 );
             }
             for place in &places {
@@ -713,32 +747,77 @@ mod tests {
     fn a_layer_is_documented_as_its_stack_writes_it() {
         let table = table();
         let python = layout("python").unwrap().places(&table);
-        let utils = python.iter().find(|p| p.name == "utils").unwrap();
-        assert_eq!(utils.files[0].0, "utils/__init__.py");
-        assert!(utils.files[0].1.starts_with("\"\"\"General-purpose parts"));
+        let domain = python.iter().find(|p| p.name == "domain").unwrap();
+        assert_eq!(domain.files[0].0, "domain/__init__.py");
         assert!(
-            utils.files[0]
+            domain.files[0]
+                .1
+                .starts_with("\"\"\"The concepts and rules")
+        );
+        assert!(
+            domain.files[0]
                 .1
                 .ends_with("Imports no other layer.\n\"\"\"\n")
+        );
+        let inbound = python
+            .iter()
+            .find(|p| p.name == "infrastructure.inbound")
+            .unwrap();
+        assert_eq!(inbound.files[0].0, "infrastructure/inbound/__init__.py");
+        assert!(
+            inbound.files[0]
+                .1
+                .contains("\nMay import `protocol.inbound`.\n")
+        );
+        assert!(
+            !python
+                .iter()
+                .any(|p| p.name == "handler" || p.name == "utils")
         );
 
         let rust = layout("rust").unwrap().places(&table);
         assert!(!rust.iter().any(|p| p.name.starts_with("ui")));
-        let handler = rust.iter().find(|p| p.name == "handler").unwrap();
-        let paths: Vec<&str> = handler.files.iter().map(|(p, _)| p.as_str()).collect();
+        let protocol = rust.iter().find(|p| p.name == "protocol").unwrap();
+        let paths: Vec<&str> = protocol.files.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(
             paths,
-            ["crates/handler/Cargo.toml", "crates/handler/src/main.rs"]
+            ["crates/protocol/Cargo.toml", "crates/protocol/src/lib.rs"]
         );
-        let main = &handler.files[1].1;
-        assert!(main.starts_with("//! Entry points") && main.contains("\n//!\n"));
-        assert!(main.ends_with("fn main() {}\n"));
+        let lib = &protocol.files[1].1;
+        assert!(lib.starts_with("//! The contracts") && lib.contains("\n//!\n"));
+        // A crate compiles a module only when its `lib.rs` declares it
+        for layer in rust.iter().filter(|p| p.parent.is_none()) {
+            let lib = layer
+                .files
+                .iter()
+                .find(|(path, _)| path.ends_with("/src/lib.rs"))
+                .map(|(_, text)| text)
+                .unwrap_or_else(|| panic!("{} has no lib.rs", layer.name));
+            let levels: Vec<&Place> = rust
+                .iter()
+                .filter(|p| p.parent.as_ref() == Some(&layer.name))
+                .collect();
+            let declared = lib.lines().filter(|l| l.starts_with("pub mod ")).count();
+            assert_eq!(declared, levels.len(), "{}: {lib}", layer.name);
+            for level in levels {
+                let module = level.name.rsplit('.').next().unwrap();
+                assert!(
+                    lib.contains(&format!("\npub mod {module};\n")),
+                    "{}",
+                    level.name
+                );
+            }
+        }
 
         let typescript = layout("typescript").unwrap().places(&table);
         let atoms = typescript.iter().find(|p| p.name == "ui.atoms").unwrap();
         assert_eq!(atoms.path, "src/ui/atoms");
         assert_eq!(atoms.parent.as_deref(), Some("ui"));
-        assert!(atoms.files[0].1.contains("\n * May import `utils`.\n */\n"));
+        assert!(
+            atoms.files[0]
+                .1
+                .contains("\n * Imports no other layer.\n */\n")
+        );
         let pages = typescript.iter().find(|p| p.name == "ui.pages").unwrap();
         assert!(
             pages.files[0]

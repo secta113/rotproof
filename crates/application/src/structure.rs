@@ -84,11 +84,11 @@ mod tests {
         let tree = Fake::new(&[
             (
                 ".config/rotproof.toml",
-                "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\", \"handler\", \"application\"]\n",
+                "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\", \"composition\", \"application\", \
+                 \"protocol\"]\n",
             ),
             ("domain/__init__.py", ""),
             ("Infrastructure/__init__.py", ""),
-            ("utils/__init__.py", ""),
             ("scripts/run.py", ""),
         ]);
         let found = problems(&tree).unwrap().found;

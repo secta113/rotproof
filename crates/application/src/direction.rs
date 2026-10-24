@@ -8,7 +8,7 @@ use crate::code::lands;
 use crate::tree::{code_files, exactly, read_code, resolved};
 use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
 use domain::direction::{Forbidden, judged, place_of, workspace_dirs};
-use domain::layers::{Declared, Language, Layout, Place};
+use domain::layers::{Declared, Language, Layout, Place, table};
 use domain::tree::Tree;
 use utils::paths::{join, parent};
 
@@ -209,8 +209,7 @@ fn typescript(
         .iter()
         .map(|why| format!("{why}; imports through it are not checked"))
         .collect();
-    // Every source file of the layers with the place it sits in, and each file a starter puts outside the layers with
-    // the layer it belongs to, while that layer is there
+    let entry = layout.entry(&table());
     let mut files: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
@@ -219,14 +218,7 @@ fn typescript(
             }
         }
     }
-    for (path, layer) in &layout.belongs {
-        let place = places.iter().find(|p| &p.name == layer);
-        if let Some(place) = place
-            && exactly(tree, path).is_ok_and(|(_, is_dir)| !is_dir)
-        {
-            files.push((path.clone(), place));
-        }
-    }
+    files.extend(entry_file(tree, entry.as_ref()));
     for (path, from) in files {
         if !is_source(&path) {
             continue;
@@ -264,7 +256,8 @@ fn typescript(
     })
 }
 
-/// The direction check of a Python project: every import of a `.py` file in a layer, as the module it names.
+/// The direction check of a Python project: every import of a `.py` file in a layer, and of the entry file, as the
+/// module it names.
 fn python(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -273,38 +266,52 @@ fn python(
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
+    let entry = layout.entry(&table());
+    let mut files: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
-            let Some(from) = place_of(&module_parts(&path).join("/"), places) else {
+            if let Some(from) = place_of(&module_parts(&path).join("/"), places) {
+                files.push((path, from));
+            }
+        }
+    }
+    files.extend(entry_file(tree, entry.as_ref()));
+    for (path, from) in files {
+        let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
+            continue;
+        };
+        let read = parsers.python(&source, &path);
+        if let Some((line, why)) = read.error {
+            found.push(format!(
+                "{path}:{line}: cannot be read as Python ({why}), so the imports after it may be misread"
+            ));
+        }
+        for (line, module) in read.imports {
+            let Some(to) = place_of(&resolved(tree, &module.join("/")), places) else {
                 continue;
             };
-            let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
-                continue;
-            };
-            let read = parsers.python(&source, &path);
-            if let Some((line, why)) = read.error {
-                found.push(format!(
-                    "{path}:{line}: cannot be read as Python ({why}), so the imports after it may be misread"
-                ));
-            }
-            for (line, module) in read.imports {
-                let Some(to) = place_of(&resolved(tree, &module.join("/")), places) else {
-                    continue;
-                };
-                let dotted = module.join(".");
-                forbidden.extend(judged(
-                    &path,
-                    line,
-                    &dotted,
-                    &format!("imports {dotted}"),
-                    from,
-                    to,
-                ));
-            }
+            let dotted = module.join(".");
+            forbidden.extend(judged(
+                &path,
+                line,
+                &dotted,
+                &format!("imports {dotted}"),
+                from,
+                to,
+            ));
         }
     }
     Ok(Direction {
         problems: found,
         forbidden,
     })
+}
+
+/// The entry file with itself as its place, when it is there as a file. It is code outside the layers, so the walk of
+/// the layers does not find it.
+fn entry_file<'a>(tree: &dyn Tree, entry: Option<&'a Place>) -> Option<(String, &'a Place)> {
+    let entry = entry?;
+    exactly(tree, &entry.path)
+        .is_ok_and(|(_, is_dir)| !is_dir)
+        .then(|| (entry.path.clone(), entry))
 }
