@@ -98,7 +98,8 @@ Body headings:
   (`[...](../../README.md#<anchor>)`). A heading's anchor is the one GitHub gives it. The log's only headings are its
   dates, so a link to a log entry points to its day and names the entry in its text
   (`[log.md: <task name>](/log.md#2026-10-01)`). A link to a Python file names the function or class in its text
-  (``[`render_index`](../../src/bundle.py)``). The check fails when a link in `# Details` does not resolve.
+  (``[`render_index`](../../src/bundle.py)``). The check fails when `# Details` holds no link, and when any link in
+  a document under `docs/` or in the log does not resolve, in `# Details` or anywhere else.
 - **"Next time someone touches X" is not a trigger anyone will see.** People who touch X do not open the work items.
   Prefer a moment when they are opened anyway, such as starting a piece of work or a deploy. If the trigger can only be
   X, search `docs/work/` for X before committing a change to X.

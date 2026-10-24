@@ -158,7 +158,7 @@ fn each_broken_rule_fails_under_its_check() {
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 23] = [
+    let cases: [(&str, &str, String); 24] = [
         // Done before the milestone it comes after
         (
             "the arrows keep their order",
@@ -188,13 +188,22 @@ fn each_broken_rule_fails_under_its_check() {
             "# no frontmatter\n".into(),
         ),
         (
-            "every link in # Details resolves",
+            "every link in docs/ resolves",
             "docs/work/x.md",
             item("[gone](/no_such.md)"),
         ),
+        // A link outside # Details is read too
+        (
+            "every link in docs/ resolves",
+            "docs/work/x.md",
+            item("[log](/log.md)").replace(
+                "# State\n\nY.",
+                "# State\n\nY, as [the spec](/work/gone.md#its-heading) says.",
+            ),
+        ),
         // The only link is inside a comment, so a reader sees none
         (
-            "every link in # Details resolves",
+            "every # Details has a link",
             "docs/work/x.md",
             item("Nothing yet. <!-- [log](/log.md) -->"),
         ),
