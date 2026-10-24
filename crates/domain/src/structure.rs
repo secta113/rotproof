@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::layers::{DECLARATION, Declared, Layout, Place};
-use utils::paths::{join, within};
+use crate::paths::{join, within};
 
 /// What the structure check reads from the tree.
 #[derive(Debug, Default)]

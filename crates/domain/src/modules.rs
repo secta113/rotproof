@@ -21,8 +21,8 @@
 
 use crate::direction::{Forbidden, judged};
 use crate::layers::Place;
-use utils::rust::{Token, attributes, code, inline_modules, paths, tokens};
-use utils::text::line_of;
+use crate::rust::{Token, attributes, code, inline_modules, paths, tokens};
+use crate::text::line_of;
 
 /// What the reading of one crate with levels found: what sits beside the levels or cannot be judged, and every path
 /// the table forbids.

@@ -17,7 +17,7 @@ pub fn in_file(path: &str, source: &str) -> (Vec<String>, usize) {
         .collect();
     let line_at = |offset: usize| starts.partition_point(|&start| start <= offset);
     let mut lines = BTreeSet::new();
-    for (at, text) in utils::rust::comments(source) {
+    for (at, text) in domain::rust::comments(source) {
         let end = at + text.trim_end_matches('\n').len().max(1) - 1;
         lines.extend(line_at(at)..=line_at(end));
     }

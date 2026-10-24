@@ -29,7 +29,6 @@
 //!
 //! Each check has a floor: when the scan finds nothing at all, it fails instead of passing with nothing checked.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io;
 
@@ -39,38 +38,19 @@ use crate::links::broken;
 use crate::tree::{exactly, read_text};
 use domain::approvals::{shown, sort, stale};
 use domain::bundle::{DOCS, Docs, in_docs, is_document};
-use domain::code::Parsers;
 use domain::layers::{DECLARATION, area_problems};
+use domain::markdown::links;
 use domain::migrate::{OLD, WORK};
+use domain::paths::{file_name, join};
 use domain::project::GUIDE;
 use domain::records::{
     dangling_item_refs, dangling_knowledge_refs, floor, knowledge_refs, log_problems, misplaced,
     root_specs, unlogged, unread_paths,
 };
-use domain::tree::Tree;
 use domain::upgrade::VERSION;
-use utils::markdown::links;
-use utils::paths::{file_name, join};
-
-/// One broken rule: which check found it, and what is wrong.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Finding {
-    /// The heading the finding is printed under. Fixed for most checks; built for those that name what they found
-    pub check: Cow<'static, str>,
-    pub detail: String,
-}
-
-/// What `rotproof check` found.
-#[derive(Debug, Default)]
-pub struct Report {
-    pub findings: Vec<Finding>,
-    /// The check that did not run, and why: the structure check says it of the layers of a repository of records only
-    pub skipped: Option<String>,
-    /// Whether the tree was checked against a stack's layers (not for `stack = "none"`)
-    pub layers_checked: bool,
-    /// Every forbidden import a person approved, as printed on every run: one line per entry that approves something
-    pub approved: Vec<String>,
-}
+use protocol::inbound::{Finding, Report};
+use protocol::outbound::Parsers;
+use protocol::outbound::Tree;
 
 /// Every broken rule in the repository `tree` holds. An error is a file that could not be read at all.
 pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
@@ -444,8 +424,8 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use infrastructure::disk::Disk;
-    use infrastructure::readers::Readers;
+    use infrastructure::outbound::disk::Disk;
+    use infrastructure::outbound::readers::Readers;
 
     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs

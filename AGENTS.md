@@ -7,17 +7,19 @@ and why, is in `README.md`.
 
 | Path | Content |
 |---|---|
-| `crates/` | The tool, one crate per layer, each with its modules (below): `handler` (the command line: the package and the binary `rotproof`, named for what it ships, and in `tests/cli.rs` the tests that run it as a user runs it), `application`, `domain`, `infrastructure` and `utils` |
+| `crates/` | The tool, one crate per layer, each with its modules (below): `composition` (the one place that wires), `infrastructure` (the command line in `inbound`, the file system, git and the parsers in `outbound`), `application`, `protocol` (the input port and the output ports) and `domain` |
+| `src/` | The entry file of the root package `rotproof`, the binary named for what it ships: `main.rs` calls `composition` alone |
+| `tests/` | `cli.rs`: the tests that run the binary as a user runs it |
 | `layers/` | The layer definitions, built into the binary: `table.toml` (what the layers are, in every stack) and one layout per stack (`python.toml`, `typescript.toml`, `rust.toml`: where each layer lives, the files that make it, and the files its toolchain needs at the root) |
 | `records/` | The records skeleton, built into the binary: `work-rules.md` and `knowledge-rules.md` (the rules of `docs/work/` and `docs/knowledge/` Rotproof writes into every project), `log.md` (the log `rotproof create` starts) and `milestone.md` (the milestone it writes when `docs/work/` has none) |
 | `project/` | What Rotproof writes into a project outside `docs/`, built into the binary. Each file is named after the one it becomes, without a leading dot and with `.in` added, so no agent here reads a project's `AGENTS.md` as its own: the project's files at the top (`AGENTS.md.in`, `CLAUDE.md.in`, `README.md.in`, `gitattributes.in`), `gitignore/` (one per stack), `pypi/` (the pin, the workflow and the README's instructions for the stacks that install Rotproof from PyPI), `unpinned/` (the README's instructions for the others), and `rotproof/` (the parts of `.rotproof/AGENTS.md`, the guide Rotproof generates for each stack) |
 | `xtask/` | The CI entry point (`cargo xtask ci`), which also checks Rotproof's own layers with its library (`layers.rs`), that every crate takes its dependencies from the workspace (`manifests.rs`), that `domain` calls no port (`pure.rs`) and the width of comment lines (`width.rs`), and `cargo xtask licenses`, which writes `THIRD-PARTY-LICENSES.txt` (`--check`: checks it) |
 | `.cargo/` | The `cargo xtask` alias |
 | `.github/` | GitHub Actions: `ci.yml` runs `cargo xtask ci` in the container, and builds and installs the wheels on Linux and Windows and runs them through `smoke.sh`; `licenses.yml` checks `THIRD-PARTY-LICENSES.txt` with cargo-about; `release.yml` releases a pushed tag to PyPI and GitHub Releases, after running each wheel through `smoke.sh` |
-| `Cargo.toml` | The workspace of the crates, and the one place that names Rotproof's version (`[workspace.package]`: every crate takes it, and maturin takes the wheel version from it) and each dependency's version or path (`[workspace.dependencies]`: every crate takes them with `workspace = true`) |
+| `Cargo.toml` | The root package `rotproof`, which depends on `composition` alone; the workspace of the crates, and the one place that names Rotproof's version (`[workspace.package]`: every crate takes it, and maturin takes the wheel version from it) and each dependency's version or path (`[workspace.dependencies]`: every crate takes them with `workspace = true`) |
 | `rust-toolchain.toml` | The one place that names the toolchain. The Dockerfile and CI install from it |
 | `Dockerfile`, `compose.yaml` | The development container: the Linux of CI, with the packaging tools and cargo-about |
-| `pyproject.toml` | The pip package: a wheel that carries only the binary and the licenses (maturin, `bindings = "bin"`, built from `crates/handler/Cargo.toml`) |
+| `pyproject.toml` | The pip package: a wheel that carries only the binary and the licenses (maturin, `bindings = "bin"`, built from the root `Cargo.toml`) |
 | `requirements-build.txt` | The one place that names the packaging tools (maturin, cargo-xwin). The Dockerfile and CI install from it |
 | `THIRD-PARTY-LICENSES.txt` | The licenses of every crate the binary links, which go with the binary: in the wheel next to Rotproof's own. Generated, never edited by hand |
 | `about.toml`, `about.hbs` | What cargo-about writes `THIRD-PARTY-LICENSES.txt` from: the licenses Rotproof may ship, and the file's template |
@@ -27,9 +29,44 @@ and why, is in `README.md`.
 Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lock`, `AGENTS.md`, and `CLAUDE.md`
 (which only imports `AGENTS.md`).
 
-| Module of `crates/handler/src/` | Content |
+| Module of `src/` | Content |
 |---|---|
-| `main.rs` | The command line, which is the `handler`: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof stop-hook`, and the help that leads from one to the next. It alone builds the adapters in `infrastructure` |
+| `main.rs` | The entry file: `composition::run` |
+
+| Module of `crates/composition/src/` | Content |
+|---|---|
+| `lib.rs` | The layer's role, and `run`: the machine of `infrastructure::outbound` given to the commands of `application`, and those to the command line of `infrastructure::inbound` |
+
+| Module of `crates/infrastructure/src/` | Content |
+|---|---|
+| `lib.rs` | The layer's role, and its two levels |
+
+| Module of `crates/infrastructure/src/inbound/` | Content |
+|---|---|
+| `mod.rs` | The level's role |
+| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof stop-hook`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here |
+
+| Module of `crates/infrastructure/src/outbound/` | Content |
+|---|---|
+| `mod.rs` | The level's role, and `Local`: the `Machine` Rotproof runs on, from the modules below and the local clock |
+| `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, the functions and classes a file defines, and the source of one of them |
+| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, and the aliases of the `tsconfig*.json` files |
+| `cargo.rs` | Reading a crate's `Cargo.toml` with toml_edit: the dependencies it declares on a path or its workspace, and its workspace |
+| `readers.rs` | `Parsers` with the readers above |
+| `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, the project's name, and the project a directory sits in |
+| `git.rs` | `Changes` with `git status`, and the name `rotproof approve` signs with, git's `user.name` |
+
+| Module of `crates/protocol/src/` | Content |
+|---|---|
+| `lib.rs` | The layer's role, and its two levels |
+
+| Module of `crates/protocol/src/inbound/` | Content |
+|---|---|
+| `mod.rs` | The input port: `Commands`, one method per command, and the plain data each takes and returns (`Made`, `Initialized`, `Report`, `Indexed`, `Drift` and the rest) |
+
+| Module of `crates/protocol/src/outbound/` | Content |
+|---|---|
+| `mod.rs` | The output ports: `Tree` and `Writer` (a project's files read and written, together `Files`), `Parsers` (the readers of code), `Changes` (what version control shows), and `Machine`, which gives each of them for a root, with git's `user.name` and the clock |
 
 | Module of `crates/domain/src/` | Content |
 |---|---|
@@ -40,18 +77,23 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `arrows.rs` | The arrows between the records of `docs/work/` (`after` and `until`): the records they name, the order they keep with how each record closed, the cycles they make with the parents, and what each open record waits for |
 | `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory, a Python definition), the hash of a directory, and what fails when one changed or is gone |
 | `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure and what it points at, the hash of a knowledge document, and the floor of the bundle |
-| `tree.rs` | The ports to a project's files (`Tree` to read them, `Writer` to write them), and how Rotproof reads a file's text and how Windows reads a name |
+| `tree.rs` | How Rotproof reads a file's text and how Windows reads a name |
 | `migrate.rs` | Moving the records of a project made before 0.3.0 from `docs/backlog/` and `docs/specs/` into `docs/work/`: when it is due, the move planned whole (each record, every link that reached one, the frontmatter a machine can rewrite) or why it cannot be made, and what it leaves to a person |
 | `upgrade.rs` | Upgrading a project's files: the version they are up to (`files` in the declaration), the named updates a later version brings to the files `rotproof create` writes once, and what each does to its file |
-| `code.rs` | What the readers give, as plain values, and the port to them (`Parsers`): the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
+| `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; and where Cargo looks for a workspace |
 | `modules.rs` | The levels inside a Rust crate: the module each file of `src/` is, every path it names from `crate`, `super`, `self` or a dependency on another layer judged by the level it lands in, the crate's root holding only its levels' modules, and no `#[path]` |
 | `layers.rs` | The layer definitions in `layers/`, what a project's `.config/rotproof.toml` says, and the fields `rotproof create` adds to it |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust), judged once the comments of a file are read |
-| `hook.rs` | What `rotproof stop-hook` finds open in the agent's last message and what it answers, the port to the project's changes (`Changes`), and the settings file that `rotproof create` writes for Claude Code: the hook, and the rule that denies editing the approvals file |
+| `hook.rs` | What `rotproof stop-hook` finds open in the agent's last message and what it answers, and the settings file that `rotproof create` writes for Claude Code: the hook, and the rule that denies editing the approvals file |
 | `project.rs` | The files Rotproof writes outside `docs/`: the guide `.rotproof/AGENTS.md`, and the project's files, once |
 | `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way, judged from the paths it names and the code files of the directories it lists |
+| `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
+| `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
+| `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals, the code alone with both blanked, and its tokens, the paths it names, its modules with a body and its attributes |
+| `paths.rs` | Paths from the root with `/`: the parent, the name, a join, without `.` and `..`, whether one sits in another, and the paths in messages |
+| `text.rs` | The line at a position in a text, for messages |
 
 | Module of `crates/application/src/` | Content |
 |---|---|
@@ -59,6 +101,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `approvals.rs` | Reading the approvals file from the tree, and `rotproof approve`: an entry added for a forbidden import a person approved, and the entries that match nothing removed (`--prune`) |
 | `bundle.rs` | Reading `docs/` from the tree, directory by directory |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
+| `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
@@ -73,36 +116,19 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
 | `structure.rs` | The structure check, read from the tree |
 
-| Module of `crates/infrastructure/src/` | Content |
-|---|---|
-| `lib.rs` | The layer's role, and its modules |
-| `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, the functions and classes a file defines, and the source of one of them |
-| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, and the aliases of the `tsconfig*.json` files |
-| `cargo.rs` | Reading a crate's `Cargo.toml` with toml_edit: the dependencies it declares on a path or its workspace, and its workspace |
-| `readers.rs` | `Parsers` with the readers above |
-| `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, the project's name, and the project a directory sits in |
-| `git.rs` | `Changes` with `git status`, and the name `rotproof approve` signs with, git's `user.name` |
-
-| Module of `crates/utils/src/` | Content |
-|---|---|
-| `lib.rs` | The layer's role, and its modules |
-| `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
-| `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
-| `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals, and the code alone with both blanked |
-| `paths.rs` | Paths from the root with `/`: the parent, the name, a join, without `.` and `..`, whether one sits in another, and the paths in messages |
-| `text.rs` | The line at a position in a text, for messages |
-
 ## How this repository differs from what Rotproof keeps
 
 - **No `docs/` here.** Rotproof's own specs, work items and log are kept outside this repository.
 - **In layers, and no `.config/rotproof.toml`.** Every layer of the Rust layout Rotproof keeps (README) is a crate of
-  its own in `crates/`, `handler` among them, and `ui` is left out as that layout leaves it out. `cargo xtask ci`
-  checks them as `rotproof check` checks a project's (structure, direction, markers), with the declaration written in
+  its own in `crates/`, with the levels of `infrastructure` and `protocol` as modules, the entry file is `src/main.rs`
+  of the root package, and `ui` is left out as that layout leaves it out. `cargo xtask ci` checks them as
+  `rotproof check` checks a project's (structure, direction, markers), with the declaration written in
   `xtask/src/layers.rs` in place of the file, and reads the comments of `xtask/` for markers too, which the layout
   leaves out; the records are kept outside, so they are not checked here.
   `domain` calls no port and does no I/O: a rule takes the values `application` has read, stricter than what
-  `rotproof check` asks of a project. `cargo xtask ci` checks it in `xtask/src/pure.rs` by the forms in the code
-  outside the tests and the trait blocks: anywhere, a port taken (every trait `domain` declares) and I/O
+  `rotproof check` asks of a project. The ports are in `protocol`, which `domain` cannot depend on; `cargo xtask ci`
+  checks the rest in `xtask/src/pure.rs` by the forms in the code outside the tests and the trait blocks: anywhere, a
+  port taken (every trait of `protocol::outbound`, and every trait `domain` declares) and I/O
   (`io::Result`, `std::fs` and the like, printing); and, since whether a function passed in reads cannot be told from
   its type, no function, closure or iterator taken where `application` can pass one (a `pub` signature, field, struct,
   enum or type alias). Private and `pub(crate)` functions are called by `domain` alone, and may take them.

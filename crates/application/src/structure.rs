@@ -7,7 +7,7 @@ use crate::layers::read;
 use crate::tree::{code_files, exactly};
 use domain::layers::{DECLARATION, Declared};
 use domain::structure::{Seen, listed, named, problems as judged};
-use domain::tree::Tree;
+use protocol::outbound::Tree;
 
 /// What the structure check found.
 #[derive(Debug, Default)]

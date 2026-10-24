@@ -8,12 +8,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::NaiveDate;
 
+use crate::frontmatter::{Sections, split};
 use crate::layers::DECLARATION;
 use crate::schema::{
     CLOSED_SECTION, ClosedAs, Guide, Item, Knowledge, KnowledgeDoc, Milestone, Spec, Status, Time,
     WHEN_SECTION, WorkDoc, knowledge_doc, work_doc,
 };
-use utils::frontmatter::{Sections, split};
 use yaml_rust2::Yaml;
 
 /// File names OKF reserves. Never used for a document
@@ -913,7 +913,7 @@ Not yet. Measured by hand.
             "{line}"
         );
         // Read back as a reader reads it, the entry is one link to its own document, with the title as its text
-        let found = utils::markdown::links(line);
+        let found = crate::markdown::links(line);
         assert_eq!(
             found,
             [(

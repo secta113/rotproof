@@ -5,20 +5,8 @@ use crate::bundle::Bundle;
 use crate::layers::areas;
 use domain::bundle::stale;
 use domain::schema::Time;
-use domain::tree::{Tree, Writer};
-
-/// What `rotproof index` did.
-#[derive(Debug, Default)]
-pub struct Indexed {
-    /// The files written, from the root
-    pub written: Vec<String>,
-    /// Documents left out of the index files: name -> why
-    pub left_out: Vec<(String, String)>,
-    /// The open work items past their `stale_after`, each with it
-    pub stale: Vec<(String, String)>,
-    /// The open milestones past their `date`, each with it
-    pub past_date: Vec<(String, String)>,
-}
+use protocol::inbound::Indexed;
+use protocol::outbound::{Tree, Writer};
 
 /// Write every index file of the bundle in `tree` through `out`, and find the items stale at `now`. `Err` is a
 /// declaration that cannot be read, or a file that cannot be read or written.

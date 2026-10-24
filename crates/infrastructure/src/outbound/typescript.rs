@@ -21,9 +21,10 @@ use oxc_span::SourceType;
 use serde_json::Value;
 
 use domain::code::{Alias, Aliases, Source};
-use domain::tree::{Tree, with_lf};
-use utils::paths::{join, parent};
-use utils::text::line_of;
+use domain::paths::{join, parent};
+use domain::text::line_of;
+use domain::tree::with_lf;
+use protocol::outbound::Tree;
 
 /// Read one file, whose path from the root says how: `.tsx` with JSX, `.d.ts` as declarations.
 pub fn read(source: &str, path: &str) -> Source<String> {
@@ -365,7 +366,7 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::disk::Disk;
+    use crate::outbound::disk::Disk;
     use domain::code::Landing;
 
     #[test]

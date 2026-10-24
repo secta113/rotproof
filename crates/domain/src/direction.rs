@@ -24,7 +24,7 @@
 //! The rules here judge an import once it is resolved to a place; `application` reads the code and resolves it.
 
 use crate::layers::{Place, importable};
-use utils::paths::{parent, within};
+use crate::paths::{parent, within};
 
 /// An import the table forbids: the file that imports, what it imports as the check names it (a Python dotted name,
 /// `m.n` for `from m import n`; a TypeScript specifier; a crate's dependency), and the finding. The file and the

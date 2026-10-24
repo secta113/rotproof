@@ -6,13 +6,14 @@ use std::io;
 
 use crate::code::lands;
 use crate::tree::{code_files, exactly, read_code, resolved};
-use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
+use domain::code::{Manifest, Origin, is_source, module_parts};
 use domain::direction::{Forbidden, judged, place_of, workspace_dirs};
 use domain::layers::{Declared, Language, Layout, Place, table};
 use domain::modules::{Dependency, judged_crate};
-use domain::tree::Tree;
-use utils::paths::{join, parent};
-use utils::rust::is_source as is_rust;
+use domain::paths::{join, parent};
+use domain::rust::is_source as is_rust;
+use protocol::outbound::Parsers;
+use protocol::outbound::Tree;
 
 /// What the direction check found.
 #[derive(Debug, Default)]

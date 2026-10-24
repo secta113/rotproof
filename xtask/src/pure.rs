@@ -1,8 +1,10 @@
 //! `domain` calls no port and does no I/O: a rule takes the values a use case in `application` has read (rust-stack
-//! spec, step 5: strict, so a closure that reads is not passed in either). Splitting the layers into crates does not
-//! enforce it: the ports are traits in `domain`, so the compiler lets `domain` call them.
+//! spec, step 5: strict, so a closure that reads is not passed in either). The ports are traits in
+//! `protocol::outbound`, which `domain` cannot depend on, so the direction check keeps it from naming them; this check
+//! keeps the rest: a trait `domain` declares itself, a reader passed in as a function, and I/O.
 //!
-//! - **Anywhere:** a port taken (every trait `domain` declares, so a new one is a port from the start), and I/O.
+//! - **Anywhere:** a port taken (every trait of `protocol::outbound`, and every trait `domain` declares, so a new one
+//!   is a port from the start), and I/O.
 //! - **What `application` can reach:** whether a function passed in reads cannot be told from its type, so what
 //!   could carry a reader in is not taken where `application` can pass it: a function or a closure, or an iterator, in
 //!   the signature of a `pub` function, a `pub` field, or a `pub` struct, enum or type alias. A private or
@@ -24,6 +26,9 @@ pub const KNOWN: [&str; 4] = ["Tree", "Writer", "Parsers", "Changes"];
 
 /// Where the rules are
 pub const DOMAIN: &str = "crates/domain/src";
+
+/// Where the ports are
+pub const PORTS: &str = "crates/protocol/src/outbound";
 
 /// A form, what it says, whether it passes right after `->` (what a function gives back), and whether it counts only
 /// where `application` can reach
@@ -173,7 +178,7 @@ struct Read {
 }
 
 fn read(source: &str) -> Read {
-    let code = utils::rust::code(source);
+    let code = domain::rust::code(source);
     let mut skipped: Vec<(usize, usize)> = Vec::new();
     let mut traits = BTreeSet::new();
     for (at, _) in code.match_indices("#[cfg(test)]") {
@@ -270,23 +275,34 @@ fn signature_end(code: &str, start: usize) -> usize {
         .map_or(code.len(), |n| start + n)
 }
 
-/// Every finding in `files` (path, text), with the floor: at least one file read, and every port Rotproof has found
-/// as a trait.
-pub fn problems(files: &[(String, String)]) -> Vec<String> {
+/// Every finding in `files` (path, text) of `domain`, beside the files of the ports `ports`, with the floor: at least
+/// one file of each read, and every port Rotproof has found as a trait among the ports.
+pub fn problems(files: &[(String, String)], ports: &[(String, String)]) -> Vec<String> {
     let read: Vec<Read> = files.iter().map(|(_, source)| read(source)).collect();
-    let traits: BTreeSet<String> = read.iter().flat_map(|r| r.traits.clone()).collect();
-    let ports = port_forms(&traits);
+    let declared: BTreeSet<String> = ports
+        .iter()
+        .flat_map(|(_, source)| self::read(source).traits)
+        .collect();
+    let traits: BTreeSet<String> = read
+        .iter()
+        .flat_map(|r| r.traits.clone())
+        .chain(declared.iter().cloned())
+        .collect();
+    let forms = port_forms(&traits);
     let mut found = Vec::new();
     for ((path, source), read) in files.iter().zip(&read) {
-        found.extend(in_file(path, source, read, &ports));
+        found.extend(in_file(path, source, read, &forms));
     }
     if files.is_empty() {
         found.push(format!("no .rs file of {DOMAIN}/ was read"));
     }
+    if ports.is_empty() {
+        found.push(format!("no .rs file of {PORTS}/ was read"));
+    }
     for port in KNOWN {
-        if !traits.contains(port) {
+        if !declared.contains(port) {
             found.push(format!(
-                "no trait {port} in {DOMAIN}/: a port renamed or moved would escape this check; name it in KNOWN \
+                "no trait {port} in {PORTS}/: a port renamed or moved would escape this check; name it in KNOWN \
                  (xtask/src/pure.rs)"
             ));
         }
@@ -303,16 +319,18 @@ mod tests {
         pub trait Parsers {\n    fn aliases(&self, tree: &dyn Tree) -> io::Result<()>;\n}\n\
         pub trait Changes {\n    fn changed(&self) -> bool;\n}\n";
 
+    /// The port traits, as the ports' file holds them
+    fn ports() -> [(String, String); 1] {
+        [(
+            "crates/protocol/src/outbound/mod.rs".to_string(),
+            PORT_TRAITS.to_string(),
+        )]
+    }
+
     /// The findings beside the port traits, each as `line: what`
     fn named(source: &str) -> Vec<String> {
-        let files = [
-            (
-                "crates/domain/src/ports.rs".to_string(),
-                PORT_TRAITS.to_string(),
-            ),
-            ("crates/domain/src/x.rs".to_string(), source.to_string()),
-        ];
-        problems(&files)
+        let files = [("crates/domain/src/x.rs".to_string(), source.to_string())];
+        problems(&files, &ports())
             .iter()
             .map(|why| {
                 why.trim_start_matches("crates/domain/src/x.rs:")
@@ -410,16 +428,23 @@ mod tests {
 
     #[test]
     fn nothing_read_or_a_port_not_found_fails_by_the_floor() {
-        assert_eq!(problems(&[]).len(), 1 + KNOWN.len());
-        let found = problems(&[(
-            "crates/domain/src/tree.rs".into(),
-            "pub trait Tree {}\n".into(),
-        )]);
+        assert_eq!(problems(&[], &[]).len(), 2 + KNOWN.len());
+        let domain = [("crates/domain/src/x.rs".to_string(), String::new())];
+        let found = problems(
+            &domain,
+            &[(
+                "crates/protocol/src/outbound/mod.rs".into(),
+                "pub trait Tree {}\n".into(),
+            )],
+        );
         assert_eq!(found.len(), 3, "{found:?}");
         assert!(found.iter().all(|why| why.starts_with("no trait ")));
-        assert_eq!(
-            problems(&[("crates/domain/src/ports.rs".into(), PORT_TRAITS.into())]),
-            Vec::<String>::new()
-        );
+        // A port declared in domain counts for the forms, and not as the port Rotproof has among the ports
+        let in_domain = [(
+            "crates/domain/src/tree.rs".to_string(),
+            "pub trait Tree {}\n".to_string(),
+        )];
+        assert_eq!(problems(&in_domain, &[]).len(), 1 + KNOWN.len());
+        assert_eq!(problems(&domain, &ports()), Vec::<String>::new());
     }
 }

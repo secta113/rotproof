@@ -4,7 +4,7 @@ use std::io;
 
 use crate::tree::{Lookup, exactly, lookup};
 use domain::layers::{DECLARATION, Declaration, MISSING, parse_declaration, unreadable};
-use domain::tree::Tree;
+use protocol::outbound::Tree;
 
 /// The areas a project declares, or why the declaration cannot be read.
 pub fn areas(tree: &dyn Tree) -> io::Result<Result<Vec<String>, String>> {

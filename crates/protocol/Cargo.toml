@@ -1,5 +1,5 @@
 [package]
-name = "utils"
+name = "protocol"
 version.workspace = true
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -7,7 +7,4 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-pulldown-cmark.workspace = true
-regex.workspace = true
-unicode-general-category.workspace = true
-yaml-rust2.workspace = true
+domain.workspace = true

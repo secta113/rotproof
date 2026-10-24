@@ -1,10 +1,8 @@
-//! The ports in `domain` on the outside: the file system, git, and the parsers of code.
+//! Technical details: the I/O with the outside, in both directions. May also import external libraries.
 //!
-//! Imports `domain`, `utils` and external libraries.
+//! Its two levels never import each other. What both need is built at run time by `composition` and passed to each
+//! (configuration, a connection, a logger), is a contract in `protocol` (a shape of data), or comes from an external
+//! library (a technical tool).
 
-pub mod cargo;
-pub mod disk;
-pub mod git;
-pub mod python;
-pub mod readers;
-pub mod typescript;
+pub mod inbound;
+pub mod outbound;

@@ -2130,13 +2130,13 @@ fn only_the_projects_own_gitignore_hides_code() {
 
 #[test]
 fn the_command_is_named_rotproof_whatever_its_crate_is_named() {
-    // The crate is the handler layer; what a user types and reads is rotproof
+    // The command line is a module of the infrastructure crate; what a user types and reads is rotproof
     assert_eq!(
         stdout(&run(&["--version"])),
         format!("rotproof {}\n", env!("CARGO_PKG_VERSION"))
     );
     let help = stdout(&run(&["--help"]));
-    assert!(!help.contains("handler"), "{help}");
+    assert!(!help.contains("infrastructure"), "{help}");
 }
 
 #[test]

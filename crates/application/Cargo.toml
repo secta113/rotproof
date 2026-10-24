@@ -8,12 +8,12 @@ publish = false
 
 [dependencies]
 domain.workspace = true
-utils.workspace = true
+protocol.workspace = true
+chrono.workspace = true
 
 # The tests read real trees with the real readers too: tests may import every layer, and the direction check does not
 # read dev-dependencies
 [dev-dependencies]
-chrono.workspace = true
 infrastructure.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

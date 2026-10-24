@@ -1,23 +1,14 @@
-//! Keeps a project's structure: makes and checks its layers (as `.config/rotproof.toml` declares them) and the records
-//! an agent works from (specs, work items, knowledge and log in `docs/`, written in OKF 0.2), and writes their index
-//! files.
+//! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
+//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof stop-hook`, and the
+//! help that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints
+//! and how it exits are decided here.
 
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use application::create::Made;
-use application::init::Initialized;
-use chrono::{Local, SecondsFormat};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use domain::approvals::{APPROVALS, Approved, Kept};
-use domain::hook::Changes;
-use domain::layers::{DECLARATION, RECORDS_ONLY};
-use domain::markers::{MARKERS, either};
-use domain::upgrade::VERSION;
-use infrastructure::disk::{Disk, project_root};
-use infrastructure::git::Git;
-use infrastructure::readers::Readers;
+use protocol::inbound::{Commands, Initialized, Made, Names};
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -192,49 +183,50 @@ enum Command {
 }
 
 /// The command line as clap reads it, with the long help of `rotproof check` naming the markers of the check.
-fn command() -> clap::Command {
+fn command(names: &Names) -> clap::Command {
     Cli::command().mut_subcommand("check", |check| {
-        check.long_about(CHECK_HELP.replace("{markers}", &either(&MARKERS)))
+        check.long_about(CHECK_HELP.replace("{markers}", &names.markers))
     })
 }
 
-fn main() -> ExitCode {
-    let cli = Cli::from_arg_matches(&command().get_matches()).unwrap_or_else(|e| e.exit());
+/// Run the command the command line names, with `commands` doing the work, and say how it went.
+pub fn run(commands: &dyn Commands) -> ExitCode {
+    let names = commands.names();
+    let cli = Cli::from_arg_matches(&command(&names).get_matches()).unwrap_or_else(|e| e.exit());
     // A root that does not exist fails here. Read as an empty tree, it would pass every check with nothing checked
     if !cli.root.is_dir() {
         eprintln!("the root is not a directory: {}", cli.root.display());
         return ExitCode::from(2);
     }
+    let root = cli.root.as_path();
     if let Command::StopHook = cli.command {
-        return stop_hook(&cli.root);
+        return stop_hook(commands, root);
     }
     let result = match cli.command {
-        Command::Init { stack } => init(&cli.root, stack.as_deref()).map(|()| true),
-        Command::Create { yes } => create(&cli.root, yes).map(|()| true),
-        Command::Check => check(&cli.root),
-        Command::Guide { stack } => {
-            application::project::guide_for(&Disk::new(&cli.root), stack.as_deref()).map(|text| {
-                print!("{text}");
-                true
-            })
-        }
-        Command::Index => index(&cli.root).map(|()| true),
+        Command::Init { stack } => init(commands, &names, root, stack.as_deref()).map(|()| true),
+        Command::Create { yes } => create(commands, &names, root, yes).map(|()| true),
+        Command::Check => check(commands, &names, root),
+        Command::Guide { stack } => commands.guide(root, stack.as_deref()).map(|text| {
+            print!("{text}");
+            true
+        }),
+        Command::Index => index(commands, root).map(|()| true),
         Command::Approve {
             file,
             import,
             prune,
             reviewed,
         } => match (prune, reviewed, file, import) {
-            (true, _, _, _) => approve_prune(&cli.root).map(|()| true),
-            (_, true, _, _) => approve_reviewed(&cli.root).map(|()| true),
+            (true, _, _, _) => approve_prune(commands, &names, root).map(|()| true),
+            (_, true, _, _) => approve_reviewed(commands, root).map(|()| true),
             (false, false, Some(file), Some(import)) => {
-                approve(&cli.root, &file, &import).map(|()| true)
+                approve(commands, &names, root, &file, &import).map(|()| true)
             }
             _ => {
                 unreachable!("clap requires the file and the import without --prune or --reviewed")
             }
         },
-        Command::Follows { keys } => follows(&cli.root, &keys).map(|()| true),
+        Command::Follows { keys } => follows(commands, root, &keys).map(|()| true),
         Command::StopHook => unreachable!("answered above"),
     };
     match result {
@@ -249,12 +241,21 @@ fn main() -> ExitCode {
 }
 
 /// Write the declaration, or upgrade the project's files, and say what to do next.
-fn init(root: &Path, stack: Option<&str>) -> Result<(), String> {
-    let disk = Disk::new(root);
-    let upgraded = match application::init::init(&disk, &disk, stack, &disk.name()?, VERSION)? {
+fn init(
+    commands: &dyn Commands,
+    names: &Names,
+    root: &Path,
+    stack: Option<&str>,
+) -> Result<(), String> {
+    let Names {
+        declaration,
+        version,
+        ..
+    } = names;
+    let upgraded = match commands.init(root, stack)? {
         Initialized::Declared(path) => {
             println!("wrote {path}");
-            if stack == Some(RECORDS_ONLY) {
+            if stack == Some(names.records_only) {
                 println!("next: run `rotproof create` to make docs/");
             } else {
                 println!(
@@ -275,36 +276,36 @@ fn init(root: &Path, stack: Option<&str>) -> Result<(), String> {
     for (name, path) in &upgraded.applied {
         println!("updated {path}: {name}");
     }
-    report_made(&upgraded.made);
+    report_made(names, &upgraded.made);
     if !upgraded.by_hand.is_empty() {
         for why in &upgraded.by_hand {
             println!("needs a person: {why}");
         }
         return Err(format!(
-            "the project's files stay up to {} in {DECLARATION} until these are done, or declined where the line \
+            "the project's files stay up to {} in {declaration} until these are done, or declined where the line \
              says how: then run `rotproof init` again",
             upgraded.from
         ));
     }
     if upgraded.files_set {
         println!(
-            "the project's files are up to {VERSION} (from {}): files = \"{VERSION}\" in {DECLARATION}",
+            "the project's files are up to {version} (from {}): files = \"{version}\" in {declaration}",
             upgraded.from
         );
     } else {
-        println!("the project's files are up to {VERSION} already");
+        println!("the project's files are up to {version} already");
     }
     println!("next: run `rotproof check`");
     Ok(())
 }
 
 /// Say what `rotproof create`, or the refresh of an upgrade, wrote and added.
-fn report_made(made: &Made) {
+fn report_made(names: &Names, made: &Made) {
     for path in &made.written {
         println!("wrote {path}");
     }
     for field in &made.added {
-        println!("added to {DECLARATION}: {field}");
+        println!("added to {}: {field}", names.declaration);
     }
     if let Some(why) = &made.not_written {
         println!("not written: {why}");
@@ -315,14 +316,13 @@ fn report_made(made: &Made) {
 }
 
 /// Make what is missing, and say what was written. A second run with nothing changed writes nothing.
-fn create(root: &Path, yes: bool) -> Result<(), String> {
-    let disk = Disk::new(root);
-    let made = application::create::create(&disk, &disk, &disk.name()?, yes)?;
-    report_made(&made);
+fn create(commands: &dyn Commands, names: &Names, root: &Path, yes: bool) -> Result<(), String> {
+    let made = commands.create(root, yes)?;
+    report_made(names, &made);
     if made.written.is_empty() {
         println!(
             "nothing to make: the tree has what {} declares",
-            DECLARATION
+            names.declaration
         );
     }
     if !made.written.is_empty() {
@@ -332,16 +332,16 @@ fn create(root: &Path, yes: bool) -> Result<(), String> {
 }
 
 /// Print every broken rule under the check that found it. `true` when there are none.
-fn check(root: &Path) -> Result<bool, String> {
-    let report =
-        application::check::check(&Disk::new(root), &Readers).map_err(|e| e.to_string())?;
+fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, String> {
+    let report = commands.check(root)?;
     if let Some(why) = &report.skipped {
         println!("{why}");
     }
     // An approval never hides: every one is printed, on every run, before what fails
     if !report.approved.is_empty() {
         println!(
-            "approved by a person in {APPROVALS} ({}):",
+            "approved by a person in {} ({}):",
+            names.approvals,
             report.approved.len()
         );
         for line in &report.approved {
@@ -370,16 +370,12 @@ fn check(root: &Path) -> Result<bool, String> {
 
 /// Answer the agent's stop hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "do not
 /// stop", and a broken hook would keep the agent from stopping instead of being shown.
-fn stop_hook(root: &Path) -> ExitCode {
+fn stop_hook(commands: &dyn Commands, root: &Path) -> ExitCode {
     let mut input = String::new();
     let answer = std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|e| format!("the hook input could not be read: {e}"))
-        .and_then(|_| {
-            // git runs only when the decision asks for it
-            let git = project_root(root).map(|root| Git::new(&root));
-            application::hook::run(&input, git.as_ref().map(|git| git as &dyn Changes))
-        });
+        .and_then(|_| commands.stop_hook(root, &input));
     match answer {
         Ok(Some(out)) => {
             println!("{out}");
@@ -395,7 +391,13 @@ fn stop_hook(root: &Path) -> ExitCode {
 
 /// Ask a person on the terminal to approve the forbidden import of `import` by `file`, and add the entry. Every answer
 /// is read from stdin, which must be a terminal: an agent's shell tool has none.
-fn approve(root: &Path, file: &str, import: &str) -> Result<(), String> {
+fn approve(
+    commands: &dyn Commands,
+    names: &Names,
+    root: &Path,
+    file: &str,
+    import: &str,
+) -> Result<(), String> {
     if !std::io::stdin().is_terminal() {
         return Err(
             "rotproof approve asks a person, and stdin is not a terminal (an agent's shell has none): run it in your \
@@ -403,35 +405,24 @@ fn approve(root: &Path, file: &str, import: &str) -> Result<(), String> {
                 .into(),
         );
     }
-    let disk = Disk::new(root);
-    let pending = application::approvals::pending(&disk, &Readers, file, import)?;
+    let pending = commands.pending(root, file, import)?;
     println!("forbidden by the layer table:");
-    for forbidden in &pending {
-        println!("  {}", forbidden.detail);
+    for detail in &pending {
+        println!("  {detail}");
     }
-    let by = match Git::new(root).user_name() {
+    let by = match commands.user_name(root) {
         Some(name) => name,
         None => ask("git's user.name is not set; the name to sign with: ")?,
     };
     let reason = ask(&format!("why is {import} in {file} kept? "))?;
     let answer = ask(&format!(
-        "approve it as {by}, in {APPROVALS}, printed on every run? [y/N] "
+        "approve it as {by}, in {}, printed on every run? [y/N] ",
+        names.approvals
     ))?;
     if !answer.eq_ignore_ascii_case("y") {
         return Err("not approved: nothing written".into());
     }
-    let entry = Kept {
-        from: file.to_string(),
-        import: import.to_string(),
-        reason,
-        approved: Approved {
-            by,
-            at: Local::now()
-                .fixed_offset()
-                .to_rfc3339_opts(SecondsFormat::Secs, true),
-        },
-    };
-    let path = application::approvals::approve(&disk, &disk, &entry)?;
+    let path = commands.approve(root, file, import, &reason, &by)?;
     println!("wrote {path}");
     Ok(())
 }
@@ -460,7 +451,7 @@ fn ask(question: &str) -> Result<String, String> {
 
 /// Ask a person on the terminal, once, to re-pin every knowledge document whose followed code changed, and write the
 /// new hashes. What is gone, or cannot be read, is left for the person to edit.
-fn approve_reviewed(root: &Path) -> Result<(), String> {
+fn approve_reviewed(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     if !std::io::stdin().is_terminal() {
         return Err(
             "rotproof approve --reviewed asks a person, and stdin is not a terminal (an agent's shell has none): run \
@@ -468,8 +459,7 @@ fn approve_reviewed(root: &Path) -> Result<(), String> {
                 .into(),
         );
     }
-    let disk = Disk::new(root);
-    let drifts = application::follows::changed(&disk, &Readers)?;
+    let drifts = commands.changed(root)?;
     if drifts.is_empty() {
         println!("nothing to re-pin: every knowledge document matches the code it follows");
         return Ok(());
@@ -502,7 +492,7 @@ fn approve_reviewed(root: &Path) -> Result<(), String> {
         if !answer.eq_ignore_ascii_case("y") {
             return Err("not re-pinned: nothing written".into());
         }
-        for (doc, hash) in application::follows::repin(&disk, &disk, &drifts)? {
+        for (doc, hash) in commands.repin(root, &drifts)? {
             println!("wrote docs/knowledge/{doc}");
             println!(
                 "  in the log entry of this change, write: * **Knowledge**: knowledge/{doc}@{hash}"
@@ -521,27 +511,28 @@ fn approve_reviewed(root: &Path) -> Result<(), String> {
 }
 
 /// Remove the approvals that match no forbidden import, and say which.
-fn approve_prune(root: &Path) -> Result<(), String> {
-    let disk = Disk::new(root);
-    let removed = application::approvals::prune(&disk, &Readers, &disk)?;
+fn approve_prune(commands: &dyn Commands, names: &Names, root: &Path) -> Result<(), String> {
+    let removed = commands.prune(root)?;
     if removed.is_empty() {
-        println!("nothing to prune: every approval in {APPROVALS} matches a forbidden import");
+        println!(
+            "nothing to prune: every approval in {} matches a forbidden import",
+            names.approvals
+        );
     }
     for entry in &removed {
         println!(
-            "removed from {APPROVALS}: {} in {}",
-            entry.import, entry.from
+            "removed from {}: {} in {}",
+            names.approvals, entry.import, entry.from
         );
     }
     Ok(())
 }
 
 /// Print each key with the hash of what it names now, as follows writes it; then say what could not be hashed.
-fn follows(root: &Path, keys: &[String]) -> Result<(), String> {
-    let disk = Disk::new(root);
+fn follows(commands: &dyn Commands, root: &Path, keys: &[String]) -> Result<(), String> {
     let mut failed = Vec::new();
     for key in keys {
-        match application::follows::current(&disk, &Readers, key) {
+        match commands.current(root, key) {
             Ok(Some(hash)) => println!("{key}: \"{hash}\""),
             Ok(None) => failed.push(format!("{key}: not there")),
             Err(why) => failed.push(format!("{key}: {why}")),
@@ -555,9 +546,8 @@ fn follows(root: &Path, keys: &[String]) -> Result<(), String> {
 }
 
 /// Write every index file, then list what was left out of them and the items to measure again.
-fn index(root: &Path) -> Result<(), String> {
-    let disk = Disk::new(root);
-    let indexed = application::index::index(&disk, &disk, Local::now().fixed_offset())?;
+fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
+    let indexed = commands.index(root)?;
     for path in indexed.written {
         println!("wrote {path}");
     }

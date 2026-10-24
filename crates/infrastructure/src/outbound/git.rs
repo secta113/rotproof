@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use domain::hook::Changes;
+use protocol::outbound::Changes;
 
 /// A project's working tree, from its root directory.
 #[derive(Debug, Clone)]

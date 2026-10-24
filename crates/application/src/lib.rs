@@ -1,12 +1,14 @@
-//! Each command of Rotproof from start to finish: it reads through the ports in `domain`, which `handler` passes in,
+//! Each command of Rotproof from start to finish: `commands.rs` implements the input port of `protocol::inbound`, each
+//! use case reads through the output ports of `protocol::outbound`, whose implementations `composition` passes in,
 //! and leaves each decision to the rules in `domain`.
 //!
-//! Imports `domain` and `utils`, never `infrastructure`.
+//! May import `protocol` and `domain`, never `infrastructure`.
 
 pub mod approvals;
 pub mod bundle;
 pub mod check;
 pub mod code;
+pub mod commands;
 pub mod create;
 pub mod direction;
 pub mod follows;

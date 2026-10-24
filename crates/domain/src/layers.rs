@@ -6,9 +6,9 @@
 
 use std::collections::BTreeMap;
 
+use crate::paths::within;
 use serde::Deserialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
-use utils::paths::within;
 
 use crate::upgrade::VERSION;
 

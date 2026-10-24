@@ -13,38 +13,14 @@
 
 use std::collections::BTreeMap;
 
-use crate::create::{Made, refresh};
+use crate::create::refresh;
 use crate::tree::{exactly, read_text};
 use domain::bundle::DOCS;
 use domain::layers::{DECLARATION, declaration_text, known_stacks};
 use domain::migrate;
-use domain::tree::{Tree, Writer};
 use domain::upgrade::{FIRST, Update, fields, pending, with_files};
-
-/// What `rotproof init` did.
-#[derive(Debug)]
-pub enum Initialized {
-    /// The declaration was written, at this path
-    Declared(&'static str),
-    Upgraded(Upgraded),
-}
-
-/// What an upgrade of the project's files did.
-#[derive(Debug, Default)]
-pub struct Upgraded {
-    /// The version the project's files were up to
-    pub from: String,
-    /// Each update applied, with the file it changed
-    pub applied: Vec<(&'static str, &'static str)>,
-    /// How many records moved into `docs/work/`
-    pub moved: usize,
-    /// What each update that could not be applied leaves to a person
-    pub by_hand: Vec<String>,
-    /// What `rotproof create` would have done after the upgrade, without a layer
-    pub made: Made,
-    /// Whether `files` was set to the running version
-    pub files_set: bool,
-}
+use protocol::inbound::{Initialized, Upgraded};
+use protocol::outbound::{Tree, Writer};
 
 /// Write the declaration for `stack` into `tree` through `out`, or upgrade the project there to `running`. `name` is
 /// the project's, for the files it writes. `Err` when no declaration exists and the stack is unknown or not named, the

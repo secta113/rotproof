@@ -1,4 +1,5 @@
-//! What Rotproof reads from code, as plain values, and the port to the readers that give them.
+//! What Rotproof reads from code, as plain values. The port to the readers that give them is `protocol::outbound`'s
+//! `Parsers`.
 //!
 //! The readers wrap parsers (Ruff for Python, oxc for TypeScript, toml_edit for a `Cargo.toml`) and give what a file
 //! imports, its comments and its first syntax error; the checks judge those values and never see a parser. The
@@ -13,29 +14,8 @@
 //! tree: [`Aliases::resolve`] gives the paths to ask about, and the caller asks.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io;
 
-use crate::tree::Tree;
-use utils::paths::{join, normalize, parent};
-
-/// The readers of code: the port the checks read code through.
-pub trait Parsers {
-    /// A Python file, whose path from the root names the package its relative imports start from: every module it
-    /// imports, as parts.
-    fn python(&self, source: &str, path: &str) -> Source<Vec<String>>;
-    /// The names of the functions and classes a Python file defines, at any depth.
-    fn python_definitions(&self, source: &str) -> BTreeSet<String>;
-    /// The source text of the definition `dotted` names in a Python file (`f`, `Class`, `Class.method`), from its
-    /// first decorator to its end: `None` when the file does not define it so.
-    fn python_definition(&self, source: &str, dotted: &str) -> Option<String>;
-    /// A TypeScript or JavaScript file, whose path from the root says how to read it: every specifier it imports.
-    fn typescript(&self, source: &str, path: &str) -> Source<String>;
-    /// The aliases of the TypeScript project in `tree`, from its `tsconfig*.json` files. An error is a config that
-    /// cannot be read at all.
-    fn typescript_aliases(&self, tree: &dyn Tree) -> io::Result<Aliases>;
-    /// A crate's `Cargo.toml`, or `Err` with the line of the first error and what the parser says.
-    fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)>;
-}
+use crate::paths::{join, normalize, parent};
 
 /// What one file of code holds: what it imports, as `I`, its comments and its first syntax error.
 #[derive(Debug)]

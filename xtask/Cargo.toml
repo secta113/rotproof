@@ -9,10 +9,10 @@ publish = false
 [dependencies]
 application.workspace = true
 domain.workspace = true
+protocol.workspace = true
 infrastructure.workspace = true
 regex.workspace = true
 toml_edit.workspace = true
-utils.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

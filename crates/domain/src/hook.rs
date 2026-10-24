@@ -82,12 +82,6 @@ pub const PHRASES: [&str; 15] = [
     "todo",
 ];
 
-/// The changes a project's version control shows: the port the hook asks whether anything was recorded.
-pub trait Changes {
-    /// Whether anything in `dir` (from the root) is changed, staged or new.
-    fn changed(&self, dir: &str) -> Result<bool, String>;
-}
-
 /// The directory whose changes say that a finding was recorded, from the root
 pub const RECORDS_DIR: &str = "docs";
 

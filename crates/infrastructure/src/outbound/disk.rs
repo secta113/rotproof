@@ -5,8 +5,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use domain::layers::DECLARATION;
-use domain::tree::{Tree, Writer};
-use utils::paths::{relative_path, within};
+use domain::paths::{relative_path, within};
+use protocol::outbound::{Tree, Writer};
 
 /// A project's files, from its root directory.
 #[derive(Debug, Clone)]

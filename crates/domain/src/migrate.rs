@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 
 use crate::bundle::CLOSED_LIST;
-use utils::paths::{file_name, normalize, parent};
+use crate::paths::{file_name, normalize, parent};
 
 /// The version that brings the move.
 pub const VERSION: &str = "0.3.0";
