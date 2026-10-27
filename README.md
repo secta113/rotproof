@@ -164,6 +164,7 @@ that has a declaration:
 | Update | Version | File | What it adds |
 |---|---|---|---|
 | `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
+| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | A second `Stop` hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above: an untouched file ends as `rotproof create` writes it now |
 
 **Crossing 0.3.0, `rotproof init` first moves the records.** Before 0.3.0 the specs were in `docs/specs/` and the
 backlog items in `docs/backlog/`; from 0.3.0 both are in `docs/work/`, and nothing reads the old places, so the move
@@ -219,10 +220,21 @@ hook to it:
 }
 ```
 
-`rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active). The
-project is the nearest directory upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A
-hook that fails (not a git repository, an input from another hook) exits 1, which Claude Code shows without keeping
-the agent from stopping; exit code 2 would keep it from stopping.
+`rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active), and
+the hook runs the first one there, which may not be the one the project pins. So neither goes unseen:
+
+- **Not on the `PATH`:** the hook fails with the shell's "command not found", which Claude Code may show only in its
+  debug log. `rotproof create` writes a second `Stop` hook beside it, which runs in the shell and needs no Rotproof:
+  `command -v rotproof >/dev/null 2>&1 || echo '{"systemMessage": "rotproof is not on the PATH ..."}'`. A project made
+  before 0.4.0 gets it from `rotproof init` (the update `claude-stop-hook-on-path`).
+- **Another version on the `PATH`:** `rotproof stop-hook` compares its own version with `files` in the declaration (the
+  version the project's files are up to) and, when they differ, says so in a `systemMessage`, on every stop. A
+  Rotproof older than 0.4.0 does not compare: the check comes with the hook.
+
+A `systemMessage` is shown to the person and keeps no agent from stopping. The project is the nearest directory
+upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A hook that fails (not a git
+repository, an input from another hook) exits 1, which Claude Code shows without keeping the agent from stopping;
+exit code 2 would keep it from stopping.
 
 ## Approving a forbidden import
 

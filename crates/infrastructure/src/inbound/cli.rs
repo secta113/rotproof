@@ -201,8 +201,9 @@ enum Command {
     ///
     /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. When the agent's last message
     /// holds a phrase that leaves something open (such as "not checked") and git shows no change in docs/, it asks the
-    /// agent once to record the finding or say where it is. Exits 1, never 2, when it fails, so a broken hook never
-    /// keeps the agent from stopping.
+    /// agent once to record the finding or say where it is. When its own version is not the one the project's files
+    /// are up to (files in the declaration), it says so to the person: the hook runs the first rotproof on the PATH.
+    /// Exits 1, never 2, when it fails, so a broken hook never keeps the agent from stopping.
     StopHook,
 }
 

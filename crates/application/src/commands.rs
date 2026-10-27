@@ -6,7 +6,7 @@ use std::path::Path;
 use domain::approvals::{APPROVALS, Approved, Kept};
 use domain::layers::{DECLARATION, MISSING, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
-use domain::upgrade::VERSION;
+use domain::upgrade::{FIRST, VERSION};
 use protocol::inbound::{
     Before, Commands, Drift, Indexed, Initialized, Made, Names, Removed, Report,
 };
@@ -137,6 +137,13 @@ impl Commands for Rotproof<'_> {
     fn stop_hook(&self, root: &Path, input: &str) -> Result<Option<String>, String> {
         // git runs only when the decision asks for it
         let changes = self.machine.changes(root);
-        crate::hook::run(input, changes.as_deref())
+        // The version the project's files are up to. A declaration that cannot be read says nothing here: the hook
+        // only warns, and `rotproof check` names what is wrong with it
+        let files = self.machine.project(root).and_then(|project| {
+            let text = self.machine.files(&project).read(DECLARATION).ok()?;
+            let fields = domain::upgrade::fields(&text).ok()?;
+            Some(fields.files.unwrap_or_else(|| FIRST.to_string()))
+        });
+        crate::hook::run(input, changes.as_deref(), files.as_deref())
     }
 }

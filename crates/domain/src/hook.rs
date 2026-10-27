@@ -10,6 +10,9 @@
 //!   (`stop_hook_active`), it lets the agent stop, so a phrase quoted in the answer cannot loop.
 //! - The project is the nearest directory, from where the hook runs upwards, that holds `.config/rotproof.toml`.
 //!   Outside one, the hook lets the agent stop and says nothing: it may be configured for every repository.
+//! - The hook runs the first `rotproof` on the `PATH` the agent runs hooks with. Not there, a second hook beside it
+//!   ([`ON_PATH`]) says so; another version there than the project's files are up to, the hook says so itself
+//!   ([`other_version`]). Both are shown to the person and keep no agent from stopping.
 //!
 //! An input from another hook, or a `git` that fails, is an error: the agent shows it, and stops.
 
@@ -18,15 +21,31 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::{Value, json};
 
+use crate::layers::DECLARATION;
+
 /// The event of the hook this answers, in `hook_event_name`
 const EVENT: &str = "Stop";
 /// The field of the input that holds the agent's last message
 const MESSAGE: &str = "last_assistant_message";
 
+/// The command of the hook.
+pub const COMMAND: &str = "rotproof stop-hook";
+
+/// The command of a second hook, beside it, that says so when `rotproof` is not on the `PATH` the agent runs hooks
+/// with. The hook itself then fails with the shell's "command not found", which Claude Code may show only in its debug
+/// log, and the agent stops unwatched. This one runs in the shell, so it needs no Rotproof, and answers with a
+/// `systemMessage`, which Claude Code shows to the person without keeping the agent from stopping. Its text has no `'`,
+/// as it is echoed between single quotes.
+pub const ON_PATH: &str = "command -v rotproof >/dev/null 2>&1 || echo '{\"systemMessage\": \"rotproof is not on \
+     the PATH the agent runs hooks with, so the stop hook of Rotproof did not run. Start the agent with the Rotproof \
+     the project pins on the PATH: for a Python project, with its venv active.\"}'";
+
 /// The settings Claude Code runs the project with, and where `rotproof create` writes them, once: the project's file
-/// from then on. They run the hook, for which `rotproof` has to be on the `PATH` the agent runs hooks with, and deny
-/// editing the approvals file (`approvals.rs`): Claude Code then refuses its edit tools and its shell's file commands
-/// and redirects on it, with no prompt, so only a person adds an approval, through `rotproof approve`.
+/// from then on. They run the hook, for which `rotproof` has to be on the `PATH` the agent runs hooks with, with
+/// [`ON_PATH`] beside it, and deny editing the approvals file (`approvals.rs`): Claude Code then refuses its edit tools
+/// and its shell's file commands and redirects on it, with no prompt, so only a person adds an approval, through
+/// `rotproof approve`. The text is as the update that adds [`ON_PATH`] writes it (`upgrade.rs`), so a project
+/// upgraded with an untouched file ends with the same settings as a new one.
 pub const SETTINGS: [(&str, &str); 1] = [(
     ".claude/settings.json",
     r#"{
@@ -44,12 +63,35 @@ pub const SETTINGS: [(&str, &str); 1] = [(
             "command": "rotproof stop-hook"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v rotproof >/dev/null 2>&1 || echo '{\"systemMessage\": \"rotproof is not on the PATH the agent runs hooks with, so the stop hook of Rotproof did not run. Start the agent with the Rotproof the project pins on the PATH: for a Python project, with its venv active.\"}'"
+          }
+        ]
       }
     ]
   }
 }
 "#,
 )];
+
+/// What the hook says when the Rotproof that runs it, `running`, is not the one the project's files are up to,
+/// `files` (the declaration's `files`, which `rotproof init` sets to the version the project upgraded to). The hook
+/// runs the first `rotproof` on the `PATH`, which may be another install than the one the project pins. Shown to the
+/// person; it does not keep the agent from stopping.
+pub fn other_version(running: &str, files: &str) -> Option<String> {
+    (running != files).then(|| {
+        format!(
+            "rotproof stop-hook ran Rotproof {running}, but this project's files are up to {files} ({DECLARATION}). \
+             The hook runs the first rotproof on the PATH the agent runs hooks with: put the Rotproof the project \
+             pins first on that PATH (for a Python project, start the agent with its venv active), or run `rotproof \
+             init` if the project was not upgraded yet."
+        )
+    })
+}
 
 // A line that points at the records: the word spec, specs, backlog or knowledge, or the words work item, standing
 // alone in ASCII (so `spec に`, `docs/specs/x.md`, `Backlog` and `work items` count, and `specific` or `inspect` do
@@ -111,22 +153,30 @@ pub fn open_in(input: &str) -> Result<Vec<&'static str>, String> {
     }
 }
 
-/// What the hook prints to send the agent back, for the phrases `found` while nothing in [`RECORDS_DIR`] changed.
-pub fn send_back(found: &[&str]) -> String {
-    let quoted: Vec<String> = found.iter().map(|phrase| format!("\"{phrase}\"")).collect();
-    let text = format!(
-        "Your last message says {} and nothing in docs/ changed. If it leaves a finding open, record it now: a \
-         draft work item in docs/work/ (docs/work/rules.md), or the spec it belongs to. If it is already recorded, or is not \
-         a finding, say where or why in one line, then stop.",
-        quoted.join(", ")
-    );
-    let answer = json!({
-        "hookSpecificOutput": {
-            "hookEventName": EVENT,
-            "additionalContext": text,
-        }
-    });
-    answer.to_string()
+/// What the hook prints: the agent sent back for the phrases `send_back` (found while nothing in [`RECORDS_DIR`]
+/// changed), and `warning` shown to the person. `None` when there is neither: the agent stops, with nothing printed.
+pub fn answer(send_back: &[&str], warning: Option<&str>) -> Option<String> {
+    let mut answer = serde_json::Map::new();
+    if !send_back.is_empty() {
+        let quoted: Vec<String> = send_back
+            .iter()
+            .map(|phrase| format!("\"{phrase}\""))
+            .collect();
+        let text = format!(
+            "Your last message says {} and nothing in docs/ changed. If it leaves a finding open, record it now: a \
+             draft work item in docs/work/ (docs/work/rules.md), or the spec it belongs to. If it is already recorded, or is not \
+             a finding, say where or why in one line, then stop.",
+            quoted.join(", ")
+        );
+        answer.insert(
+            "hookSpecificOutput".into(),
+            json!({ "hookEventName": EVENT, "additionalContext": text }),
+        );
+    }
+    if let Some(warning) = warning {
+        answer.insert("systemMessage".into(), json!(warning));
+    }
+    (!answer.is_empty()).then(|| Value::Object(answer).to_string())
 }
 
 /// The phrases of [`PHRASES`] that `message` holds, in the order of the list. A line that points at the records is
@@ -157,10 +207,51 @@ mod tests {
             read["permissions"]["deny"],
             json!([format!("Edit(/{})", crate::approvals::APPROVALS)])
         );
-        assert_eq!(
-            read["hooks"]["Stop"][0]["hooks"][0]["command"],
-            "rotproof stop-hook"
+        assert_eq!(read["hooks"]["Stop"][0]["hooks"][0]["command"], COMMAND);
+        assert_eq!(read["hooks"]["Stop"][1]["hooks"][0]["command"], ON_PATH);
+    }
+
+    /// The second hook is a shell command whose output, when rotproof is not on the PATH, is the JSON Claude Code
+    /// reads: the message is echoed between single quotes, so it must hold none.
+    #[test]
+    fn the_hook_beside_it_echoes_a_system_message() {
+        let (test, echoed) = ON_PATH.split_once(" || echo ").unwrap();
+        assert_eq!(test, "command -v rotproof >/dev/null 2>&1");
+        let inner = echoed
+            .strip_prefix('\'')
+            .unwrap()
+            .strip_suffix('\'')
+            .unwrap();
+        assert!(!inner.contains('\''), "{inner}");
+        let read: Value = serde_json::from_str(inner).unwrap();
+        assert!(
+            read["systemMessage"]
+                .as_str()
+                .unwrap()
+                .starts_with("rotproof is not on the PATH")
         );
+    }
+
+    #[test]
+    fn another_version_is_said_and_the_same_is_not() {
+        assert_eq!(other_version("0.4.0", "0.4.0"), None);
+        let said = other_version("0.3.0", "0.4.0").unwrap();
+        assert!(
+            said.starts_with(
+                "rotproof stop-hook ran Rotproof 0.3.0, but this project's files are up to 0.4.0"
+            ),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn the_answer_holds_what_there_is_and_nothing_without_either() {
+        assert_eq!(answer(&[], None), None);
+        let warned: Value = serde_json::from_str(&answer(&[], Some("other")).unwrap()).unwrap();
+        assert_eq!(warned, json!({ "systemMessage": "other" }));
+        let both: Value = serde_json::from_str(&answer(&["todo"], Some("other")).unwrap()).unwrap();
+        assert_eq!(both["systemMessage"], "other");
+        assert_eq!(both["hookSpecificOutput"]["hookEventName"], "Stop");
     }
 
     fn input(message: &str, active: bool) -> String {
@@ -176,7 +267,7 @@ mod tests {
     fn a_phrase_found_is_named_in_what_sends_the_agent_back() {
         let found = open_in(&input("Done. The Windows path is not checked.", false)).unwrap();
         assert_eq!(found, ["not checked"]);
-        let out: Value = serde_json::from_str(&send_back(&found)).unwrap();
+        let out: Value = serde_json::from_str(&answer(&found, None).unwrap()).unwrap();
         let context = out["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();

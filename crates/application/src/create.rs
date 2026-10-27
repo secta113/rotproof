@@ -14,8 +14,9 @@
 //!   so `rotproof check` fails until a person writes it.
 //! - Rotproof's guide, `.rotproof/AGENTS.md` (`project.rs`), which Rotproof rewrites: the rules it keeps in the stack,
 //!   from the version that runs.
-//! - `.claude/settings.json` with the hook that runs `rotproof stop-hook` when the agent stops (`hook.rs`), when it
-//!   does not exist. A project that has one already adds the hook to it by hand.
+//! - `.claude/settings.json` with the hook that runs `rotproof stop-hook` when the agent stops (`hook.rs`), and the
+//!   hook beside it that says when `rotproof` is not on the `PATH`, when it does not exist. A project that has one
+//!   already adds the hooks to it by hand.
 //! - The project's files (`project.rs`: `AGENTS.md`, `README.md`, the pin of Rotproof, the CI workflow, a Rust
 //!   project's workspace and others), each when it does not exist. The project's name in them is its root directory's.
 //!
