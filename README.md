@@ -123,10 +123,11 @@ The project's files are written once, as a starting point, and are the project's
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
 | `docs/work/next-milestone.md` | When `docs/work/` has no milestone: a draft of the next moment the work waits for, whose `# Condition` holds only a comment, so `rotproof check` fails until a person writes what that moment is |
-| `.claude/settings.json` | The stop hook (see "The stop hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
+| `.claude/settings.json` | The stop hook and a hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
-| `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present |
+| `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
+| `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program |
 
 How a `typescript` or `rust` project pins Rotproof is not decided yet, so for those stacks `rotproof create` writes
 neither the pin nor the workflow, and says so.

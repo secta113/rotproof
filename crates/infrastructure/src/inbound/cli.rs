@@ -88,9 +88,9 @@ enum Command {
     /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/,
     /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, whose condition a person writes
     /// before `rotproof check` passes, and the project's files (AGENTS.md, CLAUDE.md, README.md, .gitignore,
-    /// .gitattributes, Claude Code's settings with the hook and the rule that denies editing the approvals file, for
-    /// python and none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml), each when it
-    /// does not exist.
+    /// .gitattributes, Claude Code's settings with the stop hook, a hook that says when rotproof is not on the PATH and
+    /// the rule that denies editing the approvals file, for python and none the pin of Rotproof and a CI workflow, and
+    /// for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files, the closed
     /// list and the rules in docs/. Adds the fields the declaration lacks, keeping its comments and values. Never
     /// overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing the
@@ -199,7 +199,8 @@ enum Command {
     /// Run as Claude Code's Stop hook: send the agent back once when its last message leaves something open and
     /// nothing in docs/ changed. Reads the hook input on stdin
     ///
-    /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. When the agent's last message
+    /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it, beside a hook that says when
+    /// rotproof is not on the PATH, as this one cannot. When the agent's last message
     /// holds a phrase that leaves something open (such as "not checked") and git shows no change in docs/, it asks the
     /// agent once to record the finding or say where it is. When its own version is not the one the project's files
     /// are up to (files in the declaration), it says so to the person: the hook runs the first rotproof on the PATH.
