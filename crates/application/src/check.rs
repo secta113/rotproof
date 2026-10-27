@@ -10,8 +10,9 @@
 //!   a work item in `docs/work/`, where it is listed and closed.
 //! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
 //!   this version of Rotproof (`project.rs`).
-//! - **The records in `docs/work/` keep their format**: every document keeps the format of its type, every link in
-//!   a work item's `# Details` resolves, and every work item the log points to exists.
+//! - **The records in `docs/work/` keep their format**: every document keeps the format of its type, every work
+//!   item's `# Details` has a link, and every work item the log points to exists.
+//! - **Every link in `docs/` resolves**: in every document under `docs/` and in the log, not only in `# Details`.
 //! - **Every record has one declared area**: the areas in `.config/rotproof.toml` are distinct headings, and the one
 //!   tag of every work item, spec and knowledge document is one of them.
 //! - **A parent closes after its children**: a spec's `parent` names an epic, which has no parent of its own, a work
@@ -215,9 +216,16 @@ fn records(
         .iter()
         .map(|(name, (_, sections))| (name.clone(), sections["Details"].clone()))
         .collect();
+    add("every # Details has a link", pairs(&linkless(&details)));
+    // Every link a reader may follow, not only those in # Details: a link in the body of a closed spec broke unseen
+    // when a heading it pointed at was renamed
+    let mut documents = concepts(tree, DOCS)?;
+    if let Ok((log, false)) = exactly(tree, "docs/log.md") {
+        documents.insert("log.md".into(), read_text(tree, &log)?);
+    }
     add(
-        "every link in # Details resolves",
-        pairs(&unresolved(&details, tree, parsers)),
+        "every link in docs/ resolves",
+        pairs(&unresolved(&documents, tree, parsers)),
     );
 
     let log_path = exactly(tree, "docs/log.md").and_then(|(path, is_dir)| {
@@ -340,32 +348,37 @@ fn pairs(problems: &BTreeMap<String, String>) -> Vec<String> {
         .collect()
 }
 
-/// Item -> why, for the Details sections with no link or with a link that does not resolve, in the repository's
-/// `tree`.
+/// Item -> what it holds, for the Details sections with no link a reader sees: Details point to the history.
+pub fn linkless(details: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    details
+        .iter()
+        .filter(|(_, detail)| links(detail).is_empty())
+        .map(|(name, detail)| (name.clone(), format!("no markdown link: {detail}")))
+        .collect()
+}
+
+/// Document -> why, for the documents with a link that does not resolve, in the repository's `tree`. `documents` is
+/// every document under `docs/` and the log, by its path in `docs/`.
 ///
-/// Details sit in a work item (`docs/work/<slug>.md`), so relative links resolve from there and links starting
-/// with `/` from the bundle root (`docs/`).
+/// A relative link resolves from the document's directory, and one starting with `/` from the bundle root (`docs/`).
 pub fn unresolved(
-    details: &BTreeMap<String, String>,
+    documents: &BTreeMap<String, String>,
     tree: &dyn Tree,
     parsers: &dyn Parsers,
 ) -> BTreeMap<String, String> {
-    let bundle_root = DOCS;
-    let here = in_docs("work");
     let mut bad = BTreeMap::new();
-    for (name, detail) in details {
-        let found = links(detail);
-        if found.is_empty() {
-            bad.insert(name.clone(), format!("no markdown link: {detail}"));
-            continue;
-        }
-        let reasons: Vec<String> = found
+    for (path, text) in documents {
+        let here = match path.rsplit_once('/') {
+            Some((dir, _)) => in_docs(dir),
+            None => DOCS.to_string(),
+        };
+        let reasons: Vec<String> = links(text)
             .iter()
-            .filter_map(|(text, target)| broken(tree, parsers, text, target, &here, bundle_root))
+            .filter_map(|(text, target)| broken(tree, parsers, text, target, &here, DOCS))
             .collect();
         if !reasons.is_empty() {
             bad.insert(
-                name.clone(),
+                path.clone(),
                 format!("links that do not resolve: {reasons:?}"),
             );
         }
@@ -436,23 +449,44 @@ mod tests {
 
     #[test]
     fn a_details_section_without_a_link_is_caught() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("docs/work")).unwrap();
-        fs::write(root.path().join("docs/log.md"), "# Log\n").unwrap();
         let details = map(&[
             ("linked.md", "[log](/log.md)"),
             ("no link (the old form).md", "docs/log.md「somewhere」"),
             (
-                "only the second link is broken.md",
-                "[a](/log.md), [b](/no_such_file.md)",
+                "in a comment only.md",
+                "Nothing yet. <!-- [log](/log.md) -->",
             ),
         ]);
-        let bad = unresolved(&details, &Disk::new(root.path()), &Readers);
+        assert_eq!(
+            linkless(&details).keys().collect::<Vec<_>>(),
+            ["in a comment only.md", "no link (the old form).md"]
+        );
+    }
+
+    #[test]
+    fn a_broken_link_is_caught_in_any_document_and_resolved_from_its_directory() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("docs/work")).unwrap();
+        fs::create_dir_all(root.path().join("docs/knowledge")).unwrap();
+        fs::write(root.path().join("docs/log.md"), "# Log\n").unwrap();
+        fs::write(root.path().join("docs/work/a.md"), "# A\n").unwrap();
+        let documents = map(&[
+            ("work/linked.md", "[a](a.md) and [log](/log.md)"),
+            (
+                "work/only the second link is broken.md",
+                "[a](/log.md), [b](/no_such_file.md)",
+            ),
+            // Relative from its own directory: a.md is in work/, not in knowledge/
+            ("knowledge/k.md", "[a](a.md)"),
+            ("log.md", "* [a](/work/a.md) and [gone](/work/gone.md)"),
+        ]);
+        let bad = unresolved(&documents, &Disk::new(root.path()), &Readers);
         assert_eq!(
             bad.keys().collect::<Vec<_>>(),
             [
-                "no link (the old form).md",
-                "only the second link is broken.md"
+                "knowledge/k.md",
+                "log.md",
+                "work/only the second link is broken.md"
             ]
         );
     }
@@ -472,7 +506,11 @@ mod tests {
             "<a href=\"/log.md\">log</a>",
         ];
         for detail in resolving {
-            let bad = unresolved(&map(&[("x.md", detail)]), &Disk::new(root.path()), &Readers);
+            let bad = unresolved(
+                &map(&[("work/x.md", detail)]),
+                &Disk::new(root.path()),
+                &Readers,
+            );
             assert!(bad.is_empty(), "{detail}: {bad:?}");
         }
         // Next to a link that resolves, a broken one in each form is still found
@@ -487,11 +525,11 @@ mod tests {
         for form in dangling {
             let detail = format!("{good} {form}");
             let bad = unresolved(
-                &map(&[("x.md", &detail)]),
+                &map(&[("work/x.md", &detail)]),
                 &Disk::new(root.path()),
                 &Readers,
             );
-            assert!(bad.contains_key("x.md"), "{form} passed");
+            assert!(bad.contains_key("work/x.md"), "{form} passed");
         }
     }
 

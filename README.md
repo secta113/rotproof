@@ -74,6 +74,7 @@ rotproof --root <repository> init    # after upgrading Rotproof: update the proj
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write every generated file in docs/ (the index files, the closed list and the rules)
+rotproof --root <repository> before <slug>  # print the open records that close before a record, earliest first (--all: the closed ones too)
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
@@ -333,7 +334,19 @@ milestone holds neither: it is a moment the work waits for (a release, an agreem
 with a `# Condition` that says what to look at to know it came, and an optional `date` that fails nothing when it
 passes. A project always has an open one, its next moment: `rotproof create` writes `next-milestone.md` when
 `docs/work/` has none, with a condition that is only a comment, so the check fails until a person writes what the next
-moment is. The index lists the open milestones first, across the areas, by date.
+moment is. The index lists the open milestones first, across the areas, by date. A milestone's line counts the open
+records that close before it, back along the arrows and from each parent to its children, and names the open
+milestones before it, where the count stops, so that a release does not count the work of the one before it.
+`rotproof before <slug>` lists those records by depth, each after every open record it waits for, and within a depth
+by mark, which says whether a record can be worked to its end now: `started` and `ready` (nothing open closes before
+it, started or not), `waits` (something open does; `Started.` on the line says its work started), then `milestone`
+(with `Past its date.` once today is past its date). Each depth has a heading that says what it means,
+`-- nothing open closes before these --` first and `-- these close after the ones above --` after it, rather than a
+number: a depth orders the closing, not the work. Each line has the record's last measured state and the open records
+it waits for, by name; given a spec, it lists its children and what closes before them, and with `--all` the closed
+records too (`done`, `dropped`). It is how an agent learns what is left before a release, and what it can do now,
+without opening the records one by one. Work that is done but waits for something outside, such as a pull request to
+be merged, waits for a milestone of that moment (`after: [pr-12-merged]`), so it is listed as waiting, not as work.
 `knowledge/` holds how things are now, edited in place and deprecated only when it no longer holds. A done spec says
 what was decided and stays current until a later one replaces it; what it built is described in `knowledge/`, an API
 or a data model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
@@ -428,8 +441,9 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
 
 ## What `rotproof check` checks
 
-- **The tree matches `.config/rotproof.toml`, either way:** the declaration exists and names a known stack, and only
-  layers that stack has in `absent` (a misspelled field fails). Every layer of the stack is present or declared
+- **The tree matches `.config/rotproof.toml`, either way:** the declaration names a known stack, and only layers that
+  stack has in `absent` (a misspelled field fails). Without a declaration nothing is checked, and `rotproof check`
+  exits 2, not 1: CI tells a project that has not adopted Rotproof from one that breaks a rule. Every layer of the stack is present or declared
   absent, and no layer declared absent is present. No code sits outside the layers, the stack's own paths (`tests/`)
   and `unchecked`. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.
@@ -521,12 +535,14 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   tags) is on one line: a line break would end the entry and start a heading or an entry of its own. A
   title is written into the index with `[`, `]` and `\` escaped, so it stays the text of its own link. The one tag
   is a declared area, and the message lists the declared ones.
-- **Every link in `# Details` resolves,** with heading anchors computed as GitHub computes them. A path with a drive
+- **Every `# Details` has a link, and every link in `docs/` resolves:** in every document under `docs/` and in the
+  log, not only in `# Details`, each read from the document's own directory, with heading anchors computed as GitHub
+  computes them. A path with a drive
   letter (`C:/...`) or a `file:` URL fails: it names a file on one machine. Only a URL (`https:`, `mailto:`) is not
   checked, and a file name with a line number (`check.rs:104`) is a path, not a URL. A path is separated with `/`:
   only Windows reads a backslash as a separator, so a path with one fails. A path that climbs above the repository
   fails: GitHub serves only the repository. Links are read as a CommonMark reader reads them: with a title
-  (`[a](b.md "title")`), in angle brackets, as reference links defined in `# Details`, as images, and as `href` in
+  (`[a](b.md "title")`), in angle brackets, as reference links defined in the document, as images, and as `href` in
   HTML, and not inside code or comments. A link to a `.py` file names, in its text, a function
   or class defined there, at any depth. The file is parsed as Python, so a `def` line inside a string or a docstring
   does not count. The text is one name exactly as defined (``[`render_index`](../tests/bundle.py)``), not a call

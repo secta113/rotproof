@@ -27,9 +27,9 @@ The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has r
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
-when a file cannot be read or written, the command line is wrong, `rotproof create` would make layers without --yes,
-`rotproof init` leaves an update of the project's files to a person or cannot move the records, or `rotproof approve`
-is not run on a terminal or not answered y.";
+when there is no .config/rotproof.toml to work from, a file cannot be read or written, the command line is wrong,
+`rotproof create` would make layers without --yes, `rotproof init` leaves an update of the project's files to a
+person or cannot move the records, or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -45,7 +45,7 @@ updates them), that \
 older project), and that every record in docs/ keeps its rules (the rules.md of each directory), a knowledge document \
 matching the code it follows among them. \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
-a rule is broken, 2 when a file cannot be read.";
+a rule is broken, 2 when there is no .config/rotproof.toml or a file cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
 /// import which) and the records an agent works from (specs, work items, milestones, knowledge and log in docs/).
@@ -161,6 +161,28 @@ enum Command {
     /// Lists the documents it left out and why, the work items past their stale_after, and the open milestones past
     /// their date. Exits 2 when the declaration or a document cannot be read.
     Index,
+    /// Print the open records that close before a milestone, a spec or any record of docs/work/, earliest first,
+    /// writing nothing
+    ///
+    /// Follows the arrows back from the later record to the earlier one, and from a parent to its children, through
+    /// the open records, and stops at an earlier milestone, which it lists but not the work before it: what is left
+    /// before a release, or under a spec, without opening the records one by one. Prints a line naming the record with
+    /// how many open records close before it, then one line per record: its mark, which says whether it can be worked
+    /// to its end now (started or ready, when nothing open closes before it; waits, when something does, with
+    /// "Started." if its work started; milestone; with --all, done or dropped), its file name and title, a spec's
+    /// status, an item's last measured state, a milestone's date and whether it is past, or how a closed record
+    /// closed, and the open records it waits for, by name. The records are listed by depth, each after every open
+    /// record it waits for, and within a depth in the order of the marks above, the started first. Each depth has a
+    /// heading: "nothing open closes before these" first, then "these close after the ones above"; a depth orders the
+    /// closing, not the work. Records that wait on each other come last. Exits 2 when the record is not in docs/work/
+    /// or is left out of the records, or the declaration or a document cannot be read.
+    Before {
+        /// The record, by its slug (release-0-4-0) or its file name in docs/work/
+        record: String,
+        /// List the closed records too (done or dropped), through which the listing then goes
+        #[arg(long)]
+        all: bool,
+    },
     /// Print the hash a knowledge document pins for each key of follows, as the code is now, writing nothing
     ///
     /// Each key is what follows in a knowledge document names: a file from the root (src/api/routes.py), a definition
@@ -213,6 +235,7 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
             true
         }),
         Command::Index => index(commands, root).map(|()| true),
+        Command::Before { record, all } => before(commands, root, &record, all).map(|()| true),
         Command::Approve {
             file,
             import,
@@ -564,6 +587,16 @@ fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     }
     for (name, date) in indexed.past_date {
         println!("past its date and still open, close it or move its date: {name} ({date})");
+    }
+    Ok(())
+}
+
+/// Print what closes before the record, and on stderr the documents the listing could not see.
+fn before(commands: &dyn Commands, root: &Path, record: &str, all: bool) -> Result<(), String> {
+    let before = commands.before(root, record, all)?;
+    print!("{}", before.text);
+    for (name, why) in before.left_out {
+        eprintln!("left out of the records, so not listed, fix it: {name}: {why}");
     }
     Ok(())
 }

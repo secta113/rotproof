@@ -5,6 +5,7 @@
 //! May import `protocol` and `domain`, never `infrastructure`.
 
 pub mod approvals;
+pub mod before;
 pub mod bundle;
 pub mod check;
 pub mod code;

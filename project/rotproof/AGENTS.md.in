@@ -17,6 +17,11 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   runs it on its own.
 - **`rotproof index` rewrites the `index.md` files in `docs/` and `docs/work/closed.md`** after a record changes.
   Never edit them by hand.
+- **`rotproof before <slug>` prints the open records that close before a milestone, a spec or any record, earliest
+  first,** each with whether it can be worked to its end now (`started` or `ready`; `waits` when something open
+  closes before it), its last measured state and what it waits for, through the arrows and the parents and up to an
+  earlier milestone, under headings that say which close after which. The headings order the closing, not the work.
+  With `--all` it lists the closed records too. It writes nothing.
 - **Upgrade Rotproof in a commit of its own:** change the pinned version, install it, run `rotproof init`, then
   `rotproof check`. `rotproof init` applies what the new version brings to the files `rotproof create` wrote once
   (except the updates `declined` lists in `.config/rotproof.toml`), rewrites this file, and sets `files` there to the
@@ -34,6 +39,10 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   specs, work items and documents that concern the work.** Read the closed records (`docs/work/closed.md`) and
   `docs/log.md` when you need to know why something was decided. The index says which open
   records are `Ready.`, which were `Started.` and which milestones are near, and is only seen when someone opens it.
+  To know what is left before a milestone or under a spec, run `rotproof before <slug>` rather than following the
+  arrows through the records one by one, and open only the records it lists that the work needs. When a record's
+  work is done but waits for something outside it, such as a pull request to be merged, write a milestone of that
+  moment and add it to the record's `after`, so the record is listed as waiting rather than as work left.
   Continue a started record from its `# State` rather than starting it again. When you start a record's work, set
   `progress: started`; after measuring an item's state, update it right away.
 - **How each record is written is in the `rules.md` of its directory,** which Rotproof writes. The project's own rules
