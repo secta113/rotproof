@@ -6,11 +6,14 @@ use std::io;
 
 use crate::code::lands;
 use crate::tree::{code_files, exactly, read_code, resolved};
-use domain::code::{Manifest, Origin, Parsers, is_source, module_parts};
+use domain::code::{Manifest, Origin, is_source, module_parts};
 use domain::direction::{Forbidden, judged, place_of, workspace_dirs};
-use domain::layers::{Declared, Language, Layout, Place};
-use domain::tree::Tree;
-use utils::paths::{join, parent};
+use domain::layers::{Declared, Language, Layout, Place, table};
+use domain::modules::{Dependency, judged_crate};
+use domain::paths::{join, parent};
+use domain::rust::is_source as is_rust;
+use protocol::outbound::Parsers;
+use protocol::outbound::Tree;
 
 /// What the direction check found.
 #[derive(Debug, Default)]
@@ -56,68 +59,121 @@ fn rust(
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
     let mut manifests = Manifests::new(parsers);
+    // Each manifest's dependencies that land in a place, by the name the crate's code uses
+    let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
+    let mut crates: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
-            let Some(from) = place_of(&path, places) else {
-                continue;
-            };
-            let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
-                continue;
-            };
-            let dir = parent(&path);
-            for dependency in &manifest.dependencies {
-                let at = format!("{path}:{}", dependency.line);
-                let name = &dependency.name;
-                let (target, through) = match &dependency.origin {
-                    Origin::Path(rel) => (tree.landed(dir, rel), ""),
-                    Origin::Workspace => {
-                        let Some((workspace, entry)) =
-                            manifests.workspace(tree, dir, &manifest, &mut found)?
-                        else {
-                            let looked = match &manifest.workspace {
-                                Some(rel) => format!(
-                                    "{rel}, which [package] workspace names, is no workspace"
-                                ),
-                                None => {
-                                    format!("no Cargo.toml from {dir} up to the root declares one")
-                                }
-                            };
-                            found.push(format!(
-                                "{at}: {name} comes from the workspace, and {looked}, so it is not checked"
-                            ));
-                            continue;
-                        };
-                        let Some(rel) = entry.workspace_dependencies.get(name) else {
-                            found.push(format!(
-                                "{at}: {name} comes from the workspace, and {} has no {name} in \
-                                 [workspace.dependencies], so it is not checked",
-                                join(&workspace, "Cargo.toml")
-                            ));
-                            continue;
-                        };
-                        // One from a registry or git names no place
-                        let Some(rel) = rel else {
-                            continue;
-                        };
-                        (tree.landed(&workspace, rel), ", from the workspace")
-                    }
-                };
-                let Some(target) = target else {
-                    continue;
-                };
-                let Some(to) = place_of(&target, places) else {
-                    continue;
-                };
-                forbidden.extend(judged(
-                    &path,
-                    dependency.line,
-                    name,
-                    &format!("depends on {name} ({target}{through})"),
-                    from,
-                    to,
-                ));
+            if let Some(from) = place_of(&path, places) {
+                crates.push((path, from));
             }
         }
+    }
+    // Cargo compiles the entry file against what the manifest of its package declares
+    let entry = layout.entry(&table());
+    if let Some(entry) = &entry {
+        let manifest = join(parent(parent(&entry.path)), "Cargo.toml");
+        if exactly(tree, &manifest).is_ok_and(|(_, is_dir)| !is_dir) {
+            crates.push((manifest, entry));
+        }
+    }
+    for (path, from) in crates {
+        let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
+            continue;
+        };
+        let dir = parent(&path);
+        for dependency in &manifest.dependencies {
+            let at = format!("{path}:{}", dependency.line);
+            let name = &dependency.name;
+            let (target, through) = match &dependency.origin {
+                Origin::Path(rel) => (tree.landed(dir, rel), ""),
+                Origin::Workspace => {
+                    let Some((workspace, entry)) =
+                        manifests.workspace(tree, dir, &manifest, &mut found)?
+                    else {
+                        let looked = match &manifest.workspace {
+                            Some(rel) => {
+                                format!("{rel}, which [package] workspace names, is no workspace")
+                            }
+                            None => {
+                                format!("no Cargo.toml from {dir} up to the root declares one")
+                            }
+                        };
+                        found.push(format!(
+                                "{at}: {name} comes from the workspace, and {looked}, so it is not checked"
+                            ));
+                        continue;
+                    };
+                    let Some(rel) = entry.workspace_dependencies.get(name) else {
+                        found.push(format!(
+                            "{at}: {name} comes from the workspace, and {} has no {name} in \
+                                 [workspace.dependencies], so it is not checked",
+                            join(&workspace, "Cargo.toml")
+                        ));
+                        continue;
+                    };
+                    // One from a registry or git names no place
+                    let Some(rel) = rel else {
+                        continue;
+                    };
+                    (tree.landed(&workspace, rel), ", from the workspace")
+                }
+            };
+            let Some(target) = target else {
+                continue;
+            };
+            let Some(to) = place_of(&target, places) else {
+                continue;
+            };
+            depends
+                .entry(path.clone())
+                .or_default()
+                .push((name.clone(), to));
+            forbidden.extend(judged(
+                &path,
+                dependency.line,
+                name,
+                &format!("depends on {name} ({target}{through})"),
+                from,
+                to,
+            ));
+        }
+    }
+    // The levels inside a crate, which its manifest cannot tell apart: its code is read
+    for layer in places.iter().filter(|p| p.parent.is_none()) {
+        let levels: Vec<&Place> = places
+            .iter()
+            .copied()
+            .filter(|p| p.parent.as_ref() == Some(&layer.name))
+            .collect();
+        if levels.is_empty() {
+            continue;
+        }
+        let mut files = Vec::new();
+        for path in code_files(tree, &join(&layer.path, "src"), is_rust)? {
+            if let Some(source) = read_code(tree, &path, "paths", &mut found)? {
+                files.push((path, source));
+            }
+        }
+        // What the crate depends on in other layers, by the name its code uses
+        let dependencies: Vec<Dependency> = depends
+            .get(&join(&layer.path, "Cargo.toml"))
+            .into_iter()
+            .flatten()
+            .filter(|(_, to)| to.name != layer.name)
+            .map(|(name, to)| Dependency {
+                name: name.replace('-', "_"),
+                layer: to,
+                levels: places
+                    .iter()
+                    .copied()
+                    .filter(|p| p.parent.as_ref() == Some(&to.name))
+                    .collect(),
+            })
+            .collect();
+        let inside = judged_crate(&files, layer, &levels, &dependencies);
+        found.extend(inside.problems);
+        forbidden.extend(inside.forbidden);
     }
     Ok(Direction {
         problems: found,
@@ -209,8 +265,7 @@ fn typescript(
         .iter()
         .map(|why| format!("{why}; imports through it are not checked"))
         .collect();
-    // Every source file of the layers with the place it sits in, and each file a starter puts outside the layers with
-    // the layer it belongs to, while that layer is there
+    let entry = layout.entry(&table());
     let mut files: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
@@ -219,14 +274,7 @@ fn typescript(
             }
         }
     }
-    for (path, layer) in &layout.belongs {
-        let place = places.iter().find(|p| &p.name == layer);
-        if let Some(place) = place
-            && exactly(tree, path).is_ok_and(|(_, is_dir)| !is_dir)
-        {
-            files.push((path.clone(), place));
-        }
-    }
+    files.extend(entry_file(tree, entry.as_ref()));
     for (path, from) in files {
         if !is_source(&path) {
             continue;
@@ -264,7 +312,8 @@ fn typescript(
     })
 }
 
-/// The direction check of a Python project: every import of a `.py` file in a layer, as the module it names.
+/// The direction check of a Python project: every import of a `.py` file in a layer, and of the entry file, as the
+/// module it names.
 fn python(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -273,38 +322,52 @@ fn python(
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
+    let entry = layout.entry(&table());
+    let mut files: Vec<(String, &Place)> = Vec::new();
     for layer in places.iter().filter(|p| p.parent.is_none()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
-            let Some(from) = place_of(&module_parts(&path).join("/"), places) else {
+            if let Some(from) = place_of(&module_parts(&path).join("/"), places) {
+                files.push((path, from));
+            }
+        }
+    }
+    files.extend(entry_file(tree, entry.as_ref()));
+    for (path, from) in files {
+        let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
+            continue;
+        };
+        let read = parsers.python(&source, &path);
+        if let Some((line, why)) = read.error {
+            found.push(format!(
+                "{path}:{line}: cannot be read as Python ({why}), so the imports after it may be misread"
+            ));
+        }
+        for (line, module) in read.imports {
+            let Some(to) = place_of(&resolved(tree, &module.join("/")), places) else {
                 continue;
             };
-            let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
-                continue;
-            };
-            let read = parsers.python(&source, &path);
-            if let Some((line, why)) = read.error {
-                found.push(format!(
-                    "{path}:{line}: cannot be read as Python ({why}), so the imports after it may be misread"
-                ));
-            }
-            for (line, module) in read.imports {
-                let Some(to) = place_of(&resolved(tree, &module.join("/")), places) else {
-                    continue;
-                };
-                let dotted = module.join(".");
-                forbidden.extend(judged(
-                    &path,
-                    line,
-                    &dotted,
-                    &format!("imports {dotted}"),
-                    from,
-                    to,
-                ));
-            }
+            let dotted = module.join(".");
+            forbidden.extend(judged(
+                &path,
+                line,
+                &dotted,
+                &format!("imports {dotted}"),
+                from,
+                to,
+            ));
         }
     }
     Ok(Direction {
         problems: found,
         forbidden,
     })
+}
+
+/// The entry file with itself as its place, when it is there as a file. It is code outside the layers, so the walk of
+/// the layers does not find it.
+fn entry_file<'a>(tree: &dyn Tree, entry: Option<&'a Place>) -> Option<(String, &'a Place)> {
+    let entry = entry?;
+    exactly(tree, &entry.path)
+        .is_ok_and(|(_, is_dir)| !is_dir)
+        .then(|| (entry.path.clone(), entry))
 }

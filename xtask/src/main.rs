@@ -208,29 +208,36 @@ fn dependencies(root: &Path) -> Result<Vec<String>, String> {
     Ok(found)
 }
 
-/// Where `domain` takes a port or does I/O, in its `.rs` files
+/// Where `domain` takes a port or does I/O, in its `.rs` files, beside the ports in `protocol::outbound`
 fn domain_pure(root: &Path) -> Result<Vec<String>, String> {
-    let dir = root.join(pure::DOMAIN);
-    let mut names: Vec<String> = fs::read_dir(&dir)
-        .map_err(|e| format!("cannot read {}: {e}", pure::DOMAIN))?
+    Ok(pure::problems(
+        &sources(root, pure::DOMAIN)?,
+        &sources(root, pure::PORTS)?,
+    ))
+}
+
+/// The `.rs` files directly in `dir` (from the root), each with its text, by name.
+fn sources(root: &Path, dir: &str) -> Result<Vec<(String, String)>, String> {
+    let mut names: Vec<String> = fs::read_dir(root.join(dir))
+        .map_err(|e| format!("cannot read {dir}: {e}"))?
         .map(|entry| entry.map(|e| e.file_name().to_string_lossy().into_owned()))
         .collect::<Result<_, _>>()
-        .map_err(|e| format!("cannot read {}: {e}", pure::DOMAIN))?;
-    names.retain(|name| utils::rust::is_source(name));
+        .map_err(|e| format!("cannot read {dir}: {e}"))?;
+    names.retain(|name| domain::rust::is_source(name));
     names.sort();
     let mut files = Vec::new();
     for name in names {
-        let path = format!("{}/{name}", pure::DOMAIN);
+        let path = format!("{dir}/{name}");
         files.push((path.clone(), read(root, &path)?));
     }
-    Ok(pure::problems(&files))
+    Ok(files)
 }
 
 /// The lines with a comment over the width, in every tracked `.rs` file
 fn comment_width(root: &Path) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
     for path in tracked(root)? {
-        if utils::rust::is_source(&path) {
+        if domain::rust::is_source(&path) {
             files.push((path.clone(), read(root, &path)?));
         }
     }

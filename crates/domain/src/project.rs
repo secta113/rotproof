@@ -88,14 +88,14 @@ pub fn project_files<'a>(
         (".gitignore", gitignore.to_string()),
         (".gitattributes", GITATTRIBUTES_TEXT.to_string()),
     ];
-    // What the stack's toolchain needs at the root: the workspace of a Rust project
+    // What the stack's toolchain needs at the root: the workspace and the root package of a Rust project
     if let Some(layout) = &declared.layout {
-        files.extend(
-            layout
-                .files
-                .iter()
-                .map(|file| (file.path.as_str(), file.text.trim_start().to_string())),
-        );
+        files.extend(layout.files.iter().map(|file| {
+            (
+                file.path.as_str(),
+                file.text.trim_start().replace("{package}", &package(name)),
+            )
+        }));
     }
     if !pypi {
         return (
@@ -109,6 +109,26 @@ pub fn project_files<'a>(
     files.push(("requirements-dev.txt", fill(PYPI_REQUIREMENTS)));
     files.push((".github/workflows/ci.yml", PYPI_WORKFLOW.to_string()));
     (files, None)
+}
+
+/// The project's name as a package name, which Cargo takes only of letters, digits, `-` and `_`: every other
+/// character becomes `_`, and a name that starts with no letter starts with `app_`.
+fn package(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        name
+    } else {
+        format!("app_{name}")
+    }
 }
 
 /// The rows of the map for the layers present in the declaration, each with the first line of its role, which the
@@ -177,9 +197,13 @@ fn layers_section(layout: &Layout) -> String {
         "| Layer | Where | May import |".to_string(),
         "|---|---|---|".to_string(),
     ];
-    for place in layout.places(&table()) {
-        let importable = importable(&place);
-        let imports = if place.name == "ui" {
+    let places = layout.places(&table());
+    for place in &places {
+        let importable = importable(place);
+        let has_levels = places
+            .iter()
+            .any(|p| p.parent.as_ref() == Some(&place.name));
+        let imports = if has_levels {
             "Nothing: it holds only its levels".to_string()
         } else if importable.is_empty() {
             "No other layer".to_string()
@@ -195,6 +219,13 @@ fn layers_section(layout: &Layout) -> String {
         rows.push(format!(
             "| `{}` | `{}/` | {imports} |",
             place.name, place.path
+        ));
+    }
+    if let Some(entry) = layout.entry(&table()) {
+        rows.push(format!(
+            "| The entry file, no layer | `{}` | {} |",
+            entry.path,
+            listed(&entry.imports)
         ));
     }
     let not_layers = if layout.not_layers.is_empty() {
@@ -281,10 +312,14 @@ mod tests {
         let text = guide("python", Some(&layout));
         for row in [
             "| `ui` | `ui/` | Nothing: it holds only its levels |",
-            "| `ui.molecules` | `ui/molecules/` | The levels below it, and `utils` |",
-            "| `ui.atoms` | `ui/atoms/` | `utils` |",
-            "| `domain` | `domain/` | `utils` |",
-            "| `utils` | `utils/` | No other layer |",
+            "| `ui.organisms` | `ui/organisms/` | The levels below it, and `domain` |",
+            "| `ui.molecules` | `ui/molecules/` | The levels below it |",
+            "| `ui.atoms` | `ui/atoms/` | No other layer |",
+            "| `infrastructure` | `infrastructure/` | Nothing: it holds only its levels |",
+            "| `infrastructure.inbound` | `infrastructure/inbound/` | `protocol.inbound` |",
+            "| `protocol.outbound` | `protocol/outbound/` | `domain` |",
+            "| `domain` | `domain/` | No other layer |",
+            "| The entry file, no layer | `__main__.py` | `composition` |",
         ] {
             assert!(text.contains(row), "no row {row}:\n{text}");
         }

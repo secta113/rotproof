@@ -3,8 +3,9 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use domain::code::{Aliases, Manifest, Parsers, Source};
-use domain::tree::Tree;
+use domain::code::{Aliases, Manifest, Source};
+use protocol::outbound::Parsers;
+use protocol::outbound::Tree;
 
 /// Every reader Rotproof has.
 #[derive(Debug, Default, Clone, Copy)]
@@ -12,26 +13,26 @@ pub struct Readers;
 
 impl Parsers for Readers {
     fn python(&self, source: &str, path: &str) -> Source<Vec<String>> {
-        crate::python::read(source, path)
+        crate::outbound::python::read(source, path)
     }
 
     fn python_definitions(&self, source: &str) -> BTreeSet<String> {
-        crate::python::definitions(source)
+        crate::outbound::python::definitions(source)
     }
 
     fn python_definition(&self, source: &str, dotted: &str) -> Option<String> {
-        crate::python::definition(source, dotted)
+        crate::outbound::python::definition(source, dotted)
     }
 
     fn typescript(&self, source: &str, path: &str) -> Source<String> {
-        crate::typescript::read(source, path)
+        crate::outbound::typescript::read(source, path)
     }
 
     fn typescript_aliases(&self, tree: &dyn Tree) -> io::Result<Aliases> {
-        crate::typescript::aliases(tree)
+        crate::outbound::typescript::aliases(tree)
     }
 
     fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)> {
-        crate::cargo::read(source)
+        crate::outbound::cargo::read(source)
     }
 }

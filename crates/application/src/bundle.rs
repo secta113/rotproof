@@ -7,7 +7,7 @@ use domain::bundle::{
     Docs, KnowledgeFolder, Problems, Work, expected, in_docs, is_document, knowledge_with_rules,
     work_with_rules,
 };
-use domain::tree::Tree;
+use protocol::outbound::Tree;
 
 /// The bundle of one repository, `docs/` in its tree, and the areas its records are grouped by.
 pub struct Bundle<'a> {

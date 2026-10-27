@@ -4,9 +4,9 @@
 //! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`) and the paths the
 //!   project lists in `unchecked`. A path in `unchecked` exists and holds no layer, so a layer cannot be switched
 //!   off by listing it.
-//! - `ui` holds only its levels: code in it beside them fails, except the files the layout makes for `ui` itself. A
-//!   part there would have no place in the order of levels, and an import through it (`atoms → ui/helpers.py →
-//!   domain`) would pass every direct check of the direction.
+//! - A layer with levels (`ui`) holds only its levels: code in it beside them fails, except the files the layout
+//!   makes for the layer itself. A part there would have no place among the levels, and an import through it
+//!   (`atoms → ui/helpers.py → domain`) would pass every direct check of the direction.
 //!
 //! The floor: at least one layer is present. A project with every layer declared absent would check nothing. A
 //! repository that keeps records only declares `stack = "none"`, and the check says that it skipped the layers.
@@ -16,8 +16,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::layers::{DECLARATION, Declared, Layout, Place};
-use utils::paths::{join, within};
+use crate::layers::{DECLARATION, Declared, Layout, ONION, Place, retired};
+use crate::paths::{join, within};
 
 /// What the structure check reads from the tree.
 #[derive(Debug, Default)]
@@ -70,7 +70,7 @@ pub fn listed(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> 
     dirs
 }
 
-/// Each layer with levels (`ui`) that is there and not declared absent, with its levels.
+/// Each layer with levels that is there and not declared absent, with its levels.
 fn with_levels<'a>(declared: &'a Declared, seen: &Seen) -> Vec<(&'a Place, Vec<&'a Place>)> {
     let mut found = Vec::new();
     for layer in declared.places.iter().filter(|p| p.parent.is_none()) {
@@ -158,33 +158,42 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
             skipped.push(path);
         }
     }
-    // A file a starter puts outside the layers is its layer's while that layer is there; without the layer, it is code
-    // outside the layers like any other
-    for (path, layer) in &layout.belongs {
-        if declared
-            .places
-            .iter()
-            .any(|p| &p.name == layer && !declared.is_absent(p) && seen.present(&p.path))
-        {
-            skipped.push(path);
-        }
+    // The entry file is no layer, and code all the same: the direction check reads it
+    if let Some(entry) = &layout.entry {
+        skipped.push(entry);
     }
     let places: Vec<&str> = declared.places.iter().map(|p| p.path.as_str()).collect();
     let goes = layout
         .where_code_goes
         .as_ref()
         .map_or(",".to_string(), |goes| format!(": {goes};"));
+    let retired = retired(layout);
     for outside in outside(seen.code(&layout.scope), &layout.scope, &places, &skipped) {
+        // A layer of the table before 0.4.0 says where its code goes, on every run until it is moved
+        if let Some((name, _, where_it_goes)) = retired.iter().find(|(_, path, _)| *path == outside)
+        {
+            found.push(format!(
+                "code outside the layers: {outside} (the layer {name} of the table before {ONION}, which is gone: \
+                 {where_it_goes})"
+            ));
+            continue;
+        }
         found.push(format!(
             "code outside the layers: {outside} (move it into a layer{goes} or list it in unchecked in {DECLARATION})"
         ));
     }
     for (layer, levels) in with_levels(declared, seen) {
+        // Where a part of the UI goes needs saying; elsewhere the levels say it by their names
+        let goes = if layer.name == "ui" {
+            where_ui_parts_go(&declared.places)
+        } else {
+            let paths: Vec<String> = levels.iter().map(|l| format!("{}/", l.path)).collect();
+            paths.join(" or ")
+        };
         for beside in beside_levels(seen.code(&layer.path), layer, &levels) {
             found.push(format!(
-                "code in {} outside its levels: {beside} (move it into a level or a layer: {})",
+                "code in {} outside its levels: {beside} (move it into a level or a layer: {goes})",
                 layer.name,
-                where_ui_parts_go(&declared.places)
             ));
         }
     }
@@ -212,7 +221,7 @@ fn first_entry(path: &str, dir: &str) -> String {
     join(dir, first)
 }
 
-/// The code in a layer with levels (`ui`) that sits beside its levels, of the code files `code` in it, as entries
+/// The code in a layer with levels that sits beside its levels, of the code files `code` in it, as entries
 /// directly in the layer: the layer's own files (`ui/__init__.py`) are not counted. Every level counts as a level
 /// here, absent or not: an absent level that exists has a finding of its own.
 fn beside_levels(code: &[String], layer: &Place, levels: &[&Place]) -> BTreeSet<String> {
@@ -238,11 +247,11 @@ fn where_ui_parts_go(places: &[Place]) -> String {
     format!(
         "a part that knows no project concept, visible or not (a design value, one behaviour, a provider of a theme), \
          goes in {}/; one that knows domain types, such as a provider of the signed-in user, in {}/ or above; one \
-         that calls a use case in {}/; one that knows no UI framework in {}/",
+         that calls a use case in {}/; one that knows no UI framework in the layer whose concept it speaks, or it \
+         comes from a library",
         path("ui.atoms"),
         path("ui.organisms"),
         path("ui.pages"),
-        path("utils"),
     )
 }
 
@@ -256,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn ui_is_listed_only_while_it_is_there_and_not_absent() {
+    fn a_layer_with_levels_is_listed_only_while_it_is_there_and_not_absent() {
         let with_ui = declared("stack = \"python\"\nareas = []\nunchecked = [\"scripts/\"]\n");
         let layout = with_ui.layout.as_ref().unwrap();
         assert!(named(&with_ui).contains(&"ui/atoms".to_string()));
@@ -265,17 +274,23 @@ mod tests {
         for path in named(&with_ui) {
             seen.named.insert(path, Ok(()));
         }
-        assert_eq!(listed(&with_ui, layout, &seen), ["", "ui"]);
-        seen.named.insert("ui".into(), Err("missing: ui".into()));
-        assert_eq!(listed(&with_ui, layout, &seen), [""]);
-        let without_ui = declared("stack = \"python\"\nareas = []\nabsent = [\"ui\"]\n");
         assert_eq!(
-            listed(
-                &without_ui,
-                without_ui.layout.as_ref().unwrap(),
-                &Seen::default()
-            ),
-            [""]
+            listed(&with_ui, layout, &seen),
+            ["", "ui", "infrastructure", "protocol"]
+        );
+        seen.named.insert("ui".into(), Err("missing: ui".into()));
+        assert_eq!(
+            listed(&with_ui, layout, &seen),
+            ["", "infrastructure", "protocol"]
+        );
+        let without_ui = declared("stack = \"python\"\nareas = []\nabsent = [\"ui\"]\n");
+        let mut seen = Seen::default();
+        for path in named(&without_ui) {
+            seen.named.insert(path, Ok(()));
+        }
+        assert_eq!(
+            listed(&without_ui, without_ui.layout.as_ref().unwrap(), &seen),
+            ["", "infrastructure", "protocol"]
         );
     }
 
@@ -287,7 +302,8 @@ mod tests {
         for path in named(&python) {
             seen.named.insert(path, Ok(()));
         }
-        seen.code.insert("".into(), Vec::new());
+        // The entry file is code outside the layers that passes
+        seen.code.insert("".into(), vec!["__main__.py".into()]);
         seen.code.insert(
             "ui".into(),
             [
@@ -299,9 +315,25 @@ mod tests {
             .map(String::from)
             .into(),
         );
+        seen.code.insert(
+            "infrastructure".into(),
+            [
+                "infrastructure/__init__.py",
+                "infrastructure/inbound/cli.py",
+                "infrastructure/shared.py",
+            ]
+            .map(String::from)
+            .into(),
+        );
+        seen.code.insert("protocol".into(), Vec::new());
         let found = problems(&python, layout, &seen);
-        assert_eq!(found.len(), 2, "{found:#?}");
+        assert_eq!(found.len(), 3, "{found:#?}");
         assert!(found[0].starts_with("code in ui outside its levels: ui/helpers (move it"));
         assert!(found[1].starts_with("code in ui outside its levels: ui/y.py (move it"));
+        assert_eq!(
+            found[2],
+            "code in infrastructure outside its levels: infrastructure/shared.py (move it into a level or a \
+             layer: infrastructure/inbound/ or infrastructure/outbound/)"
+        );
     }
 }

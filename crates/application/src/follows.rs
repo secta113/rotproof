@@ -6,11 +6,12 @@ use std::collections::BTreeMap;
 use crate::bundle::Bundle;
 use crate::tree::{exactly, read_text};
 use domain::bundle::in_docs;
-use domain::code::Parsers;
 use domain::follows::{Followed, directory_hash, drifted, followed, repinned};
 use domain::records::content_hash;
 use domain::schema::{Knowledge, Status};
-use domain::tree::{Tree, Writer};
+use protocol::inbound::Drift;
+use protocol::outbound::Parsers;
+use protocol::outbound::{Tree, Writer};
 
 /// The hash of what `key` names as it is now: `Ok(None)` when it is not there, `Err` when it cannot be read.
 pub fn current(
@@ -47,17 +48,6 @@ pub fn current(
             Ok(Some(directory_hash(&files)))
         }
     }
-}
-
-/// One key of a document's `follows` whose code is not as pinned.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Drift {
-    /// The document's file name in `docs/knowledge/`
-    pub doc: String,
-    pub key: String,
-    pub pinned: String,
-    /// Its hash now: `None` when it is gone. `Err` when it cannot be read
-    pub now: Result<Option<String>, String>,
 }
 
 /// Every key of the knowledge documents that hold (`documents`: file name -> document) whose code is not as pinned. A
@@ -147,7 +137,7 @@ pub fn repin(
 mod tests {
     use super::*;
     use crate::tree::fake::Fake;
-    use infrastructure::readers::Readers;
+    use infrastructure::outbound::readers::Readers;
 
     const DOC: &str = "docs/knowledge/model.md";
 

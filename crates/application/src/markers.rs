@@ -5,10 +5,10 @@ use std::collections::BTreeSet;
 use std::io;
 
 use crate::tree::{code_files, read_code};
-use domain::code::Parsers;
 use domain::layers::{Declared, Language};
 use domain::markers::{Markers, has_comments, in_file, is_unchecked, markers};
-use domain::tree::Tree;
+use protocol::outbound::Parsers;
+use protocol::outbound::Tree;
 
 /// Every marker in a comment of the code of `declared`. An error is a directory that could not be walked.
 pub fn problems(
@@ -52,7 +52,7 @@ fn comments(
     match language {
         Language::Python => parsers.python(source, path).comments,
         Language::TypeScript => parsers.typescript(source, path).comments,
-        Language::Rust => utils::rust::comments(source),
+        Language::Rust => domain::rust::comments(source),
     }
 }
 
@@ -60,7 +60,7 @@ fn comments(
 mod tests {
     use super::*;
     use domain::markers::MARKERS;
-    use infrastructure::readers::Readers;
+    use infrastructure::outbound::readers::Readers;
 
     /// The lines of a source with a marker in a comment, as the reader of `language` finds its comments, and the
     /// markers on them in order

@@ -5,22 +5,36 @@
 # after the role, so the two are written once. A role is written for every stack: a port is "an interface", which a
 # stack writes as a Protocol, an interface or a trait.
 #
+# A layer may have levels (`[[layer.level]]`), each a place of its own inside the layer. A level's `imports` names
+# layers, or a level of another layer as `<layer>.<level>`. With `ordered = true` a level may also import the levels
+# below it, as listed (the atomic levels of `ui`); otherwise the levels of a layer never import each other. A layer
+# with levels holds nothing beside them.
+#
 # Order matters: `rotproof create` makes the layers in this order, and the documentation lists the imports in it.
 
-[[layer]]
-name = "handler"
-imports = ["ui", "application", "infrastructure", "domain", "utils"]
+# The file the program starts from, which each layout names (`__main__.py`, `src/main.tsx`): no layer, and nothing
+# imports it
+[entry]
+imports = ["composition"]
 role = """
-Entry points from outside: CLI, HTTP, events, jobs.
+The file the program starts from. It calls `composition` to build the program, and starts it."""
 
-This is the composition root: it builds the real implementations from `infrastructure`, passes them to the use
-cases in `application` and calls them."""
+[[layer]]
+name = "composition"
+imports = ["ui", "infrastructure", "application", "protocol", "domain"]
+role = """
+The composition root: the one place that wires the program. It builds the implementations in
+`infrastructure.outbound`, passes them to the use cases in `application`, and passes the use cases to the entry
+points in `infrastructure.inbound` and to the UI.
+
+What the entry points and the connections both need at run time (configuration, a database connection, a logger,
+a clock) is built here and passed to each."""
 
 [[layer]]
 name = "ui"
-imports = ["application", "domain", "utils"]
+imports = ["application", "protocol", "domain"]
 role = """
-Framework-specific presentation and interaction: buttons, views, screen parts. `handler` registers them.
+Framework-specific presentation and interaction: buttons, views, screen parts. `composition` registers them.
 
 Does not import `infrastructure`. Organized by atomic design: `pages` > `templates` > `organisms` >
 `molecules` > `atoms`; a level may import the levels below it, and only `pages` import `application`. The UI
@@ -28,78 +42,43 @@ is responsible for presentation, not for features: split by level first, and by 
 
 Every part of the UI sits in a level, and nothing sits beside them: what the whole UI shares goes in the lowest
 level that may know what it knows."""
+# The atomic levels, top first
+ordered = true
 
-[[layer]]
-name = "application"
-imports = ["domain", "utils"]
-role = """
-Use cases. Each one carries one operation from start to finish.
-
-Does not import `infrastructure`. When a use case needs something external, it takes a port (an interface
-defined in `domain`) as an argument; `handler` builds the real implementation and passes it in. Tests pass a
-fake."""
-
-[[layer]]
-name = "infrastructure"
-imports = ["domain", "utils"]
-role = """
-Connections to the outside: databases, API clients, files, queues. May also import external libraries.
-
-Implements the ports (interfaces) defined in `domain`."""
-
-[[layer]]
-name = "domain"
-imports = ["utils"]
-role = """
-The concepts and rules of the business: types, calculations and decisions. No I/O.
-
-Ports (interfaces to external dependencies) are defined here too. If they were in `application`, the
-`infrastructure` code that implements them would import a layer above it. Define a port only when
-`application` needs it, with only the methods `application` calls."""
-
-[[layer]]
-name = "utils"
-imports = []
-role = """
-General-purpose parts that know no project concept.
-
-A part that can be named only by referring to where it is used, or that knows a project concept, belongs in
-`domain`."""
-
-# The atomic levels of `ui`, top first. A level may import the levels below it, and the layers in its `imports`.
-[[level]]
+[[layer.level]]
 name = "pages"
-imports = ["application", "domain", "utils"]
+imports = ["application", "protocol", "domain"]
 role = """
-One screen each. The only part of `ui` that calls `application`; `handler` builds the use cases and passes
+One screen each. The only part of `ui` that calls `application`; `composition` builds the use cases and passes
 them in."""
 
-[[level]]
+[[layer.level]]
 name = "templates"
-imports = ["domain", "utils"]
+imports = ["domain"]
 role = """
 Layout: how organisms are arranged. Does not call `application`; actions come in as callbacks."""
 
-[[level]]
+[[layer.level]]
 name = "organisms"
-imports = ["domain", "utils"]
+imports = ["domain"]
 role = """
 Meaningful groups, such as a list or a control panel. They may know `domain` types but do not call
 `application`; actions come in as callbacks.
 
 A provider that hands `domain` values to its children, such as the signed-in user, sits here too, with the hook
-that reads it. It takes the function that loads the values as a callback, and `handler` passes the use case in."""
+that reads it. It takes the function that loads the values as a callback, and `composition` passes the use case
+in."""
 
-[[level]]
+[[layer.level]]
 name = "molecules"
-imports = ["utils"]
+imports = []
 role = """
 Combinations of atoms, such as an input with a button. Like atoms, they know no project concept: they import
 neither `domain` nor `application`."""
 
-[[level]]
+[[layer.level]]
 name = "atoms"
-imports = ["utils"]
+imports = []
 role = """
 The smallest parts, visible or not: one button, one label, a design value (a colour, a spacing, a font, an
 animation), one behaviour (following the width of the screen, detecting a click outside), a provider that hands
@@ -107,3 +86,70 @@ a theme to its children. They know no project concept: they import neither `doma
 only plain values.
 
 If a part cannot be named without referring to where it is used, it is not an atom."""
+
+[[layer]]
+name = "infrastructure"
+imports = ["protocol", "domain"]
+role = """
+Technical details: the I/O with the outside, in both directions. May also import external libraries.
+
+Its two levels never import each other. What both need is built at run time by `composition` and passed to each
+(configuration, a connection, a logger), is a contract in `protocol` (a shape of data), or comes from an external
+library (a technical tool)."""
+
+[[layer.level]]
+name = "inbound"
+imports = ["protocol.inbound"]
+role = """
+Entry points from outside: the command line, HTTP endpoints, controllers, handlers of events and jobs. Each turns
+what comes in into a call of an input port in `protocol.inbound`, and knows nothing else of the project: neither
+the use cases nor `domain`."""
+
+[[layer.level]]
+name = "outbound"
+imports = ["protocol.outbound", "domain"]
+role = """
+Connections to the outside: databases, API clients, files, queues. Each implements an output port of
+`protocol.outbound`."""
+
+[[layer]]
+name = "application"
+imports = ["protocol", "domain"]
+role = """
+Use cases. Each one carries one operation from start to finish.
+
+A use case implements an input port of `protocol.inbound`, converting its data to and from `domain`, and reaches
+the outside only through the output ports of `protocol.outbound`, whose implementations `composition` passes in.
+Tests pass a fake."""
+
+[[layer]]
+name = "protocol"
+imports = ["domain"]
+role = """
+The contracts at the boundary of dependency inversion: interfaces, and the data they carry, with no
+implementation. Because `application` and `infrastructure` both depend on these and not on each other, either
+side can change or be replaced by a fake.
+
+Its two levels never import each other."""
+
+[[layer.level]]
+name = "inbound"
+imports = []
+role = """
+Input ports: the interfaces of the use cases that the entry points call, with the data each takes and returns.
+That data is plain, with no `domain` type, so an entry point knows nothing of `domain`."""
+
+[[layer.level]]
+name = "outbound"
+imports = ["domain"]
+role = """
+Output ports: the interfaces to the outside (repositories, clients) that `application` calls and
+`infrastructure.outbound` implements. Define a port only when `application` needs it, with only the methods
+`application` calls."""
+
+[[layer]]
+name = "domain"
+imports = []
+role = """
+The concepts and rules of the business: types, calculations and decisions. No I/O, and no ports: those are
+contracts, in `protocol`."""

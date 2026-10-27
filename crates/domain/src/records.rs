@@ -11,9 +11,9 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use crate::bundle::Docs;
-use utils::frontmatter::split;
-use utils::markdown::{heading, visible};
-use utils::paths::{file_name, parent};
+use crate::frontmatter::split;
+use crate::markdown::{heading, visible};
+use crate::paths::{file_name, parent};
 
 /// Directory (relative to docs/, "" for the root) -> the document types allowed in it
 const TYPES: [(&str, &[&str]); 3] = [

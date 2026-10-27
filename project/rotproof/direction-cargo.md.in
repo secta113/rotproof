@@ -3,3 +3,9 @@
   `[build-dependencies]`, under `[target]` too) and fails on any other; `[dev-dependencies]` serve the tests and are
   not judged. Only direct dependencies are judged: what the table allows is closed under chaining. Each layer's role
   is in the documentation `rotproof create` wrote into it.
+- **The levels of a crate are its modules, and its code is read for them.** A file in `src/inbound/` may name
+  `crate::outbound` (or reach it with `super::`) only as the table allows, in a `use`, an expression or a macro alike.
+  The crate's `src/lib.rs` only declares the modules of its levels: a re-export there (`pub use outbound::*`) would
+  let one level reach another, and fails. Every other file in `src/` sits in a level, and `#[path]` is not allowed.
+- **The entry file, `src/main.rs` of the root package, depends on `composition` only:** the root `Cargo.toml` is read
+  for it.

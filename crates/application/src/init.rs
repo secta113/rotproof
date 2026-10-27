@@ -13,38 +13,16 @@
 
 use std::collections::BTreeMap;
 
-use crate::create::{Made, refresh};
+use crate::create::refresh;
 use crate::tree::{exactly, read_text};
 use domain::bundle::DOCS;
-use domain::layers::{DECLARATION, declaration_text, known_stacks};
+use domain::layers::{
+    DECLARATION, ONION, PORTS_MOVED, crosses_onion, declaration_text, known_stacks, layout, retired,
+};
 use domain::migrate;
-use domain::tree::{Tree, Writer};
 use domain::upgrade::{FIRST, Update, fields, pending, with_files};
-
-/// What `rotproof init` did.
-#[derive(Debug)]
-pub enum Initialized {
-    /// The declaration was written, at this path
-    Declared(&'static str),
-    Upgraded(Upgraded),
-}
-
-/// What an upgrade of the project's files did.
-#[derive(Debug, Default)]
-pub struct Upgraded {
-    /// The version the project's files were up to
-    pub from: String,
-    /// Each update applied, with the file it changed
-    pub applied: Vec<(&'static str, &'static str)>,
-    /// How many records moved into `docs/work/`
-    pub moved: usize,
-    /// What each update that could not be applied leaves to a person
-    pub by_hand: Vec<String>,
-    /// What `rotproof create` would have done after the upgrade, without a layer
-    pub made: Made,
-    /// Whether `files` was set to the running version
-    pub files_set: bool,
-}
+use protocol::inbound::{Initialized, Upgraded};
+use protocol::outbound::{Tree, Writer};
 
 /// Write the declaration for `stack` into `tree` through `out`, or upgrade the project there to `running`. `name` is
 /// the project's, for the files it writes. `Err` when no declaration exists and the stack is unknown or not named, the
@@ -107,6 +85,9 @@ fn upgrade(
     for update in pending(&from, running, &declared.declined)? {
         apply(tree, out, update, &mut upgraded)?;
     }
+    if crosses_onion(&from, running) {
+        upgraded.moves = onion_moves(tree, declared.stack.as_deref());
+    }
     upgraded.made = refresh(tree, out, name)?;
     if upgraded.by_hand.is_empty() && declared.files.as_deref() != Some(running) {
         // Read again: the refresh may have added a field the declaration lacked
@@ -120,6 +101,25 @@ fn upgrade(
         upgraded.files_set = true;
     }
     Ok(upgraded)
+}
+
+/// How to move the code of a project of `stack` onto the onion table: each retired layer that is there, with where its
+/// code goes, and what moved inside the layers that stay. Nothing for a repository of records only.
+fn onion_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
+    let Some(layout) = stack.and_then(layout) else {
+        return Vec::new();
+    };
+    let mut moves: Vec<String> = retired(&layout)
+        .into_iter()
+        .filter(|(_, path, _)| tree.found(path) == Some(true))
+        .map(|(name, path, goes)| {
+            format!(
+                "{path}/ holds the layer {name} of the table before {ONION}, which is gone: {goes}"
+            )
+        })
+        .collect();
+    moves.push(format!("in the layers that stay, {PORTS_MOVED}"));
+    moves
 }
 
 /// Move the records of a project made before 0.3.0 into `docs/work/` (`migrate.rs` in `domain`): every file under
@@ -393,6 +393,43 @@ mod tests {
             "{:?}",
             again.by_hand
         );
+    }
+
+    #[test]
+    fn crossing_the_onion_table_says_how_to_move_the_layers_once_and_moves_nothing() {
+        let tree = Fake::default();
+        assert!(matches!(
+            init(&tree, &tree, Some("python"), "x", "0.3.0"),
+            Ok(Initialized::Declared(_))
+        ));
+        tree.write("handler/__init__.py", "").unwrap();
+        tree.write("utils/text.py", "").unwrap();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.4.0") else {
+            panic!("upgraded");
+        };
+        assert_eq!(upgraded.moves.len(), 3, "{:#?}", upgraded.moves);
+        assert!(
+            upgraded.moves[0]
+                .starts_with("handler/ holds the layer handler of the table before 0.4.0")
+        );
+        assert!(upgraded.moves[1].starts_with("utils/ holds the layer utils"));
+        assert!(upgraded.moves[2].contains("protocol.outbound"));
+        // It keeps nothing behind, and moves nothing
+        assert!(upgraded.files_set && upgraded.by_hand.is_empty());
+        assert_eq!(tree.text("handler/__init__.py").as_deref(), Some(""));
+        // Said once: the next run does not cross 0.4.0
+        let Ok(Initialized::Upgraded(again)) = init(&tree, &tree, None, "x", "0.4.0") else {
+            panic!("upgraded");
+        };
+        assert!(again.moves.is_empty(), "{:#?}", again.moves);
+
+        // A repository of records only has no layers to move
+        let records = Fake::default();
+        assert!(init(&records, &records, Some("none"), "x", "0.3.0").is_ok());
+        let Ok(Initialized::Upgraded(none)) = init(&records, &records, None, "x", "0.4.0") else {
+            panic!("upgraded");
+        };
+        assert!(none.moves.is_empty());
     }
 
     #[test]

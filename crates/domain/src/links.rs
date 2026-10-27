@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
 
-use utils::markdown::anchors;
+use crate::markdown::anchors;
 
 // A URL scheme. RFC 3986 allows `.` in one, but no scheme in use has it, while a file name with a line number
 // (`check.rs:104`) always does: read as a URL, that path would never be checked

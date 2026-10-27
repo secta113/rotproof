@@ -13,9 +13,9 @@ use std::path::Path;
 use application::tree::read_code;
 use domain::layers::DECLARATION;
 use domain::markers::{MARKERS, in_file};
-use domain::tree::Tree;
-use infrastructure::disk::Disk;
-use infrastructure::readers::Readers;
+use infrastructure::outbound::disk::Disk;
+use infrastructure::outbound::readers::Readers;
+use protocol::outbound::Tree;
 
 /// Rotproof's declaration: the Rust layout, every layer present. The records are kept outside, so it names no area
 pub const DECLARATION_TEXT: &str = "stack = \"rust\"\nareas = []\n";
@@ -144,7 +144,7 @@ fn xtask_markers(tree: &dyn Tree) -> Result<(Vec<String>, BTreeSet<usize>), Stri
     let paths = tree.files(XTASK).map_err(|e| format!("{XTASK}: {e}"))?;
     for path in paths
         .iter()
-        .filter(|path| utils::rust::is_source(utils::paths::file_name(path)))
+        .filter(|path| domain::rust::is_source(domain::paths::file_name(path)))
     {
         let Some(source) =
             read_code(tree, path, "comments", &mut found).map_err(|e| e.to_string())?
@@ -152,7 +152,7 @@ fn xtask_markers(tree: &dyn Tree) -> Result<(Vec<String>, BTreeSet<usize>), Stri
             continue;
         };
         read += 1;
-        let (here, positions) = in_file(path, &source, &utils::rust::comments(&source));
+        let (here, positions) = in_file(path, &source, &domain::rust::comments(&source));
         found.extend(here);
         words.extend(positions);
     }

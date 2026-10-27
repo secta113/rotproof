@@ -3,8 +3,9 @@
 Rotproof keeps a project's structure from drifting while LLMs and people change it, so that it does not rot. It keeps
 two structures:
 
-- **The layers:** which part of the code may import which (`handler`, `application`, `domain`, `infrastructure`,
-  `utils`, and an optional `ui`). Code that cannot be split into these layers mixes responsibilities, so the layers
+- **The layers:** which part of the code may import which, on the onion architecture (`composition`,
+  `infrastructure`, `application`, `protocol`, `domain`, and an optional `ui`). Code that cannot be split into these
+  layers mixes responsibilities, so the layers
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
   of dependencies stays what it was meant to be.
@@ -23,7 +24,8 @@ two structures:
   Rotproof changes the tree only when asked. It rewrites what a person wrote in one case only: when a version of
   Rotproof changes the format it reads, `rotproof init` carries the files across that change, doing what a machine can
   without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That is not a repair of drift:
-  the files were right under the old format, and Rotproof is what changed.
+  the files were right under the old format, and Rotproof is what changed. Code it never moves: when the layer table
+  changes (0.4.0), `rotproof init` says where each layer's code goes, and the person moves it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
 - **A check with nothing to check fails.** A check that passes on an empty tree protects nothing.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
@@ -34,7 +36,8 @@ two structures:
   hand.
 
 Rotproof makes the layer directories, checks that they are where the project declares them, and checks their
-direction: from the imports in Python and TypeScript, and from the dependencies each crate declares in Rust.
+direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
+the levels inside a crate, from the paths its code names.
 
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 (its `SPEC.md` as of commit `ad30107`): every document has YAML frontmatter with a `type`, `index.md` and `log.md` are
@@ -98,8 +101,9 @@ upgrade, needs no `--yes`.
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
 then `rotproof init --stack typescript` and `rotproof create --yes` in it, which keep what Vite wrote. Vite's entry point,
-`src/main.tsx`, is `handler`'s where it is (`index.html` loads it); `rotproof check` names the rest of the starter
-(`App.tsx`, the styles, `assets/`) as code outside the layers, with where each goes.
+`src/main.tsx`, is the entry file where it is (`index.html` loads it), and may import `composition` alone: what Vite
+has it import (`./App.tsx`, `./index.css`) moves into `src/composition/`, which `main.tsx` calls. `rotproof check`
+names the rest of the starter (`App.tsx`, the styles, `assets/`) as code outside the layers, with where each goes.
 
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
@@ -145,8 +149,11 @@ that has a declaration:
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
   `.rotproof/AGENTS.md`, the generated files in `docs/`), and sets `files` to the running version. Crossing a version
-  that changes the format of the records, it first moves them (below). It never changes the declaration's other
-  values, and once it has set `files`, running it again changes nothing.
+  that changes the format of the records, it first moves them (below). Crossing 0.4.0, which builds the layer table
+  on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
+  ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
+  `rotproof check` names what is not moved yet. It never changes the declaration's other values, and once it has set
+  `files`, running it again changes nothing.
 - **An update only adds,** and does nothing when its file has it already. What it cannot do without a person (its file
   is missing, or not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by
   hand, or decline the update by its name in `declined`, and run `rotproof init` again. A move across a change of
@@ -269,21 +276,33 @@ absent = ["ui"]          # layers this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
 ```
 
-What the layers are (`handler`, `ui`, `application`, `infrastructure`, `domain`, `utils`, and the atomic levels of
-`ui`: `pages`, `templates`, `organisms`, `molecules`, `atoms`) is written once, in `layers/table.toml`. Where they live
-is written once per stack:
+What the layers are is written once, in `layers/table.toml`, on the onion architecture:
 
-| Stack | A layer is | A `ui` level is | Code Rotproof looks at |
-|---|---|---|---|
-| `python` | `<layer>/__init__.py`, the role as its docstring | `ui/<level>/__init__.py` | `.py` files anywhere (`.PY` too), except `tests/` |
-| `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/ui/<level>/index.ts` (React) | every file in `src/`; `src/main.tsx` (Vite's entry point) is `handler`'s |
-| `rust` | a crate, `crates/<layer>/` (`handler` a binary), the role as `//!` | none: Rust has no `ui` yet | every crate in `crates/` |
+| Layer | Its levels | May import |
+|---|---|---|
+| `composition` | | every layer: the one place that wires the program |
+| `ui` | `pages` > `templates` > `organisms` > `molecules` > `atoms` (a level imports the levels below it) | `application`, `protocol`, `domain`; only `pages` call `application` |
+| `infrastructure` | `inbound` (entry points: the command line, HTTP, events, jobs), `outbound` (connections: databases, clients, files) | `inbound`: `protocol.inbound` alone. `outbound`: `protocol.outbound` and `domain` |
+| `application` | | `protocol`, `domain`: a use case implements an input port and calls output ports |
+| `protocol` | `inbound` (input ports, with plain data), `outbound` (output ports) | `inbound`: nothing. `outbound`: `domain` |
+| `domain` | | nothing |
+
+The levels of a layer other than `ui` never import each other. The entry file is no layer, and may import
+`composition` alone. No layer holds general-purpose parts: a part goes in the layer whose concept it speaks.
+
+Where they live is written once per stack:
+
+| Stack | A layer is | A level is | The entry file | Code Rotproof looks at |
+|---|---|---|---|---|
+| `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/` |
+| `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
+| `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no `ui` yet) | `src/main.rs` of the root package | every crate in `crates/`, and the root `Cargo.toml` |
 
 `stack = "none"` declares a repository that keeps records only: `rotproof create` makes only `docs/`, and `Rotproof
 check` checks only the records and prints that it did not check the layers. It is a line in the declaration, not a
 flag, so the structure check is never switched off where the declaration still declares layers.
 
-A level of `ui` is declared absent by its dotted name (`absent = ["ui.templates"]`). Files `.gitignore` excludes and
+A level is declared absent by its dotted name (`absent = ["ui.templates"]`). Files `.gitignore` excludes and
 hidden files are not looked at, so a virtual environment or a build directory is not code. A code file is matched in any
 case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 
@@ -414,12 +433,14 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   absent, and no layer declared absent is present. No code sits outside the layers, the stack's own paths (`tests/`)
   and `unchecked`. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.
-  `ui` holds only its levels: code in `ui` beside them fails, apart from the layer's own file (`ui/__init__.py`).
-  What the whole UI shares goes in a level: a part that knows no project concept, visible or not (a design value, one
-  behaviour, a provider of a theme), is an atom.
+  A layer with levels holds only its levels: code beside them fails, apart from the layer's own file
+  (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
+  (a design value, one behaviour, a provider of a theme), is an atom. A directory of a layer of the table before
+  0.4.0 (`handler`, `utils`) is named with where its code goes now.
 - **The layers import only what the table allows** (Python): every `import` and `from ... import` in the layers,
-  relative ones and those inside functions or under `if TYPE_CHECKING:` included. A layer may import itself and the
-  layers in its `imports`; a level of `ui` the levels below it and the layers in its `imports`. Only direct imports
+  relative ones and those inside functions or under `if TYPE_CHECKING:` included, and those of the entry file. A
+  layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own
+  `imports` name, and in `ui` the levels below it. Only direct imports
   are judged: what the table allows is closed under chaining, so a chain of allowed imports never reaches a forbidden
   layer. A module is placed where its parts, as a path, land as the operating system that runs the check resolves
   them: on Windows, `Infrastructure.db` lands in `infrastructure`, as Python imports it with `PYTHONCASEOK` set.
@@ -450,8 +471,15 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   that lands nowhere, where Cargo fails too, or outside the root is not judged. A renamed dependency (`package`) is
   placed by its path all the same. `[dev-dependencies]` serve the tests and are not judged; dependencies from a
   registry or git are not judged. A `Cargo.toml` that is not UTF-8 or
-  TOML fails, and so does a dependency taken from a workspace that does not declare it. Not seen: `[patch]` and
-  `[replace]`, and source files taken from another crate's directory (`#[path]`, `include!`, `[lib] path`).
+  TOML fails, and so does a dependency taken from a workspace that does not declare it. The root `Cargo.toml` is read
+  for the entry file, `src/main.rs` of the root package. Not seen: `[patch]` and `[replace]`, and source files taken
+  from another crate's directory (`include!`, `[lib] path`).
+- **The levels of a crate import only what the table allows** (Rust): a level is a module of its layer's crate,
+  which the manifest cannot tell apart, so the code of `src/` is read. Every path from `crate`, `super`, `self` or a
+  dependency on another layer, in a `use`, an expression or the tokens of a macro, is judged by the level it lands in
+  (`crate::outbound::Db` from `src/inbound/` fails, and so does `domain::Song` there). The crate's `src/lib.rs` only
+  declares its levels' modules, so no re-export lets one level reach another; every other file of `src/` sits in a
+  level, and `#[path]` fails. Not seen: a path a macro builds from pieces.
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an

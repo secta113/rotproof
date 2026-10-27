@@ -7,9 +7,9 @@ use std::io;
 
 use crate::tree::{Lookup, lookup, read_text};
 use domain::approvals::{APPROVALS, Kept, parse, problems, sort, with_kept, without};
-use domain::code::Parsers;
 use domain::direction::Forbidden;
-use domain::tree::{Tree, Writer};
+use protocol::outbound::Parsers;
+use protocol::outbound::{Tree, Writer};
 
 /// What the approvals file holds.
 #[derive(Debug, Default)]

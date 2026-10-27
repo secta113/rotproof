@@ -1,6 +1,7 @@
 //! `rotproof stop-hook`: the agent sent back when its last message leaves something open and nothing was recorded.
 
-use domain::hook::{Changes, RECORDS_DIR, open_in, send_back};
+use domain::hook::{RECORDS_DIR, open_in, send_back};
+use protocol::outbound::Changes;
 
 /// What the hook prints for `input` (the JSON the agent writes on stdin). `changes` is the project's, or `None` outside
 /// a project. `None` lets the agent stop, with nothing printed.

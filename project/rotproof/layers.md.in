@@ -9,9 +9,13 @@
 {direction}
 
 {table}
-- **`application` does not import `infrastructure` (dependency inversion).** When a use case needs something external,
-  define a port (an interface) in `domain`, and build the real implementation in `handler`. Define a port only when
-  `application` calls it, with only the methods it calls.
+- **`application` and `infrastructure` meet only in `protocol` (dependency inversion).** A use case implements an input
+  port of `protocol.inbound` and calls the output ports of `protocol.outbound`; an entry point in
+  `infrastructure.inbound` calls only the input ports, and a connection in `infrastructure.outbound` implements an
+  output port. `composition` alone builds the implementations and wires them, and the entry file only calls it. Define
+  a port only when it is called, with only the methods called.
+- **A part goes in the layer whose concept it speaks.** No layer holds general-purpose parts: a general procedure comes
+  from the standard library or an external one, and wanting to write one's own is a sign of a concept not named yet.
 - **An import the table forbids passes only when a person approves it.** Fix a forbidden import; when the project
   means to keep it (a framework forces it, a fix cannot wait for the refactoring), ask a person to run
   `rotproof approve <file> <import>` on a terminal, which adds it to `.config/rotproof-approved.toml` with the reason.

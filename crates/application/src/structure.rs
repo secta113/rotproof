@@ -7,7 +7,7 @@ use crate::layers::read;
 use crate::tree::{code_files, exactly};
 use domain::layers::{DECLARATION, Declared};
 use domain::structure::{Seen, listed, named, problems as judged};
-use domain::tree::Tree;
+use protocol::outbound::Tree;
 
 /// What the structure check found.
 #[derive(Debug, Default)]
@@ -84,11 +84,11 @@ mod tests {
         let tree = Fake::new(&[
             (
                 ".config/rotproof.toml",
-                "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\", \"handler\", \"application\"]\n",
+                "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\", \"composition\", \"application\", \
+                 \"protocol\"]\n",
             ),
             ("domain/__init__.py", ""),
             ("Infrastructure/__init__.py", ""),
-            ("utils/__init__.py", ""),
             ("scripts/run.py", ""),
         ]);
         let found = problems(&tree).unwrap().found;

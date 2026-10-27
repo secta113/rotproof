@@ -23,8 +23,8 @@ use regex::Regex;
 
 use crate::code::is_source;
 use crate::layers::{Declared, Language, Layout};
-use utils::paths::within;
-use utils::text::line_of;
+use crate::paths::within;
+use crate::text::line_of;
 
 /// The words that fail in a comment.
 pub const MARKERS: [&str; 5] = ["TODO", "FIXME", "XXX", "HACK", "NOTE"];
@@ -76,7 +76,7 @@ pub fn has_comments(layout: &Layout, name: &str) -> bool {
         // Every file in `src/` is code in the layout; only source has comments to read
         Language::TypeScript => layout.is_code(name) && is_source(name),
         // The code files of a Rust layout are its crates' manifests; the comments are in the `.rs` files beside them
-        Language::Rust => utils::rust::is_source(name),
+        Language::Rust => crate::rust::is_source(name),
     }
 }
 

@@ -3,8 +3,9 @@
 
 use std::io;
 
-use domain::tree::{Tree, as_windows_reads, with_lf};
-use utils::paths::{file_name, join, parent};
+use domain::paths::{file_name, join, parent};
+use domain::tree::{as_windows_reads, with_lf};
+use protocol::outbound::Tree;
 
 /// The text of the file at `path`, as Rotproof reads it ([`with_lf`]).
 pub fn read_text(tree: &dyn Tree, path: &str) -> io::Result<String> {
@@ -149,14 +150,14 @@ pub fn code_files(
 }
 
 /// A tree in memory, for the tests: files by their path, and the directories their paths make or
-/// [`Writer`](domain::tree::Writer) made.
+/// [`Writer`](protocol::outbound::Writer) made.
 #[cfg(test)]
 pub mod fake {
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
     use std::io;
 
-    use domain::tree::{Tree, Writer};
+    use protocol::outbound::{Tree, Writer};
 
     #[derive(Debug, Default)]
     pub struct Fake {
@@ -371,7 +372,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("docs/backlog")).unwrap();
         std::fs::write(dir.path().join("README.md"), "# Readme\n").unwrap();
-        let disk = infrastructure::disk::Disk::new(dir.path());
+        let disk = infrastructure::outbound::disk::Disk::new(dir.path());
         assert_eq!(
             lookup(&disk, "docs/backlog", "../../README.md"),
             Lookup::Found {

@@ -2,9 +2,9 @@
 //! and judged by the rules in `domain`.
 
 use crate::tree::{Lookup, lookup, read_text};
-use domain::code::Parsers;
 use domain::links::{Target, missing, target as pointed, to_definition, to_heading};
-use domain::tree::Tree;
+use protocol::outbound::Parsers;
+use protocol::outbound::Tree;
 
 /// Why the link with `text` to `target` does not resolve, or `None` when it does. `here` is the directory of the
 /// document that holds it, and `bundle_root` the directory a target starting with `/` is from (see
@@ -98,13 +98,13 @@ mod tests {
     }
 
     fn reasons(root: &Path, cases: &[(&str, &str)]) -> Vec<Option<String>> {
-        let tree = infrastructure::disk::Disk::new(root);
+        let tree = infrastructure::outbound::disk::Disk::new(root);
         cases
             .iter()
             .map(|(text, target)| {
                 broken(
                     &tree,
-                    &infrastructure::readers::Readers,
+                    &infrastructure::outbound::readers::Readers,
                     text,
                     target,
                     "docs/work",

@@ -40,20 +40,8 @@ use domain::layers::{
     DECLARATION, Declared, MISSING, Place, completed, lacking, parse_declaration, unreadable,
 };
 use domain::project::{GUIDE, guide, project_files};
-use domain::tree::{Tree, Writer};
-
-/// What `rotproof create` did.
-#[derive(Debug, Default)]
-pub struct Made {
-    /// The files written, from the root, with `/`: made new or rewritten with a change
-    pub written: Vec<String>,
-    /// Documents left out of the index files: name -> why
-    pub left_out: Vec<(String, String)>,
-    /// The fields added to the declaration, as `name = value`
-    pub added: Vec<String>,
-    /// What the stack does not have Rotproof write yet, and why
-    pub not_written: Option<String>,
-}
+use protocol::inbound::Made;
+use protocol::outbound::{Tree, Writer};
 
 /// What a run does with the layers that are neither present nor declared absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

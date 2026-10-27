@@ -1,7 +1,7 @@
 # Where the layers live in a TypeScript project (React for `ui`). What the layers are is in table.toml.
 #
-# A layer is a directory in `src/` with an `index.ts`, with the role as its doc comment. A level of `ui` is a directory
-# inside it.
+# A layer is a directory in `src/` with an `index.ts`, with the role as its doc comment. A level is a directory inside
+# its layer.
 
 # Code is any file in `src/`, outside `.gitignore` and hidden directories. Code outside every layer fails, unless the
 # project lists it in `unchecked`. Nothing outside `src/` is looked at.
@@ -11,9 +11,9 @@ not_layers = []
 doc_prefix = " * "
 # Every source file in `src/` (`.ts`, `.tsx`, `.js` and the others), read with oxc; the other files there are not read
 language = "typescript"
-# Vite's React starter (`npm create vite -- --template react-ts`) puts its entry point at `src/main.tsx`, which
-# `index.html` loads: it is `handler`'s by what it holds, and moving it would mean editing `index.html` too
-belongs = { "src/main.tsx" = "handler" }
+# The entry file, where Vite's React starter (`npm create vite -- --template react-ts`) puts it and `index.html` loads
+# it: moving it would mean editing `index.html` too
+entry = "src/main.tsx"
 # The rest of the starter moves: said in the finding for code outside the layers
 where_code_goes = "a screen (Vite's App.tsx) goes in src/ui/pages; a style (index.css, App.css) or an image the UI shows (assets/) in src/ui/atoms"
 
@@ -27,7 +27,7 @@ export {};
 ''' }]
 
 [level]
-path = "src/ui/{name}"
+path = "src/{layer}/{name}"
 files = [{ path = "index.ts", text = '''
 /**
 {doc}
