@@ -29,6 +29,14 @@ pub fn split(text: &str) -> Result<(Hash, Sections), String> {
         .ok_or("no frontmatter (a YAML block between `---` lines)")?;
     let docs = YamlLoader::load_from_str(&caps[1])
         .map_err(|e| format!("frontmatter is not valid YAML: {e}"))?;
+    if let Some(line) = comment_line(&caps[1], &docs) {
+        // The frontmatter starts on the line after the opening `---`
+        return Err(format!(
+            "line {}: the frontmatter holds a YAML comment, which is read as nothing: a `#` after a space or at the \
+             start of a line starts one, so quote a value that holds one",
+            line + 1
+        ));
+    }
     let Some(Yaml::Hash(meta)) = docs.into_iter().next() else {
         return Err("frontmatter is not a mapping".into());
     };
@@ -49,6 +57,46 @@ pub fn split(text: &str) -> Result<(Hash, Sections), String> {
         .map(|(name, lines)| (name, lines.join("\n").trim().to_string()))
         .collect();
     Ok((meta, sections))
+}
+
+/// The line of the first `#` in `yaml` that starts a comment, counted from 1, where `docs` is `yaml` read. A comment is
+/// read as nothing, so one after an unquoted value cuts the value silently: `title: PR #1` is the title `PR`.
+///
+/// Whether a `#` starts a comment is left to the YAML reader: with that `#` alone replaced by a character `yaml` does
+/// not hold, `yaml` reads as `docs` once the character is changed back, unless the `#` started a comment. One inside a
+/// quoted or a block value, or inside a word, is text either way.
+fn comment_line(yaml: &str, docs: &[Yaml]) -> Option<usize> {
+    let stand_in = ('\u{E000}'..='\u{F8FF}').find(|c| !yaml.contains(*c))?;
+    yaml.match_indices('#').find_map(|(at, _)| {
+        let probe = format!("{}{stand_in}{}", &yaml[..at], &yaml[at + 1..]);
+        let same = YamlLoader::load_from_str(&probe).is_ok_and(|probed| {
+            probed.len() == docs.len()
+                && probed
+                    .into_iter()
+                    .zip(docs)
+                    .all(|(probed, doc)| restored(probed, stand_in) == *doc)
+        });
+        (!same).then(|| yaml[..at].matches('\n').count() + 1)
+    })
+}
+
+/// `value` with `stand_in` changed back to `#` in every text, keys included
+fn restored(value: Yaml, stand_in: char) -> Yaml {
+    match value {
+        Yaml::String(text) => Yaml::String(text.replace(stand_in, "#")),
+        Yaml::Array(items) => Yaml::Array(
+            items
+                .into_iter()
+                .map(|item| restored(item, stand_in))
+                .collect(),
+        ),
+        Yaml::Hash(hash) => Yaml::Hash(
+            hash.into_iter()
+                .map(|(key, value)| (restored(key, stand_in), restored(value, stand_in)))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// The first `# heading` of the body, as a reader sees the rendered page: one inside a comment or a code block does not
@@ -129,6 +177,78 @@ mod tests {
         ];
         for text in bad {
             assert!(split(text).is_err(), "{text:?} passed");
+        }
+    }
+
+    #[test]
+    fn a_comment_in_the_frontmatter_is_caught_with_its_line() {
+        let comments = [
+            // The value would be cut to `PR`
+            ("---\ntype: X\ntitle: PR #1 merged\n---\n", 3),
+            ("---\n# a note\ntype: X\n---\n", 2),
+            ("---\ntype: X\ntags: [a, b] # c\n---\n", 3),
+            ("---\ntype: X\nverified: # when\n  by: me\n---\n", 3),
+            ("---\ntype: X\ntitle: 'a # b' # c\n---\n", 3),
+            // Only the `#` that starts the comment counts, not the ones inside words before and in it
+            ("---\ntype: X\ntitle: a#b\n  c#d # e#f\n---\n", 4),
+            ("---\ntype: X\n---\n", 0),
+            ("---\ntype: X\ndescription: |\n  # text\n# a note\n---\n", 5),
+        ];
+        for (text, line) in comments {
+            let read = split(text);
+            if line == 0 {
+                assert!(read.is_ok(), "{text:?}: {read:?}");
+            } else {
+                let why = read.expect_err(text);
+                assert!(
+                    why.starts_with(&format!("line {line}: ")),
+                    "{text:?}: {why}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_hash_that_starts_no_comment_is_text() {
+        let texts = [
+            ("title: 'PR #1'", "PR #1"),
+            ("title: \"PR #1\"", "PR #1"),
+            ("title: C# and F#", "C# and F#"),
+            ("title: |\n  # one\n  ## two", "# one\n## two\n"),
+        ];
+        for (yaml, title) in texts {
+            let text = format!("---\ntype: X\n{yaml}\n---\n");
+            let (meta, _) = split(&text).unwrap_or_else(|why| panic!("{yaml:?}: {why}"));
+            assert_eq!(
+                meta[&Yaml::String("title".into())].as_str(),
+                Some(title),
+                "{yaml:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_frontmatter_a_reader_copies_reads() {
+        // The work item in the README once failed as YAML (an unquoted `: ` in its description), and its comments
+        // would now fail too: an example is copied, so it is read as a record is
+        let readme = include_str!("../../../README.md");
+        let rules = include_str!("../../../records/knowledge-rules.md");
+        let work_item = readme
+            .split_once("```markdown\n---\n")
+            .expect("the README shows a work item")
+            .1;
+        let follows = rules
+            .split_once("```yaml\n")
+            .expect("the knowledge rules show follows")
+            .1;
+        let examples = [
+            work_item.split_once("\n---\n").unwrap().0.to_string(),
+            // The block is indented under a list item
+            follows.split_once("```").unwrap().0.replace("\n  ", "\n"),
+        ];
+        for example in examples {
+            let text = format!("---\n{}\n---\n", example.trim_end());
+            assert!(split(&text).is_ok(), "{text}: {:?}", split(&text));
         }
     }
 }

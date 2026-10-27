@@ -3,11 +3,14 @@
 //!
 //! ```yaml
 //! follows:
-//!   src/api/routes.py: 3e1f0a9c          # a file, in any stack
-//!   src/api/routes.py::create_user: 0b7d21e4   # a function or class of a Python file
-//!   src/api/routes.py::Router.add: 9a01c3ff    # a method
-//!   src/api/: 51c0d2aa                   # every .py file under a directory
+//!   src/api/routes.py: 3e1f0a9c
+//!   src/api/routes.py::create_user: 0b7d21e4
+//!   src/api/routes.py::Router.add: 9a01c3ff
+//!   src/api/: 51c0d2aa
 //! ```
+//!
+//! A key is a file, in any stack, a function or class of a Python file (`::create_user`), a method (`::Router.add`),
+//! or a directory, for every `.py` file under it. The frontmatter holds no comment (`frontmatter.rs`).
 //!
 //! - **The review is pinned in the document.** Writing the new hash changes the document, so the log entry that names
 //!   it with its new hash (`records.rs`) records the review: no rule of its own.
