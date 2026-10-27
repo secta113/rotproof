@@ -623,6 +623,81 @@ fn index_fails_without_the_work_directory() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("docs/work"));
 }
 
+#[test]
+fn before_prints_what_closes_before_a_record() {
+    let root = repo();
+    let write = |slug: &str, text: &str| {
+        fs::write(root.path().join(format!("docs/work/{slug}.md")), text).unwrap();
+    };
+    write(
+        "release",
+        "---\ntype: Milestone\ntitle: Release\ndescription: D.\ntags: [operations]\nstatus: stable\n---\n\n\
+         # Condition\n\nThe tag is pushed.\n",
+    );
+    write(
+        "build",
+        "---\ntype: Work Item\ntitle: Build\ndescription: D.\ntags: [operations]\nstatus: draft\nfiled: 2026-10-01\n\
+         verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\nuntil: [release]\n---\n\n\
+         # State\n\nNot yet.\n\n# Details\n\n[log](/log.md)\n",
+    );
+    let before = |record: &str| run(&["--root", &root_arg(root.path()), "before", record]);
+    let out = before("release");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        stdout(&out),
+        "release.md: Release | 1 open record\n\
+         \n\
+         -- nothing open closes before these --\n\
+         ready     build.md - Build | State (2026-10-01): Not yet.\n"
+    );
+    // It writes nothing: no index appears
+    assert!(!root.path().join("docs/work/index.md").exists());
+    // A closed record is listed with --all only
+    write(
+        "shipped",
+        "---\ntype: Work Item\ntitle: Shipped\ndescription: D.\ntags: [operations]\nstatus: deprecated\n\
+         progress: done\nfiled: 2026-10-01\nverified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\n\
+         until: [release]\n---\n\n# Resolution\n\nShipped it.\n\n# State\n\nDone.\n\n# Details\n\n[log](/log.md)\n",
+    );
+    assert_eq!(stdout(&before("release")), stdout(&out));
+    let all = run(&[
+        "--root",
+        &root_arg(root.path()),
+        "before",
+        "release",
+        "--all",
+    ]);
+    assert_eq!(
+        stdout(&all),
+        "release.md: Release | 1 open record, 1 closed record\n\
+         \n\
+         -- nothing open closes before these --\n\
+         ready     build.md - Build | State (2026-10-01): Not yet.\n\
+         done      shipped.md - Shipped | Done: Shipped it.\n"
+    );
+    let out = before("nowhere");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("names no record in docs/work/: nowhere"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // A document left out of the records is said on stderr, as what the listing cannot see
+    write("broken", "# no frontmatter\n");
+    let out = before("release.md");
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("left out of the records, so not listed, fix it: work/broken.md: "),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// Every file under `root`, from the root with `/`, and its text.
 fn tree(root: &Path) -> Vec<(String, String)> {
     let mut out = Vec::new();

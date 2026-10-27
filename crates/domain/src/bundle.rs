@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::NaiveDate;
 
+use crate::arrows::Mark;
 use crate::frontmatter::{Sections, split};
 use crate::layers::DECLARATION;
 use crate::schema::{
@@ -669,10 +670,6 @@ fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
     if let Some(closed_as) = item.progress.closed_as() {
         return format!("{start} | {}", resolution(closed_as, sections));
     }
-    // Only the date, in the time zone of the measurement: the time of day would not change what a reader does.
-    // Whether stale_after has passed is not shown: the index would then depend on today's date, and the check that
-    // compares it with the generated text would pass on some days and fail on others
-    let measured = item.last_verified().at.date_naive();
     let unsorted = if item.status == Status::Draft {
         " | Status: draft."
     } else {
@@ -682,10 +679,123 @@ fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
         .stale_after
         .map(|at| format!(" | Re-measure after {}.", at.date_naive()))
         .unwrap_or_default();
-    format!(
-        "{start}{unsorted} | State ({measured}): {}{stale}",
-        first_sentence(&sections["State"])
-    )
+    format!("{start}{unsorted} | {}{stale}", state(item, sections))
+}
+
+/// The last measurement of an open item: its date and the first sentence of its state. Only the date, in the time zone
+/// of the measurement: the time of day would not change what a reader does. Whether stale_after has passed is not
+/// shown: the index would then depend on today's date, and the check that compares it with the generated text would
+/// pass on some days and fail on others.
+fn state(item: &Item, sections: &Sections) -> String {
+    let measured = item.last_verified().at.date_naive();
+    format!("State ({measured}): {}", first_sentence(&sections["State"]))
+}
+
+/// The headings of the depths in what `rotproof before` prints: what a depth means, not a number, which would read as
+/// the order of the work, while a depth orders only the closing (a record deep in the list may well have started).
+/// The first depth, which nothing open closes before.
+pub const FIRST_DEPTH: &str = "-- nothing open closes before these --";
+/// Every later depth: which records each waits for, its line says.
+pub const LATER_DEPTH: &str = "-- these close after the ones above --";
+/// The records that wait on each other, last.
+pub const IN_A_CYCLE: &str = "-- these wait on each other: rotproof check fails --";
+
+/// What `rotproof before` prints for the record `name` (a file name) of `work`, with the closed records too when
+/// `closed`: a line naming it, with how many open records close before it, how many earlier milestones stop the
+/// listing and how many closed records are listed, then one line per such record as `arrows::before` orders them, each
+/// depth under its heading. Each line has its mark, its file name and title, what a reader needs to choose which to
+/// open (a spec its status, an item its last measurement, a milestone its date and whether `today` is past it, a closed
+/// record how it closed), `Started.` for a waiting record whose work started, and the open records it waits for, by
+/// name. `None` when `name` is no record that passes.
+pub fn render_before(work: &Work, name: &str, closed: bool, today: NaiveDate) -> Option<String> {
+    let listed = crate::arrows::before(work, name, closed)?;
+    let records = crate::arrows::records(work);
+    let plural = |n: usize, what: &str| match n {
+        1 => format!("1 {what}"),
+        n => format!("{n} {what}s"),
+    };
+    let count = |marks: &[Mark]| {
+        listed
+            .iter()
+            .filter(|earliest| marks.contains(&earliest.mark))
+            .count()
+    };
+    let counts: Vec<String> = [
+        (
+            count(&[Mark::Started, Mark::Ready, Mark::Waits]),
+            "open record",
+        ),
+        (count(&[Mark::Milestone]), "milestone"),
+        (count(&[Mark::Done, Mark::Dropped]), "closed record"),
+    ]
+    .into_iter()
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, what)| plural(n, what))
+    .collect();
+    let counts = match (counts.is_empty(), closed) {
+        (true, false) => "nothing open closes before it".to_string(),
+        (true, true) => "nothing closes before it".to_string(),
+        (false, _) => counts.join(", "),
+    };
+    let mut out = vec![format!("{name}: {} | {counts}", records[name].title)];
+    if !listed.is_empty() {
+        out.push(String::new());
+    }
+    for (i, earliest) in listed.iter().enumerate() {
+        if i == 0 || listed[i - 1].depth != earliest.depth {
+            let heading = match earliest.depth {
+                0 => FIRST_DEPTH,
+                usize::MAX => IN_A_CYCLE,
+                _ => LATER_DEPTH,
+            };
+            out.push(heading.to_string());
+        }
+        let name = earliest.name.as_str();
+        let mark = match earliest.mark {
+            Mark::Started => "started",
+            Mark::Ready => "ready",
+            Mark::Waits => "waits",
+            Mark::Milestone => "milestone",
+            Mark::Done => "done",
+            Mark::Dropped => "dropped",
+        };
+        let sections = if let Some((_, sections)) = work.items.get(name) {
+            sections
+        } else if let Some((_, sections)) = work.specs.get(name) {
+            sections
+        } else {
+            &work.milestones[name].1
+        };
+        let detail = if let Some(closed_as) = records[name].closed_as {
+            Some(resolution(closed_as, sections))
+        } else if let Some((item, _)) = work.items.get(name) {
+            Some(state(item, sections))
+        } else if let Some((spec, _)) = work.specs.get(name) {
+            Some(format!("Status: {}.", spec.status.name()))
+        } else {
+            // The output of a command, not a file `rotproof check` compares, so it may say what today makes of the date
+            work.milestones[name].0.date.map(|date| {
+                if date < today {
+                    format!("Date: {date}. Past its date.")
+                } else {
+                    format!("Date: {date}.")
+                }
+            })
+        };
+        let started =
+            (earliest.mark == Mark::Waits && earliest.started).then(|| "Started.".to_string());
+        let waits = &earliest.waits_for;
+        let mut line = format!("{mark:<9} {name} - {}", records[name].title);
+        for part in detail
+            .into_iter()
+            .chain(started)
+            .chain((!waits.is_empty()).then(|| format!("Waits for: {}", waits.join(", "))))
+        {
+            line.push_str(&format!(" | {part}"));
+        }
+        out.push(line);
+    }
+    Some(out.join("\n") + "\n")
 }
 
 /// The knowledge index: the guides, the alarms that hold under `# When something happens`, the other documents that

@@ -93,6 +93,15 @@ pub struct Indexed {
     pub past_date: Vec<(String, String)>,
 }
 
+/// What `rotproof before` found.
+#[derive(Debug, Default)]
+pub struct Before {
+    /// What to print: the record, then the open records that close before it, earliest first
+    pub text: String,
+    /// Documents left out of the records, which the listing cannot see: name -> why
+    pub left_out: Vec<(String, String)>,
+}
+
 /// One key of a document's `follows` whose code is not as pinned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Drift {
@@ -126,6 +135,8 @@ pub trait Commands {
     fn guide(&self, root: &Path, stack: Option<&str>) -> Result<String, String>;
     /// Write every index file, and find the items to measure again now.
     fn index(&self, root: &Path) -> Result<Indexed, String>;
+    /// The open records that close before `record`, a slug of `docs/work/`, and the closed ones too when `closed`.
+    fn before(&self, root: &Path, record: &str, closed: bool) -> Result<Before, String>;
     /// The findings an approval of `import` by `file` would keep, as `rotproof check` says them. `Err` when the import
     /// is not forbidden, or is approved already.
     fn pending(&self, root: &Path, file: &str, import: &str) -> Result<Vec<String>, String>;
