@@ -302,10 +302,205 @@ pub fn waiting(work: &Work) -> BTreeMap<String, Waiting> {
     out
 }
 
+/// What an open milestone waits for, through the arrows and the parents, as the index shows it.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Reaching {
+    /// How many open specs and work items close before it
+    pub records: usize,
+    /// The open milestones that come before it, where the count stops, by file name
+    pub milestones: Vec<String>,
+}
+
+/// File name -> what each open milestone waits for. A milestone that waits for nothing open is not in it. The count is
+/// that of `closing_before`, so that a release does not count the work of the one before it.
+pub fn reaching(work: &Work) -> BTreeMap<String, Reaching> {
+    let records = records(work);
+    let earlier = Earlier::new(work, &records);
+    let mut out = BTreeMap::new();
+    for (milestone, record) in &records {
+        if !record.milestone || !record.is_open() {
+            continue;
+        }
+        let mut count = Reaching::default();
+        for name in closing_before(&records, &earlier, milestone, false) {
+            if records[name].milestone {
+                count.milestones.push(name.to_string());
+            } else {
+                count.records += 1;
+            }
+        }
+        if count != Reaching::default() {
+            out.insert(milestone.to_string(), count);
+        }
+    }
+    out
+}
+
+/// How a record that closes before another stands, as `rotproof before` marks it, in the order it lists them within a
+/// depth: the work under way first, then what can start, what waits, the moments outside the work, and what is closed.
+/// The mark answers whether the record can be worked to its end now; whether a waiting record started is said apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Mark {
+    /// Open, its work has started, and nothing open closes before it
+    Started,
+    /// Open, its work has not started, and nothing open closes before it
+    Ready,
+    /// Open, and something open closes before it, whether its work started or not
+    Waits,
+    /// An earlier open milestone, where the listing stops
+    Milestone,
+    /// Closed as done
+    Done,
+    /// Closed as dropped
+    Dropped,
+}
+
+/// A record that closes before another, as `rotproof before` lists it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Earliest {
+    /// Its file name
+    pub name: String,
+    pub mark: Mark,
+    /// How far it is from the earliest: 0 when nothing listed closes before it, else one more than the farthest that
+    /// does. `usize::MAX` for records that wait on each other
+    pub depth: usize,
+    /// Open, and its work has started, whatever it waits for
+    pub started: bool,
+    /// The open records it waits for, by file name: those its arrows name as earlier, then its children
+    pub waits_for: Vec<String>,
+}
+
+/// The records that close before the record `name` (a file name), as `closing_before` finds them, the closed ones too
+/// when `closed`: by depth, so each comes after every one it waits for, then by mark and file name. Records that wait
+/// on each other, which `rotproof check` fails on, come last. `None` when `name` is no record that passes.
+pub fn before(work: &Work, name: &str, closed: bool) -> Option<Vec<Earliest>> {
+    let records = records(work);
+    let name = *records.get_key_value(name)?.0;
+    let earlier = Earlier::new(work, &records);
+    let listed = closing_before(&records, &earlier, name, closed);
+    // The listed records each one waits for: the open ones, as a closed record holds nothing back, and none for a
+    // milestone, where the listing stops
+    let inside = |name: &str| -> Vec<&str> {
+        if records[name].milestone {
+            return Vec::new();
+        }
+        earlier
+            .of(name)
+            .filter(|before| listed.contains(before) && records[before].is_open())
+            .collect()
+    };
+    // How far each one is from the earliest: one more than the farthest it waits for. The closed records listed with
+    // `closed` change no open record's depth
+    let mut depth: BTreeMap<&str, usize> = BTreeMap::new();
+    loop {
+        let before = depth.len();
+        for name in &listed {
+            let waits = inside(name);
+            if !depth.contains_key(name) && waits.iter().all(|w| depth.contains_key(w)) {
+                let at = waits.iter().map(|w| depth[w] + 1).max().unwrap_or(0);
+                depth.insert(name, at);
+            }
+        }
+        if depth.len() == before {
+            break;
+        }
+    }
+    let mut out: Vec<Earliest> = listed
+        .iter()
+        .map(|name| {
+            let record = &records[name];
+            let waits = inside(name);
+            // The mark says whether the record can be worked to its end now: a started record that waits for an open
+            // one waits, as it cannot close, and says it started apart
+            let mark = match record.closed_as {
+                Some(ClosedAs::Done) => Mark::Done,
+                Some(ClosedAs::Dropped) => Mark::Dropped,
+                None if record.milestone => Mark::Milestone,
+                None if !waits.is_empty() => Mark::Waits,
+                None if record.started => Mark::Started,
+                None => Mark::Ready,
+            };
+            Earliest {
+                name: name.to_string(),
+                mark,
+                depth: depth.get(name).copied().unwrap_or(usize::MAX),
+                started: record.started,
+                waits_for: waits.iter().map(|name| name.to_string()).collect(),
+            }
+        })
+        .collect();
+    // Within a mark, the started records first: the work under way
+    out.sort_by(|x, y| {
+        (x.depth, x.mark, !x.started, &x.name).cmp(&(y.depth, y.mark, !y.started, &y.name))
+    });
+    Some(out)
+}
+
+/// The records that close right before each record, by file name: the earlier ends of its arrows, and its children.
+struct Earlier<'a> {
+    arrows: BTreeMap<&'a str, Vec<&'a str>>,
+    children: BTreeMap<&'a str, Vec<&'a str>>,
+}
+
+impl<'a> Earlier<'a> {
+    fn new(work: &Work, records: &BTreeMap<&'a str, Record<'a>>) -> Self {
+        let mut out = Earlier {
+            arrows: BTreeMap::new(),
+            children: BTreeMap::new(),
+        };
+        for (before, after) in arrows(work).into_keys() {
+            let before = records.get_key_value(before.as_str()).unwrap().0;
+            let after = records.get_key_value(after.as_str()).unwrap().0;
+            out.arrows.entry(after).or_default().push(before);
+        }
+        for (name, record) in records {
+            if let Some(parent) = record.parent {
+                let parent = format!("{parent}.md");
+                if let Some((parent, _)) = records.get_key_value(parent.as_str()) {
+                    out.children.entry(parent).or_default().push(name);
+                }
+            }
+        }
+        out
+    }
+
+    fn of(&self, name: &str) -> impl Iterator<Item = &'a str> + '_ {
+        let arrows = self.arrows.get(name).into_iter().flatten();
+        let children = self.children.get(name).into_iter().flatten();
+        arrows.chain(children).copied()
+    }
+}
+
+/// The open records that close before the record `target`, by file name, and the closed ones too when `closed`: back
+/// along the arrows from the later record to the earlier one and from a parent to its children. Without `closed`, only
+/// through open records (an open record before a closed one breaks an arrow or a parent, which is checked apart). An
+/// earlier milestone is in it, but not what comes before it, and the record itself never is, even in a cycle.
+fn closing_before<'a>(
+    records: &BTreeMap<&'a str, Record<'a>>,
+    earlier: &Earlier<'a>,
+    target: &'a str,
+    closed: bool,
+) -> BTreeSet<&'a str> {
+    let mut seen = BTreeSet::from([target]);
+    let mut todo: Vec<&str> = earlier.of(target).collect();
+    while let Some(name) = todo.pop() {
+        if seen.contains(name) || !(closed || records[name].is_open()) {
+            continue;
+        }
+        seen.insert(name);
+        if !records[name].milestone {
+            todo.extend(earlier.of(name));
+        }
+    }
+    seen.remove(target);
+    seen
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::{Docs, WORK_RULES, render_work, work};
+    use crate::bundle::{Docs, WORK_RULES, render_before, render_work, work};
+    use chrono::NaiveDate;
 
     /// A record of `kind` titled after its slug: open (`stable`), `done` or `dropped`, with `extra` frontmatter.
     fn record(kind: &str, slug: &str, how: &str, extra: &str) -> (String, String) {
@@ -626,8 +821,228 @@ mod tests {
         );
         // A milestone counts what it waits for
         assert!(
-            line("release").ends_with(" | Waits for 2 open records."),
+            line("release").ends_with(" | Waits for: 2 open records"),
             "{index}"
+        );
+    }
+
+    /// A milestone counts the work before it through the arrows and the parents, not only what its own arrows name,
+    /// and stops at an earlier milestone, which it counts apart.
+    #[test]
+    fn a_milestone_counts_the_work_that_reaches_it() {
+        let all = read(vec![
+            record("milestone", "next", "open", ""),
+            record("milestone", "release", "open", "until: [next]\n"),
+            record("milestone", "outside", "open", "until: [wait-outside]\n"),
+            record("milestone", "quiet", "open", ""),
+            record("spec", "epic", "open", "until: [release]\n"),
+            record("item", "part", "open", "parent: epic\n"),
+            record("item", "prep", "open", "until: [part]\n"),
+            record("item", "wait-outside", "open", "until: [release]\n"),
+            record("item", "gone", "done", "until: [release]\n"),
+            record("item", "later", "open", "until: [next]\n"),
+        ]);
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        assert_eq!(problems(&all), Vec::<String>::new());
+        let reaching = reaching(&all);
+        // epic by its arrow, part as its child, prep two steps back, wait-outside, and not the closed gone
+        assert_eq!(
+            reaching["release.md"],
+            Reaching {
+                records: 4,
+                milestones: vec!["outside.md".into()]
+            }
+        );
+        // later, and release, before which the count stops
+        assert_eq!(
+            reaching["next.md"],
+            Reaching {
+                records: 1,
+                milestones: vec!["release.md".into()]
+            }
+        );
+        assert!(!reaching.contains_key("outside.md") && !reaching.contains_key("quiet.md"));
+        let index = render_work(&all, &["a".to_string()]);
+        let line = |slug: &str| {
+            index
+                .lines()
+                .find(|line| line.starts_with(&format!("* [{slug}]({slug}.md)")))
+                .unwrap()
+                .to_string()
+        };
+        assert!(
+            line("release").ends_with(
+                " | Waits for: 4 open records, [outside](outside.md) | Until: [next](next.md)"
+            ),
+            "{index}"
+        );
+        assert!(
+            line("next").ends_with(" | Waits for: 1 open record, [release](release.md)"),
+            "{index}"
+        );
+        assert!(
+            line("outside").ends_with(" | Until: [wait-outside](wait-outside.md)"),
+            "{index}"
+        );
+    }
+
+    /// `rotproof before` lists what closes before a record as the index counts it, each after what it waits for, with
+    /// how each stands; for a spec, its children and what closes before them.
+    #[test]
+    fn before_lists_the_open_records_earliest_first() {
+        let all = read(vec![
+            record("milestone", "next", "open", ""),
+            record("milestone", "release", "open", "until: [next]\n"),
+            record(
+                "milestone",
+                "outside",
+                "open",
+                "date: 2026-10-01\nuntil: [wait-outside]\n",
+            ),
+            record("spec", "epic", "open", "until: [release]\n"),
+            record("item", "part", "open", "parent: epic\n"),
+            record("item", "prep", "open", "until: [part]\n"),
+            record(
+                "item",
+                "under-way",
+                "open",
+                "progress: started\nuntil: [release]\n",
+            ),
+            record(
+                "item",
+                "wait-outside",
+                "open",
+                "progress: started\nuntil: [release]\n",
+            ),
+            record("item", "gone", "done", "until: [release]\n"),
+            record(
+                "item",
+                "follow-up",
+                "open",
+                "after: [gone]\nuntil: [release]\n",
+            ),
+            record("item", "abandoned", "dropped", "parent: epic\n"),
+            record("item", "later", "open", "until: [next]\n"),
+        ]);
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        assert_eq!(problems(&all), Vec::<String>::new());
+        let listed = |name: &str| -> Vec<(String, Mark)> {
+            before(&all, name, false)
+                .unwrap()
+                .into_iter()
+                .map(|earliest| (earliest.name, earliest.mark))
+                .collect()
+        };
+        let pairs = |pairs: &[(&str, Mark)]| -> Vec<(String, Mark)> {
+            pairs
+                .iter()
+                .map(|(name, mark)| (name.to_string(), *mark))
+                .collect()
+        };
+        // By depth, and within one by mark: started, ready, waits, then milestone. A started record that waits for an
+        // open one waits, first among those that wait
+        assert_eq!(
+            listed("release.md"),
+            pairs(&[
+                ("under-way.md", Mark::Started),
+                ("follow-up.md", Mark::Ready),
+                ("prep.md", Mark::Ready),
+                ("outside.md", Mark::Milestone),
+                ("wait-outside.md", Mark::Waits),
+                ("part.md", Mark::Waits),
+                ("epic.md", Mark::Waits),
+            ])
+        );
+        // The listing stops at release, as the count does
+        assert_eq!(
+            listed("next.md"),
+            pairs(&[("later.md", Mark::Ready), ("release.md", Mark::Milestone)])
+        );
+        assert_eq!(
+            listed("epic.md"),
+            pairs(&[("prep.md", Mark::Ready), ("part.md", Mark::Waits)])
+        );
+        assert!(listed("prep.md").is_empty());
+        assert!(before(&all, "nowhere.md", false).is_none());
+        let today = NaiveDate::from_ymd_opt(2026, 10, 28).unwrap();
+        // A waiting record says whether it started; a parent names its open children; a milestone says when today is
+        // past its date
+        assert_eq!(
+            render_before(&all, "release.md", false, today).unwrap(),
+            "release.md: release | 6 open records, 1 milestone\n\
+             \n\
+             -- nothing open closes before these --\n\
+             started   under-way.md - under-way | State (2026-10-01): Not yet.\n\
+             ready     follow-up.md - follow-up | State (2026-10-01): Not yet.\n\
+             ready     prep.md - prep | State (2026-10-01): Not yet.\n\
+             milestone outside.md - outside | Date: 2026-10-01. Past its date.\n\
+             -- these close after the ones above --\n\
+             waits     wait-outside.md - wait-outside | State (2026-10-01): Not yet. | Started. | Waits for: outside.md\n\
+             waits     part.md - part | State (2026-10-01): Not yet. | Waits for: prep.md\n\
+             -- these close after the ones above --\n\
+             waits     epic.md - epic | Status: stable. | Waits for: part.md\n"
+        );
+        let before_its_date = NaiveDate::from_ymd_opt(2026, 9, 1).unwrap();
+        assert!(
+            render_before(&all, "release.md", false, before_its_date)
+                .unwrap()
+                .contains("milestone outside.md - outside | Date: 2026-10-01.\n")
+        );
+        assert_eq!(
+            render_before(&all, "prep.md", false, today).unwrap(),
+            "prep.md: prep | nothing open closes before it\n"
+        );
+        // With the closed records, last within their depth. A closed one holds nothing back: follow-up, after gone,
+        // stays where it was, and epic names only its open child
+        assert_eq!(
+            render_before(&all, "release.md", true, today).unwrap(),
+            "release.md: release | 6 open records, 1 milestone, 2 closed records\n\
+             \n\
+             -- nothing open closes before these --\n\
+             started   under-way.md - under-way | State (2026-10-01): Not yet.\n\
+             ready     follow-up.md - follow-up | State (2026-10-01): Not yet.\n\
+             ready     prep.md - prep | State (2026-10-01): Not yet.\n\
+             milestone outside.md - outside | Date: 2026-10-01. Past its date.\n\
+             done      gone.md - gone | Done: Closed.\n\
+             dropped   abandoned.md - abandoned | Dropped: Closed.\n\
+             -- these close after the ones above --\n\
+             waits     wait-outside.md - wait-outside | State (2026-10-01): Not yet. | Started. | Waits for: outside.md\n\
+             waits     part.md - part | State (2026-10-01): Not yet. | Waits for: prep.md\n\
+             -- these close after the ones above --\n\
+             waits     epic.md - epic | Status: stable. | Waits for: part.md\n"
+        );
+        assert_eq!(
+            render_before(&all, "later.md", true, today).unwrap(),
+            "later.md: later | nothing closes before it\n"
+        );
+    }
+
+    /// Records that wait on each other, which the check fails on, are listed last instead of stopping the listing.
+    #[test]
+    fn before_lists_a_cycle_last() {
+        let all = read(vec![
+            record("milestone", "release", "open", ""),
+            record("item", "a", "open", "after: [b]\nuntil: [release]\n"),
+            record("item", "b", "open", "after: [a]\n"),
+            record("item", "c", "open", "until: [release]\n"),
+        ]);
+        assert!(!problems(&all).is_empty());
+        let names: Vec<String> = before(&all, "release.md", false)
+            .unwrap()
+            .into_iter()
+            .map(|earliest| earliest.name)
+            .collect();
+        assert_eq!(names, ["c.md", "a.md", "b.md"]);
+        let today = NaiveDate::from_ymd_opt(2026, 10, 28).unwrap();
+        assert_eq!(
+            render_before(&all, "release.md", false, today).unwrap(),
+            "release.md: release | 3 open records\n\
+             \n\
+             -- nothing open closes before these --\n\
+             ready     c.md - c | State (2026-10-01): Not yet.\n\
+             -- these wait on each other: rotproof check fails --\n\
+             waits     a.md - a | State (2026-10-01): Not yet. | Waits for: b.md\n\
+             waits     b.md - b | State (2026-10-01): Not yet. | Waits for: a.md\n"
         );
     }
 

@@ -98,7 +98,8 @@ Body headings:
   (`[...](../../README.md#<anchor>)`). A heading's anchor is the one GitHub gives it. The log's only headings are its
   dates, so a link to a log entry points to its day and names the entry in its text
   (`[log.md: <task name>](/log.md#2026-10-01)`). A link to a Python file names the function or class in its text
-  (``[`render_index`](../../src/bundle.py)``). The check fails when a link in `# Details` does not resolve.
+  (``[`render_index`](../../src/bundle.py)``). The check fails when `# Details` holds no link, and when any link in
+  a document under `docs/` or in the log does not resolve, in `# Details` or anywhere else.
 - **"Next time someone touches X" is not a trigger anyone will see.** People who touch X do not open the work items.
   Prefer a moment when they are opened anyway, such as starting a piece of work or a deploy. If the trigger can only be
   X, search `docs/work/` for X before committing a change to X.
@@ -259,7 +260,8 @@ Under a heading or a parent, the specs come first, then the work items. An item 
 closed, `Done:` or `Dropped:`, before the first sentence of its resolution. An open record whose work has started
 says `Started.`. An open record with arrows says `Ready.` when every record before it is done and its work has not
 started, names the records before it still open after `Waits for:`, and those after it still open after `Until:`; a
-milestone counts the records it waits for instead of naming them.
+milestone instead counts the open records that close before it, through the arrows and the parents, and names the
+open milestones before it, where the count stops, so that a release does not count the work of the one before it.
 
 After adding or changing a record, run `rotproof index`. `rotproof check` fails when the index or the closed list
 differs from what `rotproof index` writes. `closed.md` is a name Rotproof writes, as `rules.md` is: no record is named

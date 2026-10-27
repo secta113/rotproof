@@ -158,7 +158,7 @@ fn each_broken_rule_fails_under_its_check() {
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 23] = [
+    let cases: [(&str, &str, String); 24] = [
         // Done before the milestone it comes after
         (
             "the arrows keep their order",
@@ -188,13 +188,22 @@ fn each_broken_rule_fails_under_its_check() {
             "# no frontmatter\n".into(),
         ),
         (
-            "every link in # Details resolves",
+            "every link in docs/ resolves",
             "docs/work/x.md",
             item("[gone](/no_such.md)"),
         ),
+        // A link outside # Details is read too
+        (
+            "every link in docs/ resolves",
+            "docs/work/x.md",
+            item("[log](/log.md)").replace(
+                "# State\n\nY.",
+                "# State\n\nY, as [the spec](/work/gone.md#its-heading) says.",
+            ),
+        ),
         // The only link is inside a comment, so a reader sees none
         (
-            "every link in # Details resolves",
+            "every # Details has a link",
             "docs/work/x.md",
             item("Nothing yet. <!-- [log](/log.md) -->"),
         ),
@@ -612,6 +621,81 @@ fn index_fails_without_the_work_directory() {
     let out = run(&["--root", &root_arg(root.path()), "index"]);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("docs/work"));
+}
+
+#[test]
+fn before_prints_what_closes_before_a_record() {
+    let root = repo();
+    let write = |slug: &str, text: &str| {
+        fs::write(root.path().join(format!("docs/work/{slug}.md")), text).unwrap();
+    };
+    write(
+        "release",
+        "---\ntype: Milestone\ntitle: Release\ndescription: D.\ntags: [operations]\nstatus: stable\n---\n\n\
+         # Condition\n\nThe tag is pushed.\n",
+    );
+    write(
+        "build",
+        "---\ntype: Work Item\ntitle: Build\ndescription: D.\ntags: [operations]\nstatus: draft\nfiled: 2026-10-01\n\
+         verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\nuntil: [release]\n---\n\n\
+         # State\n\nNot yet.\n\n# Details\n\n[log](/log.md)\n",
+    );
+    let before = |record: &str| run(&["--root", &root_arg(root.path()), "before", record]);
+    let out = before("release");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        stdout(&out),
+        "release.md: Release | 1 open record\n\
+         \n\
+         -- nothing open closes before these --\n\
+         ready     build.md - Build | State (2026-10-01): Not yet.\n"
+    );
+    // It writes nothing: no index appears
+    assert!(!root.path().join("docs/work/index.md").exists());
+    // A closed record is listed with --all only
+    write(
+        "shipped",
+        "---\ntype: Work Item\ntitle: Shipped\ndescription: D.\ntags: [operations]\nstatus: deprecated\n\
+         progress: done\nfiled: 2026-10-01\nverified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\n\
+         until: [release]\n---\n\n# Resolution\n\nShipped it.\n\n# State\n\nDone.\n\n# Details\n\n[log](/log.md)\n",
+    );
+    assert_eq!(stdout(&before("release")), stdout(&out));
+    let all = run(&[
+        "--root",
+        &root_arg(root.path()),
+        "before",
+        "release",
+        "--all",
+    ]);
+    assert_eq!(
+        stdout(&all),
+        "release.md: Release | 1 open record, 1 closed record\n\
+         \n\
+         -- nothing open closes before these --\n\
+         ready     build.md - Build | State (2026-10-01): Not yet.\n\
+         done      shipped.md - Shipped | Done: Shipped it.\n"
+    );
+    let out = before("nowhere");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("names no record in docs/work/: nowhere"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // A document left out of the records is said on stderr, as what the listing cannot see
+    write("broken", "# no frontmatter\n");
+    let out = before("release.md");
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("left out of the records, so not listed, fix it: work/broken.md: "),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// Every file under `root`, from the root with `/`, and its text.
@@ -1201,10 +1285,6 @@ fn each_difference_from_the_declaration_fails() {
             Box::new(|r| plant_file(r, "stray.PY")),
         ),
         (
-            "missing: .config/rotproof.toml",
-            Box::new(|r| fs::remove_file(r.join(".config/rotproof.toml")).unwrap()),
-        ),
-        (
             "unknown stack",
             Box::new(|r| declare(r, "stack = \"cobol\"\nareas = [\"a\"]\n")),
         ),
@@ -1289,6 +1369,30 @@ fn each_difference_from_the_declaration_fails() {
         );
         assert!(stdout(&out).contains(said), "{said}: {}", stdout(&out));
     }
+}
+
+/// Without a declaration nothing can be checked against it: no broken rule, as a file that cannot be read is none, so
+/// CI tells a project that has not adopted Rotproof from one that breaks its rules
+#[test]
+fn check_without_a_declaration_exits_2_and_says_how_to_write_one() {
+    let root = clean_repo();
+    fs::remove_file(root.path().join(".config/rotproof.toml")).unwrap();
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains(
+            "missing: .config/rotproof.toml. Write it with `rotproof init --stack <stack>`"
+        ),
+        "{said}"
+    );
+    // A declaration that is there but breaks a rule is still a broken rule
+    declare(
+        root.path(),
+        "stack = \"python\"\nareas = [\"a\"]\nextra = 1\n",
+    );
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
 }
 
 /// A declaration whose stack does not fit still names the areas the records are grouped by, so the records are checked
@@ -2186,10 +2290,12 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         "{init_help}"
     );
     let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(2));
     assert!(
-        stdout(&out).contains("rotproof init --stack <stack>` (python, typescript, rust, or none"),
+        String::from_utf8_lossy(&out.stderr)
+            .contains("rotproof init --stack <stack>` (python, typescript, rust, or none"),
         "{}",
-        stdout(&out)
+        String::from_utf8_lossy(&out.stderr)
     );
 
     // Each command names the next

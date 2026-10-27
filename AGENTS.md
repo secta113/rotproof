@@ -99,6 +99,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
 | `approvals.rs` | Reading the approvals file from the tree, and `rotproof approve`: an entry added for a forbidden import a person approved, and the entries that match nothing removed (`--prune`) |
+| `before.rs` | `rotproof before`: the open records (with `--all`, the closed ones too) that close before a record of `docs/work/`, earliest first |
 | `bundle.rs` | Reading `docs/` from the tree, directory by directory |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |
@@ -135,9 +136,12 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 
 ## Rules for every change
 
-- **A layer or a stack changes in `layers/`, not in code.** The table says what the layers are once; a layout says
-  only where they live in one stack. The tests read every definition, so a layout that names a layer the table lacks
-  fails.
+- **A layer changes in `layers/`, not in code; a stack, in `layers/` and in three tables of code.** The table says
+  what the layers are once; a layout says only where they live in one stack. A new stack is also named in `STACKS`
+  (`crates/domain/src/layers.rs`, which builds its layout into the binary), in `GITIGNORE` with its file in
+  `project/gitignore/`, and in `PYPI` when it installs Rotproof from PyPI (both in `crates/domain/src/project.rs`).
+  The tests read every definition and every one of those tables, so a layout that names a layer the table lacks
+  fails, and so does a stack left out of a table.
 - **Write Rotproof where prose names the tool, and `rotproof` for the command, the package, the crate and file
   names,** as Ruff and `ruff` are written. A sentence that starts with the command still writes it in backticks.
 - **Wrap a line that holds a comment at 120 characters.** rustfmt wraps code, not comments; `cargo xtask ci` fails on
