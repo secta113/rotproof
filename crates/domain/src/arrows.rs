@@ -302,6 +302,67 @@ pub fn waiting(work: &Work) -> BTreeMap<String, Waiting> {
     out
 }
 
+/// What an open milestone waits for, through the arrows and the parents, as the index shows it.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Reaching {
+    /// How many open specs and work items close before it
+    pub records: usize,
+    /// The open milestones that come before it, where the count stops, by file name
+    pub milestones: Vec<String>,
+}
+
+/// File name -> what each open milestone waits for. A milestone that waits for nothing open is not in it. The count
+/// follows the arrows back from the later record to the earlier one and from a parent to its children, through open
+/// records only (an open record before a closed one breaks an arrow or a parent, which is checked apart), and stops at
+/// an earlier milestone, so that a release does not count the work of the one before it.
+pub fn reaching(work: &Work) -> BTreeMap<String, Reaching> {
+    let records = records(work);
+    let mut earlier: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (before, after) in arrows(work).into_keys() {
+        let before = records.get_key_value(before.as_str()).unwrap().0;
+        let after = records.get_key_value(after.as_str()).unwrap().0;
+        earlier.entry(after).or_default().push(before);
+    }
+    for (name, record) in &records {
+        if let Some(parent) = record.parent {
+            let parent = format!("{parent}.md");
+            if let Some((parent, _)) = records.get_key_value(parent.as_str()) {
+                earlier.entry(parent).or_default().push(name);
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    for (milestone, record) in &records {
+        if !record.milestone || !record.is_open() {
+            continue;
+        }
+        let mut seen = BTreeSet::new();
+        let mut count = Reaching::default();
+        let mut todo: Vec<&str> = earlier
+            .get(milestone)
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
+        while let Some(name) = todo.pop() {
+            if !seen.insert(name) || !records[name].is_open() {
+                continue;
+            }
+            if records[name].milestone {
+                count.milestones.push(name.to_string());
+            } else {
+                count.records += 1;
+                todo.extend(earlier.get(name).into_iter().flatten().copied());
+            }
+        }
+        if count != Reaching::default() {
+            count.milestones.sort();
+            out.insert(milestone.to_string(), count);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,7 +687,67 @@ mod tests {
         );
         // A milestone counts what it waits for
         assert!(
-            line("release").ends_with(" | Waits for 2 open records."),
+            line("release").ends_with(" | Waits for: 2 open records"),
+            "{index}"
+        );
+    }
+
+    /// A milestone counts the work before it through the arrows and the parents, not only what its own arrows name,
+    /// and stops at an earlier milestone, which it counts apart.
+    #[test]
+    fn a_milestone_counts_the_work_that_reaches_it() {
+        let all = read(vec![
+            record("milestone", "next", "open", ""),
+            record("milestone", "release", "open", "until: [next]\n"),
+            record("milestone", "outside", "open", "until: [wait-outside]\n"),
+            record("milestone", "quiet", "open", ""),
+            record("spec", "epic", "open", "until: [release]\n"),
+            record("item", "part", "open", "parent: epic\n"),
+            record("item", "prep", "open", "until: [part]\n"),
+            record("item", "wait-outside", "open", "until: [release]\n"),
+            record("item", "gone", "done", "until: [release]\n"),
+            record("item", "later", "open", "until: [next]\n"),
+        ]);
+        assert!(all.problems.is_empty(), "{:?}", all.problems);
+        assert_eq!(problems(&all), Vec::<String>::new());
+        let reaching = reaching(&all);
+        // epic by its arrow, part as its child, prep two steps back, wait-outside, and not the closed gone
+        assert_eq!(
+            reaching["release.md"],
+            Reaching {
+                records: 4,
+                milestones: vec!["outside.md".into()]
+            }
+        );
+        // later, and release, before which the count stops
+        assert_eq!(
+            reaching["next.md"],
+            Reaching {
+                records: 1,
+                milestones: vec!["release.md".into()]
+            }
+        );
+        assert!(!reaching.contains_key("outside.md") && !reaching.contains_key("quiet.md"));
+        let index = render_work(&all, &["a".to_string()]);
+        let line = |slug: &str| {
+            index
+                .lines()
+                .find(|line| line.starts_with(&format!("* [{slug}]({slug}.md)")))
+                .unwrap()
+                .to_string()
+        };
+        assert!(
+            line("release").ends_with(
+                " | Waits for: 4 open records, [outside](outside.md) | Until: [next](next.md)"
+            ),
+            "{index}"
+        );
+        assert!(
+            line("next").ends_with(" | Waits for: 1 open record, [release](release.md)"),
+            "{index}"
+        );
+        assert!(
+            line("outside").ends_with(" | Until: [wait-outside](wait-outside.md)"),
             "{index}"
         );
     }

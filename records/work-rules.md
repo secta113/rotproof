@@ -260,7 +260,8 @@ Under a heading or a parent, the specs come first, then the work items. An item 
 closed, `Done:` or `Dropped:`, before the first sentence of its resolution. An open record whose work has started
 says `Started.`. An open record with arrows says `Ready.` when every record before it is done and its work has not
 started, names the records before it still open after `Waits for:`, and those after it still open after `Until:`; a
-milestone counts the records it waits for instead of naming them.
+milestone instead counts the open records that close before it, through the arrows and the parents, and names the
+open milestones before it, where the count stops, so that a release does not count the work of the one before it.
 
 After adding or changing a record, run `rotproof index`. `rotproof check` fails when the index or the closed list
 differs from what `rotproof index` writes. `closed.md` is a name Rotproof writes, as `rules.md` is: no record is named

@@ -446,10 +446,13 @@ pub fn render_closed(work: &Work, areas: &[String]) -> String {
 fn render_lists(work: &Work, areas: &[String]) -> (String, String) {
     let records = crate::arrows::records(work);
     let waiting = crate::arrows::waiting(work);
+    let reaching = crate::arrows::reaching(work);
     // Whether an open record's work has started, then what it waits for and what waits for it, after its line. Started
     // replaces Ready: an arrow orders the closing, not the start, so a record may start before its earlier records
-    // close, and is listed with what it still waits for. A milestone collects the arrows of much of the work, so it
-    // says how many records it waits for instead of naming them
+    // close, and is listed with what it still waits for. A milestone collects much of the work, so it says how many
+    // records close before it, through the arrows and the parents, instead of naming them: the records its own arrows
+    // name are only part of the work before it. It names the milestones before it, which are few, and each a moment
+    // the reader needs to see
     let arrows = |name: &str, milestone: bool| -> String {
         let started = records.get(name).is_some_and(|record| record.started);
         let started = if started { " | Started." } else { "" };
@@ -467,11 +470,20 @@ fn render_lists(work: &Work, areas: &[String]) -> (String, String) {
         if waiting.ready && started.is_empty() {
             out.push_str(" | Ready.");
         }
-        match waiting.before.len() {
-            0 => {}
-            1 if milestone => out.push_str(" | Waits for 1 open record."),
-            n if milestone => out.push_str(&format!(" | Waits for {n} open records.")),
-            _ => out.push_str(&format!(" | Waits for: {}", links(&waiting.before))),
+        if milestone {
+            if let Some(reaching) = reaching.get(name) {
+                let count = match reaching.records {
+                    0 => None,
+                    1 => Some("1 open record".to_string()),
+                    n => Some(format!("{n} open records")),
+                };
+                let milestones =
+                    Some(links(&reaching.milestones)).filter(|links| !links.is_empty());
+                let parts: Vec<String> = [count, milestones].into_iter().flatten().collect();
+                out.push_str(&format!(" | Waits for: {}", parts.join(", ")));
+            }
+        } else if !waiting.before.is_empty() {
+            out.push_str(&format!(" | Waits for: {}", links(&waiting.before)));
         }
         if !waiting.until.is_empty() {
             out.push_str(&format!(" | Until: {}", links(&waiting.until)));
