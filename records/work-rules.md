@@ -28,6 +28,8 @@ How things are now goes in `docs/knowledge/`, and what was done in `docs/log.md`
 Every record is one file, `docs/work/<slug>.md`. The slug never changes once the file exists, because commit messages,
 other documents and the `parent` of other records refer to it. The three types share one directory, so a slug names
 one record of any of them. The frontmatter holds the fields used for filtering. Everything else goes in the body.
+The frontmatter holds no YAML comment, which is read as nothing: quote a value with a `#` after a space in it
+(`title: 'PR #1 is merged'`).
 
 # Specs
 

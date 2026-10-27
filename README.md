@@ -123,10 +123,11 @@ The project's files are written once, as a starting point, and are the project's
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
 | `docs/work/next-milestone.md` | When `docs/work/` has no milestone: a draft of the next moment the work waits for, whose `# Condition` holds only a comment, so `rotproof check` fails until a person writes what that moment is |
-| `.claude/settings.json` | The stop hook (see "The stop hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
+| `.claude/settings.json` | The stop hook and a hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
-| `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present |
+| `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
+| `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program |
 
 How a `typescript` or `rust` project pins Rotproof is not decided yet, so for those stacks `rotproof create` writes
 neither the pin nor the workflow, and says so.
@@ -433,16 +434,16 @@ A work item has this frontmatter and these body headings:
 ---
 type: Work Item
 title: Some problem
-description: One sentence: what is waiting.
-tags: [area]                  # exactly one, declared in areas; the index groups items by it
-status: stable                # draft = open and not sorted yet, stable = open and sorted, deprecated = closed
-progress: started             # optional while open: started; once closed, required: done or dropped
-parent: some-spec             # the spec it is a part of; required for stable
-after: [design]               # optional: the records that come before it
-until: [release-0-3-0]        # optional: the records that come after it, often a milestone
+description: 'One sentence: what is waiting.'
+tags: [area]
+status: stable
+progress: started
+parent: some-spec
+after: [design]
+until: [release-0-3-0]
 filed: 2026-10-01
 verified: {by: human:someone, at: 2026-10-01T10:00:00+09:00}
-stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state again
+stale_after: 2027-01-01T00:00:00+09:00
 ---
 
 # Resolution    (only when closed, and then first)
@@ -450,6 +451,14 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
 # State
 # Details
 ```
+
+- `tags`: exactly one, declared in `areas`; the index groups items by it.
+- `status`: `draft` = open and not sorted yet, `stable` = open and sorted, `deprecated` = closed.
+- `progress`: optional while open: `started`; once closed, required: `done` or `dropped`.
+- `parent`: the spec it is a part of; required for `stable`.
+- `after`, optional: the records that come before it. `until`, optional: the records that come after it, often a
+  milestone.
+- `stale_after`, optional: when to measure the state again.
 
 ## What `rotproof check` checks
 
@@ -609,8 +618,9 @@ stale_after: 2027-01-01T00:00:00+09:00   # optional: when to measure the state a
   checks. A project's own rules go in another guide in the same directory.
 - **No spec sits at the repository root.**
 
-The frontmatter is read as YAML 1.2: quoting a value never changes whether it passes. Its closing `---` may end the
-file. The body is read as GitHub
+The frontmatter is read as YAML 1.2: quoting a date or a datetime never changes whether it passes. It holds no comment: a `#`
+after a space or at the start of a line starts one, which YAML reads as nothing, so an unquoted `title: PR #1` would
+be the title `PR`; quote a value that holds one. Its closing `---` may end the file. The body is read as GitHub
 renders it: an HTML comment or a fenced code block (``` or ~~~, indented by up to 3 spaces, running to the end when
 it is not closed) is not text, so a heading, a link or the only text of a section inside one counts for nothing. A
 heading may be indented by up to 3 spaces, and a closing run of `#` (`## Notes ##`) is not part of it.

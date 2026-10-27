@@ -19,7 +19,8 @@ to it and says what the code cannot: why it has this shape, and what changing it
 # One document
 
 One document is one file, `docs/knowledge/<slug>.md`. The slug never changes once the file exists, because commit
-messages and other documents refer to it.
+messages and other documents refer to it. The frontmatter holds no YAML comment, which is read as nothing: quote a
+value with a `#` after a space in it (`title: 'PR #1 is merged'`).
 
 | Field | Content |
 |---|---|
@@ -55,11 +56,14 @@ The body is free, except that a deprecated document opens with `# Resolution`: w
 
   ```yaml
   follows:
-    src/api/routes.py: 3e1f0a9c              # a file, in any language
-    src/api/routes.py::create_user: 0b7d21e4  # a function or class of a Python file
-    src/api/routes.py::Router.add: 9a01c3ff   # a method
-    src/api/: 51c0d2aa                       # every .py file under a directory
+    src/api/routes.py: 3e1f0a9c
+    src/api/routes.py::create_user: 0b7d21e4
+    src/api/routes.py::Router.add: 9a01c3ff
+    src/api/: 51c0d2aa
   ```
+
+  A key is a file, in any language (`src/api/routes.py`), a function or class of a Python file (`::create_user`), a
+  method (`::Router.add`), or a directory, for every `.py` file under it (`src/api/`).
 
   `rotproof follows <key>...` prints these lines, with the hashes as the code is now: run it when a document starts
   to follow something, once the document says what the code does.
