@@ -10,7 +10,7 @@ pub mod python;
 pub mod readers;
 pub mod typescript;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use domain::schema::Time;
 use protocol::outbound::{Changes, Files, Machine, Parsers};
@@ -44,6 +44,10 @@ impl Machine for Local {
     fn changes(&self, root: &Path) -> Option<Box<dyn Changes>> {
         // git runs only when the hook's decision asks for it, so a root outside a repository is not an error here
         project_root(root).map(|root| Box::new(Git::new(&root)) as Box<dyn Changes>)
+    }
+
+    fn project(&self, start: &Path) -> Option<PathBuf> {
+        project_root(start)
     }
 
     fn now(&self) -> Time {

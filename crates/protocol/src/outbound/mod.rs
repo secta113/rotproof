@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use domain::code::{Aliases, Manifest, Source};
 use domain::schema::Time;
@@ -86,6 +86,8 @@ pub trait Machine {
     fn user_name(&self, root: &Path) -> Option<String>;
     /// The changes of the repository that holds `root`, or `None` when no repository holds it.
     fn changes(&self, root: &Path) -> Option<Box<dyn Changes>>;
+    /// The project that holds `start`: the nearest directory upwards with a declaration, or `None` outside one.
+    fn project(&self, start: &Path) -> Option<PathBuf>;
     /// The time now, with the machine's offset from UTC.
     fn now(&self) -> Time;
 }

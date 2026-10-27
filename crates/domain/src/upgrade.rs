@@ -10,10 +10,11 @@
 //!   what the project wrote. What it cannot do without a person, it says, and the project does by hand or declines by
 //!   naming the update in `declined`.
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use toml_edit::DocumentMut;
 
 use crate::approvals::APPROVALS;
+use crate::hook;
 use crate::layers::{DECLARATION, DECLINED_COMMENT, FILES_COMMENT};
 
 /// The version of Rotproof that runs.
@@ -39,10 +40,12 @@ pub fn version(text: &str) -> Option<Version> {
 pub enum Update {
     /// The rule that denies Claude Code editing the approvals file, in `.claude/settings.json`
     DenyApprovals,
+    /// The hook beside the stop hook that says when `rotproof` is not on the `PATH`, in `.claude/settings.json`
+    StopHookOnPath,
 }
 
 /// Every update, oldest first.
-pub const UPDATES: [Update; 1] = [Update::DenyApprovals];
+pub const UPDATES: [Update; 2] = [Update::DenyApprovals, Update::StopHookOnPath];
 
 /// What an update does to its file.
 #[derive(Debug, PartialEq, Eq)]
@@ -65,6 +68,7 @@ impl Update {
     pub fn name(self) -> &'static str {
         match self {
             Update::DenyApprovals => "claude-deny-approvals",
+            Update::StopHookOnPath => "claude-stop-hook-on-path",
         }
     }
 
@@ -72,13 +76,14 @@ impl Update {
     pub fn version(self) -> &'static str {
         match self {
             Update::DenyApprovals => "0.2.0",
+            Update::StopHookOnPath => "0.4.0",
         }
     }
 
     /// The file it changes, from the root
     pub fn file(self) -> &'static str {
         match self {
-            Update::DenyApprovals => ".claude/settings.json",
+            Update::DenyApprovals | Update::StopHookOnPath => ".claude/settings.json",
         }
     }
 
@@ -86,6 +91,7 @@ impl Update {
     pub fn apply(self, text: Option<&str>) -> Outcome {
         match self {
             Update::DenyApprovals => deny_approvals(text),
+            Update::StopHookOnPath => stop_hook_on_path(text),
         }
     }
 
@@ -131,6 +137,46 @@ fn deny_approvals(text: Option<&str>) -> Outcome {
         return Outcome::Done;
     }
     deny.push(Value::String(rule));
+    let mut written = serde_json::to_string_pretty(&Value::Object(settings))
+        .expect("a JSON value always serializes");
+    written.push('\n');
+    Outcome::Changed(written)
+}
+
+/// Add the hook that says when `rotproof` is not on the `PATH` ([`hook::ON_PATH`]) to Claude Code's settings, `text`,
+/// as a group of its own after the `Stop` hooks there. Needed only while a `Stop` hook runs the stop hook
+/// ([`hook::COMMAND`]): a project that has no settings, or took the stop hook out, has nothing to guard.
+fn stop_hook_on_path(text: Option<&str>) -> Outcome {
+    let update = Update::StopHookOnPath;
+    let Some(text) = text else {
+        return Outcome::Done;
+    };
+    let Ok(Value::Object(mut settings)) = serde_json::from_str::<Value>(text) else {
+        return Outcome::ByHand(format!(
+            "{}: it is not a JSON object Rotproof can read. Add a Stop hook that runs {:?} beside {:?}, {}",
+            update.file(),
+            hook::ON_PATH,
+            hook::COMMAND,
+            update.declining()
+        ));
+    };
+    let Some(Value::Array(stop)) = settings
+        .get_mut("hooks")
+        .and_then(|hooks| hooks.get_mut("Stop"))
+    else {
+        return Outcome::Done;
+    };
+    let runs = |command: &str| {
+        stop.iter().any(|group| {
+            group["hooks"]
+                .as_array()
+                .is_some_and(|hooks| hooks.iter().any(|h| h["command"] == command))
+        })
+    };
+    if !runs(hook::COMMAND) || runs(hook::ON_PATH) {
+        return Outcome::Done;
+    }
+    stop.push(json!({ "hooks": [{ "type": "command", "command": hook::ON_PATH }] }));
     let mut written = serde_json::to_string_pretty(&Value::Object(settings))
         .expect("a JSON value always serializes");
     written.push('\n');
@@ -383,6 +429,72 @@ mod tests {
             panic!("the rule is added");
         };
         assert!(added.contains(&deny_rule()));
+    }
+
+    /// The settings `rotproof create` wrote before 0.4.0: the stop hook alone.
+    const SETTINGS_0_2: &str = r#"{
+  "permissions": {
+    "deny": [
+      "Edit(/.config/rotproof-approved.toml)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rotproof stop-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+"#;
+
+    /// Upgraded untouched, the settings are what a new project gets; the update runs once, and only where a stop hook
+    /// runs Rotproof.
+    #[test]
+    fn the_hook_beside_the_stop_hook_is_added_once_and_only_beside_it() {
+        let Outcome::Changed(upgraded) = Update::StopHookOnPath.apply(Some(SETTINGS_0_2)) else {
+            panic!("the hook is added");
+        };
+        assert_eq!(upgraded, hook::SETTINGS[0].1);
+        assert_eq!(Update::StopHookOnPath.apply(Some(&upgraded)), Outcome::Done);
+        // Nothing to guard: no settings, no hooks, or a stop hook that is not Rotproof's
+        for text in [
+            None,
+            Some("{}"),
+            Some(
+                "{\"hooks\": {\"Stop\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"x\"}]}]}}",
+            ),
+        ] {
+            assert_eq!(
+                Update::StopHookOnPath.apply(text),
+                Outcome::Done,
+                "{text:?}"
+            );
+        }
+        // What the project added stays, in its order
+        let theirs = SETTINGS_0_2.replace(
+            "\"permissions\": {",
+            "\"env\": {\"A\": \"1\"},\n  \"permissions\": {",
+        );
+        let Outcome::Changed(kept) = Update::StopHookOnPath.apply(Some(&theirs)) else {
+            panic!("the hook is added");
+        };
+        assert!(
+            kept.find("\"env\"") < kept.find("\"permissions\""),
+            "{kept}"
+        );
+        let Outcome::ByHand(why) = Update::StopHookOnPath.apply(Some("not json")) else {
+            panic!("needs a person");
+        };
+        assert!(
+            why.contains("declined = [\"claude-stop-hook-on-path\"]"),
+            "{why}"
+        );
     }
 
     #[test]
