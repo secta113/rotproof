@@ -93,6 +93,9 @@ Body headings:
 - **State is a measurement.** Write the value and how to measure it. The time and who measured go in `verified`, not
   in the body. Update the state whenever you measure, including when nothing has changed. Without a recorded state,
   every reader has to measure every item again, and the items stop being read.
+- **Read a day or a time from the clock, never from memory.** `filed`, `verified` and the day of a log entry are
+  written as the clock says when they are written; `rotproof check` fails on one that has not come, as it was guessed.
+  An agent in Claude Code is given the time on every prompt by the time hook.
 - **By when it is done is a record, not words.** A sorted item has its parent, and closes before it. An item nobody
   has sorted yet names in `until` the moment it waits for, usually a milestone (see "Every open record is bounded").
 - **Details point to the history; they do not copy it.** Copies drift. Write markdown links: `/` starts a path

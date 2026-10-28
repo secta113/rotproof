@@ -81,6 +81,7 @@ rotproof --root <repository> approve --reviewed  # re-pin the knowledge document
 rotproof --root <repository> follows <key>...  # print the hash to pin in follows, for each key
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
 rotproof stop-hook                   # run by Claude Code when the agent stops (see "The stop hook")
+rotproof time-hook                   # run by Claude Code on each prompt, to tell the agent the time (see "The time hook")
 ```
 
 `--root` defaults to the current directory. The declaration is read from `<repository>/.config/rotproof.toml`, and the
@@ -123,7 +124,7 @@ The project's files are written once, as a starting point, and are the project's
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
 | `docs/work/next-milestone.md` | When `docs/work/` has no milestone, and no document that cannot be read and may be one: a draft of the next moment the work waits for, whose `# Condition` holds only a comment, so `rotproof check` fails until a person writes what that moment is |
-| `.claude/settings.json` | The stop hook and a hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
+| `.claude/settings.json` | The stop hook and a hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), the time hook (see "The time hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
@@ -165,7 +166,8 @@ that has a declaration:
 | Update | Version | File | What it adds |
 |---|---|---|---|
 | `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
-| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | A second `Stop` hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above: an untouched file ends as `rotproof create` writes it now |
+| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | A second `Stop` hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
+| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | The time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above: an untouched file ends as `rotproof create` writes it now |
 
 **Crossing 0.3.0, `rotproof init` first moves the records.** Before 0.3.0 the specs were in `docs/specs/` and the
 backlog items in `docs/backlog/`; from 0.3.0 both are in `docs/work/`, and nothing reads the old places, so the move
@@ -236,6 +238,29 @@ A `systemMessage` is shown to the person and keeps no agent from stopping. The p
 upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A hook that fails (not a git
 repository, an input from another hook) exits 1, which Claude Code shows without keeping the agent from stopping;
 exit code 2 would keep it from stopping.
+
+### The time hook
+
+An agent has no clock of its own. It writes the day an item was filed, the time a state was measured and the day of a
+log entry from what it was last told, and a guess runs ahead of the clock: `rotproof check` fails on a day or a time
+that has not come (see "What `rotproof check` checks"). `rotproof time-hook` is Claude Code's `SessionStart` and
+`UserPromptSubmit` hook: at the start of every session (a resumed or a compacted one too) and on every prompt, it
+gives the agent the time now, as `additionalContext`, to write from. Within a long turn the time goes on, so it says
+to read the clock for a later one. `rotproof create` writes it into `.claude/settings.json` beside the stop hook; a
+project made before 0.4.0 gets it from `rotproof init` (the update `claude-time-hook`). A project that has its own
+settings adds it:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "rotproof time-hook" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "rotproof time-hook" }] }]
+  }
+}
+```
+
+It fails (an input from another hook) with exit 1, which Claude Code shows while the prompt goes on; exit code 2 would
+block the prompt.
 
 ## Approving a forbidden import
 
@@ -599,6 +624,11 @@ stale_after: 2027-01-01T00:00:00+09:00
   a flat list of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented
   lines (wrapped text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the
   first date fails. A new log, with only its title and HTML comments, passes.
+- **No day or time in the records is later than now:** a work item's `filed` and every `at` of its `verified`, and the
+  log's date headings. They are read from the clock when written, and one that has not come was guessed. A time is
+  compared with the time `rotproof check` runs at, and a day with the latest day anywhere (the day in UTC+14), so CI in
+  UTC passes a day written in Tokyo before 09:00. Time alone only makes one pass, so this never turns CI red with no
+  change. Claude Code is given the time by the time hook (see "The stop hook").
 - **Every knowledge document keeps the format,** as a spec does (without `parent`, and `status` `stable` or
   `deprecated`), and **the log names it as it is now:** some `**Knowledge**` field of a log entry, with its wrapped
   lines, names it with the first 8 hex digits of SHA-256 of the whole file (every line ending as `\n`). An edit the

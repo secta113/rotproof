@@ -42,10 +42,11 @@ pub const ON_PATH: &str = "command -v rotproof >/dev/null 2>&1 || echo '{\"syste
 
 /// The settings Claude Code runs the project with, and where `rotproof create` writes them, once: the project's file
 /// from then on. They run the hook, for which `rotproof` has to be on the `PATH` the agent runs hooks with, with
-/// [`ON_PATH`] beside it, and deny editing the approvals file (`approvals.rs`): Claude Code then refuses its edit tools
-/// and its shell's file commands and redirects on it, with no prompt, so only a person adds an approval, through
-/// `rotproof approve`. The text is as the update that adds [`ON_PATH`] writes it (`upgrade.rs`), so a project
-/// upgraded with an untouched file ends with the same settings as a new one.
+/// [`ON_PATH`] beside it, and the time hook (`time_hook.rs`) on each of its events, and deny editing the approvals file
+/// (`approvals.rs`): Claude Code then refuses its edit tools and its shell's file commands and redirects on it, with
+/// no prompt, so only a person adds an approval, through `rotproof approve`. The text is as the updates that add
+/// [`ON_PATH`] and the time hook write it (`upgrade.rs`), so a project upgraded with an untouched file ends with the
+/// same settings as a new one.
 pub const SETTINGS: [(&str, &str); 1] = [(
     ".claude/settings.json",
     r#"{
@@ -69,6 +70,26 @@ pub const SETTINGS: [(&str, &str); 1] = [(
           {
             "type": "command",
             "command": "command -v rotproof >/dev/null 2>&1 || echo '{\"systemMessage\": \"rotproof is not on the PATH the agent runs hooks with, so the stop hook of Rotproof did not run. Start the agent with the Rotproof the project pins on the PATH: for a Python project, with its venv active.\"}'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rotproof time-hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rotproof time-hook"
           }
         ]
       }
@@ -209,6 +230,12 @@ mod tests {
         );
         assert_eq!(read["hooks"]["Stop"][0]["hooks"][0]["command"], COMMAND);
         assert_eq!(read["hooks"]["Stop"][1]["hooks"][0]["command"], ON_PATH);
+        for event in crate::time_hook::EVENTS {
+            assert_eq!(
+                read["hooks"][event][0]["hooks"][0]["command"],
+                crate::time_hook::COMMAND
+            );
+        }
     }
 
     /// The second hook is a shell command whose output, when rotproof is not on the PATH, is the JSON Claude Code

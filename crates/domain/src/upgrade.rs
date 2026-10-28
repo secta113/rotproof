@@ -14,8 +14,8 @@ use serde_json::{Map, Value, json};
 use toml_edit::DocumentMut;
 
 use crate::approvals::APPROVALS;
-use crate::hook;
 use crate::layers::{DECLARATION, DECLINED_COMMENT, FILES_COMMENT};
+use crate::{hook, time_hook};
 
 /// The version of Rotproof that runs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -42,10 +42,16 @@ pub enum Update {
     DenyApprovals,
     /// The hook beside the stop hook that says when `rotproof` is not on the `PATH`, in `.claude/settings.json`
     StopHookOnPath,
+    /// The hook that tells the agent the time on each prompt and at the start of a session, in `.claude/settings.json`
+    TimeHook,
 }
 
 /// Every update, oldest first.
-pub const UPDATES: [Update; 2] = [Update::DenyApprovals, Update::StopHookOnPath];
+pub const UPDATES: [Update; 3] = [
+    Update::DenyApprovals,
+    Update::StopHookOnPath,
+    Update::TimeHook,
+];
 
 /// What an update does to its file.
 #[derive(Debug, PartialEq, Eq)]
@@ -69,6 +75,7 @@ impl Update {
         match self {
             Update::DenyApprovals => "claude-deny-approvals",
             Update::StopHookOnPath => "claude-stop-hook-on-path",
+            Update::TimeHook => "claude-time-hook",
         }
     }
 
@@ -76,14 +83,16 @@ impl Update {
     pub fn version(self) -> &'static str {
         match self {
             Update::DenyApprovals => "0.2.0",
-            Update::StopHookOnPath => "0.4.0",
+            Update::StopHookOnPath | Update::TimeHook => "0.4.0",
         }
     }
 
     /// The file it changes, from the root
     pub fn file(self) -> &'static str {
         match self {
-            Update::DenyApprovals | Update::StopHookOnPath => ".claude/settings.json",
+            Update::DenyApprovals | Update::StopHookOnPath | Update::TimeHook => {
+                ".claude/settings.json"
+            }
         }
     }
 
@@ -92,6 +101,7 @@ impl Update {
         match self {
             Update::DenyApprovals => deny_approvals(text),
             Update::StopHookOnPath => stop_hook_on_path(text),
+            Update::TimeHook => time_hook(text),
         }
     }
 
@@ -137,10 +147,7 @@ fn deny_approvals(text: Option<&str>) -> Outcome {
         return Outcome::Done;
     }
     deny.push(Value::String(rule));
-    let mut written = serde_json::to_string_pretty(&Value::Object(settings))
-        .expect("a JSON value always serializes");
-    written.push('\n');
-    Outcome::Changed(written)
+    Outcome::Changed(written(settings))
 }
 
 /// Add the hook that says when `rotproof` is not on the `PATH` ([`hook::ON_PATH`]) to Claude Code's settings, `text`,
@@ -166,21 +173,79 @@ fn stop_hook_on_path(text: Option<&str>) -> Outcome {
     else {
         return Outcome::Done;
     };
-    let runs = |command: &str| {
-        stop.iter().any(|group| {
-            group["hooks"]
-                .as_array()
-                .is_some_and(|hooks| hooks.iter().any(|h| h["command"] == command))
-        })
-    };
-    if !runs(hook::COMMAND) || runs(hook::ON_PATH) {
+    if !runs(stop, hook::COMMAND) || runs(stop, hook::ON_PATH) {
         return Outcome::Done;
     }
-    stop.push(json!({ "hooks": [{ "type": "command", "command": hook::ON_PATH }] }));
-    let mut written = serde_json::to_string_pretty(&Value::Object(settings))
+    stop.push(group(hook::ON_PATH));
+    Outcome::Changed(written(settings))
+}
+
+/// Add the time hook ([`time_hook::COMMAND`]) to Claude Code's settings, `text`, as a group of its own on each of its
+/// events whose hooks do not run it yet, after them. Needed only while a `Stop` hook runs the stop hook
+/// ([`hook::COMMAND`]): a project that has no settings, or took Rotproof's hooks out, did not take them.
+fn time_hook(text: Option<&str>) -> Outcome {
+    let update = Update::TimeHook;
+    let by_hand = |why: &str| {
+        Outcome::ByHand(format!(
+            "{}: {why}. Add a {} hook that runs {:?}, {}",
+            update.file(),
+            time_hook::EVENTS.join(" and a "),
+            time_hook::COMMAND,
+            update.declining()
+        ))
+    };
+    let Some(text) = text else {
+        return Outcome::Done;
+    };
+    let Ok(Value::Object(mut settings)) = serde_json::from_str::<Value>(text) else {
+        return by_hand("it is not a JSON object Rotproof can read");
+    };
+    let Some(Value::Object(hooks)) = settings.get_mut("hooks") else {
+        return Outcome::Done;
+    };
+    if !matches!(hooks.get("Stop"), Some(Value::Array(stop)) if runs(stop, hook::COMMAND)) {
+        return Outcome::Done;
+    }
+    let mut changed = false;
+    for event in time_hook::EVENTS {
+        let groups = hooks
+            .entry(event)
+            .or_insert_with(|| Value::Array(Vec::new()));
+        let Value::Array(groups) = groups else {
+            return by_hand(&format!("hooks.{event} is not a list"));
+        };
+        if !runs(groups, time_hook::COMMAND) {
+            groups.push(group(time_hook::COMMAND));
+            changed = true;
+        }
+    }
+    if changed {
+        Outcome::Changed(written(settings))
+    } else {
+        Outcome::Done
+    }
+}
+
+/// Whether one of the hook groups `groups` of an event runs `command`.
+fn runs(groups: &[Value], command: &str) -> bool {
+    groups.iter().any(|group| {
+        group["hooks"]
+            .as_array()
+            .is_some_and(|hooks| hooks.iter().any(|h| h["command"] == command))
+    })
+}
+
+/// A hook group of its own that runs `command`, as `rotproof create` writes one.
+fn group(command: &str) -> Value {
+    json!({ "hooks": [{ "type": "command", "command": command }] })
+}
+
+/// The settings as the file's text, as `rotproof create` writes it: indented, keys in their order, ending in a newline.
+fn written(settings: Map<String, Value>) -> String {
+    let mut text = serde_json::to_string_pretty(&Value::Object(settings))
         .expect("a JSON value always serializes");
-    written.push('\n');
-    Outcome::Changed(written)
+    text.push('\n');
+    text
 }
 
 /// The updates a project whose files are up to `files` takes to reach `running`, without the `declined` ones, oldest
@@ -453,14 +518,85 @@ mod tests {
 }
 "#;
 
-    /// Upgraded untouched, the settings are what a new project gets; the update runs once, and only where a stop hook
-    /// runs Rotproof.
+    /// Upgraded untouched, the settings are what a new project gets: every update of the file, in their order.
+    #[test]
+    fn untouched_settings_upgrade_to_what_a_new_project_gets() {
+        let mut text = SETTINGS_0_2.to_string();
+        for update in [Update::StopHookOnPath, Update::TimeHook] {
+            let Outcome::Changed(changed) = update.apply(Some(&text)) else {
+                panic!("{} changes them", update.name());
+            };
+            text = changed;
+        }
+        assert_eq!(text, hook::SETTINGS[0].1);
+        for update in UPDATES {
+            assert_eq!(
+                update.apply(Some(&text)),
+                Outcome::Done,
+                "{}",
+                update.name()
+            );
+        }
+    }
+
+    /// The time hook is added once on each event, after what the project runs there, and only where a stop hook runs
+    /// Rotproof.
+    #[test]
+    fn the_time_hook_is_added_once_on_each_event_and_only_beside_the_stop_hook() {
+        let Outcome::Changed(added) = Update::TimeHook.apply(Some(SETTINGS_0_2)) else {
+            panic!("the hook is added");
+        };
+        let read: Value = serde_json::from_str(&added).unwrap();
+        for event in time_hook::EVENTS {
+            assert_eq!(
+                read["hooks"][event],
+                json!([group(time_hook::COMMAND)]),
+                "{event}"
+            );
+        }
+        assert_eq!(Update::TimeHook.apply(Some(&added)), Outcome::Done);
+        // A hook the project runs on the event stays first
+        let theirs = SETTINGS_0_2.replace(
+            "\"hooks\": {",
+            "\"hooks\": {\n    \"UserPromptSubmit\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"x\"}]}],",
+        );
+        let Outcome::Changed(kept) = Update::TimeHook.apply(Some(&theirs)) else {
+            panic!("the hook is added");
+        };
+        let read: Value = serde_json::from_str(&kept).unwrap();
+        assert_eq!(
+            read["hooks"]["UserPromptSubmit"],
+            json!([group("x"), group(time_hook::COMMAND)])
+        );
+        // Nothing to add to: no settings, no hooks, or a stop hook that is not Rotproof's
+        for text in [
+            None,
+            Some("{}"),
+            Some(
+                "{\"hooks\": {\"Stop\": [{\"hooks\": [{\"type\": \"command\", \"command\": \"x\"}]}]}}",
+            ),
+        ] {
+            assert_eq!(Update::TimeHook.apply(text), Outcome::Done, "{text:?}");
+        }
+        for text in [
+            "not json",
+            "{\"hooks\": {\"Stop\": [{\"hooks\": [{\"command\": \"rotproof stop-hook\"}]}], \"SessionStart\": {}}}",
+        ] {
+            let Outcome::ByHand(why) = Update::TimeHook.apply(Some(text)) else {
+                panic!("{text} needs a person");
+            };
+            assert!(why.contains("declined = [\"claude-time-hook\"]"), "{why}");
+        }
+    }
+
+    /// The update runs once, and only where a stop hook runs Rotproof.
     #[test]
     fn the_hook_beside_the_stop_hook_is_added_once_and_only_beside_it() {
         let Outcome::Changed(upgraded) = Update::StopHookOnPath.apply(Some(SETTINGS_0_2)) else {
             panic!("the hook is added");
         };
-        assert_eq!(upgraded, hook::SETTINGS[0].1);
+        let read: Value = serde_json::from_str(&upgraded).unwrap();
+        assert_eq!(read["hooks"]["Stop"][1], group(hook::ON_PATH));
         assert_eq!(Update::StopHookOnPath.apply(Some(&upgraded)), Outcome::Done);
         // Nothing to guard: no settings, no hooks, or a stop hook that is not Rotproof's
         for text in [
