@@ -158,7 +158,18 @@ fn each_broken_rule_fails_under_its_check() {
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 24] = [
+    let cases: [(&str, &str, String); 26] = [
+        // A time or a day guessed rather than read from the clock
+        (
+            "no day or time in the records is later than now",
+            "docs/work/x.md",
+            item("[log](/log.md)").replace("at: 2026-10-01T10:00:00", "at: 2999-10-01T10:00:00"),
+        ),
+        (
+            "no day or time in the records is later than now",
+            "docs/log.md",
+            "# Log\n\n## 2999-01-01\n\n* Something\n".into(),
+        ),
         // Done before the milestone it comes after
         (
             "the arrows keep their order",

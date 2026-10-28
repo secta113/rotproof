@@ -1,6 +1,6 @@
 //! The rules of the records that `rotproof check` runs on what it has read: the types of documents and where each
-//! belongs, the files under `docs/` Rotproof would not read, the log's structure and what it points at, the hash
-//! the log names a knowledge document by, and the specs at the repository root.
+//! belongs, the files under `docs/` Rotproof would not read, the log's structure, its days that have not come and what
+//! it points at, the hash the log names a knowledge document by, and the specs at the repository root.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -10,10 +10,11 @@ use percent_encoding::percent_decode_str;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-use crate::bundle::Docs;
+use crate::bundle::{Docs, latest_day};
 use crate::frontmatter::split;
 use crate::markdown::{heading, visible};
 use crate::paths::{file_name, parent};
+use crate::schema::Time;
 
 /// Directory (relative to docs/, "" for the root) -> the document types allowed in it
 const TYPES: [(&str, &[&str]); 3] = [
@@ -138,6 +139,26 @@ pub fn dangling_knowledge_refs(refs: &[(String, String)], names: &[String]) -> V
     dangling.sort();
     dangling.dedup();
     dangling
+}
+
+/// The date headings of the log, `text`, whose day has not come anywhere at `now` ([`latest_day`]): an entry is written
+/// under the day it was written, read from the clock.
+pub fn log_days_to_come(text: &str, now: Time) -> Vec<String> {
+    let today = latest_day(now);
+    let shown = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    visible(text)
+        .lines()
+        .filter_map(heading)
+        .filter(|(level, title)| *level == 2 && DATE.is_match(title))
+        .filter_map(|(_, title)| NaiveDate::parse_from_str(title, "%Y-%m-%d").ok())
+        .filter(|day| *day > today)
+        .map(|day| {
+            format!(
+                "log.md: ## {day}, a day that has not come anywhere yet (now {shown}): write the entry under the day \
+                 it was written, read from the clock"
+            )
+        })
+        .collect()
 }
 
 /// What breaks the log structure, in reading order.
@@ -423,6 +444,28 @@ mod tests {
             dangling_knowledge_refs(&knowledge_refs(log), &names),
             ["gone.md", "other.md"]
         );
+    }
+
+    #[test]
+    fn a_log_day_that_has_not_come_is_named() {
+        use chrono::{FixedOffset, TimeZone};
+        let log = "# Log\n\n## 2026-10-29\n\n* **B**\n\n## 2026-10-28\n\n* **A**\n\n<!--\n## 2026-12-01\n-->\n\n### 2026-12-02\n";
+        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
+        // 2026-10-29 comes in UTC+14 at 10:00 UTC on 10-28, 19:00 in Tokyo. A heading in a comment, or at another
+        // level, is no date of the log
+        let found = log_days_to_come(
+            log,
+            tokyo.with_ymd_and_hms(2026, 10, 28, 18, 59, 59).unwrap(),
+        );
+        assert_eq!(
+            found,
+            [
+                "log.md: ## 2026-10-29, a day that has not come anywhere yet (now 2026-10-28T18:59:59+09:00): write \
+              the entry under the day it was written, read from the clock"
+            ]
+        );
+        let come = log_days_to_come(log, tokyo.with_ymd_and_hms(2026, 10, 28, 19, 0, 0).unwrap());
+        assert_eq!(come, Vec::<String>::new());
     }
 
     #[test]

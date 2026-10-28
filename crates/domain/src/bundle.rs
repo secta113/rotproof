@@ -201,6 +201,32 @@ impl Work {
             .collect()
     }
 
+    /// The times and days of the work items that have not come at `now`: when each was filed, and when its state was
+    /// measured (`verified`). They are written from the clock, and one later than now was guessed. Time alone only
+    /// makes one pass, never fail, so this check cannot turn CI red with no change.
+    pub fn not_come(&self, now: Time) -> Vec<String> {
+        let today = latest_day(now);
+        let shown = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let mut found = Vec::new();
+        for (name, (item, _)) in &self.items {
+            if item.filed > today {
+                found.push(format!(
+                    "work/{name}: filed {}, a day that has not come anywhere yet (now {shown}): write the day it was \
+                     filed, read from the clock",
+                    item.filed
+                ));
+            }
+            for stamp in item.verified.iter().filter(|stamp| stamp.at > now) {
+                found.push(format!(
+                    "work/{name}: verified at {}, later than now ({shown}): write the time the state was measured, \
+                     read from the clock",
+                    stamp.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                ));
+            }
+        }
+        found
+    }
+
     /// Why the record `name` cannot have the spec `parent` as its parent, or `None` when it can. The parent of a spec
     /// is an epic, which has no parent of its own; the parent of a work item is any spec.
     fn wrong_parent(&self, name: &str, parent: &str, of_spec: bool) -> Option<String> {
@@ -975,6 +1001,12 @@ pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
     tags
 }
 
+/// The latest day it is anywhere at `now`, the day in UTC+14. A day of the records is checked against it, not against
+/// the day of `now` itself: before 09:00 in Tokyo, the day written there is still to come in UTC, where CI runs.
+pub fn latest_day(now: Time) -> NaiveDate {
+    (now.naive_utc() + chrono::Duration::hours(14)).date()
+}
+
 /// The open items past `stale_after`. As in OKF, an item is stale when `now >= stale_after`.
 pub fn stale(items: &BTreeMap<String, (Item, Sections)>, now: Time) -> Vec<String> {
     items
@@ -1105,6 +1137,67 @@ Not yet. Measured by hand.
             Vec::<String>::new()
         );
         assert_eq!(stale(&parsed.items, cutoff), vec!["fresh.md"]);
+    }
+
+    #[test]
+    fn a_day_or_a_time_that_has_not_come_is_named() {
+        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
+        let at = |d, h, m, s| tokyo.with_ymd_and_hms(2026, 9, d, h, m, s).unwrap();
+        // Each stamp of a list is read, and a closed item as well as an open one
+        let listed = GOOD.replace(
+            "verified: {by: human:someone, at: 2026-09-28T08:00:00+09:00}",
+            "verified:\n  - {by: human:a, at: 2026-09-27T08:00:00+09:00}\n  - {by: human:b, at: 2026-09-28T08:00:00+09:00}",
+        );
+        let closed = GOOD
+            .replace("status: draft", "status: deprecated\nprogress: done")
+            .replace(
+                "---\n\n# Trigger",
+                "---\n\n# Resolution\n\nDone.\n\n# Trigger",
+            );
+        let parsed = parsed(&[("listed.md", listed), ("closed.md", closed)]);
+        assert_eq!(parsed.not_come(at(28, 8, 0, 0)), Vec::<String>::new());
+        let early = parsed.not_come(at(28, 7, 59, 59));
+        assert_eq!(early.len(), 2, "{early:?}");
+        assert!(
+            early.iter().all(|found| found.contains(
+                "verified at 2026-09-28T08:00:00+09:00, later than now (2026-09-28T07:59:59+09:00)"
+            )),
+            "{early:?}"
+        );
+        // The day filed is compared with the latest day anywhere: 2026-09-27 has come in UTC+14 once it is 10:00 UTC
+        // on the day before, 19:00 in Tokyo
+        let filed = |now| {
+            parsed
+                .not_come(now)
+                .into_iter()
+                .filter(|found| found.contains(": filed "))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(filed(at(26, 19, 0, 0)), Vec::<String>::new());
+        let before = filed(at(26, 18, 59, 59));
+        assert_eq!(before.len(), 2, "{before:?}");
+        assert!(
+            before[0].starts_with(
+                "work/closed.md: filed 2026-09-27, a day that has not come anywhere yet (now 2026-09-26T18:59:59+09:00)"
+            ),
+            "{before:?}"
+        );
+    }
+
+    #[test]
+    fn the_latest_day_is_the_day_in_utc_plus_14() {
+        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
+        // 08:00 in Tokyo is 23:00 of the day before in UTC, and already the same day in UTC+14
+        let morning = tokyo.with_ymd_and_hms(2026, 10, 28, 8, 0, 0).unwrap();
+        assert_eq!(
+            latest_day(morning),
+            NaiveDate::from_ymd_opt(2026, 10, 28).unwrap()
+        );
+        let evening = tokyo.with_ymd_and_hms(2026, 10, 28, 19, 0, 0).unwrap();
+        assert_eq!(
+            latest_day(evening),
+            NaiveDate::from_ymd_opt(2026, 10, 29).unwrap()
+        );
     }
 
     #[test]

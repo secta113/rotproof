@@ -72,11 +72,11 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
 | `approvals.rs` | The approvals file, `.config/rotproof-approved.toml`: the imports the layer table forbids that a person approved, each keyed by its file and what it imports, matched against what the direction check found, and the file with an entry added or removed |
-| `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, the files Rotproof generates in it (the index files and the rules), and the tags the records use |
+| `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, the files Rotproof generates in it (the index files and the rules), the tags the records use, and the days and times of the work items that have not come |
 | `schema.rs` | The frontmatter of each document type |
 | `arrows.rs` | The arrows between the records of `docs/work/` (`after` and `until`): the records they name, the order they keep with how each record closed, the cycles they make with the parents, and what each open record waits for |
 | `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory, a Python definition), the hash of a directory, and what fails when one changed or is gone |
-| `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure and what it points at, the hash of a knowledge document, and the floor of the bundle |
+| `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure, its days that have not come and what it points at, the hash of a knowledge document, and the floor of the bundle |
 | `tree.rs` | How Rotproof reads a file's text and how Windows reads a name |
 | `migrate.rs` | Moving the records of a project made before 0.3.0 from `docs/backlog/` and `docs/specs/` into `docs/work/`: when it is due, the move planned whole (each record, every link that reached one, the frontmatter a machine can rewrite) or why it cannot be made, and what it leaves to a person |
 | `upgrade.rs` | Upgrading a project's files: the version they are up to (`files` in the declaration), the named updates a later version brings to the files `rotproof create` writes once, and what each does to its file |

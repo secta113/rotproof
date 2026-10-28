@@ -54,7 +54,8 @@ impl Commands for Rotproof<'_> {
         {
             return Err(MISSING.into());
         }
-        crate::check::check(&*files, self.machine.parsers()).map_err(|e| e.to_string())
+        crate::check::check(&*files, self.machine.parsers(), self.machine.now())
+            .map_err(|e| e.to_string())
     }
 
     fn guide(&self, root: &Path, stack: Option<&str>) -> Result<String, String> {
