@@ -147,4 +147,8 @@ impl Commands for Rotproof<'_> {
         });
         crate::hook::run(input, changes.as_deref(), files.as_deref())
     }
+
+    fn time_hook(&self, input: &str) -> Result<String, String> {
+        domain::time_hook::answer(input, self.machine.now())
+    }
 }
