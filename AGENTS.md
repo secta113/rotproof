@@ -150,6 +150,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 - **Run CI with `cargo xtask ci`, on the host or in the container (`docker compose run --rm dev cargo xtask ci`).** The
   container is the Linux of CI and needs only Docker. On Windows, the host needs Visual Studio's C++ tools and the
   Windows SDK; without the SDK, linking fails (`kernel32.lib` not found), and Git Bash's own `link` gets in the way.
+  To run the tests alone, `cargo test --workspace --no-fail-fast`: a bare `cargo test` at the root runs only the root
+  package's tests, and stops at the first suite that fails, so a failing test of a crate passes unseen.
 - **Change the toolchain version only in `rust-toolchain.toml`,** and the base image (`Dockerfile`, the `container`
   in `.github/workflows/ci.yml`) to the same version. Change the packaging tools only in `requirements-build.txt`.
 - **Add or bump a dependency in `[workspace.dependencies]` of the root `Cargo.toml`,** and take it in a crate with
