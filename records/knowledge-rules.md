@@ -102,7 +102,8 @@ cannot see: that is for the writer.
 
 # Index
 
-[index.md](index.md) is generated: the alarms under `# When something happens`, each with the first sentence of what
+[index.md](index.md) is generated: the documents left out under `# Left out`, each with why, as an alarm left out is
+not shown until it is fixed; the alarms under `# When something happens`, each with the first sentence of what
 is seen and its `match` strings, as reading the index before work is what watches for them; then the other documents
 by area; then the deprecated ones under `# Closed`. After adding or changing a document, run `rotproof index`.
 `rotproof check` fails when the index differs from what `rotproof index` writes.

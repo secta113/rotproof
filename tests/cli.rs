@@ -472,6 +472,40 @@ fn index_names_what_it_left_out() {
         "{}",
         stdout(&out)
     );
+    // The index says so too: a reader of the index alone would otherwise take its lists and counts as whole
+    let index = fs::read_to_string(root.path().join("docs/work/index.md")).unwrap();
+    assert!(
+        index.contains(
+            "# Left out\n\n* [broken.md](broken.md) - Not listed or counted below until it is fixed: no frontmatter"
+        ),
+        "{index}"
+    );
+}
+
+#[test]
+fn create_writes_no_milestone_beside_one_it_cannot_read() {
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::create_dir_all(r.join("docs/work")).unwrap();
+    // A title cut by a comment: the milestone cannot be read, so whether the project has one is not known
+    fs::write(
+        r.join("docs/work/release.md"),
+        "---\ntype: Milestone\ntitle: v1 #1\ndescription: D.\ntags: [a]\nstatus: stable\n---\n\n# Condition\n\n\
+         The tag is pushed.\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "create"]);
+    assert!(!stdout(&out).contains("next-milestone"), "{}", stdout(&out));
+    assert!(!r.join("docs/work/next-milestone.md").exists());
+    let check = run(&["--root", &arg, "check"]);
+    assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
+    for said in [
+        "work/release.md: line 3: the frontmatter holds a YAML comment",
+        "but work/release.md, left out above, may be one: fix it first, rather than write another",
+    ] {
+        assert!(stdout(&check).contains(said), "{said}: {}", stdout(&check));
+    }
 }
 
 #[test]
@@ -485,12 +519,14 @@ fn create_leaves_a_milestone_for_a_person_to_write() {
         "{}",
         stdout(&out)
     );
-    // What the next moment is, the project says: until it does, the check fails on the milestone
+    // What the next moment is, the project says: until it does, the check fails on the milestone, and says to write
+    // that one rather than another
     let check = run(&["--root", &arg, "check"]);
     assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
     for said in [
         "work/next-milestone.md: body headings missing or empty: [\"Condition\"]",
-        "a milestone is open:\n  no open milestone in docs/work/",
+        "a milestone is open:\n  no open milestone can be read in docs/work/, but work/next-milestone.md, left out \
+         above, may be one: fix it first",
     ] {
         assert!(stdout(&check).contains(said), "{said}: {}", stdout(&check));
     }
@@ -2332,7 +2368,8 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     assert!(
         stdout(&out).contains("work/next-milestone.md: tags: 0 tags")
-            && stdout(&out).contains("no open milestone in docs/work/"),
+            && stdout(&out)
+                .contains("but work/next-milestone.md, left out above, may be one: fix it first"),
         "{}",
         stdout(&out)
     );

@@ -122,7 +122,7 @@ The project's files are written once, as a starting point, and are the project's
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
-| `docs/work/next-milestone.md` | When `docs/work/` has no milestone: a draft of the next moment the work waits for, whose `# Condition` holds only a comment, so `rotproof check` fails until a person writes what that moment is |
+| `docs/work/next-milestone.md` | When `docs/work/` has no milestone, and no document that cannot be read and may be one: a draft of the next moment the work waits for, whose `# Condition` holds only a comment, so `rotproof check` fails until a person writes what that moment is |
 | `.claude/settings.json` | The stop hook and a hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
@@ -347,7 +347,10 @@ milestone holds neither: it is a moment the work waits for (a release, an agreem
 with a `# Condition` that says what to look at to know it came, and an optional `date` that fails nothing when it
 passes. A project always has an open one, its next moment: `rotproof create` writes `next-milestone.md` when
 `docs/work/` has none, with a condition that is only a comment, so the check fails until a person writes what the next
-moment is. The index lists the open milestones first, across the areas, by date. A milestone's line counts the open
+moment is. A document that cannot be read is not known to be no milestone: while one may be, create writes none, and
+the check says to fix it rather than write another. The index lists the documents left out of it first, each with why,
+as what it lists and counts is short of them until they are fixed; then the open milestones, across the areas, by
+date. A milestone's line counts the open
 records that close before it, back along the arrows and from each parent to its children, and names the open
 milestones before it, where the count stops, so that a release does not count the work of the one before it.
 `rotproof before <slug>` lists those records by depth, each after every open record it waits for, and within a depth

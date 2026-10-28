@@ -86,11 +86,12 @@ enum Command {
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/,
-    /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, whose condition a person writes
-    /// before `rotproof check` passes, and the project's files (AGENTS.md, CLAUDE.md, README.md, .gitignore,
-    /// .gitattributes, Claude Code's settings with the stop hook, a hook that says when rotproof is not on the PATH and
-    /// the rule that denies editing the approvals file, for python and none the pin of Rotproof and a CI workflow, and
-    /// for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
+    /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, nor a document that cannot be
+    /// read and may be one, whose condition a person writes before `rotproof check` passes, and the project's files
+    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the stop hook, a hook
+    /// that says when rotproof is not on the PATH and the rule that denies editing the approvals file, for python and
+    /// none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml and the entry file
+    /// src/main.rs), each when it does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files, the closed
     /// list and the rules in docs/. Adds the fields the declaration lacks, keeping its comments and values. Never
     /// overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing the
@@ -158,8 +159,8 @@ enum Command {
     /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, the list of closed records in
     /// docs/work/closed.md, and the rules.md Rotproof keeps there, from the frontmatter of the documents. Run it after
     /// a record changes; never edit these by hand.
-    /// Lists the documents it left out and why, the work items past their stale_after, and the open milestones past
-    /// their date. Exits 2 when the declaration or a document cannot be read.
+    /// Lists the documents it left out and why, also under `# Left out` in the index, the work items past their
+    /// stale_after, and the open milestones past their date. Exits 2 when the declaration or a document cannot be read.
     Index,
     /// Print the open records that close before a milestone, a spec or any record of docs/work/, earliest first,
     /// writing nothing
