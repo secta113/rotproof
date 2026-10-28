@@ -14,9 +14,9 @@
 //!   so `rotproof check` fails until a person writes it.
 //! - Rotproof's guide, `.rotproof/AGENTS.md` (`project.rs`), which Rotproof rewrites: the rules it keeps in the stack,
 //!   from the version that runs.
-//! - `.claude/settings.json` with the hook that runs `rotproof stop-hook` when the agent stops (`hook.rs`), and the
-//!   hook beside it that says when `rotproof` is not on the `PATH`, when it does not exist. A project that has one
-//!   already adds the hooks to it by hand.
+//! - `.claude/settings.json` with the hook that runs `rotproof stop-hook` when the agent stops (`hook.rs`), the hook
+//!   beside it that says when `rotproof` is not on the `PATH`, and the time hook (`time_hook.rs`), when it does not
+//!   exist. A project that has one already adds the hooks to it by hand.
 //! - The project's files (`project.rs`: `AGENTS.md`, `README.md`, the pin of Rotproof, the CI workflow, a Rust
 //!   project's workspace and others), each when it does not exist. The project's name in them is its root directory's.
 //!
@@ -34,7 +34,7 @@ use crate::bundle::Bundle;
 use crate::layers::declaration;
 use crate::tree::{exactly, read_text};
 use domain::bundle::{
-    FIRST_MILESTONE, LOG, first_milestone, has_milestone, in_docs, record_tags as tags_in,
+    FIRST_MILESTONE, LOG, first_milestone, in_docs, may_have_milestone, record_tags as tags_in,
 };
 use domain::hook::SETTINGS;
 use domain::layers::{
@@ -124,9 +124,11 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
         write(out, "docs/log.md", LOG, &mut made)?;
     }
     // A project always has a next moment for its work to wait for. Only when it has no milestone at all: one whose
-    // milestones are all closed is told to write the next, not given a copy of the first
+    // milestones are all closed is told to write the next, not given a copy of the first, and one with a document that
+    // cannot be read may have its milestone there, which the check names, so a second one would split the work
+    // waiting for the moment between two milestones
     let work = bundle.read_folder("work").map_err(|e| e.to_string())?;
-    if !has_milestone(&work) && tree.found(FIRST_MILESTONE).is_none() {
+    if !may_have_milestone(&work) && tree.found(FIRST_MILESTONE).is_none() {
         let area = declared
             .declaration
             .areas

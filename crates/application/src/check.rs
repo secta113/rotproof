@@ -27,6 +27,9 @@
 //!   generates (the index files and the rules) equals what `rotproof index` writes, and no spec sits at the root.
 //! - **The log keeps the OKF log structure**: every second-level heading is a date, newest first, and the entries
 //!   are a flat list of list items under those dates.
+//! - **No day or time in the records is later than now**: a work item's `filed` and `verified`, and the log's date
+//!   headings, are read from the clock when written. A day is compared with the latest day anywhere, so CI in UTC
+//!   passes a day written in Tokyo. Time alone only makes one pass, so this never turns CI red with no change.
 //!
 //! Each check has a floor: when the scan finds nothing at all, it fails instead of passing with nothing checked.
 
@@ -45,16 +48,20 @@ use domain::migrate::{OLD, WORK};
 use domain::paths::{file_name, join};
 use domain::project::GUIDE;
 use domain::records::{
-    dangling_item_refs, dangling_knowledge_refs, floor, knowledge_refs, log_problems, misplaced,
-    root_specs, unlogged, unread_paths,
+    dangling_item_refs, dangling_knowledge_refs, floor, knowledge_refs, log_days_to_come,
+    log_problems, misplaced, root_specs, unlogged, unread_paths,
 };
+use domain::schema::Time;
 use domain::upgrade::VERSION;
 use protocol::inbound::{Finding, Report};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
-/// Every broken rule in the repository `tree` holds. An error is a file that could not be read at all.
-pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
+/// The check of the days and times written in the records
+const NOT_COME: &str = "no day or time in the records is later than now";
+
+/// Every broken rule in the repository `tree` holds, at `now`. An error is a file that could not be read at all.
+pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Report> {
     let structure = crate::structure::problems(tree)?;
     let mut findings: Vec<Finding> = structure
         .found
@@ -134,7 +141,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
             });
         }
     }
-    findings.extend(records(tree, parsers, structure.areas)?);
+    findings.extend(records(tree, parsers, structure.areas, now)?);
     Ok(Report {
         findings,
         skipped: structure.skipped,
@@ -143,11 +150,12 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers) -> io::Result<Report> {
     })
 }
 
-/// Every broken rule of the records, grouped by `areas`: `None` when the declaration cannot be read.
+/// Every broken rule of the records at `now`, grouped by `areas`: `None` when the declaration cannot be read.
 fn records(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     areas: Option<Vec<String>>,
+    now: Time,
 ) -> io::Result<Vec<Finding>> {
     let mut found = Vec::new();
     let mut add = |check: &'static str, details: Vec<String>| {
@@ -217,6 +225,7 @@ fn records(
         .map(|(name, (_, sections))| (name.clone(), sections["Details"].clone()))
         .collect();
     add("every # Details has a link", pairs(&linkless(&details)));
+    add(NOT_COME, work.not_come(now));
     // Every link a reader may follow, not only those in # Details: a link in the body of a closed spec broke unseen
     // when a heading it pointed at was renamed
     let mut documents = concepts(tree, DOCS)?;
@@ -247,6 +256,7 @@ fn records(
                 .collect(),
         );
         add("the log keeps its structure", log_problems(&log));
+        add(NOT_COME, log_days_to_come(&log, now));
 
         let refs = knowledge_refs(&log);
         let knowledge = bundle.read_knowledge()?;

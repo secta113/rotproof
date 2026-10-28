@@ -12,7 +12,9 @@ publish = false
 composition.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 domain.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
 
 [workspace]

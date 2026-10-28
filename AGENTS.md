@@ -44,7 +44,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/infrastructure/src/inbound/` | Content |
 |---|---|
 | `mod.rs` | The level's role |
-| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof stop-hook`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here |
+| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof stop-hook` and `rotproof time-hook`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here |
 
 | Module of `crates/infrastructure/src/outbound/` | Content |
 |---|---|
@@ -72,11 +72,11 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
 | `approvals.rs` | The approvals file, `.config/rotproof-approved.toml`: the imports the layer table forbids that a person approved, each keyed by its file and what it imports, matched against what the direction check found, and the file with an entry added or removed |
-| `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, the files Rotproof generates in it (the index files and the rules), and the tags the records use |
+| `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, the files Rotproof generates in it (the index files and the rules), the tags the records use, and the days and times of the work items that have not come |
 | `schema.rs` | The frontmatter of each document type |
 | `arrows.rs` | The arrows between the records of `docs/work/` (`after` and `until`): the records they name, the order they keep with how each record closed, the cycles they make with the parents, and what each open record waits for |
 | `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory, a Python definition), the hash of a directory, and what fails when one changed or is gone |
-| `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure and what it points at, the hash of a knowledge document, and the floor of the bundle |
+| `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure, its days that have not come and what it points at, the hash of a knowledge document, and the floor of the bundle |
 | `tree.rs` | How Rotproof reads a file's text and how Windows reads a name |
 | `migrate.rs` | Moving the records of a project made before 0.3.0 from `docs/backlog/` and `docs/specs/` into `docs/work/`: when it is due, the move planned whole (each record, every link that reached one, the frontmatter a machine can rewrite) or why it cannot be made, and what it leaves to a person |
 | `upgrade.rs` | Upgrading a project's files: the version they are up to (`files` in the declaration), the named updates a later version brings to the files `rotproof create` writes once, and what each does to its file |
@@ -86,7 +86,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `layers.rs` | The layer definitions in `layers/`, what a project's `.config/rotproof.toml` says, and the fields `rotproof create` adds to it |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust), judged once the comments of a file are read |
-| `hook.rs` | What `rotproof stop-hook` finds open in the agent's last message and what it answers, and the settings file that `rotproof create` writes for Claude Code: the hook, and the rule that denies editing the approvals file |
+| `hook.rs` | What `rotproof stop-hook` finds open in the agent's last message and what it answers, and the settings file that `rotproof create` writes for Claude Code: the hooks, and the rule that denies editing the approvals file |
+| `time_hook.rs` | What `rotproof time-hook` answers when a session starts or the person sends a prompt: the time now, for the agent to write days and times into the records from |
 | `project.rs` | The files Rotproof writes outside `docs/`: the guide `.rotproof/AGENTS.md`, and the project's files, once |
 | `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way, judged from the paths it names and the code files of the directories it lists |
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
@@ -150,6 +151,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 - **Run CI with `cargo xtask ci`, on the host or in the container (`docker compose run --rm dev cargo xtask ci`).** The
   container is the Linux of CI and needs only Docker. On Windows, the host needs Visual Studio's C++ tools and the
   Windows SDK; without the SDK, linking fails (`kernel32.lib` not found), and Git Bash's own `link` gets in the way.
+  To run the tests alone, `cargo test --workspace --no-fail-fast`: a bare `cargo test` at the root runs only the root
+  package's tests, and stops at the first suite that fails, so a failing test of a crate passes unseen.
 - **Change the toolchain version only in `rust-toolchain.toml`,** and the base image (`Dockerfile`, the `container`
   in `.github/workflows/ci.yml`) to the same version. Change the packaging tools only in `requirements-build.txt`.
 - **Add or bump a dependency in `[workspace.dependencies]` of the root `Cargo.toml`,** and take it in a crate with

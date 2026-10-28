@@ -48,14 +48,18 @@ pub fn first_milestone(area: &str) -> String {
     include_str!("../../../records/milestone.md").replace("{area}", area)
 }
 
-/// Whether any document among `docs` (those of `docs/work/`) is a milestone, open or closed, passing or not.
-pub fn has_milestone(docs: &Docs) -> bool {
-    docs.values().any(|text| {
-        split(text).is_ok_and(|(meta, _)| {
-            meta.get(&Yaml::String("type".into()))
-                .and_then(Yaml::as_str)
-                == Some("Milestone")
-        })
+/// Whether any document among `docs` (those of `docs/work/`) may be a milestone, open or closed, passing or not.
+pub fn may_have_milestone(docs: &Docs) -> bool {
+    docs.values().any(|text| may_be_milestone(text))
+}
+
+/// Whether the document `text` may be a milestone: it is one, passing or not, or its type cannot be read. A document
+/// that cannot be read is not known to be none, so what is decided from there being no milestone waits for it.
+fn may_be_milestone(text: &str) -> bool {
+    split(text).map_or(true, |(meta, _)| {
+        meta.get(&Yaml::String("type".into()))
+            .and_then(Yaml::as_str)
+            .is_none_or(|kind| kind == "Milestone")
     })
 }
 /// The bundle-root index links to these, in this order
@@ -87,6 +91,9 @@ pub struct Work {
     pub guides: BTreeMap<String, Guide>,
     /// `work/<file name>` -> why the document is left out of the index files
     pub problems: Problems,
+    /// The documents left out that may be a milestone (`work/<file name>`): one that does not pass, or one whose type
+    /// cannot be read
+    pub unsure_milestones: Vec<String>,
 }
 
 /// The documents of `docs/knowledge/`, sorted out.
@@ -155,16 +162,29 @@ impl Work {
     }
 
     /// Why the project has no next moment for its work to wait for, or nothing while a milestone is open. A milestone
-    /// left out of the index files does not count: the message about it says what to fix.
+    /// left out of the index files does not count, but it may be the open one: while a document left out may be a
+    /// milestone, the message says to fix it first, not to write another beside it.
     pub fn without_an_open_milestone(&self) -> Option<String> {
         let open = self
             .milestones
             .values()
             .any(|(milestone, _)| milestone.is_open());
-        (!open).then(|| {
-            "no open milestone in docs/work/: write the next moment the work waits for (a release, a deploy, something \
-             outside the project) as a milestone; docs/work/rules.md says how"
-                .into()
+        if open {
+            return None;
+        }
+        Some(match self.unsure_milestones.as_slice() {
+            [] => "no open milestone in docs/work/: write the next moment the work waits for (a release, a deploy, \
+                   something outside the project) as a milestone; docs/work/rules.md says how"
+                .into(),
+            [one] => format!(
+                "no open milestone can be read in docs/work/, but {one}, left out above, may be one: fix it first, \
+                 rather than write another"
+            ),
+            many => format!(
+                "no open milestone can be read in docs/work/, but {}, left out above, may each be one: fix them \
+                 first, rather than write another",
+                many.join(", ")
+            ),
         })
     }
 
@@ -179,6 +199,32 @@ impl Work {
                 (date < today).then(|| (name.clone(), date))
             })
             .collect()
+    }
+
+    /// The times and days of the work items that have not come at `now`: when each was filed, and when its state was
+    /// measured (`verified`). They are written from the clock, and one later than now was guessed. Time alone only
+    /// makes one pass, never fail, so this check cannot turn CI red with no change.
+    pub fn not_come(&self, now: Time) -> Vec<String> {
+        let today = latest_day(now);
+        let shown = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let mut found = Vec::new();
+        for (name, (item, _)) in &self.items {
+            if item.filed > today {
+                found.push(format!(
+                    "work/{name}: filed {}, a day that has not come anywhere yet (now {shown}): write the day it was \
+                     filed, read from the clock",
+                    item.filed
+                ));
+            }
+            for stamp in item.verified.iter().filter(|stamp| stamp.at > now) {
+                found.push(format!(
+                    "work/{name}: verified at {}, later than now ({shown}): write the time the state was measured, \
+                     read from the clock",
+                    stamp.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                ));
+            }
+        }
+        found
     }
 
     /// Why the record `name` cannot have the spec `parent` as its parent, or `None` when it can. The parent of a spec
@@ -289,6 +335,11 @@ pub fn work(docs: &Docs, areas: &[String]) -> Work {
             out.problems.insert(in_work(&name), why);
         }
     }
+    out.unsure_milestones = docs
+        .iter()
+        .filter(|(name, text)| out.problems.contains_key(&in_work(name)) && may_be_milestone(text))
+        .map(|(name, _)| in_work(name))
+        .collect();
     out
 }
 
@@ -337,7 +388,7 @@ pub fn expected(
     files.push((in_docs("knowledge/rules.md"), KNOWLEDGE_RULES.into()));
     files.push((
         in_docs("knowledge/index.md"),
-        render_knowledge(&read.documents, &read.guides, areas),
+        render_knowledge(&read.documents, &read.guides, &read.problems, areas),
     ));
     problems.extend(
         read.problems
@@ -619,6 +670,7 @@ fn render_lists(work: &Work, areas: &[String]) -> (String, String) {
     };
     let mut index = vec![GENERATED.to_string()];
     index.extend(guide_section(&work.guides));
+    index.extend(left_out_section(&work.problems));
     index.extend(section("Milestones", lines(open_milestones)));
     let mut closed = vec![CLOSED_HEAD.to_string(), GENERATED.to_string()];
     closed.extend(section("Milestones", lines(closed_milestones)));
@@ -633,6 +685,22 @@ fn render_lists(work: &Work, areas: &[String]) -> (String, String) {
         ));
     }
     (index.join("\n") + "\n", closed.join("\n") + "\n")
+}
+
+/// The documents of a directory left out of its index, each with why, after its guides: what the index lists and counts
+/// below may be short of them (a milestone waits for more records than it says, an alarm is not shown), and a reader of
+/// the index alone would not know it. Nothing when none is.
+fn left_out_section(problems: &Problems) -> Vec<String> {
+    if problems.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec!["".into(), "# Left out".into(), "".into()];
+    lines.extend(problems.iter().map(|(key, why)| {
+        // `work/<file name>` in docs/work/, the file name in docs/knowledge/
+        let name = key.rsplit('/').next().unwrap_or(key);
+        format!("* [{name}]({name}) - Not listed or counted below until it is fixed: {why}")
+    }));
+    lines
 }
 
 /// The guides of a directory, first in its index so the rules are found before the records. Nothing when it has none.
@@ -798,16 +866,18 @@ pub fn render_before(work: &Work, name: &str, closed: bool, today: NaiveDate) ->
     Some(out.join("\n") + "\n")
 }
 
-/// The knowledge index: the guides, the alarms that hold under `# When something happens`, the other documents that
-/// hold by area in the order `areas` declares them, and the deprecated ones last under `# Closed`, with what replaced
-/// them.
+/// The knowledge index: the guides, the documents left out, the alarms that hold under `# When something happens`, the
+/// other documents that hold by area in the order `areas` declares them, and the deprecated ones last under `# Closed`,
+/// with what replaced them.
 pub fn render_knowledge(
     documents: &BTreeMap<String, (Knowledge, Sections)>,
     guides: &BTreeMap<String, Guide>,
+    problems: &Problems,
     areas: &[String],
 ) -> String {
     let mut out = vec![GENERATED.to_string()];
     out.extend(guide_section(guides));
+    out.extend(left_out_section(problems));
     let entry = |name: &str, doc: &Knowledge| {
         format!(
             "* [{}]({name}) - {}",
@@ -929,6 +999,12 @@ pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
         }
     }
     tags
+}
+
+/// The latest day it is anywhere at `now`, the day in UTC+14. A day of the records is checked against it, not against
+/// the day of `now` itself: before 09:00 in Tokyo, the day written there is still to come in UTC, where CI runs.
+pub fn latest_day(now: Time) -> NaiveDate {
+    (now.naive_utc() + chrono::Duration::hours(14)).date()
 }
 
 /// The open items past `stale_after`. As in OKF, an item is stale when `now >= stale_after`.
@@ -1064,6 +1140,67 @@ Not yet. Measured by hand.
     }
 
     #[test]
+    fn a_day_or_a_time_that_has_not_come_is_named() {
+        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
+        let at = |d, h, m, s| tokyo.with_ymd_and_hms(2026, 9, d, h, m, s).unwrap();
+        // Each stamp of a list is read, and a closed item as well as an open one
+        let listed = GOOD.replace(
+            "verified: {by: human:someone, at: 2026-09-28T08:00:00+09:00}",
+            "verified:\n  - {by: human:a, at: 2026-09-27T08:00:00+09:00}\n  - {by: human:b, at: 2026-09-28T08:00:00+09:00}",
+        );
+        let closed = GOOD
+            .replace("status: draft", "status: deprecated\nprogress: done")
+            .replace(
+                "---\n\n# Trigger",
+                "---\n\n# Resolution\n\nDone.\n\n# Trigger",
+            );
+        let parsed = parsed(&[("listed.md", listed), ("closed.md", closed)]);
+        assert_eq!(parsed.not_come(at(28, 8, 0, 0)), Vec::<String>::new());
+        let early = parsed.not_come(at(28, 7, 59, 59));
+        assert_eq!(early.len(), 2, "{early:?}");
+        assert!(
+            early.iter().all(|found| found.contains(
+                "verified at 2026-09-28T08:00:00+09:00, later than now (2026-09-28T07:59:59+09:00)"
+            )),
+            "{early:?}"
+        );
+        // The day filed is compared with the latest day anywhere: 2026-09-27 has come in UTC+14 once it is 10:00 UTC
+        // on the day before, 19:00 in Tokyo
+        let filed = |now| {
+            parsed
+                .not_come(now)
+                .into_iter()
+                .filter(|found| found.contains(": filed "))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(filed(at(26, 19, 0, 0)), Vec::<String>::new());
+        let before = filed(at(26, 18, 59, 59));
+        assert_eq!(before.len(), 2, "{before:?}");
+        assert!(
+            before[0].starts_with(
+                "work/closed.md: filed 2026-09-27, a day that has not come anywhere yet (now 2026-09-26T18:59:59+09:00)"
+            ),
+            "{before:?}"
+        );
+    }
+
+    #[test]
+    fn the_latest_day_is_the_day_in_utc_plus_14() {
+        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
+        // 08:00 in Tokyo is 23:00 of the day before in UTC, and already the same day in UTC+14
+        let morning = tokyo.with_ymd_and_hms(2026, 10, 28, 8, 0, 0).unwrap();
+        assert_eq!(
+            latest_day(morning),
+            NaiveDate::from_ymd_opt(2026, 10, 28).unwrap()
+        );
+        let evening = tokyo.with_ymd_and_hms(2026, 10, 28, 19, 0, 0).unwrap();
+        assert_eq!(
+            latest_day(evening),
+            NaiveDate::from_ymd_opt(2026, 10, 29).unwrap()
+        );
+    }
+
+    #[test]
     fn the_alarms_come_first_with_what_is_seen_and_what_to_search_for() {
         let doc = |title: &str, tag: &str, matches: &str, body: &str| {
             format!(
@@ -1100,7 +1237,7 @@ Not yet. Measured by hand.
         .into();
         let read = knowledge(&docs, &areas());
         assert!(read.problems.is_empty(), "{:?}", read.problems);
-        let index = render_knowledge(&read.documents, &read.guides, &areas());
+        let index = render_knowledge(&read.documents, &read.guides, &read.problems, &areas());
         assert_eq!(
             index
                 .lines()
@@ -1117,6 +1254,35 @@ Not yet. Measured by hand.
                 "* [Gone](gone.md) - D. | Resolution: Fixed upstream.",
             ]
         );
+    }
+
+    #[test]
+    fn an_index_names_what_it_left_out_before_its_lists() {
+        // An alarm whose title a comment cuts: missing from the alarms, a reader of the index would never watch for it
+        let alarm = "---\ntype: Knowledge\ntitle: Publish #403\ndescription: D.\ntags: [billing]\nstatus: stable\n\
+                     ---\n\n# When\n\nThe publish job prints 403.\n\n# Do\n\nRenew the token.\n";
+        let read = knowledge(
+            &[("publish.md".to_string(), alarm.to_string())].into(),
+            &areas(),
+        );
+        let index = render_knowledge(&read.documents, &read.guides, &read.problems, &areas());
+        assert!(
+            index.contains(
+                "\n# Left out\n\n* [publish.md](publish.md) - Not listed or counted below until it is fixed: line 3: \
+                 the frontmatter holds a YAML comment"
+            ),
+            "{index}"
+        );
+        let docs: Docs = [("x.md".to_string(), "# no frontmatter\n".to_string())].into();
+        let index = render_work(&work(&docs, &areas()), &areas());
+        assert!(
+            index.contains("\n# Left out\n\n* [x.md](x.md) - Not listed or counted below until it is fixed: no "),
+            "{index}"
+        );
+        // Nothing left out, no heading
+        let read = knowledge(&Docs::new(), &areas());
+        let index = render_knowledge(&read.documents, &read.guides, &read.problems, &areas());
+        assert!(!index.contains("Left out"), "{index}");
     }
 
     #[test]
@@ -1138,7 +1304,7 @@ Not yet. Measured by hand.
         .into();
         let read = knowledge(&docs, &areas());
         assert!(read.problems.is_empty(), "{:?}", read.problems);
-        let index = render_knowledge(&read.documents, &read.guides, &areas());
+        let index = render_knowledge(&read.documents, &read.guides, &read.problems, &areas());
         assert_eq!(
             index
                 .lines()
@@ -1814,32 +1980,64 @@ Not yet. Measured by hand.
 
     #[test]
     fn a_project_always_has_an_open_milestone() {
+        let doc = |name: &str, text: &str| (name.to_string(), text.to_string());
+        // An item that breaks the format is known to be no milestone
+        let broken_item = doc("item.md", "---\ntype: Work Item\ntitle: I\n---\n");
+        // What is said, the left-out documents named as maybe the milestone, and whether create may write one
         let cases = [
-            ("none at all", vec![]),
+            (
+                "none at all",
+                vec![],
+                "no open milestone in docs/work/:",
+                "",
+            ),
             (
                 "only closed ones",
-                vec![milestone_doc("past", "deprecated", None)],
+                vec![
+                    milestone_doc("past", "deprecated", None),
+                    broken_item.clone(),
+                ],
+                "no open milestone in docs/work/:",
+                "",
             ),
-            // One that breaks the format does not count: the message about it says what to fix
+            // One that breaks the format does not count, but it may be the open one: fix it, rather than write another
             (
                 "only a broken one",
-                vec![(
-                    "broken.md".to_string(),
-                    "---\ntype: Milestone\ntitle: B\n---\n".to_string(),
-                )],
+                vec![doc("broken.md", "---\ntype: Milestone\ntitle: B\n---\n")],
+                "no open milestone can be read in docs/work/, but work/broken.md, left out above, may be one: fix it",
+                "work/broken.md",
+            ),
+            // Nor does one whose type cannot be read, or its value cut by a comment
+            (
+                "unreadable ones",
+                vec![
+                    doc("a.md", "---\ntype: Milestone\ntitle: v1 #1\n---\n"),
+                    doc("b.md", "# no frontmatter\n"),
+                    doc("c.md", "---\ntitle: no type\n---\n"),
+                    broken_item,
+                ],
+                "no open milestone can be read in docs/work/, but work/a.md, work/b.md, work/c.md, left out above, \
+                 may each be one: fix them",
+                "work/a.md work/b.md work/c.md",
             ),
         ];
-        for (name, docs) in cases {
+        for (name, docs, said, unsure) in cases {
             let docs: Docs = docs.into_iter().collect();
-            assert!(
-                work(&docs, &areas())
-                    .without_an_open_milestone()
-                    .is_some_and(|why| why.starts_with("no open milestone in docs/work/")),
-                "{name}"
-            );
-            // create writes one only when there is none at all, broken or closed
-            assert_eq!(has_milestone(&docs), name != "none at all", "{name}");
+            let read = work(&docs, &areas());
+            let why = read.without_an_open_milestone().unwrap_or_default();
+            assert!(why.starts_with(said), "{name}: {why}");
+            assert_eq!(read.unsure_milestones.join(" "), unsure, "{name}");
+            // create writes one only when there is none at all, broken, closed or unreadable
+            assert_eq!(may_have_milestone(&docs), name != "none at all", "{name}");
         }
+        // A readable open one is enough, whatever else cannot be read
+        let docs: Docs = [
+            milestone_doc("next", "stable", None),
+            doc("b.md", "# no frontmatter\n"),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(work(&docs, &areas()).without_an_open_milestone(), None);
         // A proposed one is open
         let docs: Docs = [milestone_doc("next", "draft", None)].into_iter().collect();
         assert_eq!(work(&docs, &areas()).without_an_open_milestone(), None);

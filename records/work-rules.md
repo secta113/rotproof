@@ -93,6 +93,9 @@ Body headings:
 - **State is a measurement.** Write the value and how to measure it. The time and who measured go in `verified`, not
   in the body. Update the state whenever you measure, including when nothing has changed. Without a recorded state,
   every reader has to measure every item again, and the items stop being read.
+- **Read a day or a time from the clock, never from memory.** `filed`, `verified` and the day of a log entry are
+  written as the clock says when they are written; `rotproof check` fails on one that has not come, as it was guessed.
+  An agent in Claude Code is given the time on every prompt by the time hook.
 - **By when it is done is a record, not words.** A sorted item has its parent, and closes before it. An item nobody
   has sorted yet names in `until` the moment it waits for, usually a milestone (see "Every open record is bounded").
 - **Details point to the history; they do not copy it.** Copies drift. Write markdown links: `/` starts a path
@@ -152,7 +155,9 @@ Body headings:
 - **`rotproof create` writes one when `docs/work/` has none,** `next-milestone.md`, with a `# Condition` that holds only
   a comment. A reader does not see a comment, so the check fails until a person writes what to look at: what the
   next moment is, the project says. When every milestone is closed, create writes none: the next one is the
-  project's to write.
+  project's to write. Nor does it while a document of `docs/work/` that cannot be read may be a milestone (one that
+  breaks the format, or whose type cannot be read): the check names it, and says to fix it rather than write another,
+  as a second milestone would split the work waiting for the moment between the two.
 - **A date that passes fails nothing.** Work is late more often than not, and a check that failed on a date alone would
   turn CI red with no change. The index shows the date, and `rotproof index` lists the open milestones past theirs.
 - **A milestone is not a part of anything,** and nothing is a part of it: it has no `parent`, and no record names it as
@@ -248,7 +253,9 @@ spec per area, and tie them back together as parts of an epic.
 
 # Index
 
-[index.md](index.md) is generated, and read before every piece of work: the guides; the open milestones under
+[index.md](index.md) is generated, and read before every piece of work: the guides; the documents left out under
+`# Left out`, each with why, as what the index lists and counts is short of them until they are fixed; the open
+milestones under
 `# Milestones`, by date and those without one last, as they are what the work of every area waits for; then by area
 the open records, and the closed records whose parent is open, so an open spec shows which of its steps are done.
 Every other closed record is in [closed.md](closed.md), also generated and listed among the guides: the closed

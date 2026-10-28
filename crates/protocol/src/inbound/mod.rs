@@ -161,4 +161,6 @@ pub trait Commands {
     fn current(&self, root: &Path, key: &str) -> Result<Option<String>, String>;
     /// The answer to the agent's stop hook, whose input is `input`: `None` to let it stop.
     fn stop_hook(&self, root: &Path, input: &str) -> Result<Option<String>, String>;
+    /// The answer to the agent's time hook, whose input is `input`: the time now, for the agent to read.
+    fn time_hook(&self, input: &str) -> Result<String, String>;
 }

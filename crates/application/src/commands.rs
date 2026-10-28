@@ -54,7 +54,8 @@ impl Commands for Rotproof<'_> {
         {
             return Err(MISSING.into());
         }
-        crate::check::check(&*files, self.machine.parsers()).map_err(|e| e.to_string())
+        crate::check::check(&*files, self.machine.parsers(), self.machine.now())
+            .map_err(|e| e.to_string())
     }
 
     fn guide(&self, root: &Path, stack: Option<&str>) -> Result<String, String> {
@@ -145,5 +146,9 @@ impl Commands for Rotproof<'_> {
             Some(fields.files.unwrap_or_else(|| FIRST.to_string()))
         });
         crate::hook::run(input, changes.as_deref(), files.as_deref())
+    }
+
+    fn time_hook(&self, input: &str) -> Result<String, String> {
+        domain::time_hook::answer(input, self.machine.now())
     }
 }

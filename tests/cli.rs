@@ -158,7 +158,18 @@ fn each_broken_rule_fails_under_its_check() {
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 24] = [
+    let cases: [(&str, &str, String); 26] = [
+        // A time or a day guessed rather than read from the clock
+        (
+            "no day or time in the records is later than now",
+            "docs/work/x.md",
+            item("[log](/log.md)").replace("at: 2026-10-01T10:00:00", "at: 2999-10-01T10:00:00"),
+        ),
+        (
+            "no day or time in the records is later than now",
+            "docs/log.md",
+            "# Log\n\n## 2999-01-01\n\n* Something\n".into(),
+        ),
         // Done before the milestone it comes after
         (
             "the arrows keep their order",
@@ -472,6 +483,40 @@ fn index_names_what_it_left_out() {
         "{}",
         stdout(&out)
     );
+    // The index says so too: a reader of the index alone would otherwise take its lists and counts as whole
+    let index = fs::read_to_string(root.path().join("docs/work/index.md")).unwrap();
+    assert!(
+        index.contains(
+            "# Left out\n\n* [broken.md](broken.md) - Not listed or counted below until it is fixed: no frontmatter"
+        ),
+        "{index}"
+    );
+}
+
+#[test]
+fn create_writes_no_milestone_beside_one_it_cannot_read() {
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::create_dir_all(r.join("docs/work")).unwrap();
+    // A title cut by a comment: the milestone cannot be read, so whether the project has one is not known
+    fs::write(
+        r.join("docs/work/release.md"),
+        "---\ntype: Milestone\ntitle: v1 #1\ndescription: D.\ntags: [a]\nstatus: stable\n---\n\n# Condition\n\n\
+         The tag is pushed.\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "create"]);
+    assert!(!stdout(&out).contains("next-milestone"), "{}", stdout(&out));
+    assert!(!r.join("docs/work/next-milestone.md").exists());
+    let check = run(&["--root", &arg, "check"]);
+    assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
+    for said in [
+        "work/release.md: line 3: the frontmatter holds a YAML comment",
+        "but work/release.md, left out above, may be one: fix it first, rather than write another",
+    ] {
+        assert!(stdout(&check).contains(said), "{said}: {}", stdout(&check));
+    }
 }
 
 #[test]
@@ -485,12 +530,14 @@ fn create_leaves_a_milestone_for_a_person_to_write() {
         "{}",
         stdout(&out)
     );
-    // What the next moment is, the project says: until it does, the check fails on the milestone
+    // What the next moment is, the project says: until it does, the check fails on the milestone, and says to write
+    // that one rather than another
     let check = run(&["--root", &arg, "check"]);
     assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
     for said in [
         "work/next-milestone.md: body headings missing or empty: [\"Condition\"]",
-        "a milestone is open:\n  no open milestone in docs/work/",
+        "a milestone is open:\n  no open milestone can be read in docs/work/, but work/next-milestone.md, left out \
+         above, may be one: fix it first",
     ] {
         assert!(stdout(&check).contains(said), "{said}: {}", stdout(&check));
     }
@@ -2332,7 +2379,8 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     assert!(
         stdout(&out).contains("work/next-milestone.md: tags: 0 tags")
-            && stdout(&out).contains("no open milestone in docs/work/"),
+            && stdout(&out)
+                .contains("but work/next-milestone.md, left out above, may be one: fix it first"),
         "{}",
         stdout(&out)
     );
@@ -2341,7 +2389,15 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     assert!(out.status.success(), "{}", stdout(&out));
 
     // Every command's --help says more than its -h, and how it exits
-    for command in ["init", "create", "check", "guide", "index", "stop-hook"] {
+    for command in [
+        "init",
+        "create",
+        "check",
+        "guide",
+        "index",
+        "stop-hook",
+        "time-hook",
+    ] {
         let short = stdout(&run(&[command, "-h"]));
         let long = stdout(&run(&[command, "--help"]));
         assert!(long.len() > short.len(), "{command}:\n{long}");
@@ -2726,10 +2782,15 @@ fn the_help_of_check_names_the_markers_of_the_check() {
 
 /// Run the stop hook from `root` with `input` on stdin.
 fn stop_hook(root: &Path, input: &str) -> Output {
+    hook(root, "stop-hook", input)
+}
+
+/// Run the hook `command` from `root` with `input` on stdin.
+fn hook(root: &Path, command: &str, input: &str) -> Output {
     use std::io::Write;
     use std::process::Stdio;
     let mut child = Command::new(env!("CARGO_BIN_EXE_rotproof"))
-        .args(["--root", &root_arg(root), "stop-hook"])
+        .args(["--root", &root_arg(root), command])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2829,6 +2890,52 @@ fn a_broken_stop_hook_exits_1_never_2() {
     let out = stop_hook(root.path(), open);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("git status failed"));
+}
+
+#[test]
+fn the_time_hook_tells_the_agent_the_time_and_a_broken_one_exits_1() {
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    assert!(create(&["--root", &root_arg(r), "create"]).status.success());
+    // create wrote the settings that run it, on each event
+    let settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(r.join(".claude/settings.json")).unwrap())
+            .unwrap();
+    for event in ["SessionStart", "UserPromptSubmit"] {
+        assert_eq!(
+            settings["hooks"][event][0]["hooks"][0]["command"], "rotproof time-hook",
+            "{event}"
+        );
+        let out = hook(
+            r,
+            "time-hook",
+            &format!("{{\"hook_event_name\": \"{event}\"}}"),
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let said: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+        let context = said["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        // The time is this machine's, with its offset, to the second
+        let time = context
+            .strip_prefix("The time now is ")
+            .and_then(|rest| rest.split_once(' '))
+            .map(|(time, _)| time)
+            .unwrap();
+        let read = chrono::DateTime::parse_from_rfc3339(time).unwrap();
+        let off = (chrono::Local::now().fixed_offset() - read).num_seconds();
+        assert!((0..60).contains(&off), "{context}");
+    }
+    // Claude Code reads exit code 2 from a UserPromptSubmit hook as "block the prompt"
+    for input in ["not json", "{\"hook_event_name\": \"Stop\"}"] {
+        let out = hook(r, "time-hook", input);
+        assert_eq!(out.status.code(), Some(1), "{input}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("rotproof time-hook:"));
+    }
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof stop-hook`, and the
-//! help that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints
-//! and how it exits are decided here.
+//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof stop-hook` and `rotproof
+//! time-hook`, and the help that leads from one to the next. Each command is a call of an input port of
+//! `protocol.inbound`; what it prints and how it exits are decided here.
 
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -86,11 +86,12 @@ enum Command {
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/,
-    /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, whose condition a person writes
-    /// before `rotproof check` passes, and the project's files (AGENTS.md, CLAUDE.md, README.md, .gitignore,
-    /// .gitattributes, Claude Code's settings with the stop hook, a hook that says when rotproof is not on the PATH and
-    /// the rule that denies editing the approvals file, for python and none the pin of Rotproof and a CI workflow, and
-    /// for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
+    /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, nor a document that cannot be
+    /// read and may be one, whose condition a person writes before `rotproof check` passes, and the project's files
+    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the stop hook, a hook
+    /// that says when rotproof is not on the PATH, the time hook and the rule that denies editing the approvals file,
+    /// for python and none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml and the
+    /// entry file src/main.rs), each when it does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files, the closed
     /// list and the rules in docs/. Adds the fields the declaration lacks, keeping its comments and values. Never
     /// overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing the
@@ -158,8 +159,8 @@ enum Command {
     /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, the list of closed records in
     /// docs/work/closed.md, and the rules.md Rotproof keeps there, from the frontmatter of the documents. Run it after
     /// a record changes; never edit these by hand.
-    /// Lists the documents it left out and why, the work items past their stale_after, and the open milestones past
-    /// their date. Exits 2 when the declaration or a document cannot be read.
+    /// Lists the documents it left out and why, also under `# Left out` in the index, the work items past their
+    /// stale_after, and the open milestones past their date. Exits 2 when the declaration or a document cannot be read.
     Index,
     /// Print the open records that close before a milestone, a spec or any record of docs/work/, earliest first,
     /// writing nothing
@@ -206,6 +207,14 @@ enum Command {
     /// are up to (files in the declaration), it says so to the person: the hook runs the first rotproof on the PATH.
     /// Exits 1, never 2, when it fails, so a broken hook never keeps the agent from stopping.
     StopHook,
+    /// Run as Claude Code's SessionStart and UserPromptSubmit hook: tell the agent the time now. Reads the hook input
+    /// on stdin
+    ///
+    /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. An agent has no clock, and a
+    /// day or a time it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
+    /// gives it the time on every prompt and at the start of every session, to write from. Exits 1, never 2, when it
+    /// fails, so a broken hook never blocks the prompt.
+    TimeHook,
 }
 
 /// The command line as clap reads it, with the long help of `rotproof check` naming the markers of the check.
@@ -227,6 +236,9 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
     let root = cli.root.as_path();
     if let Command::StopHook = cli.command {
         return stop_hook(commands, root);
+    }
+    if let Command::TimeHook = cli.command {
+        return time_hook(commands);
     }
     let result = match cli.command {
         Command::Init { stack } => init(commands, &names, root, stack.as_deref()).map(|()| true),
@@ -254,7 +266,7 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
             }
         },
         Command::Follows { keys } => follows(commands, root, &keys).map(|()| true),
-        Command::StopHook => unreachable!("answered above"),
+        Command::StopHook | Command::TimeHook => unreachable!("answered above"),
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,
@@ -414,6 +426,26 @@ fn stop_hook(commands: &dyn Commands, root: &Path) -> ExitCode {
         Ok(None) => ExitCode::SUCCESS,
         Err(why) => {
             eprintln!("rotproof stop-hook: {why}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Answer the agent's time hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "block the
+/// prompt", and a broken hook would keep the person's prompt from the agent instead of being shown.
+fn time_hook(commands: &dyn Commands) -> ExitCode {
+    let mut input = String::new();
+    let answer = std::io::stdin()
+        .read_to_string(&mut input)
+        .map_err(|e| format!("the hook input could not be read: {e}"))
+        .and_then(|_| commands.time_hook(&input));
+    match answer {
+        Ok(out) => {
+            println!("{out}");
+            ExitCode::SUCCESS
+        }
+        Err(why) => {
+            eprintln!("rotproof time-hook: {why}");
             ExitCode::FAILURE
         }
     }
