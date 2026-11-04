@@ -189,16 +189,17 @@ enum Command {
     ///
     /// Run it once the document is reviewed against the code: when it starts to follow something, or after what it
     /// follows changed. The document is named as rotproof check names it (knowledge/api.md) or from the root
-    /// (docs/knowledge/api.md). Each key is what follows names: a file from the root (src/api/routes.py), a definition
-    /// of a Python file (src/api/routes.py::create_user, or Class.method), or every .py file under a directory
-    /// (src/api/). A key in follows gets its new hash, and a key not in it is added at its end, with the hash quoted;
-    /// nothing else in the document changes. Prints each key with what was done, then, when the document changed, the
+    /// (docs/knowledge/api.md, or docs\knowledge\api.md). Each key is what follows names: a file from the root
+    /// (src/api/routes.py), a definition of a Python file (src/api/routes.py::create_user, or Class.method), or every
+    /// .py file under a directory (src/api/). A key in follows gets its new hash, and a key not in it is added at its
+    /// end, with the hash quoted (follows is made at the end of the frontmatter when the document has none); nothing
+    /// else in the document changes. Prints each key with what was done, then, when the document changed, the
     /// line to write in the log entry, as the check asks for it. Writes all the keys or none, and only the keys named:
     /// re-pinning every changed document in one act is `rotproof approve --reviewed`, which a person runs. Needs no
     /// terminal: pinning one document is an edit of it, which its log entry records. A key gone from the code is left
     /// to edit by hand. Exits 2, writing nothing, when the first argument is not a knowledge document (as before 0.4.0,
-    /// when follows took the keys alone), the document is not there, cannot be read or is deprecated, or a key is not a
-    /// form follows takes, names what is not there, or cannot be read.
+    /// when follows took the keys alone), the document is not there, cannot be read, is a guide or is deprecated, or a
+    /// key is not a form follows takes, names what is not there, or cannot be read.
     Follows {
         /// The knowledge document: knowledge/<slug>.md, or docs/knowledge/<slug>.md
         document: String,

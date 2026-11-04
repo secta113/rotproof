@@ -21,11 +21,14 @@ two structures:
 
 - **The declaration is the truth, and Rotproof does not repair.** The structure a project declares is the structure. A
   tree that differs from it fails, either way, and someone decides whether the tree or the declaration is wrong;
-  Rotproof changes the tree only when asked. It rewrites what a person wrote in one case only: when a version of
+  Rotproof changes the tree only when asked. It rewrites what a person wrote in two cases only. When a version of
   Rotproof changes the format it reads, `rotproof init` carries the files across that change, doing what a machine can
   without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That is not a repair of drift:
-  the files were right under the old format, and Rotproof is what changed. Code it never moves: when the layer table
-  changes (0.4.0), `rotproof init` says where each layer's code goes, and the person moves it.
+  the files were right under the old format, and Rotproof is what changed. And once a knowledge document is reviewed
+  against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a person, on a terminal)
+  write the hashes in its `follows`, and nothing else: the review is the person's or the agent's, and pinning only
+  records it. Code it never moves: when the layer table changes (0.4.0), `rotproof init` says where each layer's code
+  goes, and the person moves it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
 - **A check with nothing to check fails.** A check that passes on an empty tree protects nothing.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
@@ -399,11 +402,12 @@ the code, `rotproof follows knowledge/api.md <key>...` (or `docs/knowledge/api.m
 code is now, adding a key `follows` lacks with its hash quoted, writes all the keys or none, and prints the log line to
 write: pinning changes the document, so its log entry records the review. Run it when a document starts to follow
 something, and when `rotproof check` fails because what it follows changed since: the check names the command to run.
-It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand. After a refactoring that moved code without changing what it does, a person can
-re-pin every changed hash in one act: `rotproof approve --reviewed` lists each document and what changed under it,
-says to read the changes first (a hash says only that the code changed), asks for one `y` on a terminal (an agent's
-shell has none), writes the new hashes, and prints the log lines to write. What is gone is left for the person to
-edit. No LLM judges whether the meaning changed: the agent that refactors is usually one.
+It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand. After a
+refactoring that moved code without changing what it does, a person can re-pin every changed hash in one act:
+`rotproof approve --reviewed` lists each document and what changed under it, says to read the changes first (a hash
+says only that the code changed), asks for one `y` on a terminal (an agent's shell has none), writes the new hashes,
+and prints the log lines to write. What is gone is left for the person to edit. No LLM judges whether the meaning
+changed: the agent that refactors is usually one.
 
 Some knowledge matters only when something is seen: a service refuses an upload, a CI image moves. Such a document is
 an alarm, with `# When` (what is seen and where, in the words of the output) and `# Do` (what to do then, usually
