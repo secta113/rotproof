@@ -113,6 +113,17 @@ pub struct Drift {
     pub now: Result<Option<String>, String>,
 }
 
+/// What `rotproof follows` pinned in a knowledge document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pinned {
+    /// The document's file name in `docs/knowledge/`
+    pub doc: String,
+    /// Each key: its hash as pinned before (`None` when it was added), and as the code is now
+    pub keys: Vec<(String, Option<String>, String)>,
+    /// The document's new hash, for the log: `None` when every key was pinned as it is now, and nothing was written
+    pub written: Option<String>,
+}
+
 /// An approval `rotproof approve --prune` removed: what it kept, and in which file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Removed {
@@ -157,8 +168,8 @@ pub trait Commands {
     fn changed(&self, root: &Path) -> Result<Vec<Drift>, String>;
     /// Pin each of `drifts` as reviewed: each document written, with its hash for the log.
     fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<(String, String)>, String>;
-    /// The hash of what the key of `follows` names now: `None` when it is not there.
-    fn current(&self, root: &Path, key: &str) -> Result<Option<String>, String>;
+    /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
+    fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
     /// The answer to the agent's stop hook, whose input is `input`: `None` to let it stop.
     fn stop_hook(&self, root: &Path, input: &str) -> Result<Option<String>, String>;
     /// The answer to the agent's time hook, whose input is `input`: the time now, for the agent to read.

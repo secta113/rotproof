@@ -6,10 +6,12 @@ use std::collections::BTreeMap;
 use crate::bundle::Bundle;
 use crate::tree::{exactly, read_text};
 use domain::bundle::in_docs;
-use domain::follows::{Followed, directory_hash, drifted, followed, repinned};
+use domain::follows::{
+    Followed, added, directory_hash, document_name, drifted, followed, repinned,
+};
 use domain::records::content_hash;
-use domain::schema::{Knowledge, Status};
-use protocol::inbound::Drift;
+use domain::schema::{Knowledge, KnowledgeDoc, Status, knowledge_doc};
+use protocol::inbound::{Drift, Pinned};
 use protocol::outbound::Parsers;
 use protocol::outbound::{Tree, Writer};
 
@@ -133,6 +135,108 @@ pub fn repin(
     Ok(written)
 }
 
+/// Pin each of `keys` in the knowledge document `document` names (`knowledge/api.md` or `docs/knowledge/api.md`) at
+/// its hash now, through `out`: a pinned key gets its new hash, a key not in `follows` is added. All of them or none:
+/// when a key is not there or cannot be read, nothing is written. A deprecated document no longer holds, so it is not
+/// pinned.
+pub fn pin(
+    tree: &dyn Tree,
+    out: &dyn Writer,
+    parsers: &dyn Parsers,
+    document: &str,
+    keys: &[String],
+) -> Result<Pinned, String> {
+    let name = document_name(document)?;
+    let path = in_docs(&format!("knowledge/{name}"));
+    let areas = crate::layers::areas(tree).map_err(|e| e.to_string())??;
+    let folder = Bundle::new(tree, areas)
+        .read_knowledge()
+        .map_err(|e| e.to_string())?;
+    let doc = match folder.documents.get(&name) {
+        Some((doc, _)) => doc,
+        None => {
+            return Err(match folder.problems.get(&name) {
+                Some(why) => format!("{path} cannot be pinned until it is fixed: {why}"),
+                None if folder.guides.contains_key(&name) => {
+                    format!("{path} is a guide, which follows nothing")
+                }
+                None => format!("{path} is not there"),
+            });
+        }
+    };
+    if doc.status == Status::Deprecated {
+        return Err(format!(
+            "{path} is deprecated: it no longer holds, so what it followed is not read"
+        ));
+    }
+    let mut unique: Vec<&str> = Vec::new();
+    for key in keys {
+        if !unique.contains(&key.as_str()) {
+            unique.push(key);
+        }
+    }
+    let mut pinned = Vec::new();
+    let mut failed = Vec::new();
+    for key in unique {
+        match current(tree, parsers, key) {
+            Ok(Some(now)) => {
+                let before = doc
+                    .follows
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, h)| h.clone());
+                pinned.push((key.to_string(), before, now));
+            }
+            Ok(None) => failed.push(format!("{key}: not there")),
+            Err(why) => failed.push(format!("{key}: {why}")),
+        }
+    }
+    if !failed.is_empty() {
+        return Err(format!("{path}: nothing written\n{}", failed.join("\n")));
+    }
+    let text = read_text(tree, &path).map_err(|e| format!("{path}: {e}"))?;
+    let repins: Vec<(&str, &str, &str)> = pinned
+        .iter()
+        .filter_map(|(key, before, now)| {
+            before
+                .as_deref()
+                .filter(|before| before != now)
+                .map(|before| (key.as_str(), before, now.as_str()))
+        })
+        .collect();
+    let adds: Vec<(&str, &str)> = pinned
+        .iter()
+        .filter(|(_, before, _)| before.is_none())
+        .map(|(key, _, now)| (key.as_str(), now.as_str()))
+        .collect();
+    let mut written = None;
+    if !repins.is_empty() || !adds.is_empty() {
+        let new = repinned(&text, &repins)
+            .and_then(|text| added(&text, &adds))
+            .map_err(|why| format!("{path}: {why}"))?;
+        // Read back as the check reads it, so a key written is a key pinned
+        let reads_back = match knowledge_doc(&new) {
+            Ok(KnowledgeDoc::Knowledge(doc, _)) => pinned
+                .iter()
+                .all(|(key, _, now)| doc.follows.iter().any(|(k, h)| k == key && h == now)),
+            _ => false,
+        };
+        if !reads_back {
+            return Err(format!(
+                "{path}: nothing written, as the document would not read back with these keys pinned: edit follows by \
+                 hand"
+            ));
+        }
+        out.write(&path, &new).map_err(|e| format!("{path}: {e}"))?;
+        written = Some(content_hash(&new));
+    }
+    Ok(Pinned {
+        doc: name,
+        keys: pinned,
+        written,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +288,89 @@ mod tests {
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].key, "domain/gone.py");
         assert_eq!(left[0].now, Ok(None));
+    }
+
+    #[test]
+    fn a_pin_writes_every_key_or_none() {
+        let tree = project(&[("domain/model.py::play", "00000000")]);
+        let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+        let before = tree.text(DOC).unwrap();
+        // A key not there leaves the document as it was, the key that could be pinned too
+        let why = pin(
+            &tree,
+            &tree,
+            &Readers,
+            "knowledge/model.md",
+            &keys(&["domain/model.py::play", "domain/gone.py"]),
+        )
+        .unwrap_err();
+        assert!(why.contains("domain/gone.py: not there"), "{why}");
+        assert_eq!(tree.text(DOC).unwrap(), before);
+
+        // A pinned key is re-pinned and a new one added, named from the root, once though named twice
+        let done = pin(
+            &tree,
+            &tree,
+            &Readers,
+            "docs/knowledge/model.md",
+            &keys(&["domain/model.py::play", "domain/", "domain/"]),
+        )
+        .unwrap();
+        assert_eq!(done.doc, "model.md");
+        assert_eq!(done.keys.len(), 2, "{done:?}");
+        assert_eq!(done.keys[0].1.as_deref(), Some("00000000"));
+        assert_eq!(done.keys[1].1, None);
+        let text = tree.text(DOC).unwrap();
+        assert_eq!(done.written, Some(content_hash(&text)));
+        assert!(
+            text.contains(&format!("  domain/: \"{}\"\n", done.keys[1].2)),
+            "{text}"
+        );
+        assert!(changed(&tree, &Readers).unwrap().is_empty());
+
+        // Pinned as it is now: nothing written, and no log line to write
+        let again = pin(
+            &tree,
+            &tree,
+            &Readers,
+            "knowledge/model.md",
+            &keys(&["domain/"]),
+        )
+        .unwrap();
+        assert_eq!(again.written, None);
+        assert_eq!(tree.text(DOC).unwrap(), text);
+    }
+
+    #[test]
+    fn a_pin_refuses_what_is_no_knowledge_document_that_holds() {
+        let tree = project(&[]);
+        let play = vec!["domain/model.py::play".to_string()];
+        for (document, said) in [
+            ("knowledge/gone.md", "is not there"),
+            ("knowledge/rules.md", "is a guide"),
+            (
+                "domain/model.py",
+                "rotproof follows takes the document first",
+            ),
+        ] {
+            if document.contains("rules") {
+                tree.write(
+                    "docs/knowledge/rules.md",
+                    "---\ntype: Guide\ntitle: R\ndescription: D.\n---\n\n# Rules\n",
+                )
+                .unwrap();
+            }
+            let why = pin(&tree, &tree, &Readers, document, &play).unwrap_err();
+            assert!(why.contains(said), "{document}: {why}");
+        }
+        tree.write(
+            DOC,
+            "---\ntype: Knowledge\ntitle: M\ndescription: D.\ntags: [a]\nstatus: deprecated\n---\n\n# Resolution\n\n\
+             Replaced.\n",
+        )
+        .unwrap();
+        let why = pin(&tree, &tree, &Readers, "knowledge/model.md", &play).unwrap_err();
+        assert!(why.contains("is deprecated"), "{why}");
+        assert!(!tree.text(DOC).unwrap().contains("follows"));
     }
 }

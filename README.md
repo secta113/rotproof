@@ -78,7 +78,7 @@ rotproof --root <repository> before <slug>  # print the open records that close 
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
-rotproof --root <repository> follows <key>...  # print the hash to pin in follows, for each key
+rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
 rotproof stop-hook                   # run by Claude Code when the agent stops (see "The stop hook")
 rotproof time-hook                   # run by Claude Code on each prompt, to tell the agent the time (see "The time hook")
@@ -394,10 +394,12 @@ or a data model, or why something was decided. Every edit of a knowledge documen
 contents, under the label `**Knowledge**` (`* **Knowledge**: knowledge/api.md@a3f9c1d2`), and `rotproof check` fails
 an edit the log does not name. A knowledge document that describes code names it in `follows`, each with its hash when
 the document was last reviewed: a file in any language, and in Python also a function or class
-(`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). `rotproof follows <key>...` prints the
-line to put in `follows` for each key, as the code is now, when a document starts to follow it. `rotproof check` fails
-when one changed since, and prints the line to write once the document is reviewed; writing it changes the document,
-so its log entry records the review. After a refactoring that moved code without changing what it does, a person can
+(`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). Once the document is reviewed against
+the code, `rotproof follows knowledge/api.md <key>...` (or `docs/knowledge/api.md`) pins each key at its hash as the
+code is now, adding a key `follows` lacks with its hash quoted, writes all the keys or none, and prints the log line to
+write: pinning changes the document, so its log entry records the review. Run it when a document starts to follow
+something, and when `rotproof check` fails because what it follows changed since: the check names the command to run.
+It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand. After a refactoring that moved code without changing what it does, a person can
 re-pin every changed hash in one act: `rotproof approve --reviewed` lists each document and what changed under it,
 says to read the changes first (a hash says only that the code changed), asks for one `y` on a terminal (an agent's
 shell has none), writes the new hashes, and prints the log lines to write. What is gone is left for the person to

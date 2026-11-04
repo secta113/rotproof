@@ -75,7 +75,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, the files Rotproof generates in it (the index files and the rules), the tags the records use, and the days and times of the work items that have not come |
 | `schema.rs` | The frontmatter of each document type |
 | `arrows.rs` | The arrows between the records of `docs/work/` (`after` and `until`): the records they name, the order they keep with how each record closed, the cycles they make with the parents, and what each open record waits for |
-| `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory, a Python definition), the hash of a directory, and what fails when one changed or is gone |
+| `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory, a Python definition), the hash of a directory, what fails when one changed or is gone, the document `rotproof follows` names, and a hash replaced or a key added in the frontmatter |
 | `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure, its days that have not come and what it points at, the hash of a knowledge document, and the floor of the bundle |
 | `tree.rs` | How Rotproof reads a file's text and how Windows reads a name |
 | `migrate.rs` | Moving the records of a project made before 0.3.0 from `docs/backlog/` and `docs/specs/` into `docs/work/`: when it is due, the move planned whole (each record, every link that reached one, the frontmatter a machine can rewrite) or why it cannot be made, and what it leaves to a person |
@@ -110,7 +110,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
-| `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, and the re-pin of `rotproof approve --reviewed` |
+| `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, the re-pin of `rotproof approve --reviewed`, and the pin of `rotproof follows` |
 | `markers.rs` | The marker check, read from the tree: every code file walked, and its comments read by the reader of its language |
 | `hook.rs` | `rotproof stop-hook`, the hook Claude Code runs when the agent stops |
 | `index.rs` | `rotproof index`: every index file written from the frontmatter, and the open items to measure again |
