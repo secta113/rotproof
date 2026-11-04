@@ -3197,14 +3197,11 @@ fn approve_refuses_without_a_terminal_and_prune_removes_only_what_matches_nothin
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
 }
 
-/// Every `key: hash` the check asks to write in follows, from its output.
-fn to_write(said: &str) -> Vec<(String, String)> {
+/// Every key the check asks to pin in knowledge/model.md with `rotproof follows`, from its output.
+fn to_pin(said: &str) -> Vec<String> {
     said.split('`')
-        .filter_map(|part| {
-            let (key, hash) = part.rsplit_once(": ")?;
-            (hash.len() == 8 && hash.bytes().all(|b| b.is_ascii_hexdigit()) && !key.contains(' '))
-                .then(|| (key.to_string(), hash.to_string()))
-        })
+        .filter_map(|part| part.strip_prefix("rotproof follows knowledge/model.md "))
+        .map(str::to_string)
         .collect()
 }
 
@@ -3236,33 +3233,40 @@ fn a_knowledge_document_fails_when_what_it_follows_changes_unreviewed() {
              {follows}---\n\n# Shape\n\nA song plays.\n"
         )
     };
-    // The check names every key and the hash it has now: pinned at those, the document matches its code
+    // The check names the command that pins every key: run as it says, the document matches its code
     let placeholders: Vec<(String, String)> = keys
         .iter()
         .map(|key| (key.to_string(), "00000000".to_string()))
         .collect();
     fs::write(r.join("docs/knowledge/model.md"), document(&placeholders)).unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
     let said = stdout(&run(&["--root", &arg, "check"]));
-    let pins: Vec<(String, String)> = to_write(&said)
-        .into_iter()
-        .filter(|(key, _)| keys.contains(&key.as_str()))
-        .collect();
-    assert_eq!(pins.len(), keys.len(), "{said}");
-    let pin = |pins: &[(String, String)]| {
-        fs::write(r.join("docs/knowledge/model.md"), document(pins)).unwrap();
-        assert!(run(&["--root", &arg, "index"]).status.success());
-        let said = stdout(&run(&["--root", &arg, "check"]));
+    let pins = to_pin(&said);
+    assert_eq!(pins, keys, "{said}");
+    let pin = |keys: &[String]| {
+        let mut args = vec!["--root", &arg, "follows", "knowledge/model.md"];
+        args.extend(keys.iter().map(String::as_str));
+        let out = run(&args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let said = stdout(&out);
         let line = said
-            .split('`')
-            .find(|part| part.starts_with("* **Knowledge**: knowledge/model.md@"))
-            .map(str::to_string);
-        if let Some(line) = line {
-            fs::write(
-                r.join("docs/log.md"),
-                format!("# Log\n\n## 2026-10-02\n\n* Something\n  {line}\n"),
-            )
-            .unwrap();
-        }
+            .split("write: ")
+            .nth(1)
+            .and_then(|rest| rest.lines().next())
+            .expect("follows prints the log line");
+        assert!(
+            line.starts_with("* **Knowledge**: knowledge/model.md@"),
+            "{said}"
+        );
+        fs::write(
+            r.join("docs/log.md"),
+            format!("# Log\n\n## 2026-10-02\n\n* Something\n  {line}\n"),
+        )
+        .unwrap();
     };
     pin(&pins);
     let check = || {
@@ -3282,8 +3286,7 @@ fn a_knowledge_document_fails_when_what_it_follows_changes_unreviewed() {
     .unwrap();
     let (code, said) = check();
     assert_eq!(code, Some(1), "{said}");
-    let changed: Vec<String> = to_write(&said).into_iter().map(|(key, _)| key).collect();
-    assert_eq!(changed, ["domain/model.py", "domain/"], "{said}");
+    assert_eq!(to_pin(&said), ["domain/model.py", "domain/"], "{said}");
     assert!(said.contains(
         "every knowledge document matches the code it follows:\n  knowledge/model.md follows domain/model.py, \
          which changed since the document was last reviewed"
@@ -3299,42 +3302,26 @@ fn a_knowledge_document_fails_when_what_it_follows_changes_unreviewed() {
     .unwrap();
     let (_, said) = check();
     assert!(
-        to_write(&said)
+        to_pin(&said)
             .iter()
-            .any(|(key, _)| key == "domain/model.py::Song"),
+            .any(|key| key == "domain/model.py::Song"),
         "{said}"
     );
     assert!(
-        !to_write(&said)
+        !to_pin(&said)
             .iter()
-            .any(|(key, _)| key == "domain/model.py::Song.play"),
+            .any(|key| key == "domain/model.py::Song.play"),
         "{said}"
     );
 
     // A file added to a followed directory changes it
-    let pinned = to_write(&said);
-    pin(&pinned
-        .iter()
-        .cloned()
-        .chain(
-            pins.iter()
-                .filter(|(k, _)| !pinned.iter().any(|(p, _)| p == k))
-                .cloned(),
-        )
-        .collect::<Vec<_>>());
+    pin(&to_pin(&said));
     let (code, said) = check();
     assert_eq!(code, Some(0), "{said}");
     fs::write(r.join("domain/more.py"), "MORE = 1\n").unwrap();
     let (code, said) = check();
     assert_eq!(code, Some(1), "{said}");
-    assert_eq!(
-        to_write(&said)
-            .into_iter()
-            .map(|(key, _)| key)
-            .collect::<Vec<_>>(),
-        ["domain/"],
-        "{said}"
-    );
+    assert_eq!(to_pin(&said), ["domain/"], "{said}");
 
     // A definition gone fails, as a dangling link does
     fs::write(r.join("domain/model.py"), "def other():\n    return 3\n").unwrap();
@@ -3385,15 +3372,41 @@ fn the_re_pin_of_followed_code_refuses_without_a_terminal() {
 }
 
 #[test]
-fn follows_prints_the_hash_a_document_pins_and_writes_nothing() {
+fn follows_pins_the_keys_in_the_document_and_prints_the_log_line() {
     let root = clean_repo();
     let r = root.path();
     let arg = root_arg(r);
+    let doc = r.join("docs/knowledge/model.md");
     fs::write(r.join("domain/model.py"), "def play():\n    return 1\n").unwrap();
+    let before = "---\ntype: Knowledge\ntitle: M\ndescription: D.\ntags: [a]\nstatus: stable\n---\n\n# Shape\n\n\
+                  It plays.\n";
+    fs::write(&doc, before).unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+
+    // What is not there, or not a key, fails with exit 2 and writes nothing, the keys that could be pinned too
     let out = run(&[
         "--root",
         &arg,
         "follows",
+        "knowledge/model.md",
+        "domain/model.py",
+        "domain/gone.py",
+        "domain\\x.py",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("domain/gone.py: not there") && err.contains("not a path from the root"),
+        "{err}"
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+
+    // Named from the root, the keys are added, and the log line printed is the one the check asks for
+    let out = run(&[
+        "--root",
+        &arg,
+        "follows",
+        "docs/knowledge/model.md",
         "domain/model.py::play",
         "domain/",
     ]);
@@ -3402,46 +3415,46 @@ fn follows_prints_the_hash_a_document_pins_and_writes_nothing() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let lines: Vec<String> = stdout(&out).lines().map(str::to_string).collect();
-    assert_eq!(lines.len(), 2, "{lines:?}");
+    let said = stdout(&out);
     assert!(
-        lines[0].starts_with("domain/model.py::play: \""),
-        "{lines:?}"
+        said.contains("  domain/model.py::play: added ") && said.contains("  domain/: added "),
+        "{said}"
     );
-    // Pasted into follows as printed, the document matches its code
-    let follows: String = lines.iter().map(|line| format!("  {line}\n")).collect();
-    fs::write(
-        r.join("docs/knowledge/model.md"),
-        format!(
-            "---\ntype: Knowledge\ntitle: M\ndescription: D.\ntags: [a]\nstatus: stable\nfollows:\n{follows}---\n\n\
-             # Shape\n\nIt plays.\n"
-        ),
-    )
-    .unwrap();
-    assert!(run(&["--root", &arg, "index"]).status.success());
-    let said = stdout(&run(&["--root", &arg, "check"]));
-    assert!(!said.contains("matches the code it follows"), "{said}");
+    let text = fs::read_to_string(&doc).unwrap();
+    assert!(
+        text.contains("follows:\n  domain/model.py::play: \""),
+        "{text}"
+    );
+    let line = said
+        .split("write: ")
+        .nth(1)
+        .and_then(|rest| rest.lines().next())
+        .expect("follows prints the log line");
+    let check = stdout(&run(&["--root", &arg, "check"]));
+    assert!(!check.contains("matches the code it follows"), "{check}");
+    assert!(check.contains(line), "{check}");
 
-    // What is not there, or not a key, fails with exit 2, after printing what could be hashed
-    let out = run(&[
-        "--root",
-        &arg,
-        "follows",
-        "domain/model.py",
-        "domain/gone.py",
-        "domain\\x.py",
-    ]);
+    // Pinned as the code is now: nothing written
+    let out = run(&["--root", &arg, "follows", "knowledge/model.md", "domain/"]);
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("nothing written"), "{}", stdout(&out));
+    assert_eq!(fs::read_to_string(&doc).unwrap(), text);
+
+    // Called as before 0.4.0, with the keys alone, it says the new form and writes nothing
+    let out = run(&["--root", &arg, "follows", "domain/model.py", "domain/"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(
-        stdout(&out).starts_with("domain/model.py: \""),
+        String::from_utf8_lossy(&out.stderr).contains("takes the document first"),
         "{}",
-        stdout(&out)
+        String::from_utf8_lossy(&out.stderr)
     );
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        err.contains("domain/gone.py: not there") && err.contains("not a path from the root"),
-        "{err}"
-    );
-    // A key is needed
+    assert_eq!(fs::read_to_string(&doc).unwrap(), text);
+    // A document and a key are needed
     assert_eq!(run(&["--root", &arg, "follows"]).status.code(), Some(2));
+    assert_eq!(
+        run(&["--root", &arg, "follows", "knowledge/model.md"])
+            .status
+            .code(),
+        Some(2)
+    );
 }

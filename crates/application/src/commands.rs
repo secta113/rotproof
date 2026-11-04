@@ -8,7 +8,7 @@ use domain::layers::{DECLARATION, MISSING, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
 use domain::upgrade::{FIRST, VERSION};
 use protocol::inbound::{
-    Before, Commands, Drift, Indexed, Initialized, Made, Names, Removed, Report,
+    Before, Commands, Drift, Indexed, Initialized, Made, Names, Pinned, Removed, Report,
 };
 use protocol::outbound::Machine;
 
@@ -131,8 +131,9 @@ impl Commands for Rotproof<'_> {
         crate::follows::repin(&*files, &*files, drifts)
     }
 
-    fn current(&self, root: &Path, key: &str) -> Result<Option<String>, String> {
-        crate::follows::current(&*self.machine.files(root), self.machine.parsers(), key)
+    fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String> {
+        let files = self.machine.files(root);
+        crate::follows::pin(&*files, &*files, self.machine.parsers(), document, keys)
     }
 
     fn stop_hook(&self, root: &Path, input: &str) -> Result<Option<String>, String> {

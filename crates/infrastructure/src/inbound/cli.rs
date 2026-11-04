@@ -184,15 +184,25 @@ enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Print the hash a knowledge document pins for each key of follows, as the code is now, writing nothing
+    /// Pin keys in a knowledge document's follows, at the hash of the code as it is now, and print the log line to
+    /// write
     ///
-    /// Each key is what follows in a knowledge document names: a file from the root (src/api/routes.py), a definition
-    /// of a Python file (src/api/routes.py::create_user, or Class.method), or every .py file under a directory
-    /// (src/api/). Prints one line per key, `key: "hash"`, to put in follows once the document is reviewed against the
-    /// code: when a document starts to follow it, or after it changed. Writes nothing, and needs no terminal: pinning
-    /// is the edit of the document, which its log entry records. Exits 2 when a key is not a form follows takes, names
-    /// what is not there, or cannot be read.
+    /// Run it once the document is reviewed against the code: when it starts to follow something, or after what it
+    /// follows changed. The document is named as rotproof check names it (knowledge/api.md) or from the root
+    /// (docs/knowledge/api.md, or docs\knowledge\api.md). Each key is what follows names: a file from the root
+    /// (src/api/routes.py), a definition of a Python file (src/api/routes.py::create_user, or Class.method), or every
+    /// .py file under a directory (src/api/). A key in follows gets its new hash, and a key not in it is added at its
+    /// end, with the hash quoted (follows is made at the end of the frontmatter when the document has none); nothing
+    /// else in the document changes. Prints each key with what was done, then, when the document changed, the
+    /// line to write in the log entry, as the check asks for it. Writes all the keys or none, and only the keys named:
+    /// re-pinning every changed document in one act is `rotproof approve --reviewed`, which a person runs. Needs no
+    /// terminal: pinning one document is an edit of it, which its log entry records. A key gone from the code is left
+    /// to edit by hand. Exits 2, writing nothing, when the first argument is not a knowledge document (as before 0.4.0,
+    /// when follows took the keys alone), the document is not there, cannot be read, is a guide or is deprecated, or a
+    /// key is not a form follows takes, names what is not there, or cannot be read.
     Follows {
+        /// The knowledge document: knowledge/<slug>.md, or docs/knowledge/<slug>.md
+        document: String,
         /// The keys, as follows writes them
         #[arg(required = true)]
         keys: Vec<String>,
@@ -265,7 +275,9 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
                 unreachable!("clap requires the file and the import without --prune or --reviewed")
             }
         },
-        Command::Follows { keys } => follows(commands, root, &keys).map(|()| true),
+        Command::Follows { document, keys } => {
+            follows(commands, root, &document, &keys).map(|()| true)
+        }
         Command::StopHook | Command::TimeHook => unreachable!("answered above"),
     };
     match result {
@@ -517,7 +529,8 @@ fn approve_reviewed(commands: &dyn Commands, root: &Path) -> Result<(), String> 
     if !std::io::stdin().is_terminal() {
         return Err(
             "rotproof approve --reviewed asks a person, and stdin is not a terminal (an agent's shell has none): run \
-             it in your own terminal, or review each document and write the hash `rotproof check` prints"
+             it in your own terminal, or review each document and pin it with the `rotproof follows` that `rotproof \
+             check` names"
                 .into(),
         );
     }
@@ -590,21 +603,35 @@ fn approve_prune(commands: &dyn Commands, names: &Names, root: &Path) -> Result<
     Ok(())
 }
 
-/// Print each key with the hash of what it names now, as follows writes it; then say what could not be hashed.
-fn follows(commands: &dyn Commands, root: &Path, keys: &[String]) -> Result<(), String> {
-    let mut failed = Vec::new();
-    for key in keys {
-        match commands.current(root, key) {
-            Ok(Some(hash)) => println!("{key}: \"{hash}\""),
-            Ok(None) => failed.push(format!("{key}: not there")),
-            Err(why) => failed.push(format!("{key}: {why}")),
+/// Pin the keys in the document, then say what was done to each and the log line to write.
+fn follows(
+    commands: &dyn Commands,
+    root: &Path,
+    document: &str,
+    keys: &[String],
+) -> Result<(), String> {
+    let pinned = commands.pin(root, document, keys)?;
+    for (key, before, now) in &pinned.keys {
+        match before {
+            None => println!("  {key}: added {now}"),
+            Some(before) if before == now => println!("  {key}: unchanged"),
+            Some(before) => println!("  {key}: {before} -> {now}"),
         }
     }
-    if failed.is_empty() {
-        Ok(())
-    } else {
-        Err(failed.join("\n"))
+    match pinned.written {
+        Some(hash) => {
+            println!("wrote docs/knowledge/{}", pinned.doc);
+            println!(
+                "  in the log entry of this change, write: * **Knowledge**: knowledge/{}@{hash}",
+                pinned.doc
+            );
+        }
+        None => println!(
+            "nothing written: docs/knowledge/{} pins these keys as the code is now",
+            pinned.doc
+        ),
     }
+    Ok(())
 }
 
 /// Write every index file, then list what was left out of them and the items to measure again.

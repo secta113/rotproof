@@ -22,6 +22,9 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   closes before it), its last measured state and what it waits for, through the arrows and the parents and up to an
   earlier milestone, under headings that say which close after which. The headings order the closing, not the work.
   With `--all` it lists the closed records too. It writes nothing.
+- **`rotproof follows knowledge/<slug>.md <key>...` pins keys in a knowledge document's `follows`** at the hash of the
+  code as it is now, and prints the log line to write. Run it once the document is reviewed against the code, when it
+  starts to follow something and when `rotproof check` names it, rather than editing the hashes by hand.
 - **Upgrade Rotproof in a commit of its own:** change the pinned version, install it, run `rotproof init`, then
   `rotproof check`. `rotproof init` applies what the new version brings to the files `rotproof create` wrote once
   (except the updates `declined` lists in `.config/rotproof.toml`), rewrites this file, and sets `files` there to the

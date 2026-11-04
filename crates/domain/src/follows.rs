@@ -3,10 +3,10 @@
 //!
 //! ```yaml
 //! follows:
-//!   src/api/routes.py: 3e1f0a9c
-//!   src/api/routes.py::create_user: 0b7d21e4
-//!   src/api/routes.py::Router.add: 9a01c3ff
-//!   src/api/: 51c0d2aa
+//!   src/api/routes.py: "3e1f0a9c"
+//!   src/api/routes.py::create_user: "0b7d21e4"
+//!   src/api/routes.py::Router.add: "9a01c3ff"
+//!   src/api/: "51c0d2aa"
 //! ```
 //!
 //! A key is a file, in any stack, a function or class of a Python file (`::create_user`), a method (`::Router.add`),
@@ -100,11 +100,94 @@ pub fn drifted(doc: &str, key: &str, pinned: &str, now: Option<&str>) -> Option<
             "knowledge/{doc} follows {key}, which is not there: follow what replaced it, or drop it from follows"
         )),
         Some(now) if now == pinned => None,
-        Some(now) => Some(format!(
+        Some(_) => Some(format!(
             "knowledge/{doc} follows {key}, which changed since the document was last reviewed: review the \
-             document against it, then write `{key}: {now}` in follows"
+             document against it, then run `rotproof follows knowledge/{doc} {key}`"
         )),
     }
+}
+
+/// The file name in `docs/knowledge/` of the document `arg` names: as `rotproof check` and the log name it
+/// (`knowledge/api.md`), or from the root (`docs/knowledge/api.md`, also with `\`, as a Windows shell completes it).
+/// `Err` when it names no document of `docs/knowledge/`, such as a key passed first.
+pub fn document_name(arg: &str) -> Result<String, String> {
+    let path = arg.replace('\\', "/");
+    path.strip_prefix("docs/")
+        .unwrap_or(&path)
+        .strip_prefix("knowledge/")
+        .filter(|name| name.ends_with(".md") && name.len() > 3 && !name.contains('/'))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "{arg:?} is not a document of docs/knowledge/: rotproof follows takes the document first, then the \
+                 keys (rotproof follows knowledge/api.md src/api.py)"
+            )
+        })
+}
+
+/// The line after the frontmatter of `lines`, which ends at the second `---`.
+fn frontmatter_end(lines: &[String]) -> Result<usize, String> {
+    lines
+        .iter()
+        .skip(1)
+        .position(|line| line.trim_end() == "---")
+        .map(|i| i + 1)
+        .filter(|_| lines.first().map(|l| l.trim_end()) == Some("---"))
+        .ok_or_else(|| "no frontmatter".to_string())
+}
+
+/// The key `key` as a YAML key: as it is, unless YAML would read it otherwise, then in double quotes.
+fn yaml_key(key: &str) -> String {
+    let plain = key
+        .chars()
+        .next()
+        .is_some_and(|c| !c.is_whitespace() && !"-?:,[]{}#&*!|>'\"%@`".contains(c))
+        && !key.contains(": ")
+        && !key.contains(" #")
+        && !key.ends_with([':', ' ']);
+    if plain {
+        key.to_string()
+    } else {
+        format!("\"{}\"", key.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
+/// The knowledge document `text` with each of `added` (a key of `follows`, its hash) added at the end of `follows`,
+/// the field made at the end of the frontmatter when there is none, and everything else as it was. A hash is quoted,
+/// as YAML reads `12345678` as a number and `1e100000` as a float. `Err` when `follows` is not one key per line, for a
+/// person to edit.
+pub fn added(text: &str, added: &[(&str, &str)]) -> Result<String, String> {
+    let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+    let end = frontmatter_end(&lines)?;
+    // Each line split on \n keeps its \r, so a line added keeps the document's line ending
+    let cr = if text.contains("\r\n") { "\r" } else { "" };
+    let field = (1..end).find(|&i| lines[i].starts_with("follows:"));
+    let (at, indent) = match field {
+        Some(i) => {
+            if !lines[i]["follows:".len()..].trim().is_empty() {
+                return Err("follows is not one key per line: edit follows by hand".into());
+            }
+            let block = (i + 1..end)
+                .take_while(|&j| lines[j].starts_with([' ', '\t']))
+                .count();
+            let indent = match block {
+                0 => "  ".to_string(),
+                _ => {
+                    let first = &lines[i + 1];
+                    first[..first.len() - first.trim_start().len()].to_string()
+                }
+            };
+            (i + 1 + block, indent)
+        }
+        None => {
+            lines.insert(end, format!("follows:{cr}"));
+            (end + 1, "  ".to_string())
+        }
+    };
+    for (n, (key, hash)) in added.iter().enumerate() {
+        lines.insert(at + n, format!("{indent}{}: \"{hash}\"{cr}", yaml_key(key)));
+    }
+    Ok(lines.join("\n"))
 }
 
 /// The knowledge document `text` with each pin in `pins` (a key of `follows`, its hash as written, the hash to write)
@@ -112,13 +195,7 @@ pub fn drifted(doc: &str, key: &str, pinned: &str, now: Option<&str>) -> Option<
 /// quoted as it was. `Err` when a key is not on one line of the frontmatter with its hash, for a person to edit.
 pub fn repinned(text: &str, pins: &[(&str, &str, &str)]) -> Result<String, String> {
     let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
-    let end = lines
-        .iter()
-        .skip(1)
-        .position(|line| line.trim_end() == "---")
-        .map(|i| i + 1)
-        .filter(|_| lines.first().map(|l| l.trim_end()) == Some("---"))
-        .ok_or("no frontmatter")?;
+    let end = frontmatter_end(&lines)?;
     for (key, old, new) in pins {
         let mut found = 0;
         for line in &mut lines[1..end] {
@@ -182,6 +259,51 @@ mod tests {
     }
 
     #[test]
+    fn a_key_is_added_at_the_end_of_follows_with_its_hash_quoted() {
+        let text = "---\ntype: Knowledge\nfollows:\n    src/a.py: \"00000000\"\nstatus: stable\n---\n\n# Body\n";
+        assert_eq!(
+            added(text, &[("src/b.py::f", "12345678"), ("src/c/", "1e100000")]).unwrap(),
+            "---\ntype: Knowledge\nfollows:\n    src/a.py: \"00000000\"\n    src/b.py::f: \"12345678\"\n    \
+             src/c/: \"1e100000\"\nstatus: stable\n---\n\n# Body\n"
+        );
+        // Without follows, the field is made at the end of the frontmatter
+        let bare = "---\r\ntype: Knowledge\r\nstatus: stable\r\n---\r\n\r\n# Body\r\n";
+        assert_eq!(
+            added(bare, &[("src/a.py", "aaaaaaaa")]).unwrap(),
+            "---\r\ntype: Knowledge\r\nstatus: stable\r\nfollows:\r\n  src/a.py: \"aaaaaaaa\"\r\n---\r\n\r\n# Body\r\n"
+        );
+        // A key YAML would read otherwise is quoted
+        assert!(
+            added(bare, &[("my api.py", "aaaaaaaa"), ("@x.py", "bbbbbbbb")])
+                .unwrap()
+                .contains("  my api.py: \"aaaaaaaa\"\r\n  \"@x.py\": \"bbbbbbbb\"\r\n")
+        );
+        assert!(added("---\nfollows: {}\n---\n", &[("a.py", "aaaaaaaa")]).is_err());
+        assert!(added("no frontmatter", &[]).is_err());
+    }
+
+    #[test]
+    fn a_document_is_named_as_the_check_names_it_or_from_the_root() {
+        for arg in [
+            "knowledge/api.md",
+            "docs/knowledge/api.md",
+            "docs\\knowledge\\api.md",
+        ] {
+            assert_eq!(document_name(arg), Ok("api.md".to_string()), "{arg}");
+        }
+        for bad in [
+            "src/api.py",
+            "api.md",
+            "knowledge/.md",
+            "knowledge/a/b.md",
+            "docs/work/a.md",
+            "knowledge/api.txt",
+        ] {
+            assert!(document_name(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn a_key_names_a_file_a_directory_or_a_python_definition() {
         assert_eq!(
             followed("src/api.py"),
@@ -242,7 +364,7 @@ mod tests {
         );
         let changed = drifted("api.md", "a.py", "00000000", Some("12345678")).unwrap();
         assert!(
-            changed.contains("write `a.py: 12345678` in follows"),
+            changed.contains("then run `rotproof follows knowledge/api.md a.py`"),
             "{changed}"
         );
         let gone = drifted("api.md", "a.py::f", "00000000", None).unwrap();

@@ -51,22 +51,24 @@ The body is free, except that a deprecated document opens with `# Resolution`: w
 - **A document that no longer holds stays.** Set `status: deprecated` and write `# Resolution` as the first heading:
   what replaced it. Deleting it breaks the links to it, and its hashes in the log would name nothing.
 - **A document that describes code follows it.** It names what it describes in `follows`, each with its hash when
-  the document was last reviewed against it, and `rotproof check` fails when one of them changed since, printing the
-  line to write once the document is reviewed:
+  the document was last reviewed against it, and `rotproof check` fails when one of them changed since, naming the
+  command that pins it once the document is reviewed:
 
   ```yaml
   follows:
-    src/api/routes.py: 3e1f0a9c
-    src/api/routes.py::create_user: 0b7d21e4
-    src/api/routes.py::Router.add: 9a01c3ff
-    src/api/: 51c0d2aa
+    src/api/routes.py: "3e1f0a9c"
+    src/api/routes.py::create_user: "0b7d21e4"
+    src/api/routes.py::Router.add: "9a01c3ff"
+    src/api/: "51c0d2aa"
   ```
 
   A key is a file, in any language (`src/api/routes.py`), a function or class of a Python file (`::create_user`), a
   method (`::Router.add`), or a directory, for every `.py` file under it (`src/api/`).
 
-  `rotproof follows <key>...` prints these lines, with the hashes as the code is now: run it when a document starts
-  to follow something, once the document says what the code does.
+  `rotproof follows knowledge/api.md <key>...` writes these lines, with the hashes as the code is now, and prints
+  the log line to write: run it when a document starts to follow something, once the document says what the code
+  does, and when the check names it. It pins only the keys named, all of them or none, and a key not in `follows` is
+  added at its end. A hash is quoted, as YAML reads `12345678` as a number.
   A definition is hashed from its first decorator to its end, so a change elsewhere in its file does not fail it. What
   a document follows must exist: a file, directory or definition that is gone fails. Writing the new hash changes the
   document, so its log entry records the review. A document about a decision follows nothing. After a refactoring
