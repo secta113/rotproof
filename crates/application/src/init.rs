@@ -402,6 +402,12 @@ mod tests {
             init(&tree, &tree, Some("python"), "x", "0.3.0"),
             Ok(Initialized::Declared(_))
         ));
+        // Up to 0.3.0 whatever this Rotproof is: the declaration is written with its version
+        let written = tree.text(DECLARATION).unwrap();
+        let running = format!("files = \"{}\"", domain::upgrade::VERSION);
+        assert!(written.contains(&running), "{written}");
+        tree.write(DECLARATION, &written.replace(&running, "files = \"0.3.0\""))
+            .unwrap();
         tree.write("handler/__init__.py", "").unwrap();
         tree.write("utils/text.py", "").unwrap();
         let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.4.0") else {
