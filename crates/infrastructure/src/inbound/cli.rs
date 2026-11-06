@@ -155,11 +155,11 @@ enum Command {
         #[arg(long)]
         reviewed: bool,
     },
-    /// Write every index.md in docs/, and docs/work/closed.md, from the frontmatter
+    /// Write every index.md in docs/ and docs/work/closed.md from the frontmatter, and the rules.md Rotproof keeps
     ///
-    /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, the list of closed records in
-    /// docs/work/closed.md, and the rules.md Rotproof keeps there, from the frontmatter of the documents. Run it after
-    /// a record changes; never edit these by hand.
+    /// Rewrites docs/index.md, the index.md of docs/work/ and docs/knowledge/ and the list of closed records in
+    /// docs/work/closed.md, from the frontmatter of the documents, and the rules.md Rotproof keeps in docs/work/ and
+    /// docs/knowledge/. Run it after a record changes; never edit these by hand.
     /// Lists the documents it left out and why, also under `# Left out` in the index, the work items past their
     /// stale_after, and the open milestones past their date. Exits 2 when the declaration or a document cannot be read.
     Index,
