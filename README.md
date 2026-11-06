@@ -126,9 +126,8 @@ names the rest of the starter (`App.tsx`, the styles, `assets/`) as code outside
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
 (below), a milestone when `docs/work/` has none, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files, the closed list and the rules in `docs/`). It never
-overwrites a file it does not generate, and never moves or deletes one. Nothing runs it on its own, so a layer removed
-  `xtask/src/layers.rs` in place of the file, and reads the comments of `xtask/` for markers too, which the layout
-  leaves out; the records are kept outside, so they are not checked here.
+overwrites a file it does not generate, apart from adding the fields the declaration lacks (below), and never moves or
+deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
 
 The project's files are written once, as a starting point, and are the project's from then on:
 
