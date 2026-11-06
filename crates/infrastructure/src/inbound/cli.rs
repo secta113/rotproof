@@ -1,7 +1,7 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof stop-hook` and `rotproof
-//! time-hook`, and the help that leads from one to the next. Each command is a call of an input port of
-//! `protocol.inbound`; what it prints and how it exits are decided here.
+//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof before`, `rotproof follows`, `rotproof
+//! stop-hook` and `rotproof time-hook`, and the help that leads from one to the next. Each command is a call of an
+//! input port of `protocol.inbound`; what it prints and how it exits are decided here.
 
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
