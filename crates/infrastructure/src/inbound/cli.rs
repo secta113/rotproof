@@ -26,10 +26,11 @@ moves the records when the new version changes their format), then `rotproof che
 The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has run; `rotproof guide --stack <stack>`
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
-Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
-when there is no .config/rotproof.toml to work from, a file cannot be read or written, the command line is wrong,
-`rotproof create` would make layers without --yes, `rotproof init` leaves an update of the project's files to a
-person or cannot move the records, or `rotproof approve` is not run on a terminal or not answered y.";
+Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken, or
+`rotproof stop-hook` or `rotproof time-hook` fails; 2 when there is no .config/rotproof.toml to work from, a file
+cannot be read or written, the command line is wrong or its --root is not a directory, `rotproof create` would make
+layers without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
+or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
