@@ -221,7 +221,7 @@ enum Command {
     /// on stdin
     ///
     /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. An agent has no clock, and a
-    /// day or a time it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
+    /// day it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
     /// gives it the time on every prompt and at the start of every session, to write from. Exits 1, never 2, when it
     /// fails, so a broken hook never blocks the prompt.
     TimeHook,

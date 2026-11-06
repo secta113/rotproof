@@ -118,11 +118,11 @@ impl Status {
     }
 }
 
-/// Who and when: one entry of OKF's `verified`, or `generated`.
+/// Who and on which day: one entry of OKF's `verified`. Only the day is kept ([`day`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stamp {
     pub by: String,
-    pub at: Time,
+    pub at: NaiveDate,
 }
 
 /// How far the work of a record of `docs/work/` has come: its `progress`. It decides whether the record is open, apart
@@ -188,9 +188,9 @@ pub struct Item {
     pub filed: NaiveDate,
     /// Never empty. As in OKF, written as one mapping or a list of them
     pub verified: Vec<Stamp>,
-    /// When the recorded state goes out of date with time alone, the time after which it should be measured again.
+    /// When the recorded state goes out of date with time alone, the day from which it should be measured again.
     /// It does not end the item, and passing it does not fail the check
-    pub stale_after: Option<Time>,
+    pub stale_after: Option<NaiveDate>,
 }
 
 impl Item {
@@ -199,7 +199,7 @@ impl Item {
         self.progress.closed_as().is_none()
     }
 
-    /// The last measurement: the newest `at`. On a tie, the one written first.
+    /// The last measurement: the newest day `at`. On a tie (two on the same day), the one written first.
     pub fn last_verified(&self) -> &Stamp {
         // `max_by_key` keeps the last of equal keys, so search from the end to keep the first
         self.verified
@@ -502,7 +502,7 @@ fn spec_fields(fields: &mut Fields) -> Option<Spec> {
     let parent = fields.optional("parent", slug);
     let arrows = arrows(fields);
     fields.optional("verified", stamps);
-    fields.optional("stale_after", time);
+    fields.optional("stale_after", day);
     okf_optional(fields);
     Some(Spec {
         title: title?,
@@ -588,7 +588,7 @@ fn milestone_fields(fields: &mut Fields) -> Option<Milestone> {
     let date = fields.optional("date", date);
     let arrows = arrows(fields);
     fields.optional("verified", stamps);
-    fields.optional("stale_after", time);
+    fields.optional("stale_after", day);
     okf_optional(fields);
     Some(Milestone {
         title: title?,
@@ -608,7 +608,7 @@ fn knowledge_fields(fields: &mut Fields) -> Option<Knowledge> {
     let tag = fields.required("tags", one_tag);
     let status = fields.required("status", status(&[Status::Stable, Status::Deprecated]));
     fields.optional("verified", stamps);
-    fields.optional("stale_after", time);
+    fields.optional("stale_after", day);
     let follows = fields.optional("follows", followed_hashes);
     let matches = fields.optional("match", match_strings);
     okf_optional(fields);
@@ -693,7 +693,7 @@ fn item(fields: &mut Fields) -> Option<Item> {
     let arrows = arrows(fields);
     let filed = fields.required("filed", date);
     let verified = fields.required("verified", stamps);
-    let stale_after = fields.optional("stale_after", time);
+    let stale_after = fields.optional("stale_after", day);
     okf_optional(fields);
     let item = Item {
         title: title?,
@@ -723,7 +723,9 @@ fn item(fields: &mut Fields) -> Option<Item> {
         if stale_after <= last {
             fields.wrong(
                 "stale_after",
-                format!("({stale_after}) is not later than the last verified time ({last})"),
+                format!(
+                    "({stale_after}) is not later than the day of the last measurement ({last})"
+                ),
             );
         }
     }
@@ -742,7 +744,7 @@ fn guide(fields: &mut Fields) -> Option<Guide> {
         .map(|status| status.unwrap_or(Status::Stable));
     fields.optional("tags", text_list);
     fields.optional("verified", stamps);
-    fields.optional("stale_after", time);
+    fields.optional("stale_after", day);
     okf_optional(fields);
     Some(Guide {
         title: title?,
@@ -938,11 +940,26 @@ fn date(value: &Yaml) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(&s, "%Y-%m-%d").map_err(|_| format!("not a date (YYYY-MM-DD): {s}"))
 }
 
-/// A datetime with a time zone. A date alone fails: filling in 00:00 would invent a time nobody measured.
+/// A datetime with a time zone, for the timestamps of OKF that Rotproof only checks (`generated`, `sources`,
+/// `usage_window`). A date alone fails: filling in 00:00 would invent a time nobody wrote.
 fn time(value: &Yaml) -> Result<Time, String> {
     let s = text(value)?;
     DateTime::parse_from_rfc3339(&s)
         .map_err(|_| format!("not a datetime with a time zone (ISO 8601): {s}"))
+}
+
+/// A day of `verified` or `stale_after`: written as a day (YYYY-MM-DD), or as a datetime with a time zone, read as its
+/// day in that zone. The time of day is never kept. An agent has no clock, so a time of day it writes may be a guess,
+/// and no check can tell a guess a few minutes early from a measurement; a day is what a reader acts on. OKF asks for a
+/// datetime here (a SHOULD, section 5): the records depart from it on purpose, and a datetime written by a process
+/// with a clock still passes.
+fn day(value: &Yaml) -> Result<NaiveDate, String> {
+    let s = text(value)?;
+    NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+        .or_else(|_| DateTime::parse_from_rfc3339(&s).map(|at| at.date_naive()))
+        .map_err(|_| {
+            format!("not a day (YYYY-MM-DD) or a datetime with a time zone (ISO 8601): {s}")
+        })
 }
 
 fn stamp(value: &Yaml) -> Result<Stamp, String> {
@@ -951,7 +968,7 @@ fn stamp(value: &Yaml) -> Result<Stamp, String> {
     };
     let mut fields = Fields::new(map);
     let by = fields.required("by", actor);
-    let at = fields.required("at", time);
+    let at = fields.required("at", day);
     fields.finish(by.zip(at).map(|(by, at)| Stamp { by, at }))
 }
 
@@ -1906,8 +1923,7 @@ File a draft work item with until: [the next release], and check the trusted pub
                 good("The next deploy\n", "The next deploy\n\n```\n"),
             ),
             ("no verified time", good(&format!(", {AT}"), "")),
-            // OKF asks for a datetime. With a date only, someone would have to invent the time
-            ("verified date only", good(AT, "at: 2026-09-28")),
+            ("verified not a day", good(AT, "at: 2026-09-31")),
             (
                 "verified without a time zone",
                 good(AT, "at: 2026-09-28T10:00:00"),
@@ -2066,9 +2082,14 @@ File a draft work item with until: [the next release], and check the trusted pub
                 "stale_after equal to the verified time",
                 good("filed:", "stale_after: 2026-09-28T10:00:00+09:00\nfiled:"),
             ),
+            // Only days are compared: a time later on the day of the measurement is the same day
             (
-                "stale_after date only",
-                good("filed:", "stale_after: 2027-03-31\nfiled:"),
+                "stale_after later on the verified day",
+                good("filed:", "stale_after: 2026-09-28T23:00:00+09:00\nfiled:"),
+            ),
+            (
+                "stale_after the verified day",
+                good("filed:", "stale_after: 2026-09-28\nfiled:"),
             ),
             (
                 "stale_after not a date",
@@ -2110,6 +2131,41 @@ status: stable
 
 Something.
 ";
+
+    #[test]
+    fn verified_and_stale_after_are_read_as_days() {
+        let item = |text: &str| match work_doc(text) {
+            Ok(WorkDoc::Item(item, _)) => item,
+            other => panic!("{other:?}"),
+        };
+        let day = |d| NaiveDate::from_ymd_opt(2026, 9, d).unwrap();
+        // A day, as the records are written
+        let written = item(&good(AT, "at: 2026-09-28"));
+        assert_eq!(written.last_verified().at, day(28));
+        // A datetime is read as its day in the zone written: 23:30 at UTC-5 is the 29th in UTC, and the 28th there
+        let late = item(&good(AT, "at: 2026-09-28T23:30:00-05:00"));
+        assert_eq!(late.last_verified().at, day(28));
+        // On the same day, the one written first is the last measurement, a datetime or not
+        let same_day = item(&good(
+            &format!("verified: {{by: human:someone, {AT}}}"),
+            "verified:\n  - {by: human:a, at: 2026-09-28}\n  - {by: human:b, at: 2026-09-28T23:00:00+09:00}",
+        ));
+        assert_eq!(same_day.last_verified().by, "human:a");
+        // stale_after is a day too, and passes once it is later than the day of the last measurement
+        let stale = item(&good("filed:", "stale_after: 2026-09-29\nfiled:"));
+        assert_eq!(stale.stale_after, Some(day(29)));
+        let stale = item(&good(
+            "filed:",
+            "stale_after: 2026-09-29T00:00:00+09:00\nfiled:",
+        ));
+        assert_eq!(stale.stale_after, Some(day(29)));
+        // A spec's optional verified takes a day as well
+        let on_spec = SPEC.replace(
+            "status: stable",
+            "status: stable\nverified: {by: human:a, at: 2026-10-01}",
+        );
+        assert!(spec(&on_spec).is_ok(), "{:?}", spec(&on_spec).err());
+    }
 
     #[test]
     fn a_good_spec_passes() {
@@ -2186,10 +2242,10 @@ Something.
                 SPEC.replace("status: stable", "status: stable\nstatu: stable"),
             ),
             (
-                "date-only verified",
+                "verified without a time zone",
                 SPEC.replace(
                     "status: stable",
-                    "status: stable\nverified: {by: human:a, at: 2026-10-01}",
+                    "status: stable\nverified: {by: human:a, at: 2026-10-01T10:00:00}",
                 ),
             ),
             ("no frontmatter", "# Goals\n\nSomething.\n".to_string()),

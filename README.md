@@ -47,7 +47,12 @@ The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/G
 reserved names, and the log's headings are dates. An OKF reader can read the records as a bundle. The rules on top of
 that format (a work item's state and what it is bounded by, a closed record opening with its resolution, a knowledge
 document's hash in the log, the shape of a log entry) are Rotproof's own, stricter than OKF, and not part of it.
-Rotproof is not an OKF validator.
+Rotproof is not an OKF validator. In one place the records depart from a SHOULD of OKF, which asks that every
+timestamp be a datetime with a UTC offset (section 5): the `at` of `verified` and `stale_after` are written as a day
+(`YYYY-MM-DD`), and Rotproof reads only the day of either, of a datetime too. An agent has no clock, and no check can
+tell a time of day it guessed a few minutes early from one it measured, so the records hold no time of day rather than
+one that may be untrue; OKF's `verified` is written for a person or a process with a clock to confirm. A reader that
+knows only OKF may not read a day there as a datetime.
 
 ## Install
 
@@ -244,9 +249,9 @@ exit code 2 would keep it from stopping.
 
 ### The time hook
 
-An agent has no clock of its own. It writes the day an item was filed, the time a state was measured and the day of a
-log entry from what it was last told, and a guess runs ahead of the clock: `rotproof check` fails on a day or a time
-that has not come (see "What `rotproof check` checks"). `rotproof time-hook` is Claude Code's `SessionStart` and
+An agent has no clock of its own. It writes the day an item was filed, the day a state was measured and the day of a
+log entry from what it was last told, and a guess runs ahead of the clock: `rotproof check` fails on a day that has
+not come (see "What `rotproof check` checks"). `rotproof time-hook` is Claude Code's `SessionStart` and
 `UserPromptSubmit` hook: at the start of every session (a resumed or a compacted one too) and on every prompt, it
 gives the agent the time now, as `additionalContext`, to write from. Within a long turn the time goes on, so it says
 to read the clock for a later one. `rotproof create` writes it into `.claude/settings.json` beside the stop hook; a
@@ -476,8 +481,8 @@ parent: some-spec
 after: [design]
 until: [release-0-3-0]
 filed: 2026-10-01
-verified: {by: human:someone, at: 2026-10-01T10:00:00+09:00}
-stale_after: 2027-01-01T00:00:00+09:00
+verified: {by: human:someone, at: 2026-10-01}
+stale_after: 2027-01-01
 ---
 
 # Resolution    (only when closed, and then first)
@@ -492,7 +497,8 @@ stale_after: 2027-01-01T00:00:00+09:00
 - `parent`: the spec it is a part of; required for `stable`.
 - `after`, optional: the records that come before it. `until`, optional: the records that come after it, often a
   milestone.
-- `stale_after`, optional: when to measure the state again.
+- `verified`: who measured the state, and the day (`at`). A datetime with a time zone passes too, read as its day there.
+- `stale_after`, optional: the day from which to measure the state again.
 
 ## What `rotproof check` checks
 
@@ -585,7 +591,7 @@ stale_after: 2027-01-01T00:00:00+09:00
   other types have and this one does not (a work item's `filed` on a spec, the `parent` of a spec or a work item on
   a knowledge document), or is a field Rotproof no longer reads (`epic`, which says to write `parent`; `deadline_kind`
   and `deadline`, which say to write the moment as a milestone and name it in `until`): those fail, in every document
-  type, as a misspelled optional field would otherwise be silently dropped. Every time has a time zone. `stale_after` is later than the last `verified`. A required text is not blank (spaces alone
+  type, as a misspelled optional field would otherwise be silently dropped. The `at` of `verified` and `stale_after` are a day, or a datetime with a time zone read as its day there; every other time has a time zone. `stale_after` is a later day than the last `verified`. A required text is not blank (spaces alone
   are empty), in every document type, and no tag is empty. What the index lists (`title`, `description` and the
   tags) is on one line: a line break would end the entry and start a heading or an entry of its own. A
   title is written into the index with `[`, `]` and `\` escaped, so it stays the text of its own link. The one tag
@@ -630,11 +636,11 @@ stale_after: 2027-01-01T00:00:00+09:00
   a flat list of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented
   lines (wrapped text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the
   first date fails. A new log, with only its title and HTML comments, passes.
-- **No day or time in the records is later than now:** a work item's `filed` and every `at` of its `verified`, and the
-  log's date headings. They are read from the clock when written, and one that has not come was guessed. A time is
-  compared with the time `rotproof check` runs at, and a day with the latest day anywhere (the day in UTC+14), so CI in
-  UTC passes a day written in Tokyo before 09:00. Time alone only makes one pass, so this never turns CI red with no
-  change. Claude Code is given the time by the time hook (see "The stop hook").
+- **No day in the records is later than today:** a work item's `filed` and every `at` of its `verified`, and the
+  log's date headings. They are read from the clock when written, and one that has not come was guessed. Each is a
+  day, the day of a datetime too (a time of day is never compared), and is compared with the latest day anywhere (the
+  day in UTC+14), so CI in UTC passes a day written in Tokyo before 09:00. Time alone only makes one pass, so this
+  never turns CI red with no change. Claude Code is given the time by the time hook (see "The stop hook").
 - **Every knowledge document keeps the format,** as a spec does (without `parent`, and `status` `stable` or
   `deprecated`), and **the log names it as it is now:** some `**Knowledge**` field of a log entry, with its wrapped
   lines, names it with the first 8 hex digits of SHA-256 of the whole file (every line ending as `\n`). An edit the

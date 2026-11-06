@@ -1,9 +1,10 @@
 //! `rotproof time-hook`: the hook Claude Code runs when a session starts and when the person sends a prompt (its
 //! `SessionStart` and `UserPromptSubmit` hooks). It tells the agent the time now.
 //!
-//! - An agent has no clock of its own. It writes a day or a time into the records (`filed`, `verified`, the log's date
-//!   headings) from what it was last told, and a guess runs ahead of the clock. `rotproof check` fails on one that has
-//!   not come; this hook gives the agent the time before it writes one.
+//! - An agent has no clock of its own. It writes a day into the records (`filed`, `verified`, the log's date headings)
+//!   from what it was last told, and a guess runs ahead of the clock. `rotproof check` fails on a day that has not
+//!   come; this hook gives the agent the time before it writes one. It asks for a day, with no time of day: a time an
+//!   agent guessed a few minutes early cannot be told from one it read.
 //! - It answers with `additionalContext`, which Claude Code adds to what the agent reads, read again on every prompt
 //!   and at the start of every session, a resumed or a compacted one too. Within a long turn the time goes on, so the
 //!   answer says to read the clock for a later one.
@@ -35,9 +36,9 @@ pub fn answer(input: &str, now: Time) -> Result<String, String> {
         ));
     }
     let text = format!(
-        "The time now is {} ({COMMAND}). Write a day or a time into docs/ (filed, verified, the log's date headings) \
-         from this, or from the clock for a later one, never from a guess: rotproof check fails on one that has not \
-         come.",
+        "The time now is {} ({COMMAND}). Write the day (YYYY-MM-DD, no time of day) into docs/ (filed, verified, \
+         stale_after, the log's date headings) from this, or from the clock for a later one, never from a guess: \
+         rotproof check fails on a day that has not come.",
         now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     );
     Ok(

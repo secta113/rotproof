@@ -73,8 +73,8 @@ The body is free, except that a closed spec opens with `# Resolution`: its first
 | `parent` | The slug of the spec it is a part of. Required for `stable`; a draft may have none. See "Parents" |
 | `after`, `until` | Optional. Lists of slugs: the records that come before this one, and after it. See "Arrows" |
 | `filed` | Date the item was filed |
-| `verified` | Who measured the state and when: `{by, at}`, or a list of them. `at` is a datetime with a time zone. `by` is `human:<id>` for a person, `<producer>/<version>` for an agent (example: `claude-code/claude-opus-5-5`), or `process:<id>` |
-| `stale_after` | Optional. A datetime after which the state should be measured again. See "Re-measuring" |
+| `verified` | Who measured the state and on which day: `{by, at}`, or a list of them. `at` is a day (`YYYY-MM-DD`); a datetime with a time zone passes too, read as its day there. `by` is `human:<id>` for a person, `<producer>/<version>` for an agent (example: `claude-code/claude-opus-5-5`), or `process:<id>` |
+| `stale_after` | Optional. The day from which the state should be measured again. See "Re-measuring" |
 
 Body headings:
 
@@ -90,12 +90,13 @@ Body headings:
 - **Say that the work has started.** Set `progress: started` when you start, and write in `# State` how far it has
   come. The index then says `Started.`, so the next reader, or the next session, continues the work instead of
   starting it again.
-- **State is a measurement.** Write the value and how to measure it. The time and who measured go in `verified`, not
+- **State is a measurement.** Write the value and how to measure it. The day and who measured go in `verified`, not
   in the body. Update the state whenever you measure, including when nothing has changed. Without a recorded state,
   every reader has to measure every item again, and the items stop being read.
-- **Read a day or a time from the clock, never from memory.** `filed`, `verified` and the day of a log entry are
-  written as the clock says when they are written; `rotproof check` fails on one that has not come, as it was guessed.
-  An agent in Claude Code is given the time on every prompt by the time hook.
+- **Read the day from the clock, never from memory.** `filed`, `verified` and the day of a log entry are written as
+  the clock says when they are written; `rotproof check` fails on one that has not come, as it was guessed. Write a
+  day, not a time of day: a time an agent guessed a few minutes early cannot be told from one it measured, and the
+  day is what a reader acts on. An agent in Claude Code is given the time on every prompt by the time hook.
 - **By when it is done is a record, not words.** A sorted item has its parent, and closes before it. An item nobody
   has sorted yet names in `until` the moment it waits for, usually a milestone (see "Every open record is bounded").
 - **Details point to the history; they do not copy it.** Copies drift. Write markdown links: `/` starts a path
@@ -127,8 +128,8 @@ decides it, in one of four ways:
 `stale_after` is optional. Use it when the state records a fact that goes out of date with time alone, such as an
 external price, an API's behaviour or another service's status. It does not end the item: it only says when to measure
 the state again. Passing `stale_after` does not fail the check, because a check that fails on a date alone turns CI red
-without any change to the code. The index shows the date, and
-`rotproof index` lists the items past it.
+without any change to the code. It is a later day than the last `verified`. The index shows the date, and
+`rotproof index` lists the items that have reached it.
 
 # Milestones
 
@@ -287,3 +288,9 @@ so.
   `deadline`), with what to write instead. OKF tells readers not to reject unknown fields; this is a check on the writer's side. Any other
   unknown field passes as an extension, and the fields OKF defines (`generated`, `sources`, `resource`,
   `usage_window`) pass as OKF writes them.
+- The `at` of `verified` and `stale_after` are written as a day (`YYYY-MM-DD`), which departs from OKF's SHOULD that
+  every timestamp is a datetime with a UTC offset (section 5). Rotproof reads only the day of either, of a datetime
+  too, so a datetime still passes. The reason: an agent has no clock, and no check can tell a time of day it guessed
+  a few minutes early from one it measured, so the records hold no time of day rather than one that may be untrue;
+  OKF's `verified` is written for a person or a process with a clock to confirm. A reader that knows only OKF may not
+  read a day there as a datetime.

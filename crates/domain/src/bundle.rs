@@ -201,9 +201,10 @@ impl Work {
             .collect()
     }
 
-    /// The times and days of the work items that have not come at `now`: when each was filed, and when its state was
-    /// measured (`verified`). They are written from the clock, and one later than now was guessed. Time alone only
-    /// makes one pass, never fail, so this check cannot turn CI red with no change.
+    /// The days of the work items that have not come anywhere at `now` ([`latest_day`]): when each was filed, and
+    /// when its state was measured (`verified`, only its day, as a time of day is never read). They are written from
+    /// the clock, and one later than today was guessed. Time alone only makes one pass, never fail, so this check
+    /// cannot turn CI red with no change.
     pub fn not_come(&self, now: Time) -> Vec<String> {
         let today = latest_day(now);
         let shown = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -216,11 +217,11 @@ impl Work {
                     item.filed
                 ));
             }
-            for stamp in item.verified.iter().filter(|stamp| stamp.at > now) {
+            for stamp in item.verified.iter().filter(|stamp| stamp.at > today) {
                 found.push(format!(
-                    "work/{name}: verified at {}, later than now ({shown}): write the time the state was measured, \
-                     read from the clock",
-                    stamp.at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                    "work/{name}: verified on {}, a day that has not come anywhere yet (now {shown}): write the day \
+                     the state was measured, read from the clock",
+                    stamp.at
                 ));
             }
         }
@@ -745,17 +746,16 @@ fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
     };
     let stale = item
         .stale_after
-        .map(|at| format!(" | Re-measure after {}.", at.date_naive()))
+        .map(|day| format!(" | Re-measure from {day}."))
         .unwrap_or_default();
     format!("{start}{unsorted} | {}{stale}", state(item, sections))
 }
 
-/// The last measurement of an open item: its date and the first sentence of its state. Only the date, in the time zone
-/// of the measurement: the time of day would not change what a reader does. Whether stale_after has passed is not
-/// shown: the index would then depend on today's date, and the check that compares it with the generated text would
-/// pass on some days and fail on others.
+/// The last measurement of an open item: its day and the first sentence of its state. Whether stale_after has passed
+/// is not shown: the index would then depend on today's date, and the check that compares it with the generated text
+/// would pass on some days and fail on others.
 fn state(item: &Item, sections: &Sections) -> String {
-    let measured = item.last_verified().at.date_naive();
+    let measured = item.last_verified().at;
     format!("State ({measured}): {}", first_sentence(&sections["State"]))
 }
 
@@ -1007,11 +1007,13 @@ pub fn latest_day(now: Time) -> NaiveDate {
     (now.naive_utc() + chrono::Duration::hours(14)).date()
 }
 
-/// The open items past `stale_after`. As in OKF, an item is stale when `now >= stale_after`.
+/// The open items past `stale_after`. As in OKF, an item is stale on and after that day: once the day has come
+/// anywhere ([`latest_day`]), as the days of the records are checked.
 pub fn stale(items: &BTreeMap<String, (Item, Sections)>, now: Time) -> Vec<String> {
+    let today = latest_day(now);
     items
         .iter()
-        .filter(|(_, (item, _))| item.is_open() && item.stale_after.is_some_and(|at| now >= at))
+        .filter(|(_, (item, _))| item.is_open() && item.stale_after.is_some_and(|day| today >= day))
         .map(|(name, _)| name.clone())
         .collect()
 }
@@ -1124,13 +1126,14 @@ Not yet. Measured by hand.
     #[test]
     fn the_stale_date_is_listed_but_not_judged() {
         // The index shows the stale_after date; whether it has passed is answered by `stale`, given the current time
-        // (OKF: stale when now >= stale_after)
-        let fresh = GOOD.replace("filed:", "stale_after: 2027-03-31T00:00:00+09:00\nfiled:");
+        // (OKF: stale on and after stale_after), once the day has come anywhere: 2027-03-31 comes in UTC+14 at 19:00
+        // in Tokyo on the day before
+        let fresh = GOOD.replace("filed:", "stale_after: 2027-03-31\nfiled:");
         let parsed = parsed(&[("fresh.md", fresh), ("plain.md", GOOD.into())]);
-        assert!(render_work(&parsed, &areas()).contains("| Re-measure after 2027-03-31."));
+        assert!(render_work(&parsed, &areas()).contains("| Re-measure from 2027-03-31."));
         let cutoff = FixedOffset::east_opt(9 * 3600)
             .unwrap()
-            .with_ymd_and_hms(2027, 3, 31, 0, 0, 0)
+            .with_ymd_and_hms(2027, 3, 30, 19, 0, 0)
             .unwrap();
         assert_eq!(
             stale(&parsed.items, cutoff - chrono::Duration::seconds(1)),
@@ -1155,12 +1158,15 @@ Not yet. Measured by hand.
                 "---\n\n# Resolution\n\nDone.\n\n# Trigger",
             );
         let parsed = parsed(&[("listed.md", listed), ("closed.md", closed)]);
-        assert_eq!(parsed.not_come(at(28, 8, 0, 0)), Vec::<String>::new());
-        let early = parsed.not_come(at(28, 7, 59, 59));
+        // Only the day of verified is compared: a time a few minutes ahead on a day that has come passes
+        assert_eq!(parsed.not_come(at(28, 7, 59, 59)), Vec::<String>::new());
+        // As filed is, with the latest day anywhere: 2026-09-28 comes in UTC+14 at 19:00 in Tokyo on the 27th
+        assert_eq!(parsed.not_come(at(27, 19, 0, 0)), Vec::<String>::new());
+        let early = parsed.not_come(at(27, 18, 59, 59));
         assert_eq!(early.len(), 2, "{early:?}");
         assert!(
             early.iter().all(|found| found.contains(
-                "verified at 2026-09-28T08:00:00+09:00, later than now (2026-09-28T07:59:59+09:00)"
+                "verified on 2026-09-28, a day that has not come anywhere yet (now 2026-09-27T18:59:59+09:00)"
             )),
             "{early:?}"
         );

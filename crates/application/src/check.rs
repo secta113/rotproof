@@ -27,9 +27,10 @@
 //!   generates (the index files and the rules) equals what `rotproof index` writes, and no spec sits at the root.
 //! - **The log keeps the OKF log structure**: every second-level heading is a date, newest first, and the entries
 //!   are a flat list of list items under those dates.
-//! - **No day or time in the records is later than now**: a work item's `filed` and `verified`, and the log's date
-//!   headings, are read from the clock when written. A day is compared with the latest day anywhere, so CI in UTC
-//!   passes a day written in Tokyo. Time alone only makes one pass, so this never turns CI red with no change.
+//! - **No day in the records is later than today**: a work item's `filed` and `verified`, and the log's date
+//!   headings, are read from the clock when written. Each is a day (only the day of a datetime `verified` is read),
+//!   compared with the latest day anywhere, so CI in UTC passes a day written in Tokyo. Time alone only makes one
+//!   pass, so this never turns CI red with no change.
 //!
 //! Each check has a floor: when the scan finds nothing at all, it fails instead of passing with nothing checked.
 
@@ -57,8 +58,8 @@ use protocol::inbound::{Finding, Report};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
-/// The check of the days and times written in the records
-const NOT_COME: &str = "no day or time in the records is later than now";
+/// The check of the days written in the records
+const NOT_COME: &str = "no day in the records is later than today";
 
 /// Every broken rule in the repository `tree` holds, at `now`. An error is a file that could not be read at all.
 pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Report> {
