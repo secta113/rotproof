@@ -16,8 +16,8 @@ const START: &str = "\
 Start a project:
   1. rotproof init --stack <stack>   write .config/rotproof.toml (python, typescript, rust, or none for records only)
   2. edit it: list in absent the layers the project does not have
-  3. rotproof create --yes           make the layers, docs/ and the project's files (without --yes, it lists the
-                                     layers it would make and writes nothing)
+  3. rotproof create --yes           make the layers, docs/ and the project's files (without --yes, a run that
+                                     would make a layer lists the layers and writes nothing)
   4. rotproof check                  check them; this is the project's CI
 
 Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files, and
