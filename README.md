@@ -166,7 +166,8 @@ that has a declaration:
   or not an update applies, so every upgrade runs `rotproof init` once.
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
-  `.rotproof/AGENTS.md`, the generated files in `docs/`), and sets `files` to the running version. Crossing a version
+  `.rotproof/AGENTS.md`, the generated files in `docs/`, and the records skeleton and the project's files where they
+  are missing), and sets `files` to the running version. Crossing a version
   that changes the format of the records, it first moves them (below). Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
