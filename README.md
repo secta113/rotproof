@@ -353,9 +353,10 @@ Where they live is written once per stack:
 | `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
 | `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no `ui` yet) | `src/main.rs` of the root package | every crate in `crates/`, and the root `Cargo.toml` |
 
-`stack = "none"` declares a repository that keeps records only: `rotproof create` makes only `docs/`, and `Rotproof
-check` checks only the records and prints that it did not check the layers. It is a line in the declaration, not a
-flag, so the structure check is never switched off where the declaration still declares layers.
+`stack = "none"` declares a repository that keeps records only: `rotproof create` makes no layer, only `docs/`, the
+guide and the project's files, and `rotproof check` checks only the records and prints that it did not check the
+layers. It is a line in the declaration, not a flag, so the structure check is never switched off where the
+declaration still declares layers.
 
 A level is declared absent by its dotted name (`absent = ["ui.templates"]`). Files `.gitignore` excludes and
 hidden files are not looked at, so a virtual environment or a build directory is not code. A code file is matched in any
