@@ -20,15 +20,23 @@ two structures:
 ## Principles
 
 - **The declaration is the truth, and Rotproof does not repair.** The structure a project declares is the structure. A
-  tree that differs from it fails, either way, and someone decides whether the tree or the declaration is wrong;
-  Rotproof changes the tree only when asked. It rewrites what a person wrote in two cases only. When a version of
-  Rotproof changes the format it reads, `rotproof init` carries the files across that change, doing what a machine can
-  without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That is not a repair of drift:
-  the files were right under the old format, and Rotproof is what changed. And once a knowledge document is reviewed
-  against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a person, on a terminal)
-  write the hashes in its `follows`, and nothing else: the review is the person's or the agent's, and pinning only
-  records it. Code it never moves: when the layer table changes (0.4.0), `rotproof init` says where each layer's code
-  goes, and the person moves it.
+  tree that differs from it fails, either way, and someone decides whether the tree or the declaration is wrong.
+  `rotproof check` only reports. What writes is a command a person or an agent runs, and it says what it did. Such a
+  command adds what is missing and leaves the values a person wrote as they are: a layer or a project's file that is
+  not there, a field the declaration lacks, an entry a person approved, what a named update of `rotproof init` brings
+  (see "Upgrading Rotproof"), and the files Rotproof generates, which nobody writes by hand. A field the declaration
+  lacks takes its first value from the tree, once (`areas` gets the tags the records use, so the records that kept
+  the rules keep them); from then on a record with a tag the declaration does not list fails. An update of
+  `.claude/settings.json` keeps its keys, their order and their values, but writes the whole file again in Rotproof's
+  layout (two spaces of indentation, `\n` line endings). These change what a person wrote, each in a command run for
+  that. When a version of Rotproof changes the format it reads, `rotproof init` carries the files across that change,
+  doing what a machine can without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That
+  is not a repair of drift: the files were right under the old format, and Rotproof is what changed. Once a knowledge
+  document is reviewed against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a
+  person, on a terminal) write the hashes in its `follows`: the review is the person's or the agent's, and pinning
+  only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
+  `rotproof check` fails on: it only takes away, so nothing passes that failed before. Code it never moves: when the
+  layer table changes (0.4.0), `rotproof init` says where each layer's code goes, and the person moves it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
 - **A check with nothing to check fails.** A check that passes on an empty tree protects nothing.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
@@ -47,7 +55,12 @@ The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/G
 reserved names, and the log's headings are dates. An OKF reader can read the records as a bundle. The rules on top of
 that format (a work item's state and what it is bounded by, a closed record opening with its resolution, a knowledge
 document's hash in the log, the shape of a log entry) are Rotproof's own, stricter than OKF, and not part of it.
-Rotproof is not an OKF validator.
+Rotproof is not an OKF validator. In one place the records depart from a SHOULD of OKF, which asks that every
+timestamp be a datetime with a UTC offset (section 5): the `at` of `verified` and `stale_after` are written as a day
+(`YYYY-MM-DD`), and Rotproof reads only the day of either, of a datetime too. An agent has no clock, and no check can
+tell a time of day it guessed a few minutes early from one it measured, so the records hold no time of day rather than
+one that may be untrue; OKF's `verified` is written for a person or a process with a clock to confirm. A reader that
+knows only OKF may not read a day there as a datetime.
 
 ## Install
 
@@ -113,9 +126,8 @@ names the rest of the starter (`App.tsx`, the styles, `assets/`) as code outside
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
 (below), a milestone when `docs/work/` has none, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files, the closed list and the rules in `docs/`). It never
-overwrites a file it does not generate, and never moves or deletes one. Nothing runs it on its own, so a layer removed
-  `xtask/src/layers.rs` in place of the file, and reads the comments of `xtask/` for markers too, which the layout
-  leaves out; the records are kept outside, so they are not checked here.
+overwrites a file it does not generate, apart from adding the fields the declaration lacks (below), and never moves or
+deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
 
 The project's files are written once, as a starting point, and are the project's from then on:
 
@@ -154,7 +166,8 @@ that has a declaration:
   or not an update applies, so every upgrade runs `rotproof init` once.
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
-  `.rotproof/AGENTS.md`, the generated files in `docs/`), and sets `files` to the running version. Crossing a version
+  `.rotproof/AGENTS.md`, the generated files in `docs/`, and the records skeleton and the project's files where they
+  are missing), and sets `files` to the running version. Crossing a version
   that changes the format of the records, it first moves them (below). Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
@@ -168,7 +181,7 @@ that has a declaration:
 
 | Update | Version | File | What it adds |
 |---|---|---|---|
-| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
+| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order, two spaces of indentation and `\n` line endings |
 | `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | A second `Stop` hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
 | `claude-time-hook` | 0.4.0 | `.claude/settings.json` | The time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above: an untouched file ends as `rotproof create` writes it now |
 
@@ -244,9 +257,9 @@ exit code 2 would keep it from stopping.
 
 ### The time hook
 
-An agent has no clock of its own. It writes the day an item was filed, the time a state was measured and the day of a
-log entry from what it was last told, and a guess runs ahead of the clock: `rotproof check` fails on a day or a time
-that has not come (see "What `rotproof check` checks"). `rotproof time-hook` is Claude Code's `SessionStart` and
+An agent has no clock of its own. It writes the day an item was filed, the day a state was measured and the day of a
+log entry from what it was last told, and a guess runs ahead of the clock: `rotproof check` fails on a day that has
+not come (see "What `rotproof check` checks"). `rotproof time-hook` is Claude Code's `SessionStart` and
 `UserPromptSubmit` hook: at the start of every session (a resumed or a compacted one too) and on every prompt, it
 gives the agent the time now, as `additionalContext`, to write from. Within a long turn the time goes on, so it says
 to read the clock for a later one. `rotproof create` writes it into `.claude/settings.json` beside the stop hook; a
@@ -340,9 +353,10 @@ Where they live is written once per stack:
 | `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
 | `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no `ui` yet) | `src/main.rs` of the root package | every crate in `crates/`, and the root `Cargo.toml` |
 
-`stack = "none"` declares a repository that keeps records only: `rotproof create` makes only `docs/`, and `Rotproof
-check` checks only the records and prints that it did not check the layers. It is a line in the declaration, not a
-flag, so the structure check is never switched off where the declaration still declares layers.
+`stack = "none"` declares a repository that keeps records only: `rotproof create` makes no layer, only `docs/`, the
+guide and the project's files, and `rotproof check` checks only the records and prints that it did not check the
+layers. It is a line in the declaration, not a flag, so the structure check is never switched off where the
+declaration still declares layers.
 
 A level is declared absent by its dotted name (`absent = ["ui.templates"]`). Files `.gitignore` excludes and
 hidden files are not looked at, so a virtual environment or a build directory is not code. A code file is matched in any
@@ -476,8 +490,8 @@ parent: some-spec
 after: [design]
 until: [release-0-3-0]
 filed: 2026-10-01
-verified: {by: human:someone, at: 2026-10-01T10:00:00+09:00}
-stale_after: 2027-01-01T00:00:00+09:00
+verified: {by: human:someone, at: 2026-10-01}
+stale_after: 2027-01-01
 ---
 
 # Resolution    (only when closed, and then first)
@@ -492,7 +506,8 @@ stale_after: 2027-01-01T00:00:00+09:00
 - `parent`: the spec it is a part of; required for `stable`.
 - `after`, optional: the records that come before it. `until`, optional: the records that come after it, often a
   milestone.
-- `stale_after`, optional: when to measure the state again.
+- `verified`: who measured the state, and the day (`at`). A datetime with a time zone passes too, read as its day there.
+- `stale_after`, optional: the day from which to measure the state again.
 
 ## What `rotproof check` checks
 
@@ -585,7 +600,7 @@ stale_after: 2027-01-01T00:00:00+09:00
   other types have and this one does not (a work item's `filed` on a spec, the `parent` of a spec or a work item on
   a knowledge document), or is a field Rotproof no longer reads (`epic`, which says to write `parent`; `deadline_kind`
   and `deadline`, which say to write the moment as a milestone and name it in `until`): those fail, in every document
-  type, as a misspelled optional field would otherwise be silently dropped. Every time has a time zone. `stale_after` is later than the last `verified`. A required text is not blank (spaces alone
+  type, as a misspelled optional field would otherwise be silently dropped. The `at` of `verified` and `stale_after` are a day, or a datetime with a time zone read as its day there; every other time has a time zone. `stale_after` is a later day than the last `verified`. A required text is not blank (spaces alone
   are empty), in every document type, and no tag is empty. What the index lists (`title`, `description` and the
   tags) is on one line: a line break would end the entry and start a heading or an entry of its own. A
   title is written into the index with `[`, `]` and `\` escaped, so it stays the text of its own link. The one tag
@@ -630,11 +645,11 @@ stale_after: 2027-01-01T00:00:00+09:00
   a flat list of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented
   lines (wrapped text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the
   first date fails. A new log, with only its title and HTML comments, passes.
-- **No day or time in the records is later than now:** a work item's `filed` and every `at` of its `verified`, and the
-  log's date headings. They are read from the clock when written, and one that has not come was guessed. A time is
-  compared with the time `rotproof check` runs at, and a day with the latest day anywhere (the day in UTC+14), so CI in
-  UTC passes a day written in Tokyo before 09:00. Time alone only makes one pass, so this never turns CI red with no
-  change. Claude Code is given the time by the time hook (see "The stop hook").
+- **No day in the records is later than today:** a work item's `filed` and every `at` of its `verified`, and the
+  log's date headings. They are read from the clock when written, and one that has not come was guessed. Each is a
+  day, the day of a datetime too (a time of day is never compared), and is compared with the latest day anywhere (the
+  day in UTC+14), so CI in UTC passes a day written in Tokyo before 09:00. Time alone only makes one pass, so this
+  never turns CI red with no change. Claude Code is given the time by the time hook (see "The stop hook").
 - **Every knowledge document keeps the format,** as a spec does (without `parent`, and `status` `stable` or
   `deprecated`), and **the log names it as it is now:** some `**Knowledge**` field of a log entry, with its wrapped
   lines, names it with the first 8 hex digits of SHA-256 of the whole file (every line ending as `\n`). An edit the

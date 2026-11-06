@@ -1,7 +1,7 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof stop-hook` and `rotproof
-//! time-hook`, and the help that leads from one to the next. Each command is a call of an input port of
-//! `protocol.inbound`; what it prints and how it exits are decided here.
+//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof before`, `rotproof follows`, `rotproof
+//! stop-hook` and `rotproof time-hook`, and the help that leads from one to the next. Each command is a call of an
+//! input port of `protocol.inbound`; what it prints and how it exits are decided here.
 
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -16,8 +16,8 @@ const START: &str = "\
 Start a project:
   1. rotproof init --stack <stack>   write .config/rotproof.toml (python, typescript, rust, or none for records only)
   2. edit it: list in absent the layers the project does not have
-  3. rotproof create --yes           make the layers, docs/ and the project's files (without --yes, it lists the
-                                     layers it would make and writes nothing)
+  3. rotproof create --yes           make the layers, docs/ and the project's files (without --yes, a run that
+                                     would make a layer lists the layers and writes nothing)
   4. rotproof check                  check them; this is the project's CI
 
 Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files, and
@@ -26,10 +26,11 @@ moves the records when the new version changes their format), then `rotproof che
 The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has run; `rotproof guide --stack <stack>`
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
-Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2
-when there is no .config/rotproof.toml to work from, a file cannot be read or written, the command line is wrong,
-`rotproof create` would make layers without --yes, `rotproof init` leaves an update of the project's files to a
-person or cannot move the records, or `rotproof approve` is not run on a terminal or not answered y.";
+Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken, or
+`rotproof stop-hook` or `rotproof time-hook` fails; 2 when there is no .config/rotproof.toml to work from, a file
+cannot be read or written, the command line is wrong or its --root is not a directory, `rotproof create` would make
+layers without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
+or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -71,13 +72,14 @@ enum Command {
     /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
     /// the declaration to this version. It never changes the declaration's other values. What an update cannot do
     /// without a person, it says, leaves files as it was, and exits 2. Crossing 0.3.0, it first moves the records
-    /// from docs/backlog/ and docs/specs/ to docs/work/ and points every link in docs/ that reached one at its new
-    /// place; the move cannot be declined, says what it leaves to a person (how each closed record closed, the deadline
-    /// of each open item), and stops with nothing changed when a name is in both directories or a file there is no
-    /// record. Crossing 0.4.0, which builds the layer table on the onion architecture, it says where the code of the
-    /// layers that are gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left
-    /// until it is moved. Exits 2 too for an unknown stack, a stack other than the declared one, a move that stopped,
-    /// or a file that cannot be read or written.
+    /// from docs/backlog/ and docs/specs/ to docs/work/ and points every link that reached one at its new place, in
+    /// docs/ and in the markdown files elsewhere that .gitignore does not exclude; the move cannot be declined, says
+    /// what it leaves to a person (how each closed record closed, the deadline of each open item), and stops with
+    /// nothing changed when a name is in both directories or a file there is no record. Crossing 0.4.0, which builds
+    /// the layer table on the onion architecture, it says where the code of the layers that are gone (handler, utils)
+    /// and the ports go, and moves no code: `rotproof check` names what is left until it is moved. Exits 2 too for an
+    /// unknown stack, a stack other than the declared one, a move that stopped, or a file that cannot be read or
+    /// written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
         #[arg(long)]
@@ -154,11 +156,11 @@ enum Command {
         #[arg(long)]
         reviewed: bool,
     },
-    /// Write every index.md in docs/, and docs/work/closed.md, from the frontmatter
+    /// Write every index.md in docs/ and docs/work/closed.md from the frontmatter, and the rules.md Rotproof keeps
     ///
-    /// Rewrites docs/index.md and the index.md of docs/work/ and docs/knowledge/, the list of closed records in
-    /// docs/work/closed.md, and the rules.md Rotproof keeps there, from the frontmatter of the documents. Run it after
-    /// a record changes; never edit these by hand.
+    /// Rewrites docs/index.md, the index.md of docs/work/ and docs/knowledge/ and the list of closed records in
+    /// docs/work/closed.md, from the frontmatter of the documents, and the rules.md Rotproof keeps in docs/work/ and
+    /// docs/knowledge/. Run it after a record changes; never edit these by hand.
     /// Lists the documents it left out and why, also under `# Left out` in the index, the work items past their
     /// stale_after, and the open milestones past their date. Exits 2 when the declaration or a document cannot be read.
     Index,
@@ -221,7 +223,7 @@ enum Command {
     /// on stdin
     ///
     /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. An agent has no clock, and a
-    /// day or a time it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
+    /// day it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
     /// gives it the time on every prompt and at the start of every session, to write from. Exits 1, never 2, when it
     /// fails, so a broken hook never blocks the prompt.
     TimeHook,

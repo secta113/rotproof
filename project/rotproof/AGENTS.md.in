@@ -15,8 +15,8 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   generates:** this file, and in `docs/` the `index.md` and `rules.md` files and `docs/work/closed.md`. It never
   changes another file, apart from adding the fields the declaration lacks, and never moves or deletes one. Nothing
   runs it on its own.
-- **`rotproof index` rewrites the `index.md` files in `docs/` and `docs/work/closed.md`** after a record changes.
-  Never edit them by hand.
+- **`rotproof index` rewrites the `index.md` and `rules.md` files in `docs/` and `docs/work/closed.md`** after a
+  record changes. Never edit them by hand.
 - **`rotproof before <slug>` prints the open records that close before a milestone, a spec or any record, earliest
   first,** each with whether it can be worked to its end now (`started` or `ready`; `waits` when something open
   closes before it), its last measured state and what it waits for, through the arrows and the parents and up to an

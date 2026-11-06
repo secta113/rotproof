@@ -159,14 +159,14 @@ fn each_broken_rule_fails_under_its_check() {
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
     let cases: [(&str, &str, String); 26] = [
-        // A time or a day guessed rather than read from the clock
+        // A day guessed rather than read from the clock
         (
-            "no day or time in the records is later than now",
+            "no day in the records is later than today",
             "docs/work/x.md",
             item("[log](/log.md)").replace("at: 2026-10-01T10:00:00", "at: 2999-10-01T10:00:00"),
         ),
         (
-            "no day or time in the records is later than now",
+            "no day in the records is later than today",
             "docs/log.md",
             "# Log\n\n## 2999-01-01\n\n* Something\n".into(),
         ),
@@ -2388,16 +2388,23 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
-    // Every command's --help says more than its -h, and how it exits
-    for command in [
-        "init",
-        "create",
-        "check",
-        "guide",
-        "index",
-        "stop-hook",
-        "time-hook",
-    ] {
+    // Every command's --help says more than its -h, and how it exits: every command `rotproof --help` lists, so one
+    // added later is not left out
+    let help = stdout(&run(&["--help"]));
+    let commands: Vec<&str> = help
+        .lines()
+        .skip_while(|line| *line != "Commands:")
+        .skip(1)
+        .take_while(|line| !line.is_empty())
+        .filter_map(|line| {
+            line.strip_prefix("  ")
+                .filter(|rest| !rest.starts_with(' '))
+        })
+        .filter_map(|rest| rest.split_whitespace().next())
+        .filter(|command| *command != "help")
+        .collect();
+    assert!(commands.len() >= 10, "{commands:?}\n{help}");
+    for command in commands {
         let short = stdout(&run(&[command, "-h"]));
         let long = stdout(&run(&[command, "--help"]));
         assert!(long.len() > short.len(), "{command}:\n{long}");
