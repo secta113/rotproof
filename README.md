@@ -20,15 +20,23 @@ two structures:
 ## Principles
 
 - **The declaration is the truth, and Rotproof does not repair.** The structure a project declares is the structure. A
-  tree that differs from it fails, either way, and someone decides whether the tree or the declaration is wrong;
-  Rotproof changes the tree only when asked. It rewrites what a person wrote in two cases only. When a version of
-  Rotproof changes the format it reads, `rotproof init` carries the files across that change, doing what a machine can
-  without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That is not a repair of drift:
-  the files were right under the old format, and Rotproof is what changed. And once a knowledge document is reviewed
-  against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a person, on a terminal)
-  write the hashes in its `follows`, and nothing else: the review is the person's or the agent's, and pinning only
-  records it. Code it never moves: when the layer table changes (0.4.0), `rotproof init` says where each layer's code
-  goes, and the person moves it.
+  tree that differs from it fails, either way, and someone decides whether the tree or the declaration is wrong.
+  `rotproof check` only reports. What writes is a command a person or an agent runs, and it says what it did. Such a
+  command adds what is missing and leaves the values a person wrote as they are: a layer or a project's file that is
+  not there, a field the declaration lacks, an entry a person approved, what a named update of `rotproof init` brings
+  (see "Upgrading Rotproof"), and the files Rotproof generates, which nobody writes by hand. A field the declaration
+  lacks takes its first value from the tree, once (`areas` gets the tags the records use, so the records that kept
+  the rules keep them); from then on a record with a tag the declaration does not list fails. An update of
+  `.claude/settings.json` keeps its keys, their order and their values, but writes the whole file again in Rotproof's
+  layout (two spaces of indentation, `\n` line endings). These change what a person wrote, each in a command run for
+  that. When a version of Rotproof changes the format it reads, `rotproof init` carries the files across that change,
+  doing what a machine can without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That
+  is not a repair of drift: the files were right under the old format, and Rotproof is what changed. Once a knowledge
+  document is reviewed against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a
+  person, on a terminal) write the hashes in its `follows`: the review is the person's or the agent's, and pinning
+  only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
+  `rotproof check` fails on: it only takes away, so nothing passes that failed before. Code it never moves: when the
+  layer table changes (0.4.0), `rotproof init` says where each layer's code goes, and the person moves it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
 - **A check with nothing to check fails.** A check that passes on an empty tree protects nothing.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
@@ -173,7 +181,7 @@ that has a declaration:
 
 | Update | Version | File | What it adds |
 |---|---|---|---|
-| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
+| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order, two spaces of indentation and `\n` line endings |
 | `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | A second `Stop` hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
 | `claude-time-hook` | 0.4.0 | `.claude/settings.json` | The time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above: an untouched file ends as `rotproof create` writes it now |
 
