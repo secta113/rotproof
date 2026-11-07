@@ -32,7 +32,7 @@ use std::collections::BTreeSet;
 
 use crate::bundle::Bundle;
 use crate::layers::declaration;
-use crate::tree::{exactly, read_text};
+use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::{
     FIRST_MILESTONE, LOG, first_milestone, in_docs, may_have_milestone, record_tags as tags_in,
 };
@@ -167,7 +167,7 @@ fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     let Ok((path, _)) = exactly(tree, DECLARATION) else {
         return Ok(None);
     };
-    let text = read_text(tree, &path).map_err(|e| unreadable(&e.to_string()))?;
+    let (text, was) = read_written(tree, &path).map_err(|e| unreadable(&e.to_string()))?;
     let Some(lacking) = lacking(&text) else {
         return Ok(None);
     };
@@ -184,10 +184,10 @@ fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
         };
         values.push((name, value));
     }
-    // In the line endings the project wrote: `read_text` gave every line `\n`, and a declaration checked out with
-    // CRLF would otherwise change on every line, not only where a field was added
-    let raw = tree.read(&path).map_err(|e| unreadable(&e.to_string()))?;
-    Ok(Some(completed(&text, &values, raw.contains("\r\n"))))
+    // As the project wrote it: the text was read with every line ending `\n`, and a declaration checked out with CRLF
+    // would otherwise change on every line, not only where a field was added
+    let (text, added) = completed(&text, &values);
+    Ok(Some((was.restore(&text), added)))
 }
 
 /// Every tag the work items, specs and knowledge documents use, sorted by name: the first value of `areas`, so the

@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 
 use crate::create::refresh;
-use crate::tree::{exactly, read_text};
+use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::DOCS;
 use domain::layers::{
     DECLARATION, ONION, PORTS_MOVED, crosses_onion, declaration_text, known_stacks, layout, retired,
@@ -102,11 +102,9 @@ fn upgrade(
     }
     if upgraded.by_hand.is_empty() && declared.files.as_deref() != Some(running) {
         // Read again: the refresh may have added a field the declaration lacked
-        let text = read_text(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
-        let raw = tree
-            .read(&path)
-            .map_err(|e| format!("{DECLARATION}: {e}"))?;
-        let (written, added) = with_files(&text, running, raw.contains("\r\n"))?;
+        let (text, was) = read_written(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
+        let (written, added) = with_files(&text, running)?;
+        let written = was.restore(&written);
         out.write(DECLARATION, &written)
             .map_err(|e| format!("{DECLARATION}: {e}"))?;
         upgraded.files_set = true;
@@ -346,6 +344,37 @@ mod tests {
             written_done(&tree, Update::DenyApprovals, &written),
             Ok(false)
         );
+    }
+
+    #[test]
+    fn files_is_set_in_the_line_endings_and_with_the_byte_order_mark_the_project_wrote() {
+        for (crlf, bom) in [(true, true), (true, false), (false, true), (false, false)] {
+            let tree = made_by_first();
+            let lf = tree.text(DECLARATION).unwrap();
+            let text = if crlf {
+                lf.replace('\n', "\r\n")
+            } else {
+                lf.clone()
+            };
+            let raw = if bom { format!("\u{feff}{text}") } else { text };
+            tree.write(DECLARATION, &raw).unwrap();
+            let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.2.0") else {
+                panic!("upgraded");
+            };
+            assert!(upgraded.files_set);
+            let now = tree.text(DECLARATION).unwrap();
+            let said = format!("crlf {crlf}, bom {bom}: {now:?}");
+            assert!(now.starts_with(&raw), "{said}");
+            assert_eq!(now.starts_with('\u{feff}'), bom, "{said}");
+            // Every line ends as the others did, the lines added too
+            if crlf {
+                assert!(!now.replace("\r\n", "").contains('\n'), "{said}");
+            } else {
+                assert!(!now.contains('\r'), "{said}");
+            }
+            let read = domain::tree::with_lf(&now);
+            assert_eq!(read_fields(&read).unwrap().files.as_deref(), Some("0.2.0"));
+        }
     }
 
     /// A project of records as 0.2.0 laid it out: specs in docs/specs/, backlog items in docs/backlog/

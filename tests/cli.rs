@@ -1207,17 +1207,22 @@ fn create_adds_the_fields_the_declaration_lacks() {
 }
 
 #[test]
-fn create_keeps_the_line_endings_of_the_declaration() {
-    // Checked out with CRLF, as git does on Windows: only the added lines are new
-    let older = "# Ours\r\nstack = \"none\"\r\n";
-    let root = repo();
-    fs::write(root.path().join(".config/rotproof.toml"), older).unwrap();
-    let out = create(&["--root", &root_arg(root.path()), "create"]);
-    assert!(out.status.success(), "{}", stdout(&out));
-    let now = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
-    assert!(now.starts_with(older), "{now:?}");
-    assert!(now.contains("\r\nareas = []\r\n"), "{now:?}");
-    assert!(!now.replace("\r\n", "").contains('\n'), "{now:?}");
+fn create_keeps_the_line_endings_and_the_byte_order_mark_of_the_declaration() {
+    // Checked out with CRLF, as git does on Windows, and saved by a tool that writes a byte order mark or not: only
+    // the added lines are new
+    for older in [
+        "# Ours\r\nstack = \"none\"\r\n",
+        "\u{feff}# Ours\r\nstack = \"none\"\r\n",
+    ] {
+        let root = repo();
+        fs::write(root.path().join(".config/rotproof.toml"), older).unwrap();
+        let out = create(&["--root", &root_arg(root.path()), "create"]);
+        assert!(out.status.success(), "{}", stdout(&out));
+        let now = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
+        assert!(now.starts_with(older), "{now:?}");
+        assert!(now.contains("\r\nareas = []\r\n"), "{now:?}");
+        assert!(!now.replace("\r\n", "").contains('\n'), "{now:?}");
+    }
 }
 
 #[test]

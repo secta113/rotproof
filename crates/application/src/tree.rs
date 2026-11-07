@@ -1,15 +1,22 @@
 //! Reading a project's files through the [`Tree`] port: a path read name by name, the code files of a directory, and
-//! the text of a file as the checks read it.
+//! the text of a file as the checks read it, with how it was written.
 
 use std::io;
 
 use domain::paths::{file_name, join, parent};
-use domain::tree::{as_windows_reads, with_lf};
+use domain::tree::{Written, as_windows_reads, with_lf};
 use protocol::outbound::Tree;
 
 /// The text of the file at `path`, as Rotproof reads it ([`with_lf`]).
 pub fn read_text(tree: &dyn Tree, path: &str) -> io::Result<String> {
     Ok(with_lf(&tree.read(path)?))
+}
+
+/// The text of the file at `path` as [`read_text`] gives it, and how the file was written ([`Written`]), for a file
+/// a person wrote that Rotproof changes and writes back: the text written goes through [`Written::restore`].
+pub fn read_written(tree: &dyn Tree, path: &str) -> io::Result<(String, Written)> {
+    let raw = tree.read(path)?;
+    Ok((with_lf(&raw), Written::of(&raw)))
 }
 
 /// Read a code file for a check: `None`, with a finding that its `what` are not checked, when it is not UTF-8. An

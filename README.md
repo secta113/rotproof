@@ -416,13 +416,15 @@ the document was last reviewed: a file in any language, and in Python also a fun
 (`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). Once the document is reviewed against
 the code, `rotproof follows knowledge/api.md <key>...` (or `docs/knowledge/api.md`) pins each key at its hash as the
 code is now, adding a key `follows` lacks with its hash quoted, writes all the keys or none, and prints the log line to
-write: pinning changes the document, so its log entry records the review. Run it when a document starts to follow
-something, and when `rotproof check` fails because what it follows changed since: the check names the command to run.
-It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand. After a
-refactoring that moved code without changing what it does, a person can re-pin every changed hash in one act:
+write: pinning changes the document, so its log entry records the review. Nothing else in the document changes: it
+keeps a byte order mark and its line endings (CRLF on every line when one line had it). Run it when a document starts
+to follow something, and when `rotproof check` fails because what it follows changed since: the check names the
+command to run. It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand.
+After a refactoring that moved code without changing what it does, a person can re-pin every changed hash in one act:
 `rotproof approve --reviewed` lists each document and what changed under it, says to read the changes first (a hash
-says only that the code changed), asks for one `y` on a terminal (an agent's shell has none), writes the new hashes,
-and prints the log lines to write. What is gone is left for the person to edit. No LLM judges whether the meaning
+says only that the code changed), asks for one `y` on a terminal (an agent's shell has none), writes the new hashes
+(each document keeping a byte order mark and its line endings, as `rotproof follows` does), and prints the log lines
+to write. What is gone is left for the person to edit. No LLM judges whether the meaning
 changed: the agent that refactors is usually one.
 
 Some knowledge matters only when something is seen: a service refuses an upload, a CI image moves. Such a document is
