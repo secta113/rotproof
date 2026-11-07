@@ -254,8 +254,8 @@ the hook runs the first one there, which may not be the one the project pins. So
 
 A `systemMessage` is shown to the person and keeps no agent from stopping. The project is the nearest directory
 upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A hook that fails (not a git
-repository, an input from another hook, a `--root` that is not a directory) exits 1, which Claude Code shows without
-keeping the agent from stopping; exit code 2 would keep it from stopping.
+repository, an input from another hook, a `--root` that is not a directory, a command line that is wrong) exits 1,
+which Claude Code shows without keeping the agent from stopping; exit code 2 would keep it from stopping.
 
 ### The time hook
 
@@ -277,8 +277,8 @@ settings adds it:
 }
 ```
 
-It fails (an input from another hook) with exit 1, which Claude Code shows while the prompt goes on; exit code 2 would
-block the prompt. It reads no `--root`, so one that is not a directory changes nothing.
+It fails (an input from another hook, a command line that is wrong) with exit 1, which Claude Code shows while the
+prompt goes on; exit code 2 would block the prompt. It reads no `--root`, so one that is not a directory changes nothing.
 
 ## Approving a forbidden import
 

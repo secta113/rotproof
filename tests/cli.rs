@@ -3038,6 +3038,66 @@ fn the_time_hook_tells_the_agent_the_time_and_a_broken_one_exits_1() {
     assert!(stdout(&out).contains("The time now is "));
 }
 
+/// Run the binary with `args` as given, with `{}` on stdin.
+fn run_with_input(args: &[&str]) -> Output {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rotproof"))
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary runs");
+    // The binary may exit on its command line before it reads any input
+    let _ = child.stdin.take().unwrap().write_all(b"{}");
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn a_hook_with_a_wrong_command_line_exits_1_never_2() {
+    // Claude Code reads exit code 2 from a Stop hook as "do not stop" and from a UserPromptSubmit hook as "block the
+    // prompt": a hook set up wrongly fails with 1 and says so, as clap does for the other commands, with 2
+    let root = tempfile::tempdir().unwrap();
+    let arg = root_arg(root.path());
+    for args in [
+        vec!["stop-hook", "extra"],
+        vec!["time-hook", "--bogus"],
+        vec!["--root", &arg, "stop-hook", "extra"],
+        vec!["--root", &arg, "time-hook", "--bogus"],
+        vec!["--bogus", "stop-hook"],
+    ] {
+        let out = run_with_input(&args);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(said.contains("unexpected argument"), "{args:?}: {said}");
+        assert_eq!(stdout(&out), "", "{args:?}");
+    }
+    // The help is not a failure
+    for args in [
+        vec!["stop-hook", "--help"],
+        vec!["time-hook", "-h"],
+        vec!["--root", &arg, "stop-hook", "--help"],
+        vec!["--version", "time-hook"],
+    ] {
+        let out = run_with_input(&args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}");
+        assert!(!stdout(&out).is_empty(), "{args:?}");
+    }
+    // Any other command is as it was: 2
+    for args in [
+        vec!["check", "extra"],
+        vec!["index", "--bogus"],
+        vec!["--bogus", "check"],
+        vec!["bogus-command"],
+        vec!["stop-hook-not", "x"],
+        vec!["check", "stop-hook"],
+    ] {
+        let out = run_with_input(&args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+    }
+}
+
 #[test]
 fn every_edit_of_a_knowledge_document_is_named_in_the_log() {
     let root = clean_repo();

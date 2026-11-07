@@ -28,8 +28,9 @@ prints them before. `rotproof <command> --help` says what a command reads, write
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken, or
 `rotproof stop-hook` or `rotproof time-hook` fails (the stop hook fails on a --root that is not a directory, and the
-time hook reads none); 2 when there is no .config/rotproof.toml to work from, a file cannot be read or written, the
-command line is wrong or the --root of another command is not a directory, `rotproof create` would make layers
+time hook reads none; a wrong command line that names a hook fails with 1 too); 2 when there is no
+.config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
+its --root is not a directory, `rotproof create` would make layers
 without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
 or `rotproof approve` is not run on a terminal or not answered y.";
 
@@ -222,8 +223,8 @@ enum Command {
     /// holds a phrase that leaves something open (such as "not checked") and git shows no change in docs/, it asks the
     /// agent once to record the finding or say where it is. When its own version is not the one the project's files
     /// are up to (files in the declaration), it says so to the person: the hook runs the first rotproof on the PATH.
-    /// Exits 1, never 2, when it fails (a --root that is not a directory among the failures), so a broken hook never
-    /// keeps the agent from stopping.
+    /// Exits 1, never 2, when it fails (a --root that is not a directory, or a command line that is wrong, among the
+    /// failures), so a broken hook never keeps the agent from stopping.
     StopHook,
     /// Run as Claude Code's SessionStart and UserPromptSubmit hook: tell the agent the time now. Reads the hook input
     /// on stdin
@@ -231,8 +232,8 @@ enum Command {
     /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. An agent has no clock, and a
     /// day it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
     /// gives it the time on every prompt and at the start of every session, to write from. It reads no --root, so one
-    /// that is not a directory changes nothing. Exits 1, never 2, when it fails, so a broken hook never blocks the
-    /// prompt.
+    /// that is not a directory changes nothing. Exits 1, never 2, when it fails (a command line that is wrong among the
+    /// failures), so a broken hook never blocks the prompt.
     TimeHook,
 }
 
@@ -246,7 +247,13 @@ fn command(names: &Names) -> clap::Command {
 /// Run the command the command line names, with `commands` doing the work, and say how it went.
 pub fn run(commands: &dyn Commands) -> ExitCode {
     let names = commands.names();
-    let cli = Cli::from_arg_matches(&command(&names).get_matches()).unwrap_or_else(|e| e.exit());
+    let parsed = command(&names)
+        .try_get_matches()
+        .and_then(|matches| Cli::from_arg_matches(&matches));
+    let cli = match parsed {
+        Ok(cli) => cli,
+        Err(e) => return wrong_command_line(&e, &names),
+    };
     // The hooks answer before the root is checked below, whose exit code 2 Claude Code takes from a hook for "block":
     // the stop hook fails with 1 on a root that is not a directory, and the time hook reads no root
     if let Command::StopHook = cli.command {
@@ -299,6 +306,38 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
             eprintln!("{why}");
             ExitCode::from(2)
         }
+    }
+}
+
+/// Say what is wrong with the command line, and exit. Exit 2 for a wrong command line, as clap does, and 0 for the
+/// help and the version, which clap reports as errors too; but 1 when the command line names a hook (`stop-hook` or
+/// `time-hook`, whatever else is wrong with it), as a hook exits 1, never 2: Claude Code takes exit code 2 from one
+/// for "do not stop" or "block the prompt", and a hook set up wrongly would keep the agent or the prompt from going on.
+fn wrong_command_line(e: &clap::Error, names: &Names) -> ExitCode {
+    if e.use_stderr() && names_a_hook(names) {
+        // `print` writes to stderr for an error that uses it, as `exit` does
+        let _ = e.print();
+        return ExitCode::FAILURE;
+    }
+    e.exit()
+}
+
+/// Whether the command line names `stop-hook` or `time-hook` as its subcommand, though it did not parse. clap is asked
+/// again with its errors ignored, so that it finds the subcommand as it always does, past the global `--root` and its
+/// value, rather than a guess here at which word is the subcommand. When clap finds none (a flag it does not know
+/// before the subcommand stops it there), a word that is a hook's name is enough: a hook set up with a mistyped flag
+/// must not exit 2 either, and any other command line that holds the word fails with 1 instead of 2, which no hook
+/// is run by.
+fn names_a_hook(names: &Names) -> bool {
+    const HOOKS: [&str; 2] = ["stop-hook", "time-hook"];
+    let found = command(names).ignore_errors(true).try_get_matches();
+    match found
+        .as_ref()
+        .ok()
+        .and_then(|matches| matches.subcommand_name())
+    {
+        Some(name) => HOOKS.contains(&name),
+        None => std::env::args_os().any(|arg| HOOKS.iter().any(|hook| arg == *hook)),
     }
 }
 
