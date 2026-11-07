@@ -129,7 +129,8 @@ enum Command {
     /// file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each name of
     /// `from m import n`; a TypeScript specifier; a crate's dependency). It shows the forbidden import, asks why it is
     /// kept and for a y, signs with git's user.name (or a name it asks for), and adds the entry to
-    /// .config/rotproof-approved.toml. `rotproof approve --reviewed`, after a refactoring that kept what the code does,
+    /// .config/rotproof-approved.toml, which keeps a byte order mark and its line endings (CRLF on every line when one
+    /// line had it), as does --prune. `rotproof approve --reviewed`, after a refactoring that kept what the code does,
     /// lists every knowledge document whose followed code changed and what changed under it, says to read the changes
     /// first, asks for one y, writes the new hashes in their follows (each document keeps a byte order mark and its
     /// line endings, as with rotproof follows), and prints the log lines to write; what is gone is left to edit by
