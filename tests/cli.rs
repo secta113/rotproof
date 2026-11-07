@@ -2897,6 +2897,16 @@ fn a_broken_stop_hook_exits_1_never_2() {
     let out = stop_hook(root.path(), open);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("git status failed"));
+    // A root that is not a directory, which exits 2 from every other command: 1, and said, though nothing is open. Read
+    // as outside a project, it would say nothing on every stop
+    let done = r#"{"hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": "All done."}"#;
+    let out = stop_hook(&root.path().join("no/such/directory"), done);
+    assert_eq!(out.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("rotproof stop-hook: the root is not a directory"),
+        "{said}"
+    );
 }
 
 #[test]
@@ -2943,6 +2953,18 @@ fn the_time_hook_tells_the_agent_the_time_and_a_broken_one_exits_1() {
         assert_eq!(out.status.code(), Some(1), "{input}");
         assert!(String::from_utf8_lossy(&out.stderr).contains("rotproof time-hook:"));
     }
+    // It reads no root: one that is not a directory, which exits 2 from the other commands, changes nothing
+    let out = hook(
+        &r.join("no/such/directory"),
+        "time-hook",
+        "{\"hook_event_name\": \"UserPromptSubmit\"}",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout(&out).contains("The time now is "));
 }
 
 #[test]

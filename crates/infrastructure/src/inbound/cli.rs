@@ -27,9 +27,10 @@ The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has r
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken, or
-`rotproof stop-hook` or `rotproof time-hook` fails; 2 when there is no .config/rotproof.toml to work from, a file
-cannot be read or written, the command line is wrong or its --root is not a directory, `rotproof create` would make
-layers without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
+`rotproof stop-hook` or `rotproof time-hook` fails (the stop hook fails on a --root that is not a directory, and the
+time hook reads none); 2 when there is no .config/rotproof.toml to work from, a file cannot be read or written, the
+command line is wrong or the --root of another command is not a directory, `rotproof create` would make layers
+without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
 or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
@@ -217,15 +218,17 @@ enum Command {
     /// holds a phrase that leaves something open (such as "not checked") and git shows no change in docs/, it asks the
     /// agent once to record the finding or say where it is. When its own version is not the one the project's files
     /// are up to (files in the declaration), it says so to the person: the hook runs the first rotproof on the PATH.
-    /// Exits 1, never 2, when it fails, so a broken hook never keeps the agent from stopping.
+    /// Exits 1, never 2, when it fails (a --root that is not a directory among the failures), so a broken hook never
+    /// keeps the agent from stopping.
     StopHook,
     /// Run as Claude Code's SessionStart and UserPromptSubmit hook: tell the agent the time now. Reads the hook input
     /// on stdin
     ///
     /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. An agent has no clock, and a
     /// day it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
-    /// gives it the time on every prompt and at the start of every session, to write from. Exits 1, never 2, when it
-    /// fails, so a broken hook never blocks the prompt.
+    /// gives it the time on every prompt and at the start of every session, to write from. It reads no --root, so one
+    /// that is not a directory changes nothing. Exits 1, never 2, when it fails, so a broken hook never blocks the
+    /// prompt.
     TimeHook,
 }
 
@@ -240,18 +243,20 @@ fn command(names: &Names) -> clap::Command {
 pub fn run(commands: &dyn Commands) -> ExitCode {
     let names = commands.names();
     let cli = Cli::from_arg_matches(&command(&names).get_matches()).unwrap_or_else(|e| e.exit());
+    // The hooks answer before the root is checked below, whose exit code 2 Claude Code takes from a hook for "block":
+    // the stop hook fails with 1 on a root that is not a directory, and the time hook reads no root
+    if let Command::StopHook = cli.command {
+        return stop_hook(commands, &cli.root);
+    }
+    if let Command::TimeHook = cli.command {
+        return time_hook(commands);
+    }
     // A root that does not exist fails here. Read as an empty tree, it would pass every check with nothing checked
     if !cli.root.is_dir() {
         eprintln!("the root is not a directory: {}", cli.root.display());
         return ExitCode::from(2);
     }
     let root = cli.root.as_path();
-    if let Command::StopHook = cli.command {
-        return stop_hook(commands, root);
-    }
-    if let Command::TimeHook = cli.command {
-        return time_hook(commands);
-    }
     let result = match cli.command {
         Command::Init { stack } => init(commands, &names, root, stack.as_deref()).map(|()| true),
         Command::Create { yes } => create(commands, &names, root, yes).map(|()| true),
@@ -425,13 +430,21 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
 }
 
 /// Answer the agent's stop hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "do not
-/// stop", and a broken hook would keep the agent from stopping instead of being shown.
+/// stop", and a broken hook would keep the agent from stopping instead of being shown. A root that is not a directory
+/// is such an error: read as outside a project, it would say nothing on every stop, and the setting would go unseen.
 fn stop_hook(commands: &dyn Commands, root: &Path) -> ExitCode {
     let mut input = String::new();
     let answer = std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|e| format!("the hook input could not be read: {e}"))
-        .and_then(|_| commands.stop_hook(root, &input));
+        .and_then(|_| {
+            if root.is_dir() {
+                Ok(())
+            } else {
+                Err(format!("the root is not a directory: {}", root.display()))
+            }
+        })
+        .and_then(|()| commands.stop_hook(root, &input));
     match answer {
         Ok(Some(out)) => {
             println!("{out}");
@@ -446,7 +459,8 @@ fn stop_hook(commands: &dyn Commands, root: &Path) -> ExitCode {
 }
 
 /// Answer the agent's time hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "block the
-/// prompt", and a broken hook would keep the person's prompt from the agent instead of being shown.
+/// prompt", and a broken hook would keep the person's prompt from the agent instead of being shown. It reads no root,
+/// so --root, whatever it names, changes nothing here.
 fn time_hook(commands: &dyn Commands) -> ExitCode {
     let mut input = String::new();
     let answer = std::io::stdin()
