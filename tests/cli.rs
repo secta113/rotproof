@@ -2543,6 +2543,14 @@ fn init_upgrades_a_project_made_by_the_first_release() {
     let out = run(&["--root", &arg, "init"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(stdout(&out).contains("updated .claude/settings.json: claude-deny-approvals"));
+    // Every field it adds to the declaration is named, as `rotproof create` names those it adds
+    for field in [format!("files = \"{version}\""), "declined = []".into()] {
+        assert!(
+            stdout(&out).contains(&format!("added to .config/rotproof.toml: {field}\n")),
+            "{}",
+            stdout(&out)
+        );
+    }
     let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
     assert!(
         settings.contains("Edit(/.config/rotproof-approved.toml)"),
@@ -2559,6 +2567,28 @@ fn init_upgrades_a_project_made_by_the_first_release() {
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
+    // A declaration with files and without declined: only declined is added, and said
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        "stack = \"none\"\nareas = [\"a\"]\nfiles = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let printed = stdout(&out);
+    let added: Vec<&str> = printed
+        .lines()
+        .filter(|line| line.starts_with("added to"))
+        .collect();
+    assert_eq!(
+        added,
+        ["added to .config/rotproof.toml: declined = []"],
+        "{}",
+        stdout(&out)
+    );
+    // Nothing to add: nothing said
+    let out = run(&["--root", &arg, "init"]);
+    assert!(!stdout(&out).contains("added to"), "{}", stdout(&out));
 }
 
 #[test]

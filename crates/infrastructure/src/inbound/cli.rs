@@ -71,7 +71,8 @@ enum Command {
     /// With one, it is the whole upgrade of Rotproof: it applies every update a newer Rotproof brings to the files
     /// `rotproof create` wrote once (such as a rule added to .claude/settings.json), except the ones the declaration
     /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
-    /// the declaration to this version. It never changes the declaration's other values. What an update cannot do
+    /// the declaration to this version, adding declined = [] when the declaration lacks it. It names every field it
+    /// adds to the declaration, as `rotproof create` does, and never changes its other values. What an update cannot do
     /// without a person, it says, leaves files as it was, and exits 2. Crossing 0.3.0, it first moves the records
     /// from docs/backlog/ and docs/specs/ to docs/work/ and points every link that reached one at its new place, in
     /// docs/ and in the markdown files elsewhere that .gitignore does not exclude; the move cannot be declined, says
@@ -360,7 +361,7 @@ fn init(
     Ok(())
 }
 
-/// Say what `rotproof create`, or the refresh of an upgrade, wrote and added.
+/// Say what `rotproof create`, or an upgrade (its refresh, and `files` set), wrote and added.
 fn report_made(names: &Names, made: &Made) {
     for path in &made.written {
         println!("wrote {path}");

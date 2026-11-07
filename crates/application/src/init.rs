@@ -7,7 +7,8 @@
 //!   between the declaration's `files` and the running version that the project did not decline, does what
 //!   `rotproof create` does after an upgrade without making a layer, and sets `files` to the running version. What an
 //!   update cannot do without a person it says, and then `files` stays where it was, so `rotproof check` keeps
-//!   failing until it is done or declined. It never changes the declaration's other values.
+//!   failing until it is done or declined. It adds `declined`, empty, when the declaration lacks it, names every field
+//!   it adds, and never changes the declaration's other values.
 //! - **Crossing 0.3.0,** it first moves the records from `docs/backlog/` and `docs/specs/` into `docs/work/`
 //!   (`migrate.rs` in `domain`), which cannot be declined: Rotproof from 0.3.0 reads no other place.
 
@@ -95,10 +96,12 @@ fn upgrade(
         let raw = tree
             .read(&path)
             .map_err(|e| format!("{DECLARATION}: {e}"))?;
-        let written = with_files(&text, running, raw.contains("\r\n"))?;
+        let (written, added) = with_files(&text, running, raw.contains("\r\n"))?;
         out.write(DECLARATION, &written)
             .map_err(|e| format!("{DECLARATION}: {e}"))?;
         upgraded.files_set = true;
+        // Said where the refresh's fields are said, in the same words
+        upgraded.made.added.extend(added);
     }
     Ok(upgraded)
 }
