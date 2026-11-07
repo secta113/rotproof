@@ -7,8 +7,9 @@
 //!   between the declaration's `files` and the running version that the project did not decline, does what
 //!   `rotproof create` does after an upgrade without making a layer, and sets `files` to the running version. What an
 //!   update cannot do without a person it says, and then `files` stays where it was, so `rotproof check` keeps
-//!   failing until it is done or declined. It adds `declined`, empty, when the declaration lacks it, names every field
-//!   it adds, and never changes the declaration's other values.
+//!   failing until it is done or declined. An update whose file is missing asks no person when the refresh then
+//!   writes that file with what the update adds, as it writes `.claude/settings.json`. It adds `declined`, empty,
+//!   when the declaration lacks it, names every field it adds, and never changes the declaration's other values.
 //! - **Crossing 0.3.0,** it first moves the records from `docs/backlog/` and `docs/specs/` into `docs/work/`
 //!   (`migrate.rs` in `domain`), which cannot be declined: Rotproof from 0.3.0 reads no other place.
 
@@ -83,13 +84,22 @@ fn upgrade(
     if migrate::due(&from, running) {
         move_records(tree, out, &mut upgraded)?;
     }
+    let mut asked = Vec::new();
     for update in pending(&from, running, &declared.declined)? {
-        apply(tree, out, update, &mut upgraded)?;
+        if let Some(why) = apply(tree, out, update, &mut upgraded)? {
+            asked.push((update, why));
+        }
     }
     if crosses_onion(&from, running) {
         upgraded.moves = onion_moves(tree, declared.stack.as_deref());
     }
     upgraded.made = refresh(tree, out, name)?;
+    // An update that asked a person for a file the refresh then wrote with what the update adds asks no more
+    for (update, why) in asked {
+        if !written_done(tree, update, &upgraded.made.written)? {
+            upgraded.by_hand.push(why);
+        }
+    }
     if upgraded.by_hand.is_empty() && declared.files.as_deref() != Some(running) {
         // Read again: the refresh may have added a field the declaration lacked
         let text = read_text(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
@@ -173,13 +183,13 @@ fn move_records(tree: &dyn Tree, out: &dyn Writer, upgraded: &mut Upgraded) -> R
     Ok(())
 }
 
-/// Apply one update to its file, or say what it leaves to a person.
+/// Apply one update to its file, or return what it leaves to a person.
 fn apply(
     tree: &dyn Tree,
     out: &dyn Writer,
     update: Update,
     upgraded: &mut Upgraded,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let path = update.file();
     let text = match exactly(tree, path) {
         Ok((found, false)) => Some(read_text(tree, &found).map_err(|e| format!("{path}: {e}"))?),
@@ -192,9 +202,22 @@ fn apply(
                 .map_err(|e| format!("{path}: {e}"))?;
             upgraded.applied.push((update.name(), path));
         }
-        domain::upgrade::Outcome::ByHand(why) => upgraded.by_hand.push(why),
+        domain::upgrade::Outcome::ByHand(why) => return Ok(Some(why)),
     }
-    Ok(())
+    Ok(None)
+}
+
+/// Whether the refresh wrote the file of an update that asked a person, as it writes `.claude/settings.json` when
+/// there is none, and the file it wrote has what the update adds. The update is asked again of the written file
+/// rather than trusted by the path alone, so a file the refresh writes without what the update adds still needs a
+/// person.
+fn written_done(tree: &dyn Tree, update: Update, written: &[String]) -> Result<bool, String> {
+    let path = update.file();
+    if !written.iter().any(|w| w == path) {
+        return Ok(false);
+    }
+    let text = read_text(tree, path).map_err(|e| format!("{path}: {e}"))?;
+    Ok(update.apply(Some(&text)) == domain::upgrade::Outcome::Done)
 }
 
 #[cfg(test)]
@@ -290,6 +313,39 @@ mod tests {
             .map(|p| tree.text(p))
             .collect();
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn an_update_asks_no_person_for_a_file_the_refresh_writes_with_what_it_adds() {
+        let tree = made_by_first();
+        tree.remove(SETTINGS).unwrap();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.2.0") else {
+            panic!("upgraded");
+        };
+        // The refresh wrote the settings, with the rule, and the update asks for nothing more
+        assert!(upgraded.made.written.iter().any(|p| p == SETTINGS));
+        assert!(
+            tree.text(SETTINGS)
+                .unwrap()
+                .contains("Edit(/.config/rotproof-approved.toml)")
+        );
+        assert!(upgraded.by_hand.is_empty(), "{:?}", upgraded.by_hand);
+        assert!(upgraded.applied.is_empty());
+        assert!(upgraded.files_set);
+
+        // Asked again of the file, not trusted by its path: a written file without the rule still needs a person
+        let written = [SETTINGS.to_string()];
+        assert_eq!(
+            written_done(&tree, Update::DenyApprovals, &written),
+            Ok(true)
+        );
+        // Not written by the refresh: the request stays, whatever the file holds
+        assert_eq!(written_done(&tree, Update::DenyApprovals, &[]), Ok(false));
+        tree.write(SETTINGS, "{}\n").unwrap();
+        assert_eq!(
+            written_done(&tree, Update::DenyApprovals, &written),
+            Ok(false)
+        );
     }
 
     /// A project of records as 0.2.0 laid it out: specs in docs/specs/, backlog items in docs/backlog/

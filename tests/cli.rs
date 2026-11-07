@@ -2592,6 +2592,42 @@ fn init_upgrades_a_project_made_by_the_first_release() {
 }
 
 #[test]
+fn init_asks_no_person_for_the_settings_it_writes_itself() {
+    // A project of the first release without .claude/settings.json: the deny rule's update finds no file, and the
+    // refresh of the same run writes one that has the rule
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        "stack = \"none\"\nareas = [\"a\"]\n",
+    )
+    .unwrap();
+    let version = env!("CARGO_PKG_VERSION");
+    if version == "0.1.0" {
+        return;
+    }
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("wrote .claude/settings.json"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stdout(&out).contains("needs a person"), "{}", stdout(&out));
+    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
+    assert!(
+        settings.contains("Edit(/.config/rotproof-approved.toml)"),
+        "{settings}"
+    );
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    assert!(
+        declaration.contains(&format!("files = \"{version}\"")),
+        "{declaration}"
+    );
+}
+
+#[test]
 fn a_repository_of_records_only_makes_and_checks_only_docs() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let arg = root_arg(root.path());

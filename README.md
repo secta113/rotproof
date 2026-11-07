@@ -175,10 +175,11 @@ that has a declaration:
   `rotproof check` names what is not moved yet. It never changes the declaration's other values, and once it has set
   `files`, running it again changes nothing.
 - **An update only adds,** and does nothing when its file has it already. What it cannot do without a person (its file
-  is missing, or not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by
-  hand, or decline the update by its name in `declined`, and run `rotproof init` again. A move across a change of
-  format (below) is not an update: it rewrites, cannot be declined, and leaves `files` as it was in the same way while
-  it leaves something to a person.
+  is not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by hand, or
+  decline the update by its name in `declined`, and run `rotproof init` again. When its file is missing, the same run
+  writes the file as `rotproof create` does now, with what every update adds, and the update asks for nothing. A move
+  across a change of format (below) is not an update: it rewrites, cannot be declined, and leaves `files` as it was in
+  the same way while it leaves something to a person.
 
 | Update | Version | File | What it adds |
 |---|---|---|---|
