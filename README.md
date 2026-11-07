@@ -167,17 +167,19 @@ that has a declaration:
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
   `.rotproof/AGENTS.md`, the generated files in `docs/`, and the records skeleton and the project's files where they
-  are missing), and sets `files` to the running version. Crossing a version
+  are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
+  names every field it adds to the declaration, as `rotproof create` does. Crossing a version
   that changes the format of the records, it first moves them (below). Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
   `rotproof check` names what is not moved yet. It never changes the declaration's other values, and once it has set
   `files`, running it again changes nothing.
 - **An update only adds,** and does nothing when its file has it already. What it cannot do without a person (its file
-  is missing, or not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by
-  hand, or decline the update by its name in `declined`, and run `rotproof init` again. A move across a change of
-  format (below) is not an update: it rewrites, cannot be declined, and leaves `files` as it was in the same way while
-  it leaves something to a person.
+  is not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by hand, or
+  decline the update by its name in `declined`, and run `rotproof init` again. When its file is missing, the same run
+  writes the file as `rotproof create` does now, with what every update adds, and the update asks for nothing. A move
+  across a change of format (below) is not an update: it rewrites, cannot be declined, and leaves `files` as it was in
+  the same way while it leaves something to a person.
 
 | Update | Version | File | What it adds |
 |---|---|---|---|
@@ -252,8 +254,8 @@ the hook runs the first one there, which may not be the one the project pins. So
 
 A `systemMessage` is shown to the person and keeps no agent from stopping. The project is the nearest directory
 upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A hook that fails (not a git
-repository, an input from another hook) exits 1, which Claude Code shows without keeping the agent from stopping;
-exit code 2 would keep it from stopping.
+repository, an input from another hook, a `--root` that is not a directory) exits 1, which Claude Code shows without
+keeping the agent from stopping; exit code 2 would keep it from stopping.
 
 ### The time hook
 
@@ -276,7 +278,7 @@ settings adds it:
 ```
 
 It fails (an input from another hook) with exit 1, which Claude Code shows while the prompt goes on; exit code 2 would
-block the prompt.
+block the prompt. It reads no `--root`, so one that is not a directory changes nothing.
 
 ## Approving a forbidden import
 
@@ -414,13 +416,15 @@ the document was last reviewed: a file in any language, and in Python also a fun
 (`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). Once the document is reviewed against
 the code, `rotproof follows knowledge/api.md <key>...` (or `docs/knowledge/api.md`) pins each key at its hash as the
 code is now, adding a key `follows` lacks with its hash quoted, writes all the keys or none, and prints the log line to
-write: pinning changes the document, so its log entry records the review. Run it when a document starts to follow
-something, and when `rotproof check` fails because what it follows changed since: the check names the command to run.
-It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand. After a
-refactoring that moved code without changing what it does, a person can re-pin every changed hash in one act:
+write: pinning changes the document, so its log entry records the review. Nothing else in the document changes: it
+keeps a byte order mark and its line endings (CRLF on every line when one line had it). Run it when a document starts
+to follow something, and when `rotproof check` fails because what it follows changed since: the check names the
+command to run. It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand.
+After a refactoring that moved code without changing what it does, a person can re-pin every changed hash in one act:
 `rotproof approve --reviewed` lists each document and what changed under it, says to read the changes first (a hash
-says only that the code changed), asks for one `y` on a terminal (an agent's shell has none), writes the new hashes,
-and prints the log lines to write. What is gone is left for the person to edit. No LLM judges whether the meaning
+says only that the code changed), asks for one `y` on a terminal (an agent's shell has none), writes the new hashes
+(each document keeping a byte order mark and its line endings, as `rotproof follows` does), and prints the log lines
+to write. What is gone is left for the person to edit. No LLM judges whether the meaning
 changed: the agent that refactors is usually one.
 
 Some knowledge matters only when something is seen: a service refuses an upload, a CI image moves. Such a document is

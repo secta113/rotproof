@@ -495,8 +495,9 @@ pub fn lacking(text: &str) -> Option<Vec<&'static str>> {
 
 /// The declaration `text` with each field of `values` (a name of [`ADDED`], and its first value) added under its
 /// comment, and the fields added as `name = value`. The comments and the values already there are kept, and the
-/// lines end as in the file the project wrote: with `\r\n` when `crlf`, as `text` was read with `\n`.
-pub fn completed(text: &str, values: &[(&str, Vec<String>)], crlf: bool) -> (String, Vec<String>) {
+/// lines end with `\n`, as `text` was read: the caller writes it as the project wrote the file
+/// ([`Written`](crate::tree::Written)).
+pub fn completed(text: &str, values: &[(&str, Vec<String>)]) -> (String, Vec<String>) {
     let mut document = text
         .parse::<DocumentMut>()
         .expect("lacking read it as TOML");
@@ -516,15 +517,7 @@ pub fn completed(text: &str, values: &[(&str, Vec<String>)], crlf: bool) -> (Str
             .set_prefix(format!("\n{}{}", field.comment, field.first_value));
         added.push(format!("{} = {}", field.name, document[field.name]));
     }
-    let text = document.to_string();
-    (
-        if crlf {
-            text.replace('\n', "\r\n")
-        } else {
-            text
-        },
-        added,
-    )
+    (document.to_string(), added)
 }
 
 /// Every stack a declaration may name, `none` last.
@@ -904,13 +897,11 @@ mod tests {
         assert_eq!(lacking("stack = \"none\"\nareas = []\n"), Some(Vec::new()));
         assert_eq!(lacking("stack = "), None);
         let tags = vec!["billing".to_string(), "ops".to_string()];
-        let (text, added) = completed(old, &[("areas", tags)], false);
+        let (text, added) = completed(old, &[("areas", tags)]);
         assert_eq!(added, ["areas = [\"billing\", \"ops\"]"]);
         assert!(text.starts_with(old), "{text}");
         assert!(text.contains(&format!("\n{AREAS_COMMENT}")), "{text}");
         assert_eq!(parse_declaration(&text).unwrap().areas, ["billing", "ops"]);
-        let (crlf, _) = completed(old, &[("areas", Vec::new())], true);
-        assert!(!crlf.replace("\r\n", "").contains('\n'), "{crlf:?}");
     }
 
     #[test]

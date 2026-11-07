@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::bundle::Bundle;
-use crate::tree::{exactly, read_text};
+use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::in_docs;
 use domain::follows::{
     Followed, added, directory_hash, document_name, drifted, followed, repinned,
@@ -108,7 +108,9 @@ pub fn changed(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Vec<Drift>, Str
 }
 
 /// Write the new hash of every changed key in `drifts` into its document, through `out`. A key that is gone or cannot
-/// be read is left for a person. Each document written, with its new hash for the log.
+/// be read is left for a person. A document keeps its line endings and its byte order mark
+/// ([`Written`](domain::tree::Written)), and its hash is of the text as the check reads it. Each document written, with
+/// its new hash for the log.
 pub fn repin(
     tree: &dyn Tree,
     out: &dyn Writer,
@@ -126,9 +128,9 @@ pub fn repin(
     let mut written = Vec::new();
     for (doc, pins) in by_doc {
         let path = in_docs(&format!("knowledge/{doc}"));
-        let text = read_text(tree, &path).map_err(|e| format!("{path}: {e}"))?;
+        let (text, was) = read_written(tree, &path).map_err(|e| format!("{path}: {e}"))?;
         let pinned = repinned(&text, &pins).map_err(|why| format!("{path}: {why}"))?;
-        out.write(&path, &pinned)
+        out.write(&path, &was.restore(&pinned))
             .map_err(|e| format!("{path}: {e}"))?;
         written.push((doc.to_string(), content_hash(&pinned)));
     }
@@ -138,7 +140,7 @@ pub fn repin(
 /// Pin each of `keys` in the knowledge document `document` names (`knowledge/api.md` or `docs/knowledge/api.md`) at
 /// its hash now, through `out`: a pinned key gets its new hash, a key not in `follows` is added. All of them or none:
 /// when a key is not there or cannot be read, nothing is written. A deprecated document no longer holds, so it is not
-/// pinned.
+/// pinned. The document keeps its line endings and its byte order mark, as in [`repin`].
 pub fn pin(
     tree: &dyn Tree,
     out: &dyn Writer,
@@ -194,7 +196,7 @@ pub fn pin(
     if !failed.is_empty() {
         return Err(format!("{path}: nothing written\n{}", failed.join("\n")));
     }
-    let text = read_text(tree, &path).map_err(|e| format!("{path}: {e}"))?;
+    let (text, was) = read_written(tree, &path).map_err(|e| format!("{path}: {e}"))?;
     let repins: Vec<(&str, &str, &str)> = pinned
         .iter()
         .filter_map(|(key, before, now)| {
@@ -227,7 +229,8 @@ pub fn pin(
                  hand"
             ));
         }
-        out.write(&path, &new).map_err(|e| format!("{path}: {e}"))?;
+        out.write(&path, &was.restore(&new))
+            .map_err(|e| format!("{path}: {e}"))?;
         written = Some(content_hash(&new));
     }
     Ok(Pinned {
@@ -339,6 +342,63 @@ mod tests {
         .unwrap();
         assert_eq!(again.written, None);
         assert_eq!(tree.text(DOC).unwrap(), text);
+    }
+
+    #[test]
+    fn a_pin_and_a_re_pin_keep_the_line_endings_and_the_byte_order_mark() {
+        let keys = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<Vec<_>>();
+        for (crlf, bom) in [(true, true), (true, false), (false, true), (false, false)] {
+            let tree = project(&[("domain/model.py::play", "00000000")]);
+            let lf = tree.text(DOC).unwrap();
+            let as_written = |text: &str| {
+                let text = if crlf {
+                    text.replace('\n', "\r\n")
+                } else {
+                    text.to_string()
+                };
+                if bom { format!("\u{feff}{text}") } else { text }
+            };
+            tree.write(DOC, &as_written(&lf)).unwrap();
+            let done = pin(
+                &tree,
+                &tree,
+                &Readers,
+                "knowledge/model.md",
+                &keys(&["domain/model.py::play", "domain/"]),
+            )
+            .unwrap();
+            // Only the hash changed and the key was added, and every line ends as before
+            let pinned = lf.replace("00000000", &done.keys[0].2).replace(
+                "---\n\n#",
+                &format!("  domain/: \"{}\"\n---\n\n#", done.keys[1].2),
+            );
+            assert_eq!(
+                tree.text(DOC).unwrap(),
+                as_written(&pinned),
+                "crlf {crlf}, bom {bom}"
+            );
+            // The hash for the log is of the text as the check reads it
+            assert_eq!(done.written, Some(content_hash(&pinned)));
+
+            tree.write("domain/model.py", "def play():\n    return 2\n")
+                .unwrap();
+            let drifts = changed(&tree, &Readers).unwrap();
+            let written = repin(&tree, &tree, &drifts).unwrap();
+            let mut repinned = pinned.clone();
+            for d in &drifts {
+                let Ok(Some(now)) = &d.now else {
+                    panic!("{drifts:?}")
+                };
+                repinned = repinned.replace(&d.pinned, now);
+            }
+            assert_ne!(repinned, pinned);
+            assert_eq!(
+                tree.text(DOC).unwrap(),
+                as_written(&repinned),
+                "crlf {crlf}, bom {bom}"
+            );
+            assert_eq!(written[0].1, content_hash(&repinned));
+        }
     }
 
     #[test]

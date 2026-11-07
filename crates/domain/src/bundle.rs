@@ -431,7 +431,11 @@ pub fn link_text(title: &str) -> String {
 }
 
 /// The first sentence of the first line, for the index. Bold text at the start counts as a sentence on its own.
-/// Works for any language: a sentence ends at "。" or at "." followed by a space or the end of the line.
+/// Works for any language: a sentence ends at "。" or at "." followed by a space or the end of the line, but not
+/// inside parentheses ("（）" or "()", nested or not, either kind closing either) or inline code, where a full stop
+/// ends a sentence of the aside, not of the line: "実装した（PR #1。CI は pass）。" is one sentence. A parenthesis or
+/// inline code left open on the line is read as text, so the sentence ends at the first full stop after it that no
+/// closed bracket holds, as it would without the bracket, and not at the end of the line.
 pub fn first_sentence(text: &str) -> &str {
     let first = text.split('\n').next().unwrap_or("").trim();
     if let Some(rest) = first.strip_prefix("**")
@@ -441,18 +445,71 @@ pub fn first_sentence(text: &str) -> &str {
     {
         return &first[..end + 4];
     }
-    let mut chars = first.char_indices().peekable();
+    match sentence_end(first) {
+        Some(end) => &first[..end],
+        None => first,
+    }
+}
+
+/// Where the first sentence of a line ends, after its full stop, as `first_sentence` reads it; none when no full stop
+/// ends one, and the line is one sentence.
+fn sentence_end(line: &str) -> Option<usize> {
+    // How deep in parentheses; the length of the run of backticks that opened inline code; and, while inside either,
+    // where the text after the outermost opening starts, which is read again as text when that opening is not closed
+    let mut depth = 0usize;
+    let mut code: Option<usize> = None;
+    let mut opened: Option<usize> = None;
+    let mut chars = line.char_indices().peekable();
     while let Some((i, c)) = chars.next() {
-        let ends = match c {
-            '。' => true,
-            '.' => chars.peek().is_none_or(|(_, next)| next.is_whitespace()),
-            _ => false,
-        };
-        if ends {
-            return &first[..i + c.len_utf8()];
+        let after = i + c.len_utf8();
+        if c == '`' {
+            let mut run = 1;
+            while chars.next_if(|&(_, next)| next == '`').is_some() {
+                run += 1;
+            }
+            // A run of another length inside inline code is code too
+            match code {
+                Some(length) if length == run => {
+                    code = None;
+                    if depth == 0 {
+                        opened = None;
+                    }
+                }
+                None => {
+                    code = Some(run);
+                    if depth == 0 {
+                        opened = Some(i + run);
+                    }
+                }
+                Some(_) => {}
+            }
+            continue;
+        }
+        if code.is_some() {
+            continue;
+        }
+        match c {
+            '（' | '(' => {
+                if depth == 0 {
+                    opened = Some(after);
+                }
+                depth += 1;
+            }
+            '）' | ')' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    opened = None;
+                }
+            }
+            '。' if depth == 0 => return Some(after),
+            '.' if depth == 0 && chars.peek().is_none_or(|(_, next)| next.is_whitespace()) => {
+                return Some(after);
+            }
+            _ => {}
         }
     }
-    first
+    let start = opened?;
+    sentence_end(&line[start..]).map(|end| start + end)
 }
 
 /// One record of `docs/work/` as the index lists it.
@@ -1075,6 +1132,51 @@ Not yet. Measured by hand.
         ];
         for (text, expected) in cases {
             assert_eq!(first_sentence(text), expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn first_sentence_does_not_end_inside_brackets() {
+        let pr = "実装した、push 済み・未 merge（2026-10-24、secta113/rotproof の PR #1。CI は `3be3976` で全ジョブ pass）。";
+        let cases = [
+            // A full stop inside parentheses, full-width or ASCII, ends a sentence of the aside, not of the line
+            (format!("{pr}Rotproof のブランチ。"), pr),
+            (
+                "Done (see PR #1. CI passed). Then more.".into(),
+                "Done (see PR #1. CI passed).",
+            ),
+            // Nested, and either kind closing either
+            (
+                "済んだ（基準は「a」（ユーザー。全文）。b）。次。".into(),
+                "済んだ（基準は「a」（ユーザー。全文）。b）。",
+            ),
+            ("A (b (c. d) e. f) g. Next.".into(), "A (b (c. d) e. f) g."),
+            ("A（b (c。d）e)。Next。".into(), "A（b (c。d）e)。"),
+            // Inside inline code, with any run of backticks; a parenthesis in code is code
+            (
+                "Ran `a. b` and passed. Then.".into(),
+                "Ran `a. b` and passed.",
+            ),
+            ("`x。y` を足した。次。".into(), "`x。y` を足した。"),
+            ("Grep `(foo` found 3. Next.".into(), "Grep `(foo` found 3."),
+            (
+                "Wrote ``a ` b. c`` here. Next.".into(),
+                "Wrote ``a ` b. c`` here.",
+            ),
+            // Left open on the line, a bracket is read as text: the sentence does not run to the end of the line
+            ("A (unclosed. Next sentence. Third".into(), "A (unclosed."),
+            ("前置き（閉じない。次の文。".into(), "前置き（閉じない。"),
+            ("Ran `a. b and more. Next".into(), "Ran `a."),
+            ("A (b. c) d (e. f".into(), "A (b. c) d (e."),
+            ("A (x (b. c) d. e".into(), "A (x (b. c) d."),
+            ("A (no full stop".into(), "A (no full stop"),
+            // A closing parenthesis with no opening one is text
+            ("1) first. 2) second.".into(), "1) first."),
+            // No full stop outside the brackets: the line is one sentence
+            ("Text (a. b) more".into(), "Text (a. b) more"),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(first_sentence(&text), expected, "{text:?}");
         }
     }
 

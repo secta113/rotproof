@@ -1207,17 +1207,22 @@ fn create_adds_the_fields_the_declaration_lacks() {
 }
 
 #[test]
-fn create_keeps_the_line_endings_of_the_declaration() {
-    // Checked out with CRLF, as git does on Windows: only the added lines are new
-    let older = "# Ours\r\nstack = \"none\"\r\n";
-    let root = repo();
-    fs::write(root.path().join(".config/rotproof.toml"), older).unwrap();
-    let out = create(&["--root", &root_arg(root.path()), "create"]);
-    assert!(out.status.success(), "{}", stdout(&out));
-    let now = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
-    assert!(now.starts_with(older), "{now:?}");
-    assert!(now.contains("\r\nareas = []\r\n"), "{now:?}");
-    assert!(!now.replace("\r\n", "").contains('\n'), "{now:?}");
+fn create_keeps_the_line_endings_and_the_byte_order_mark_of_the_declaration() {
+    // Checked out with CRLF, as git does on Windows, and saved by a tool that writes a byte order mark or not: only
+    // the added lines are new
+    for older in [
+        "# Ours\r\nstack = \"none\"\r\n",
+        "\u{feff}# Ours\r\nstack = \"none\"\r\n",
+    ] {
+        let root = repo();
+        fs::write(root.path().join(".config/rotproof.toml"), older).unwrap();
+        let out = create(&["--root", &root_arg(root.path()), "create"]);
+        assert!(out.status.success(), "{}", stdout(&out));
+        let now = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
+        assert!(now.starts_with(older), "{now:?}");
+        assert!(now.contains("\r\nareas = []\r\n"), "{now:?}");
+        assert!(!now.replace("\r\n", "").contains('\n'), "{now:?}");
+    }
 }
 
 #[test]
@@ -2543,6 +2548,14 @@ fn init_upgrades_a_project_made_by_the_first_release() {
     let out = run(&["--root", &arg, "init"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(stdout(&out).contains("updated .claude/settings.json: claude-deny-approvals"));
+    // Every field it adds to the declaration is named, as `rotproof create` names those it adds
+    for field in [format!("files = \"{version}\""), "declined = []".into()] {
+        assert!(
+            stdout(&out).contains(&format!("added to .config/rotproof.toml: {field}\n")),
+            "{}",
+            stdout(&out)
+        );
+    }
     let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
     assert!(
         settings.contains("Edit(/.config/rotproof-approved.toml)"),
@@ -2559,6 +2572,64 @@ fn init_upgrades_a_project_made_by_the_first_release() {
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
+    // A declaration with files and without declined: only declined is added, and said
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        "stack = \"none\"\nareas = [\"a\"]\nfiles = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let printed = stdout(&out);
+    let added: Vec<&str> = printed
+        .lines()
+        .filter(|line| line.starts_with("added to"))
+        .collect();
+    assert_eq!(
+        added,
+        ["added to .config/rotproof.toml: declined = []"],
+        "{}",
+        stdout(&out)
+    );
+    // Nothing to add: nothing said
+    let out = run(&["--root", &arg, "init"]);
+    assert!(!stdout(&out).contains("added to"), "{}", stdout(&out));
+}
+
+#[test]
+fn init_asks_no_person_for_the_settings_it_writes_itself() {
+    // A project of the first release without .claude/settings.json: the deny rule's update finds no file, and the
+    // refresh of the same run writes one that has the rule
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        "stack = \"none\"\nareas = [\"a\"]\n",
+    )
+    .unwrap();
+    let version = env!("CARGO_PKG_VERSION");
+    if version == "0.1.0" {
+        return;
+    }
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("wrote .claude/settings.json"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stdout(&out).contains("needs a person"), "{}", stdout(&out));
+    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
+    assert!(
+        settings.contains("Edit(/.config/rotproof-approved.toml)"),
+        "{settings}"
+    );
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    assert!(
+        declaration.contains(&format!("files = \"{version}\"")),
+        "{declaration}"
+    );
 }
 
 #[test]
@@ -2897,6 +2968,16 @@ fn a_broken_stop_hook_exits_1_never_2() {
     let out = stop_hook(root.path(), open);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("git status failed"));
+    // A root that is not a directory, which exits 2 from every other command: 1, and said, though nothing is open. Read
+    // as outside a project, it would say nothing on every stop
+    let done = r#"{"hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": "All done."}"#;
+    let out = stop_hook(&root.path().join("no/such/directory"), done);
+    assert_eq!(out.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("rotproof stop-hook: the root is not a directory"),
+        "{said}"
+    );
 }
 
 #[test]
@@ -2943,6 +3024,18 @@ fn the_time_hook_tells_the_agent_the_time_and_a_broken_one_exits_1() {
         assert_eq!(out.status.code(), Some(1), "{input}");
         assert!(String::from_utf8_lossy(&out.stderr).contains("rotproof time-hook:"));
     }
+    // It reads no root: one that is not a directory, which exits 2 from the other commands, changes nothing
+    let out = hook(
+        &r.join("no/such/directory"),
+        "time-hook",
+        "{\"hook_event_name\": \"UserPromptSubmit\"}",
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout(&out).contains("The time now is "));
 }
 
 #[test]

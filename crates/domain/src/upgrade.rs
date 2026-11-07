@@ -323,12 +323,14 @@ pub fn fields(text: &str) -> Result<Fields, String> {
 }
 
 /// The declaration `text` with `files` set to `running`, and `declined` added when it lacks one, each under its
-/// comment. Every other comment and value is kept, and the lines end with `\r\n` when `crlf`, as the project wrote
-/// them.
-pub fn with_files(text: &str, running: &str, crlf: bool) -> Result<String, String> {
+/// comment, and the fields added as `name = value`, as `rotproof create` names those it adds. Every other comment and
+/// value is kept, and the lines end with `\n`, as `text` was read: the caller writes it as the project wrote the file
+/// ([`Written`](crate::tree::Written)).
+pub fn with_files(text: &str, running: &str) -> Result<(String, Vec<String>), String> {
     let mut document = text
         .parse::<DocumentMut>()
         .map_err(|e| format!("{DECLARATION}: {}", e.message()))?;
+    let mut added = Vec::new();
     match document.get_mut("files") {
         Some(item) => {
             // The value changes, its comment and place stay
@@ -345,6 +347,7 @@ pub fn with_files(text: &str, running: &str, crlf: bool) -> Result<String, Strin
                 .expect("inserted just before")
                 .leaf_decor_mut()
                 .set_prefix(format!("\n{FILES_COMMENT}"));
+            added.push(format!("files = {}", document["files"]));
         }
     }
     if !document.contains_key("declined") {
@@ -354,13 +357,9 @@ pub fn with_files(text: &str, running: &str, crlf: bool) -> Result<String, Strin
             .expect("inserted just before")
             .leaf_decor_mut()
             .set_prefix(format!("\n{DECLINED_COMMENT}"));
+        added.push(format!("declined = {}", document["declined"]));
     }
-    let text = document.to_string();
-    Ok(if crlf {
-        text.replace('\n', "\r\n")
-    } else {
-        text
-    })
+    Ok((document.to_string(), added))
 }
 
 /// What `rotproof check` finds in the declaration's `files` and `declined`, against the running version.
@@ -452,6 +451,21 @@ mod tests {
                 .unwrap_err()
                 .contains("not a version")
         );
+    }
+
+    #[test]
+    fn setting_files_names_every_field_it_adds() {
+        let (text, added) = with_files("stack = \"none\"\n", "0.5.0").unwrap();
+        assert_eq!(added, ["files = \"0.5.0\"", "declined = []"]);
+        let read = fields(&text).unwrap();
+        assert_eq!(read.files.as_deref(), Some("0.5.0"));
+        // files set, not added: only declined is added
+        let (text, added) = with_files("files = \"0.4.0\" # kept\n", "0.5.0").unwrap();
+        assert_eq!(added, ["declined = []"]);
+        assert!(text.starts_with("files = \"0.5.0\" # kept\n"), "{text:?}");
+        // Both there: nothing added
+        let (_, added) = with_files(&text, "0.5.0").unwrap();
+        assert!(added.is_empty(), "{added:?}");
     }
 
     #[test]

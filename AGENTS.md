@@ -77,7 +77,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `arrows.rs` | The arrows between the records of `docs/work/` (`after` and `until`): the records they name, the order they keep with how each record closed, the cycles they make with the parents, and what each open record waits for |
 | `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory, a Python definition), the hash of a directory, what fails when one changed or is gone, the document `rotproof follows` names, and a hash replaced or a key added in the frontmatter |
 | `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure, its days that have not come and what it points at, the hash of a knowledge document, and the floor of the bundle |
-| `tree.rs` | How Rotproof reads a file's text and how Windows reads a name |
+| `tree.rs` | How Rotproof reads a file's text, how it writes the text back as the file was written (its line endings and byte order mark), and how Windows reads a name |
 | `migrate.rs` | Moving the records of a project made before 0.3.0 from `docs/backlog/` and `docs/specs/` into `docs/work/`: when it is due, the move planned whole (each record, every link that reached one, the frontmatter a machine can rewrite) or why it cannot be made, and what it leaves to a person |
 | `upgrade.rs` | Upgrading a project's files: the version they are up to (`files` in the declaration), the named updates a later version brings to the files `rotproof create` writes once, and what each does to its file |
 | `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
@@ -105,7 +105,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
-| `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file |
+| `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
 | `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |

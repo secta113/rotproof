@@ -27,9 +27,10 @@ The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has r
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken, or
-`rotproof stop-hook` or `rotproof time-hook` fails; 2 when there is no .config/rotproof.toml to work from, a file
-cannot be read or written, the command line is wrong or its --root is not a directory, `rotproof create` would make
-layers without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
+`rotproof stop-hook` or `rotproof time-hook` fails (the stop hook fails on a --root that is not a directory, and the
+time hook reads none); 2 when there is no .config/rotproof.toml to work from, a file cannot be read or written, the
+command line is wrong or the --root of another command is not a directory, `rotproof create` would make layers
+without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
 or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
@@ -70,7 +71,8 @@ enum Command {
     /// With one, it is the whole upgrade of Rotproof: it applies every update a newer Rotproof brings to the files
     /// `rotproof create` wrote once (such as a rule added to .claude/settings.json), except the ones the declaration
     /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
-    /// the declaration to this version. It never changes the declaration's other values. What an update cannot do
+    /// the declaration to this version, adding declined = [] when the declaration lacks it. It names every field it
+    /// adds to the declaration, as `rotproof create` does, and never changes its other values. What an update cannot do
     /// without a person, it says, leaves files as it was, and exits 2. Crossing 0.3.0, it first moves the records
     /// from docs/backlog/ and docs/specs/ to docs/work/ and points every link that reached one at its new place, in
     /// docs/ and in the markdown files elsewhere that .gitignore does not exclude; the move cannot be declined, says
@@ -129,12 +131,13 @@ enum Command {
     /// kept and for a y, signs with git's user.name (or a name it asks for), and adds the entry to
     /// .config/rotproof-approved.toml. `rotproof approve --reviewed`, after a refactoring that kept what the code does,
     /// lists every knowledge document whose followed code changed and what changed under it, says to read the changes
-    /// first, asks for one y, writes the new hashes in their follows, and prints the log lines to write; what is gone
-    /// is left to edit by hand. Both run only when stdin is a terminal, so an agent's shell cannot approve: a person
-    /// does. `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden
-    /// import, needs no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not a
-    /// terminal, the import is not forbidden or is approved already, the answer is not y, something followed is gone,
-    /// or a file cannot be read or written.
+    /// first, asks for one y, writes the new hashes in their follows (each document keeps a byte order mark and its
+    /// line endings, as with rotproof follows), and prints the log lines to write; what is gone is left to edit by
+    /// hand. Both run only when stdin is a terminal, so an agent's shell cannot approve: a person does. `rotproof
+    /// approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden import, needs
+    /// no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not a terminal, the import
+    /// is not forbidden or is approved already, the answer is not y, something followed is gone, or a file cannot be
+    /// read or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
         #[arg(
@@ -195,13 +198,14 @@ enum Command {
     /// (src/api/routes.py), a definition of a Python file (src/api/routes.py::create_user, or Class.method), or every
     /// .py file under a directory (src/api/). A key in follows gets its new hash, and a key not in it is added at its
     /// end, with the hash quoted (follows is made at the end of the frontmatter when the document has none); nothing
-    /// else in the document changes. Prints each key with what was done, then, when the document changed, the
-    /// line to write in the log entry, as the check asks for it. Writes all the keys or none, and only the keys named:
-    /// re-pinning every changed document in one act is `rotproof approve --reviewed`, which a person runs. Needs no
-    /// terminal: pinning one document is an edit of it, which its log entry records. A key gone from the code is left
-    /// to edit by hand. Exits 2, writing nothing, when the first argument is not a knowledge document (as before 0.4.0,
-    /// when follows took the keys alone), the document is not there, cannot be read, is a guide or is deprecated, or a
-    /// key is not a form follows takes, names what is not there, or cannot be read.
+    /// else in the document changes, and it keeps a byte order mark and its line endings (CRLF on every line when one
+    /// line had it). Prints each key with what was done, then, when the document changed, the line to write in the log
+    /// entry, as the check asks for it. Writes all the keys or none, and only the keys named: re-pinning every changed
+    /// document in one act is `rotproof approve --reviewed`, which a person runs. Needs no terminal: pinning one
+    /// document is an edit of it, which its log entry records. A key gone from the code is left to edit by hand. Exits
+    /// 2, writing nothing, when the first argument is not a knowledge document (as before 0.4.0, when follows took the
+    /// keys alone), the document is not there, cannot be read, is a guide or is deprecated, or a key is not a form
+    /// follows takes, names what is not there, or cannot be read.
     Follows {
         /// The knowledge document: knowledge/<slug>.md, or docs/knowledge/<slug>.md
         document: String,
@@ -217,15 +221,17 @@ enum Command {
     /// holds a phrase that leaves something open (such as "not checked") and git shows no change in docs/, it asks the
     /// agent once to record the finding or say where it is. When its own version is not the one the project's files
     /// are up to (files in the declaration), it says so to the person: the hook runs the first rotproof on the PATH.
-    /// Exits 1, never 2, when it fails, so a broken hook never keeps the agent from stopping.
+    /// Exits 1, never 2, when it fails (a --root that is not a directory among the failures), so a broken hook never
+    /// keeps the agent from stopping.
     StopHook,
     /// Run as Claude Code's SessionStart and UserPromptSubmit hook: tell the agent the time now. Reads the hook input
     /// on stdin
     ///
     /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. An agent has no clock, and a
     /// day it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
-    /// gives it the time on every prompt and at the start of every session, to write from. Exits 1, never 2, when it
-    /// fails, so a broken hook never blocks the prompt.
+    /// gives it the time on every prompt and at the start of every session, to write from. It reads no --root, so one
+    /// that is not a directory changes nothing. Exits 1, never 2, when it fails, so a broken hook never blocks the
+    /// prompt.
     TimeHook,
 }
 
@@ -240,18 +246,20 @@ fn command(names: &Names) -> clap::Command {
 pub fn run(commands: &dyn Commands) -> ExitCode {
     let names = commands.names();
     let cli = Cli::from_arg_matches(&command(&names).get_matches()).unwrap_or_else(|e| e.exit());
+    // The hooks answer before the root is checked below, whose exit code 2 Claude Code takes from a hook for "block":
+    // the stop hook fails with 1 on a root that is not a directory, and the time hook reads no root
+    if let Command::StopHook = cli.command {
+        return stop_hook(commands, &cli.root);
+    }
+    if let Command::TimeHook = cli.command {
+        return time_hook(commands);
+    }
     // A root that does not exist fails here. Read as an empty tree, it would pass every check with nothing checked
     if !cli.root.is_dir() {
         eprintln!("the root is not a directory: {}", cli.root.display());
         return ExitCode::from(2);
     }
     let root = cli.root.as_path();
-    if let Command::StopHook = cli.command {
-        return stop_hook(commands, root);
-    }
-    if let Command::TimeHook = cli.command {
-        return time_hook(commands);
-    }
     let result = match cli.command {
         Command::Init { stack } => init(commands, &names, root, stack.as_deref()).map(|()| true),
         Command::Create { yes } => create(commands, &names, root, yes).map(|()| true),
@@ -355,7 +363,7 @@ fn init(
     Ok(())
 }
 
-/// Say what `rotproof create`, or the refresh of an upgrade, wrote and added.
+/// Say what `rotproof create`, or an upgrade (its refresh, and `files` set), wrote and added.
 fn report_made(names: &Names, made: &Made) {
     for path in &made.written {
         println!("wrote {path}");
@@ -425,13 +433,21 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
 }
 
 /// Answer the agent's stop hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "do not
-/// stop", and a broken hook would keep the agent from stopping instead of being shown.
+/// stop", and a broken hook would keep the agent from stopping instead of being shown. A root that is not a directory
+/// is such an error: read as outside a project, it would say nothing on every stop, and the setting would go unseen.
 fn stop_hook(commands: &dyn Commands, root: &Path) -> ExitCode {
     let mut input = String::new();
     let answer = std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|e| format!("the hook input could not be read: {e}"))
-        .and_then(|_| commands.stop_hook(root, &input));
+        .and_then(|_| {
+            if root.is_dir() {
+                Ok(())
+            } else {
+                Err(format!("the root is not a directory: {}", root.display()))
+            }
+        })
+        .and_then(|()| commands.stop_hook(root, &input));
     match answer {
         Ok(Some(out)) => {
             println!("{out}");
@@ -446,7 +462,8 @@ fn stop_hook(commands: &dyn Commands, root: &Path) -> ExitCode {
 }
 
 /// Answer the agent's time hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "block the
-/// prompt", and a broken hook would keep the person's prompt from the agent instead of being shown.
+/// prompt", and a broken hook would keep the person's prompt from the agent instead of being shown. It reads no root,
+/// so --root, whatever it names, changes nothing here.
 fn time_hook(commands: &dyn Commands) -> ExitCode {
     let mut input = String::new();
     let answer = std::io::stdin()
