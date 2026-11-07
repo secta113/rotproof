@@ -125,14 +125,15 @@ pub fn document_name(arg: &str) -> Result<String, String> {
         })
 }
 
-/// The line after the frontmatter of `lines`, which ends at the second `---`.
+/// The line after the frontmatter of `lines`, which ends at the second `---`, as the frontmatter is read in the check
+/// (`frontmatter.rs`): a `---` on a line of its own, with no trailing character.
 fn frontmatter_end(lines: &[String]) -> Result<usize, String> {
     lines
         .iter()
         .skip(1)
-        .position(|line| line.trim_end() == "---")
+        .position(|line| line == "---")
         .map(|i| i + 1)
-        .filter(|_| lines.first().map(|l| l.trim_end()) == Some("---"))
+        .filter(|_| lines.first().map(String::as_str) == Some("---"))
         .ok_or_else(|| "no frontmatter".to_string())
 }
 
@@ -155,12 +156,11 @@ fn yaml_key(key: &str) -> String {
 /// The knowledge document `text` with each of `added` (a key of `follows`, its hash) added at the end of `follows`,
 /// the field made at the end of the frontmatter when there is none, and everything else as it was. A hash is quoted,
 /// as YAML reads `12345678` as a number and `1e100000` as a float. `Err` when `follows` is not one key per line, for a
-/// person to edit.
+/// person to edit. `text` is taken as the check reads it: every line ending `\n` and no byte order mark
+/// (`tree::with_lf`), which `tree::Written` puts back when the document is written.
 pub fn added(text: &str, added: &[(&str, &str)]) -> Result<String, String> {
     let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
     let end = frontmatter_end(&lines)?;
-    // Each line split on \n keeps its \r, so a line added keeps the document's line ending
-    let cr = if text.contains("\r\n") { "\r" } else { "" };
     let field = (1..end).find(|&i| lines[i].starts_with("follows:"));
     let (at, indent) = match field {
         Some(i) => {
@@ -180,19 +180,20 @@ pub fn added(text: &str, added: &[(&str, &str)]) -> Result<String, String> {
             (i + 1 + block, indent)
         }
         None => {
-            lines.insert(end, format!("follows:{cr}"));
+            lines.insert(end, "follows:".to_string());
             (end + 1, "  ".to_string())
         }
     };
     for (n, (key, hash)) in added.iter().enumerate() {
-        lines.insert(at + n, format!("{indent}{}: \"{hash}\"{cr}", yaml_key(key)));
+        lines.insert(at + n, format!("{indent}{}: \"{hash}\"", yaml_key(key)));
     }
     Ok(lines.join("\n"))
 }
 
 /// The knowledge document `text` with each pin in `pins` (a key of `follows`, its hash as written, the hash to write)
 /// set to its new hash, and everything else as it was: only the hash on the key's line in the frontmatter changes,
-/// quoted as it was. `Err` when a key is not on one line of the frontmatter with its hash, for a person to edit.
+/// quoted as it was. `Err` when a key is not on one line of the frontmatter with its hash, for a person to edit. `text`
+/// is taken as the check reads it: every line ending `\n` and no byte order mark (`tree::with_lf`).
 pub fn repinned(text: &str, pins: &[(&str, &str, &str)]) -> Result<String, String> {
     let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
     let end = frontmatter_end(&lines)?;
@@ -267,16 +268,16 @@ mod tests {
              src/c/: \"1e100000\"\nstatus: stable\n---\n\n# Body\n"
         );
         // Without follows, the field is made at the end of the frontmatter
-        let bare = "---\r\ntype: Knowledge\r\nstatus: stable\r\n---\r\n\r\n# Body\r\n";
+        let bare = "---\ntype: Knowledge\nstatus: stable\n---\n\n# Body\n";
         assert_eq!(
             added(bare, &[("src/a.py", "aaaaaaaa")]).unwrap(),
-            "---\r\ntype: Knowledge\r\nstatus: stable\r\nfollows:\r\n  src/a.py: \"aaaaaaaa\"\r\n---\r\n\r\n# Body\r\n"
+            "---\ntype: Knowledge\nstatus: stable\nfollows:\n  src/a.py: \"aaaaaaaa\"\n---\n\n# Body\n"
         );
         // A key YAML would read otherwise is quoted
         assert!(
             added(bare, &[("my api.py", "aaaaaaaa"), ("@x.py", "bbbbbbbb")])
                 .unwrap()
-                .contains("  my api.py: \"aaaaaaaa\"\r\n  \"@x.py\": \"bbbbbbbb\"\r\n")
+                .contains("  my api.py: \"aaaaaaaa\"\n  \"@x.py\": \"bbbbbbbb\"\n")
         );
         assert!(added("---\nfollows: {}\n---\n", &[("a.py", "aaaaaaaa")]).is_err());
         assert!(added("no frontmatter", &[]).is_err());

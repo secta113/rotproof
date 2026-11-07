@@ -254,8 +254,8 @@ the hook runs the first one there, which may not be the one the project pins. So
 
 A `systemMessage` is shown to the person and keeps no agent from stopping. The project is the nearest directory
 upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A hook that fails (not a git
-repository, an input from another hook, a `--root` that is not a directory) exits 1, which Claude Code shows without
-keeping the agent from stopping; exit code 2 would keep it from stopping.
+repository, an input from another hook, a `--root` that is not a directory, a command line that is wrong) exits 1,
+which Claude Code shows without keeping the agent from stopping; exit code 2 would keep it from stopping.
 
 ### The time hook
 
@@ -277,8 +277,8 @@ settings adds it:
 }
 ```
 
-It fails (an input from another hook) with exit 1, which Claude Code shows while the prompt goes on; exit code 2 would
-block the prompt. It reads no `--root`, so one that is not a directory changes nothing.
+It fails (an input from another hook, a command line that is wrong) with exit 1, which Claude Code shows while the
+prompt goes on; exit code 2 would block the prompt. It reads no `--root`, so one that is not a directory changes nothing.
 
 ## Approving a forbidden import
 
@@ -294,7 +294,8 @@ The file and the import are named as `rotproof check` names them: the file from 
 writes it (a Python dotted name, a TypeScript specifier, a crate's dependency). In Python, each name of
 `from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them.
 `rotproof approve` shows the forbidden import, asks why it is kept and for a `y`, signs with git's `user.name` (or a
-name it asks for when that is not set), and adds the entry:
+name it asks for when that is not set), and adds the entry (the file keeps a byte order mark and its line endings,
+CRLF on every line when one line had it, and so it does when `--prune` removes entries):
 
 ```toml
 [[kept]]
