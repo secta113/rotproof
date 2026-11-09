@@ -2408,7 +2408,7 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         .filter_map(|rest| rest.split_whitespace().next())
         .filter(|command| *command != "help")
         .collect();
-    assert!(commands.len() >= 10, "{commands:?}\n{help}");
+    assert!(commands.len() >= 9, "{commands:?}\n{help}");
     for command in commands {
         let short = stdout(&run(&[command, "-h"]));
         let long = stdout(&run(&[command, "--help"]));
@@ -2883,30 +2883,16 @@ fn hook(root: &Path, command: &str, input: &str) -> Output {
     child.wait_with_output().unwrap()
 }
 
-fn git(root: &Path, args: &[&str]) {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
-        .args(args)
-        .output()
-        .expect("git runs");
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
 #[test]
-fn the_stop_hook_sends_the_agent_back_once_while_docs_did_not_change() {
+fn create_writes_no_stop_hook_and_the_old_one_says_it_does_nothing() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     assert!(create(&["--root", &root_arg(r), "create"]).status.success());
-    // create wrote the settings that run the hook, for Claude Code only
+    // create wrote the settings that run the time hook and no stop hook, for Claude Code only
     let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
+    assert!(!settings.contains("\"Stop\""), "{settings}");
     assert!(
-        settings.contains("\"command\": \"rotproof stop-hook\"") && settings.contains("\"Stop\""),
+        settings.contains("\"command\": \"rotproof time-hook\""),
         "{settings}"
     );
     // and that deny Claude Code editing the approvals file, which only a person adds to
@@ -2915,69 +2901,31 @@ fn the_stop_hook_sends_the_agent_back_once_while_docs_did_not_change() {
         "{settings}"
     );
     assert!(!r.join(".gemini").exists());
-    git(r, &["init", "-q"]);
-    git(r, &["add", "-A"]);
-    git(r, &["commit", "-q", "-m", "start"]);
-    let open = r#"{"hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": "Done; the Linux path is not checked."}"#;
 
-    // From a directory inside the project too
-    fs::create_dir_all(r.join("src/deep")).unwrap();
-    for from in [r.to_path_buf(), r.join("src/deep")] {
-        let out = stop_hook(&from, open);
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let said = stdout(&out);
-        assert!(said.contains("\"additionalContext\""), "{said}");
-        assert!(said.contains("\\\"not checked\\\""), "{said}");
-    }
-    // Once per stop
-    let again = open.replace("\"stop_hook_active\": false", "\"stop_hook_active\": true");
-    assert_eq!(stdout(&stop_hook(r, &again)), "");
-    // Nothing open
-    let done = open.replace("the Linux path is not checked", "every path passes");
-    assert_eq!(stdout(&stop_hook(r, &done)), "");
-    // Recorded: a change in docs/, new files included
-    fs::write(r.join("docs/work/new.md"), "x\n").unwrap();
-    let out = stop_hook(r, open);
-    assert!(out.status.success());
-    assert_eq!(stdout(&out), "");
-    // Outside a project, nothing is said
+    // The command a project's settings may still run: a message for the person and exit 0, whatever the input and
+    // the root, inside a project or not, as Claude Code takes 2 for "do not stop"
     let outside = tempfile::tempdir().unwrap();
-    let out = stop_hook(outside.path(), open);
-    assert!(out.status.success());
-    assert_eq!(stdout(&out), "");
-}
-
-#[test]
-fn a_broken_stop_hook_exits_1_never_2() {
-    // Claude Code reads exit code 2 from a Stop hook as "do not stop"
-    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
-    for input in ["not json", "{}"] {
-        let out = stop_hook(root.path(), input);
-        assert_eq!(out.status.code(), Some(1), "{input}");
-        assert!(
-            String::from_utf8_lossy(&out.stderr).contains("rotproof stop-hook:"),
-            "{input}"
-        );
-    }
-    // Not a git repository: git fails, and the hook says so
     let open = r#"{"hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": "未確認"}"#;
-    let out = stop_hook(root.path(), open);
-    assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("git status failed"));
-    // A root that is not a directory, which exits 2 from every other command: 1, and said, though nothing is open. Read
-    // as outside a project, it would say nothing on every stop
-    let done = r#"{"hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": "All done."}"#;
-    let out = stop_hook(&root.path().join("no/such/directory"), done);
-    assert_eq!(out.status.code(), Some(1));
-    let said = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        said.contains("rotproof stop-hook: the root is not a directory"),
-        "{said}"
-    );
+    for (from, input) in [
+        (r.to_path_buf(), open),
+        (outside.path().to_path_buf(), "not json"),
+        (r.join("no/such/directory"), ""),
+    ] {
+        let out = stop_hook(&from, input);
+        assert_eq!(out.status.code(), Some(0), "{from:?}");
+        let said: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+        assert!(
+            said["systemMessage"]
+                .as_str()
+                .unwrap()
+                .contains("run `rotproof init`, which takes this hook out"),
+            "{said}"
+        );
+        assert!(said.get("hookSpecificOutput").is_none(), "{said}");
+    }
+    // Hidden from the help
+    let help = stdout(&run(&["--help"]));
+    assert!(!help.contains("stop-hook"), "{help}");
 }
 
 #[test]

@@ -22,6 +22,7 @@ use domain::layers::{
     DECLARATION, ONION, PORTS_MOVED, crosses_onion, declaration_text, known_stacks, layout, retired,
 };
 use domain::migrate;
+use domain::tree::Written;
 use domain::upgrade::{FIRST, Update, fields, pending, with_files};
 use protocol::inbound::{Initialized, Upgraded};
 use protocol::outbound::{Tree, Writer};
@@ -189,14 +190,18 @@ fn apply(
     upgraded: &mut Upgraded,
 ) -> Result<Option<String>, String> {
     let path = update.file();
-    let text = match exactly(tree, path) {
-        Ok((found, false)) => Some(read_text(tree, &found).map_err(|e| format!("{path}: {e}"))?),
-        _ => None,
+    // Read with how it was written, so the text written back keeps the file's line endings and byte order mark
+    let (text, how) = match exactly(tree, path) {
+        Ok((found, false)) => {
+            let (text, how) = read_written(tree, &found).map_err(|e| format!("{path}: {e}"))?;
+            (Some(text), how)
+        }
+        _ => (None, Written::default()),
     };
     match update.apply(text.as_deref()) {
         domain::upgrade::Outcome::Done => {}
         domain::upgrade::Outcome::Changed(written) => {
-            out.write(path, &written)
+            out.write(path, &how.restore(&written))
                 .map_err(|e| format!("{path}: {e}"))?;
             upgraded.applied.push((update.name(), path));
         }
@@ -375,6 +380,61 @@ mod tests {
             let read = domain::tree::with_lf(&now);
             assert_eq!(read_fields(&read).unwrap().files.as_deref(), Some("0.2.0"));
         }
+    }
+
+    /// An update writes its file back as the project wrote it, as `files` is set: the settings came back all LF and
+    /// without the byte order mark.
+    #[test]
+    fn an_update_keeps_the_line_endings_and_the_byte_order_mark_of_its_file() {
+        for (crlf, bom) in [(true, true), (true, false), (false, true), (false, false)] {
+            let tree = made_by_first();
+            let lf = tree.text(SETTINGS).unwrap();
+            let text = if crlf { lf.replace('\n', "\r\n") } else { lf };
+            let raw = if bom { format!("\u{feff}{text}") } else { text };
+            tree.write(SETTINGS, &raw).unwrap();
+            let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.2.0") else {
+                panic!("upgraded");
+            };
+            assert_eq!(upgraded.applied, [("claude-deny-approvals", SETTINGS)]);
+            let now = tree.text(SETTINGS).unwrap();
+            let said = format!("crlf {crlf}, bom {bom}: {now:?}");
+            assert_eq!(now.starts_with('\u{feff}'), bom, "{said}");
+            if crlf {
+                assert!(!now.replace("\r\n", "").contains('\n'), "{said}");
+            } else {
+                assert!(!now.contains('\r'), "{said}");
+            }
+            assert!(
+                now.contains("Edit(/.config/rotproof-approved.toml)"),
+                "{said}"
+            );
+        }
+    }
+
+    /// Upgraded to 1.0, the settings 0.4.0 wrote lose the stop hook and end as a new project's, in their line endings.
+    #[test]
+    fn the_stop_hook_is_taken_out_on_the_way_to_1_0() {
+        let tree = made_by_first();
+        let new = domain::hook::SETTINGS[0].1;
+        let stop = "\"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \
+                    \"type\": \"command\",\n            \"command\": \"rotproof stop-hook\"\n          }\n        ]\n      \
+                    }\n    ],\n";
+        let old = new.replacen("\"hooks\": {\n", stop, 1);
+        assert_ne!(old, new);
+        tree.write(SETTINGS, &old.replace('\n', "\r\n")).unwrap();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "1.0.0-rc.1")
+        else {
+            panic!("upgraded");
+        };
+        assert!(
+            upgraded
+                .applied
+                .contains(&("claude-remove-stop-hook", SETTINGS)),
+            "{:?}",
+            upgraded.applied
+        );
+        assert!(upgraded.by_hand.is_empty(), "{:?}", upgraded.by_hand);
+        assert_eq!(tree.text(SETTINGS), Some(new.replace('\n', "\r\n")));
     }
 
     /// A project of records as 0.2.0 laid it out: specs in docs/specs/, backlog items in docs/backlog/

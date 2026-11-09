@@ -1,7 +1,8 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof before`, `rotproof follows`, `rotproof
-//! stop-hook` and `rotproof time-hook`, and the help that leads from one to the next. Each command is a call of an
-//! input port of `protocol.inbound`; what it prints and how it exits are decided here.
+//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof before`, `rotproof follows` and `rotproof
+//! time-hook`, and the help that leads from one to the next. Each command is a call of an input port of
+//! `protocol.inbound`; what it prints and how it exits are decided here. `rotproof stop-hook`, hidden, only says that
+//! it does nothing since 1.0, and calls no port.
 
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -27,8 +28,7 @@ The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has r
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken, or
-`rotproof stop-hook` or `rotproof time-hook` fails (the stop hook fails on a --root that is not a directory, and the
-time hook reads none; a wrong command line that names a hook fails with 1 too); 2 when there is no
+`rotproof time-hook` fails (it reads no --root; a wrong command line that names a hook fails with 1 too); 2 when there is no
 .config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
 its --root is not a directory, `rotproof create` would make layers
 without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
@@ -93,8 +93,8 @@ enum Command {
     /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/,
     /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, nor a document that cannot be
     /// read and may be one, whose condition a person writes before `rotproof check` passes, and the project's files
-    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the stop hook, a hook
-    /// that says when rotproof is not on the PATH, the time hook and the rule that denies editing the approvals file,
+    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the time hook and
+    /// the rule that denies editing the approvals file,
     /// for python and none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml and the
     /// entry file src/main.rs), each when it does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files, the closed
@@ -215,16 +215,13 @@ enum Command {
         #[arg(required = true)]
         keys: Vec<String>,
     },
-    /// Run as Claude Code's Stop hook: send the agent back once when its last message leaves something open and
-    /// nothing in docs/ changed. Reads the hook input on stdin
+    /// Does nothing since 1.0: says so to the person when Claude Code runs it as the Stop hook Rotproof wrote before
     ///
-    /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it, beside a hook that says when
-    /// rotproof is not on the PATH, as this one cannot. When the agent's last message
-    /// holds a phrase that leaves something open (such as "not checked") and git shows no change in docs/, it asks the
-    /// agent once to record the finding or say where it is. When its own version is not the one the project's files
-    /// are up to (files in the declaration), it says so to the person: the hook runs the first rotproof on the PATH.
-    /// Exits 1, never 2, when it fails (a --root that is not a directory, or a command line that is wrong, among the
-    /// failures), so a broken hook never keeps the agent from stopping.
+    /// Before 1.0 it sent the agent back when its last message left something open and nothing in docs/ changed.
+    /// `rotproof init` takes it out of the project's .claude/settings.json (the update claude-remove-stop-hook). Until
+    /// then it reads the hook input on stdin, prints a systemMessage, which keeps no agent from stopping, and exits 0.
+    /// A command line that is wrong exits 1, never 2, as Claude Code takes 2 for "do not stop".
+    #[command(hide = true)]
     StopHook,
     /// Run as Claude Code's SessionStart and UserPromptSubmit hook: tell the agent the time now. Reads the hook input
     /// on stdin
@@ -255,9 +252,9 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Err(e) => return wrong_command_line(&e, &names),
     };
     // The hooks answer before the root is checked below, whose exit code 2 Claude Code takes from a hook for "block":
-    // the stop hook fails with 1 on a root that is not a directory, and the time hook reads no root
+    // neither reads a root
     if let Command::StopHook = cli.command {
-        return stop_hook(commands, &cli.root);
+        return stop_hook();
     }
     if let Command::TimeHook = cli.command {
         return time_hook(commands);
@@ -472,33 +469,19 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
     Ok(found.is_empty())
 }
 
-/// Answer the agent's stop hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "do not
-/// stop", and a broken hook would keep the agent from stopping instead of being shown. A root that is not a directory
-/// is such an error: read as outside a project, it would say nothing on every stop, and the setting would go unseen.
-fn stop_hook(commands: &dyn Commands, root: &Path) -> ExitCode {
-    let mut input = String::new();
-    let answer = std::io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|e| format!("the hook input could not be read: {e}"))
-        .and_then(|_| {
-            if root.is_dir() {
-                Ok(())
-            } else {
-                Err(format!("the root is not a directory: {}", root.display()))
-            }
-        })
-        .and_then(|()| commands.stop_hook(root, &input));
-    match answer {
-        Ok(Some(out)) => {
-            println!("{out}");
-            ExitCode::SUCCESS
-        }
-        Ok(None) => ExitCode::SUCCESS,
-        Err(why) => {
-            eprintln!("rotproof stop-hook: {why}");
-            ExitCode::FAILURE
-        }
-    }
+/// What `rotproof stop-hook` says, as the JSON Claude Code reads from a hook: a `systemMessage`, shown to the person,
+/// which keeps no agent from stopping. Its text holds no `"` or `\`, so it is JSON as written.
+const STOP_HOOK_REMOVED: &str = "{\"systemMessage\": \"rotproof stop-hook does nothing since Rotproof 1.0, which \
+    no longer manages tasks. In a project, run `rotproof init`, which takes this hook out of .claude/settings.json; \
+    elsewhere, remove the Stop hook that runs rotproof stop-hook from your Claude Code settings.\"}";
+
+/// Answer a stop hook Rotproof wrote before 1.0, which a project's settings still run: say that it does nothing now,
+/// and exit 0. The input is read and not looked at, so Claude Code writes it whole; reading it fails nothing, and
+/// --root is not read, as a hook that fails is shown with less than the message says.
+fn stop_hook() -> ExitCode {
+    let _ = std::io::stdin().read_to_string(&mut String::new());
+    println!("{STOP_HOOK_REMOVED}");
+    ExitCode::SUCCESS
 }
 
 /// Answer the agent's time hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "block the

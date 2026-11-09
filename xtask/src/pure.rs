@@ -22,7 +22,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 /// The ports Rotproof has: each has to be found as a trait, so the check cannot pass with the traits moved away
-pub const KNOWN: [&str; 4] = ["Tree", "Writer", "Parsers", "Changes"];
+pub const KNOWN: [&str; 3] = ["Tree", "Writer", "Parsers"];
 
 /// Where the rules are
 pub const DOMAIN: &str = "crates/domain/src";
@@ -471,7 +471,7 @@ mod tests {
                 "pub trait Tree {}\n".into(),
             )],
         );
-        assert_eq!(found.len(), 3, "{found:?}");
+        assert_eq!(found.len(), KNOWN.len() - 1, "{found:?}");
         assert!(found.iter().all(|why| why.starts_with("no trait ")));
         // A port declared in domain counts for the forms, and not as the port Rotproof has among the ports
         let in_domain = [(

@@ -14,8 +14,7 @@ two structures:
   ordered by arrows up to milestones (the moments the work waits for); knowledge documents (an API, a data model, a
   decision, edited in place and named in the log at every edit, and alarms for what matters only when it is seen); and
   a log, each kept to strict rules. A
-  finding does not stay outside them: a `TODO` or `NOTE` in a code comment fails the check, and a stop hook sends an
-  agent back when its last message leaves something open that it did not record.
+  finding does not stay outside them: a `TODO` or `NOTE` in a code comment fails the check.
 
 ## Principles
 
@@ -27,9 +26,9 @@ two structures:
   (see "Upgrading Rotproof"), and the files Rotproof generates, which nobody writes by hand. A field the declaration
   lacks takes its first value from the tree, once (`areas` gets the tags the records use, so the records that kept
   the rules keep them); from then on a record with a tag the declaration does not list fails. An update of
-  `.claude/settings.json` keeps its keys, their order and their values, but writes the whole file again in Rotproof's
-  layout (two spaces of indentation, `\n` line endings). These change what a person wrote, each in a command run for
-  that. When a version of Rotproof changes the format it reads, `rotproof init` carries the files across that change,
+  `.claude/settings.json` keeps its keys, their order and their values (it takes out only the stop hook Rotproof wrote
+  before 1.0, matched exactly), but writes the whole file again in Rotproof's layout (two spaces of indentation),
+  keeping its line endings and byte order mark. These change what a person wrote, each in a command run for that. When a version of Rotproof changes the format it reads, `rotproof init` carries the files across that change,
   doing what a machine can without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That
   is not a repair of drift: the files were right under the old format, and Rotproof is what changed. Once a knowledge
   document is reviewed against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a
@@ -96,7 +95,6 @@ rotproof --root <repository> approve --prune  # remove the approvals that match 
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
-rotproof stop-hook                   # run by Claude Code when the agent stops (see "The stop hook")
 rotproof time-hook                   # run by Claude Code on each prompt, to tell the agent the time (see "The time hook")
 ```
 
@@ -139,7 +137,7 @@ The project's files are written once, as a starting point, and are the project's
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
 | `docs/work/next-milestone.md` | When `docs/work/` has no milestone, and no document that cannot be read and may be one: a draft of the next moment the work waits for, whose `# Condition` holds only a comment, so `rotproof check` fails until a person writes what that moment is |
-| `.claude/settings.json` | The stop hook and a hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), the time hook (see "The time hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
+| `.claude/settings.json` | The time hook (see "The time hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
@@ -174,18 +172,21 @@ that has a declaration:
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
   `rotproof check` names what is not moved yet. It never changes the declaration's other values, and once it has set
   `files`, running it again changes nothing.
-- **An update only adds,** and does nothing when its file has it already. What it cannot do without a person (its file
+- **An update only adds, or takes out what Rotproof itself wrote and no longer keeps, matched exactly,** and does
+  nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
+  byte order mark it had. What it cannot do without a person (its file
   is not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by hand, or
   decline the update by its name in `declined`, and run `rotproof init` again. When its file is missing, the same run
   writes the file as `rotproof create` does now, with what every update adds, and the update asks for nothing. A move
   across a change of format (below) is not an update: it rewrites, cannot be declined, and leaves `files` as it was in
   the same way while it leaves something to a person.
 
-| Update | Version | File | What it adds |
+| Update | Version | File | What it does |
 |---|---|---|---|
-| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order, two spaces of indentation and `\n` line endings |
-| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | A second `Stop` hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
-| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | The time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above: an untouched file ends as `rotproof create` writes it now |
+| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
+| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
+| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
+| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, and `Stop` when no group is left (see "The time hook"). Written again as above: an untouched file ends as `rotproof create` writes it now |
 
 **Crossing 0.3.0, `rotproof init` first moves the records.** Before 0.3.0 the specs were in `docs/specs/` and the
 backlog items in `docs/backlog/`; from 0.3.0 both are in `docs/work/`, and nothing reads the old places, so the move
@@ -218,55 +219,15 @@ in `CLAUDE.md` for Claude Code:
 @.rotproof/AGENTS.md
 ```
 
-## The stop hook
+## The time hook
 
-An agent's findings are lost when it reports them and stops: "not checked", "out of scope" in its last message, and
-nothing in the records. `rotproof stop-hook` is [Claude Code's `Stop` hook](https://code.claude.com/docs/en/hooks),
-run when the agent stops, and reads that last message. When the message holds a phrase that leaves something open
-and `git status` shows no change in `docs/`, the hook sends the agent back once, asking it to record the finding or to
-say in one line where it already is. While the agent is
-continuing because of a stop hook, the hook lets it stop, so it never loops. A line that points at the records (the
-word `spec`, `backlog` or `knowledge`, the words `work item`, or a path through `work/`) is not read: what it leaves
-open is recorded where it points. The phrases are built in (Japanese and English); the agent decides what each one meant.
-
-`rotproof create` writes `.claude/settings.json` with the hook when it does not exist, together with the rule that
-denies Claude Code editing the approvals file (see "Approving a forbidden import"). A project that has one adds the
-hook to it:
-
-```json
-{
-  "hooks": {
-    "Stop": [{ "hooks": [{ "type": "command", "command": "rotproof stop-hook" }] }]
-  }
-}
-```
-
-`rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active), and
-the hook runs the first one there, which may not be the one the project pins. So neither goes unseen:
-
-- **Not on the `PATH`:** the hook fails with the shell's "command not found", which Claude Code may show only in its
-  debug log. `rotproof create` writes a second `Stop` hook beside it, which runs in the shell and needs no Rotproof:
-  `command -v rotproof >/dev/null 2>&1 || echo '{"systemMessage": "rotproof is not on the PATH ..."}'`. A project made
-  before 0.4.0 gets it from `rotproof init` (the update `claude-stop-hook-on-path`).
-- **Another version on the `PATH`:** `rotproof stop-hook` compares its own version with `files` in the declaration (the
-  version the project's files are up to) and, when they differ, says so in a `systemMessage`, on every stop. A
-  Rotproof older than 0.4.0 does not compare: the check comes with the hook.
-
-A `systemMessage` is shown to the person and keeps no agent from stopping. The project is the nearest directory
-upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A hook that fails (not a git
-repository, an input from another hook, a `--root` that is not a directory, a command line that is wrong) exits 1,
-which Claude Code shows without keeping the agent from stopping; exit code 2 would keep it from stopping.
-
-### The time hook
-
-An agent has no clock of its own. It writes the day an item was filed, the day a state was measured and the day of a
-log entry from what it was last told, and a guess runs ahead of the clock: `rotproof check` fails on a day that has
-not come (see "What `rotproof check` checks"). `rotproof time-hook` is Claude Code's `SessionStart` and
-`UserPromptSubmit` hook: at the start of every session (a resumed or a compacted one too) and on every prompt, it
-gives the agent the time now, as `additionalContext`, to write from. Within a long turn the time goes on, so it says
-to read the clock for a later one. `rotproof create` writes it into `.claude/settings.json` beside the stop hook; a
-project made before 0.4.0 gets it from `rotproof init` (the update `claude-time-hook`). A project that has its own
-settings adds it:
+An agent has no clock of its own. It writes the days in the records from what it was last told, and a guess runs ahead
+of the clock: `rotproof check` fails on a day that has not come (see "What `rotproof check` checks").
+`rotproof time-hook` is [Claude Code's](https://code.claude.com/docs/en/hooks) `SessionStart` and `UserPromptSubmit`
+hook: at the start of every session (a resumed or a compacted one too) and on every prompt, it gives the agent the
+time now, as `additionalContext`, to write from. Within a long turn the time goes on, so it says to read the clock for
+a later one. `rotproof create` writes it into `.claude/settings.json`; a project made before 0.4.0 gets it from
+`rotproof init` (the update `claude-time-hook`). A project that has its own settings adds it:
 
 ```json
 {
@@ -277,8 +238,15 @@ settings adds it:
 }
 ```
 
-It fails (an input from another hook, a command line that is wrong) with exit 1, which Claude Code shows while the
-prompt goes on; exit code 2 would block the prompt. It reads no `--root`, so one that is not a directory changes nothing.
+`rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active). The
+hook fails (an input from another hook, a command line that is wrong) with exit 1, which Claude Code shows while the
+prompt goes on; exit code 2 would block the prompt. It reads no `--root`, so one that is not a directory changes
+nothing.
+
+Before 1.0, Rotproof also wrote a `Stop` hook, `rotproof stop-hook`, which sent the agent back when its last message
+left something open and nothing in `docs/` changed. It went with the records of work it asked for. `rotproof init`
+takes it out of `.claude/settings.json` (the update `claude-remove-stop-hook`); until then, the command reads the hook
+input, says in a `systemMessage` that it does nothing now, which keeps no agent from stopping, and exits 0.
 
 ## Approving a forbidden import
 
@@ -654,7 +622,7 @@ stale_after: 2027-01-01
   log's date headings. They are read from the clock when written, and one that has not come was guessed. Each is a
   day, the day of a datetime too (a time of day is never compared), and is compared with the latest day anywhere (the
   day in UTC+14), so CI in UTC passes a day written in Tokyo before 09:00. Time alone only makes one pass, so this
-  never turns CI red with no change. Claude Code is given the time by the time hook (see "The stop hook").
+  never turns CI red with no change. Claude Code is given the time by the time hook (see "The time hook").
 - **Every knowledge document keeps the format,** as a spec does (without `parent`, and `status` `stable` or
   `deprecated`), and **the log names it as it is now:** some `**Knowledge**` field of a log entry, with its wrapped
   lines, names it with the first 8 hex digits of SHA-256 of the whole file (every line ending as `\n`). An edit the

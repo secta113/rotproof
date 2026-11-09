@@ -13,7 +13,6 @@ pub mod commands;
 pub mod create;
 pub mod direction;
 pub mod follows;
-pub mod hook;
 pub mod index;
 pub mod init;
 pub mod layers;
