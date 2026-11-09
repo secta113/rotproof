@@ -47,8 +47,6 @@ pub struct Upgraded {
     pub from: String,
     /// Each update applied, with the file it changed
     pub applied: Vec<(&'static str, &'static str)>,
-    /// How many records moved into `docs/work/`
-    pub moved: usize,
     /// What each update that could not be applied leaves to a person
     pub by_hand: Vec<String>,
     /// How to move the project's code where the new version's layers want it, which no machine can do: said once,

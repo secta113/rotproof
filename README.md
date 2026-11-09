@@ -28,9 +28,9 @@ two structures:
   the rules keep them); from then on a record with a tag the declaration does not list fails. An update of
   `.claude/settings.json` keeps its keys, their order and their values (it takes out only the stop hook Rotproof wrote
   before 1.0, matched exactly), but writes the whole file again in Rotproof's layout (two spaces of indentation),
-  keeping its line endings and byte order mark. These change what a person wrote, each in a command run for that. When a version of Rotproof changes the format it reads, `rotproof init` carries the files across that change,
-  doing what a machine can without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That
-  is not a repair of drift: the files were right under the old format, and Rotproof is what changed. Once a knowledge
+  keeping its line endings and byte order mark. These change what a person wrote, each in a command run for that.
+  Rotproof never moves or rewrites a record: from 1.0 it reads no records of work, and those of an older project stay
+  where they are, as they are. Once a knowledge
   document is reviewed against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a
   person, on a terminal) write the hashes in its `follows`: the review is the person's or the agent's, and pinning
   only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
@@ -166,20 +166,17 @@ that has a declaration:
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
   `.rotproof/AGENTS.md`, the generated files in `docs/`, and the records skeleton and the project's files where they
   are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
-  names every field it adds to the declaration, as `rotproof create` does. Crossing a version
-  that changes the format of the records, it first moves them (below). Crossing 0.4.0, which builds the layer table
+  names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
   `rotproof check` names what is not moved yet. It never changes the declaration's other values, and once it has set
   `files`, running it again changes nothing.
 - **An update only adds, or takes out what Rotproof itself wrote and no longer keeps, matched exactly,** and does
   nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
-  byte order mark it had. What it cannot do without a person (its file
-  is not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by hand, or
-  decline the update by its name in `declined`, and run `rotproof init` again. When its file is missing, the same run
-  writes the file as `rotproof create` does now, with what every update adds, and the update asks for nothing. A move
-  across a change of format (below) is not an update: it rewrites, cannot be declined, and leaves `files` as it was in
-  the same way while it leaves something to a person.
+  byte order mark it had. What it cannot do without a person (its file is not in a form Rotproof can read),
+  `rotproof init` says, exits 2 and leaves `files` as it was: do it by hand, or decline the update by its name in
+  `declined`, and run `rotproof init` again. When its file is missing, the same run writes the file as
+  `rotproof create` does now, with what every update adds, and the update asks for nothing.
 
 | Update | Version | File | What it does |
 |---|---|---|---|
@@ -187,22 +184,6 @@ that has a declaration:
 | `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
 | `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
 | `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, and `Stop` when no group is left (see "The time hook"). Written again as above: an untouched file ends as `rotproof create` writes it now |
-
-**Crossing 0.3.0, `rotproof init` first moves the records.** Before 0.3.0 the specs were in `docs/specs/` and the
-backlog items in `docs/backlog/`; from 0.3.0 both are in `docs/work/`, and nothing reads the old places, so the move
-cannot be declined. It is what a machine can do without reading the records: each record to `docs/work/` under its own
-name; every link that reached one pointed at its new place, in `docs/` (in the log too, whose words stay as they were
-written) and in every markdown file elsewhere in the repository that `.gitignore` does not exclude, such as
-`AGENTS.md` and the READMEs, where a link starting with `/` is read from the root of the repository, as GitHub reads
-it; `type: Backlog Item` as `Work Item` and `epic` as `parent`; an open item with no parent as a draft, as a
-stable item is now one sorted into a spec; and the deadline of a closed item dropped, as it binds nothing. The rest it
-says, and `rotproof check` names it record by record: how each closed record closed (`progress`), and the deadline of
-each open item, which becomes a milestone named in `until`. It also names the markdown files outside `docs/` that
-still name `docs/backlog/` or `docs/specs/` in words, which a person points at `docs/work/` where they describe the
-project now. Files other than markdown (code and its comments, configuration) are not read: search them for the old
-paths after the move. The move is planned whole first: a name in both old
-directories, or a file it would not know where to put, stops it with nothing changed, and is renamed or moved by hand.
-Until it has run, `rotproof check` says only that the records are in the old places.
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
@@ -554,9 +535,6 @@ stale_after: 2027-01-01
   stays, without the word. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
   strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
 
-- **The records are in `docs/work/`:** no `docs/backlog/` or `docs/specs/` is left from before 0.3.0. When one is,
-  this is the only finding on the records, as nothing else reads the old places: `rotproof init` moves them (see
-  "Upgrading Rotproof").
 - **The bundle is there:** `docs/`, `docs/index.md`, `docs/work/`, `docs/work/rules.md`, `docs/knowledge/` and
   `docs/knowledge/rules.md` exist, and the declaration with its `areas` can be read. Without them every other check
   would pass with nothing checked.

@@ -158,7 +158,7 @@ fn each_broken_rule_fails_under_its_check() {
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 26] = [
+    let cases: [(&str, &str, String); 25] = [
         // A day guessed rather than read from the clock
         (
             "no day in the records is later than today",
@@ -253,12 +253,6 @@ fn each_broken_rule_fails_under_its_check() {
             "every generated file is up to date",
             "docs/work/rules.md",
             "---\ntype: Guide\ntitle: Work rules\ndescription: Our own.\n---\n".into(),
-        ),
-        // A record left where the records were before docs/work/: run init, which moves it
-        (
-            "the records are in docs/work/",
-            "docs/backlog/x.md",
-            item("[log](/log.md)"),
         ),
         (
             "the bundle is seen",

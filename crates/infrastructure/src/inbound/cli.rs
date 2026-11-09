@@ -21,8 +21,8 @@ Start a project:
                                      would make a layer lists the layers and writes nothing)
   4. rotproof check                  check them; this is the project's CI
 
-Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files, and
-moves the records when the new version changes their format), then `rotproof check`.
+Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files), then
+`rotproof check`.
 
 The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has run; `rotproof guide --stack <stack>`
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
@@ -31,7 +31,7 @@ Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotp
 `rotproof time-hook` fails (it reads no --root; a wrong command line that names a hook fails with 1 too); 2 when there is no
 .config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
 its --root is not a directory, `rotproof create` would make layers
-without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
+without --yes, `rotproof init` leaves an update of the project's files to a person,
 or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
@@ -44,8 +44,7 @@ layers), that each layer imports only what the layer table allows or a person ap
 .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
 comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that \
-.rotproof/AGENTS.md is up to date, that the records are in docs/work/ (from 0.3.0; `rotproof init` moves those of an \
-older project), and that every record in docs/ keeps its rules (the rules.md of each directory), a knowledge document \
+.rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the rules.md of each directory), a knowledge document \
 matching the code it follows among them. \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
 a rule is broken, 2 when there is no .config/rotproof.toml or a file cannot be read.";
@@ -74,14 +73,10 @@ enum Command {
     /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
     /// the declaration to this version, adding declined = [] when the declaration lacks it. It names every field it
     /// adds to the declaration, as `rotproof create` does, and never changes its other values. What an update cannot do
-    /// without a person, it says, leaves files as it was, and exits 2. Crossing 0.3.0, it first moves the records
-    /// from docs/backlog/ and docs/specs/ to docs/work/ and points every link that reached one at its new place, in
-    /// docs/ and in the markdown files elsewhere that .gitignore does not exclude; the move cannot be declined, says
-    /// what it leaves to a person (how each closed record closed, the deadline of each open item), and stops with
-    /// nothing changed when a name is in both directories or a file there is no record. Crossing 0.4.0, which builds
-    /// the layer table on the onion architecture, it says where the code of the layers that are gone (handler, utils)
-    /// and the ports go, and moves no code: `rotproof check` names what is left until it is moved. Exits 2 too for an
-    /// unknown stack, a stack other than the declared one, a move that stopped, or a file that cannot be read or
+    /// without a person, it says, leaves files as it was, and exits 2. It never moves or rewrites a record. Crossing
+    /// 0.4.0, which builds the layer table on the onion architecture, it says where the code of the layers that are
+    /// gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left until it is
+    /// moved. Exits 2 too for an unknown stack, a stack other than the declared one, or a file that cannot be read or
     /// written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
@@ -365,12 +360,6 @@ fn init(
         }
         Initialized::Upgraded(upgraded) => upgraded,
     };
-    if upgraded.moved > 0 {
-        println!(
-            "moved {} records from docs/backlog/ and docs/specs/ to docs/work/, and the links to them",
-            upgraded.moved
-        );
-    }
     for (name, path) in &upgraded.applied {
         println!("updated {path}: {name}");
     }
