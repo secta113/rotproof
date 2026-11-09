@@ -18,7 +18,7 @@
 //!   reads, and every file Rotproof generates (the index files and the rules) equals what `rotproof index` writes. The
 //!   rest of `docs/` is the project's, and is not read.
 //! - **The log keeps the OKF log structure**: every second-level heading is a date, newest first, and the entries
-//!   are a flat list of list items under those dates. It names every knowledge document as it is now.
+//!   are a flat list of list items under those dates.
 //! - **No day in the log is later than today**: its date headings are read from the clock when written, and compared
 //!   with the latest day anywhere, so CI in UTC passes a day written in Tokyo. Time alone only makes one pass, so this
 //!   never turns CI red with no change.
@@ -38,10 +38,7 @@ use domain::layers::{DECLARATION, area_problems};
 use domain::markdown::links;
 use domain::paths::join;
 use domain::project::GUIDE;
-use domain::records::{
-    KNOWLEDGE, dangling_knowledge_refs, floor, knowledge_refs, log_days_to_come, log_problems,
-    unlogged, unread_paths,
-};
+use domain::records::{KNOWLEDGE, floor, log_days_to_come, log_problems, unread_paths};
 use domain::schema::Time;
 use domain::upgrade::VERSION;
 use protocol::inbound::{Finding, Report};
@@ -205,26 +202,6 @@ fn records(
         let log = read_text(tree, &log_path)?;
         add("the log keeps its structure", log_problems(&log));
         add(NOT_COME, log_days_to_come(&log, now));
-
-        let refs = knowledge_refs(&log);
-        let knowledge = bundle.read_knowledge()?;
-        let mut documents = BTreeMap::new();
-        for name in knowledge.documents.keys() {
-            let path = in_docs(&format!("knowledge/{name}"));
-            documents.insert(name.clone(), read_text(tree, &path)?);
-        }
-        add(
-            "the log names every knowledge document as it is now",
-            unlogged(&documents, &refs),
-        );
-        let names = file_names(tree, &in_docs("knowledge"))?;
-        add(
-            "the log points only at real knowledge documents",
-            dangling_knowledge_refs(&refs, &names)
-                .into_iter()
-                .map(|name| format!("no such document: docs/knowledge/{name}"))
-                .collect(),
-        );
     } else if let Err(why) = log_path {
         add("the log keeps its structure", vec![why]);
     }
@@ -261,15 +238,6 @@ fn records(
         .collect();
     add("every generated file is up to date", stale);
     Ok(found)
-}
-
-/// Every name in a directory: files, directories and the rest.
-fn file_names(tree: &dyn Tree, dir: &str) -> io::Result<Vec<String>> {
-    Ok(tree
-        .entries(dir)?
-        .into_iter()
-        .map(|(name, _)| name)
-        .collect())
 }
 
 fn pairs(problems: &BTreeMap<String, String>) -> Vec<String> {

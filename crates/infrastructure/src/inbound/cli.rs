@@ -129,7 +129,7 @@ enum Command {
     /// line had it), as does --prune. `rotproof approve --reviewed`, after a refactoring that kept what the code does,
     /// lists every knowledge document whose followed code changed and what changed under it, says to read the changes
     /// first, asks for one y, writes the new hashes in their follows (each document keeps a byte order mark and its
-    /// line endings, as with rotproof follows), and prints the log lines to write; what is gone is left to edit by
+    /// line endings, as with rotproof follows), and names each document it wrote; what is gone is left to edit by
     /// hand. Both run only when stdin is a terminal, so an agent's shell cannot approve: a person does. `rotproof
     /// approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden import, needs
     /// no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not a terminal, the import
@@ -173,8 +173,7 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
         _args: Vec<String>,
     },
-    /// Pin keys in a knowledge document's follows, at the hash of the code as it is now, and print the log line to
-    /// write
+    /// Pin keys in a knowledge document's follows, at the hash of the code as it is now
     ///
     /// Run it once the document is reviewed against the code: when it starts to follow something, or after what it
     /// follows changed. The document is named as rotproof check names it (knowledge/api.md) or from the root
@@ -183,10 +182,10 @@ enum Command {
     /// .py file under a directory (src/api/). A key in follows gets its new hash, and a key not in it is added at its
     /// end, with the hash quoted (follows is made at the end of the frontmatter when the document has none); nothing
     /// else in the document changes, and it keeps a byte order mark and its line endings (CRLF on every line when one
-    /// line had it). Prints each key with what was done, then, when the document changed, the line to write in the log
-    /// entry, as the check asks for it. Writes all the keys or none, and only the keys named: re-pinning every changed
-    /// document in one act is `rotproof approve --reviewed`, which a person runs. Needs no terminal: pinning one
-    /// document is an edit of it, which its log entry records. A key gone from the code is left to edit by hand. Exits
+    /// line had it). Prints each key with what was done, then whether the document was written. Writes all the keys or
+    /// none, and only the keys named: re-pinning every changed document in one act is `rotproof approve --reviewed`,
+    /// which a person runs. Needs no terminal: pinning one document is an edit of it, which git records. A key gone
+    /// from the code is left to edit by hand. Exits
     /// 2, writing nothing, when the first argument is not a knowledge document (as before 0.4.0, when follows took the
     /// keys alone), the document is not there, cannot be read, is a guide or is deprecated, or a key is not a form
     /// follows takes, names what is not there, or cannot be read.
@@ -591,11 +590,8 @@ fn approve_reviewed(commands: &dyn Commands, root: &Path) -> Result<(), String> 
         if !answer.eq_ignore_ascii_case("y") {
             return Err("not re-pinned: nothing written".into());
         }
-        for (doc, hash) in commands.repin(root, &drifts)? {
+        for doc in commands.repin(root, &drifts)? {
             println!("wrote docs/knowledge/{doc}");
-            println!(
-                "  in the log entry of this change, write: * **Knowledge**: knowledge/{doc}@{hash}"
-            );
         }
     }
     if !left.is_empty() {
@@ -627,7 +623,7 @@ fn approve_prune(commands: &dyn Commands, names: &Names, root: &Path) -> Result<
     Ok(())
 }
 
-/// Pin the keys in the document, then say what was done to each and the log line to write.
+/// Pin the keys in the document, then say what was done to each.
 fn follows(
     commands: &dyn Commands,
     root: &Path,
@@ -642,18 +638,13 @@ fn follows(
             Some(before) => println!("  {key}: {before} -> {now}"),
         }
     }
-    match pinned.written {
-        Some(hash) => {
-            println!("wrote docs/knowledge/{}", pinned.doc);
-            println!(
-                "  in the log entry of this change, write: * **Knowledge**: knowledge/{}@{hash}",
-                pinned.doc
-            );
-        }
-        None => println!(
+    if pinned.written {
+        println!("wrote docs/knowledge/{}", pinned.doc);
+    } else {
+        println!(
             "nothing written: docs/knowledge/{} pins these keys as the code is now",
             pinned.doc
-        ),
+        );
     }
     Ok(())
 }

@@ -711,8 +711,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "# Guides",
-                "* [Knowledge rules](rules.md) - What goes in docs/knowledge/, how each document and alarm is written, \
-                 and how the log names every edit. The format is OKF 0.2; rotproof check checks it.",
+                "* [Knowledge rules](rules.md) - What goes in docs/knowledge/ and how each document and alarm is \
+                 written. The format is OKF 0.2; rotproof check checks it.",
                 "# operations",
                 "* [Ops](ops.md) - D.",
                 "# billing",

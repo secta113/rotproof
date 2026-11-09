@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use crate::bundle::Bundle;
 use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::in_docs;
+use domain::follows::content_hash;
 use domain::follows::{
     Followed, added, directory_hash, document_name, drifted, followed, repinned,
 };
-use domain::records::content_hash;
 use domain::schema::{Knowledge, KnowledgeDoc, Status, knowledge_doc};
 use protocol::inbound::{Drift, Pinned};
 use protocol::outbound::Parsers;
@@ -109,13 +109,8 @@ pub fn changed(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Vec<Drift>, Str
 
 /// Write the new hash of every changed key in `drifts` into its document, through `out`. A key that is gone or cannot
 /// be read is left for a person. A document keeps its line endings and its byte order mark
-/// ([`Written`](domain::tree::Written)), and its hash is of the text as the check reads it. Each document written, with
-/// its new hash for the log.
-pub fn repin(
-    tree: &dyn Tree,
-    out: &dyn Writer,
-    drifts: &[Drift],
-) -> Result<Vec<(String, String)>, String> {
+/// ([`Written`](domain::tree::Written)). The file name of each document written.
+pub fn repin(tree: &dyn Tree, out: &dyn Writer, drifts: &[Drift]) -> Result<Vec<String>, String> {
     let mut by_doc: BTreeMap<&str, Vec<(&str, &str, &str)>> = BTreeMap::new();
     for d in drifts {
         if let Ok(Some(now)) = &d.now {
@@ -132,7 +127,7 @@ pub fn repin(
         let pinned = repinned(&text, &pins).map_err(|why| format!("{path}: {why}"))?;
         out.write(&path, &was.restore(&pinned))
             .map_err(|e| format!("{path}: {e}"))?;
-        written.push((doc.to_string(), content_hash(&pinned)));
+        written.push(doc.to_string());
     }
     Ok(written)
 }
@@ -211,7 +206,7 @@ pub fn pin(
         .filter(|(_, before, _)| before.is_none())
         .map(|(key, _, now)| (key.as_str(), now.as_str()))
         .collect();
-    let mut written = None;
+    let mut written = false;
     if !repins.is_empty() || !adds.is_empty() {
         let new = repinned(&text, &repins)
             .and_then(|text| added(&text, &adds))
@@ -231,7 +226,7 @@ pub fn pin(
         }
         out.write(&path, &was.restore(&new))
             .map_err(|e| format!("{path}: {e}"))?;
-        written = Some(content_hash(&new));
+        written = true;
     }
     Ok(Pinned {
         doc: name,
@@ -279,9 +274,8 @@ mod tests {
         assert_eq!(drifts.len(), 2, "{drifts:?}");
         let written = repin(&tree, &tree, &drifts).unwrap();
         assert_eq!(written.len(), 1);
-        assert_eq!(written[0].0, "model.md");
+        assert_eq!(written, ["model.md"]);
         let text = tree.text(DOC).unwrap();
-        assert_eq!(content_hash(&text), written[0].1);
         assert!(
             !text.contains("00000000") && text.contains("11111111"),
             "{text}"
@@ -324,7 +318,7 @@ mod tests {
         assert_eq!(done.keys[0].1.as_deref(), Some("00000000"));
         assert_eq!(done.keys[1].1, None);
         let text = tree.text(DOC).unwrap();
-        assert_eq!(done.written, Some(content_hash(&text)));
+        assert!(done.written);
         assert!(
             text.contains(&format!("  domain/: \"{}\"\n", done.keys[1].2)),
             "{text}"
@@ -340,7 +334,7 @@ mod tests {
             &keys(&["domain/"]),
         )
         .unwrap();
-        assert_eq!(again.written, None);
+        assert!(!again.written);
         assert_eq!(tree.text(DOC).unwrap(), text);
     }
 
@@ -377,8 +371,8 @@ mod tests {
                 as_written(&pinned),
                 "crlf {crlf}, bom {bom}"
             );
-            // The hash for the log is of the text as the check reads it
-            assert_eq!(done.written, Some(content_hash(&pinned)));
+            // Written, as the text shows above
+            assert!(done.written);
 
             tree.write("domain/model.py", "def play():\n    return 2\n")
                 .unwrap();
@@ -397,7 +391,7 @@ mod tests {
                 as_written(&repinned),
                 "crlf {crlf}, bom {bom}"
             );
-            assert_eq!(written[0].1, content_hash(&repinned));
+            assert_eq!(written, ["model.md"]);
         }
     }
 

@@ -1,110 +1,21 @@
 //! The rules of the records that `rotproof check` runs on what it has read: the files under `docs/knowledge/` Rotproof
-//! would not read, the log's structure, its days that have not come and the knowledge documents it names, the hash it
-//! names one by, and the floor of the bundle.
+//! would not read, the log's structure and its days that have not come, and the floor of the bundle.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use chrono::NaiveDate;
-use percent_encoding::percent_decode_str;
 use regex::Regex;
-use sha2::{Digest, Sha256};
 
 use crate::bundle::latest_day;
 use crate::markdown::{heading, visible};
 use crate::paths::{file_name, parent};
 use crate::schema::Time;
 
-// The `**Knowledge**` field of a log entry: its indentation and what follows the label
-static KNOWLEDGE_FIELD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)[*+-][ \t]+\*\*Knowledge\*\*:(.*)$").unwrap());
-// A knowledge document named with its hash, written with `/` or `\`
-static KNOWLEDGE_REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"knowledge[/\\]([\w.%-]+\.md)@([0-9a-f]{8})\b").unwrap());
-// A list item at any depth, once its indentation is removed
-static LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[*+-](?:[ \t]|$)").unwrap());
 static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
 // A bullet list item, indented by up to 3 spaces as GFM allows
 static LIST_ITEM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^ {0,3}[*+-](?:[ \t]|$)").unwrap());
-
-/// The hash the log names a knowledge document by: the first 8 hex digits of SHA-256 of its text, as `read_text`
-/// reads it (every line ending as `\n` and no byte order mark, so a checkout with CRLF has the same hash).
-pub fn content_hash(text: &str) -> String {
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .take(4)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// Every knowledge document the log names, as (file name, hash), in the `**Knowledge**` field of its entries: the label
-/// line, and the lines under it that continue it (wrapped, not a list item of their own). A name is percent-decoded,
-/// as a link may write it.
-pub fn knowledge_refs(log: &str) -> Vec<(String, String)> {
-    let mut text = String::new();
-    let mut field: Option<usize> = None;
-    for line in log.lines() {
-        let indent = line.len() - line.trim_start().len();
-        if let Some(caps) = KNOWLEDGE_FIELD.captures(line) {
-            field = Some(caps[1].len());
-            text.push_str(&caps[2]);
-            text.push('\n');
-            continue;
-        }
-        let continues = field.is_some_and(|label| {
-            !line.trim().is_empty() && indent > label && !LIST_MARKER.is_match(line.trim_start())
-        });
-        if continues {
-            text.push_str(line);
-            text.push('\n');
-        } else {
-            field = None;
-        }
-    }
-    KNOWLEDGE_REF
-        .captures_iter(&text)
-        .map(|caps| {
-            (
-                percent_decode_str(&caps[1])
-                    .decode_utf8_lossy()
-                    .into_owned(),
-                caps[2].to_string(),
-            )
-        })
-        .collect()
-}
-
-/// The knowledge documents (file name -> text) that no log entry names with their current hash, each with the line to
-/// write.
-pub fn unlogged(documents: &BTreeMap<String, String>, refs: &[(String, String)]) -> Vec<String> {
-    documents
-        .iter()
-        .filter_map(|(name, text)| {
-            let hash = content_hash(text);
-            let named = refs.iter().any(|(n, h)| n == name && *h == hash);
-            (!named).then(|| {
-                format!(
-                    "knowledge/{name}: no log entry names it as it is now. In the log entry of this change, write \
-                     `* **Knowledge**: knowledge/{name}@{hash}`"
-                )
-            })
-        })
-        .collect()
-}
-
-/// The knowledge documents the log names in `refs` (see [`knowledge_refs`]) that are not among `names` (the file names
-/// in `docs/knowledge/`), each once.
-pub fn dangling_knowledge_refs(refs: &[(String, String)], names: &[String]) -> Vec<String> {
-    let mut dangling: Vec<String> = refs
-        .iter()
-        .map(|(name, _)| name.clone())
-        .filter(|name| !names.contains(name))
-        .collect();
-    dangling.sort();
-    dangling.dedup();
-    dangling
-}
 
 /// The date headings of the log, `text`, whose day has not come anywhere at `now` ([`latest_day`]): an entry is written
 /// under the day it was written, read from the clock.
@@ -257,88 +168,6 @@ pub fn floor() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_hash_is_the_first_8_hex_digits_of_sha_256() {
-        // printf 'abc' | sha256sum
-        assert_eq!(content_hash("abc"), "ba7816bf");
-        assert_eq!(content_hash("line\n"), "c73b73af");
-    }
-
-    #[test]
-    fn the_knowledge_field_is_read_with_its_wrapped_lines_only() {
-        let log = "\
-# Log
-
-## 2026-10-03
-
-* **A task**
-  * **Changes**: knowledge/not-a-field.md@00000000 is in another field
-  * **Knowledge**: knowledge/api.md@a3f9c1d2, knowledge\\model.md@0123abcd,
-    knowledge/%E6%97%A5.md@ffffffff
-  * **Lessons**: knowledge/after.md@11111111 is not in the field
-* **Knowledge**: knowledge/top.md@22222222
-- **Knowledge**:
-  knowledge/next-line.md@33333333
-";
-        assert_eq!(
-            knowledge_refs(log),
-            [
-                ("api.md", "a3f9c1d2"),
-                ("model.md", "0123abcd"),
-                ("日.md", "ffffffff"),
-                ("top.md", "22222222"),
-                ("next-line.md", "33333333"),
-            ]
-            .map(|(n, h)| (n.to_string(), h.to_string()))
-        );
-        // A hash that is not 8 hex digits names nothing
-        assert_eq!(
-            knowledge_refs("* **Knowledge**: knowledge/a.md@a3f9c1, knowledge/b.md@A3F9C1D2\n"),
-            Vec::<(String, String)>::new()
-        );
-    }
-
-    #[test]
-    fn a_knowledge_document_passes_only_with_its_current_hash_in_the_log() {
-        let documents = map(&[("api.md", "abc")]);
-        let named = |hash: &str| vec![("api.md".to_string(), hash.to_string())];
-        assert_eq!(
-            unlogged(&documents, &named("ba7816bf")),
-            Vec::<String>::new()
-        );
-        // Edited after its entry: the old hash names an older text
-        let found = unlogged(&documents, &named("c73b73af"));
-        assert_eq!(
-            found,
-            [
-                "knowledge/api.md: no log entry names it as it is now. In the log entry of this change, write \
-              `* **Knowledge**: knowledge/api.md@ba7816bf`"
-            ]
-        );
-        // Never named
-        assert_eq!(unlogged(&documents, &[]).len(), 1);
-    }
-
-    fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
-    #[test]
-    fn a_missing_knowledge_document_is_named_once() {
-        // Named by entries that are not next to each other in the log, with another missing one between them
-        let log = "## 2026-10-02\n\n* **a**\n  * **Knowledge**: knowledge/gone.md@12345678\n\
-                   * **b**\n  * **Knowledge**: knowledge/other.md@12345678, knowledge/api.md@12345678\n\
-                   * **c**\n  * **Knowledge**: knowledge/gone.md@abcdef01\n";
-        let names = ["api.md", "rules.md"].map(String::from).to_vec();
-        assert_eq!(
-            dangling_knowledge_refs(&knowledge_refs(log), &names),
-            ["gone.md", "other.md"]
-        );
-    }
 
     #[test]
     fn a_log_day_that_has_not_come_is_named() {

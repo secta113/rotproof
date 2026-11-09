@@ -88,10 +88,9 @@ fn a_record_with_a_byte_order_mark_passes() {
     let docs = root.path().join("docs");
     let text = "\u{feff}---\ntype: Knowledge\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\n---\n\n# Why\n\nZ.\n";
     fs::write(docs.join("knowledge/x.md"), text).unwrap();
-    let hash = domain::records::content_hash(&text.replace('\u{feff}', ""));
     fs::write(
         docs.join("log.md"),
-        format!("\u{feff}# Log\n\n## 2026-10-02\n\n* Something\n  * **Knowledge**: knowledge/x.md@{hash}\n"),
+        "\u{feff}# Log\n\n## 2026-10-02\n\n* Something\n",
     )
     .unwrap();
     let out = run(&["--root", &root_arg(root.path()), "index"]);
@@ -113,7 +112,7 @@ fn each_broken_rule_fails_under_its_check() {
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 17] = [
+    let cases: [(&str, &str, String); 16] = [
         // A day guessed rather than read from the clock
         (
             "no day in the records is later than today",
@@ -180,11 +179,6 @@ fn each_broken_rule_fails_under_its_check() {
             "every generated file is up to date",
             "docs/knowledge/rules.md",
             "---\ntype: Guide\ntitle: Knowledge rules\ndescription: Our own.\n---\n".into(),
-        ),
-        (
-            "the log names every knowledge document as it is now",
-            "docs/knowledge/x.md",
-            doc("Z."),
         ),
         (
             "the areas are distinct headings",
@@ -765,18 +759,6 @@ fn knowledge(title: &str, tag: &str) -> String {
     )
 }
 
-/// A log whose one entry names each of `documents` (file name, text) in `docs/knowledge/` as it is now.
-fn log_naming(documents: &[(&str, &str)]) -> String {
-    let named: Vec<String> = documents
-        .iter()
-        .map(|(name, text)| format!("knowledge/{name}@{}", domain::records::content_hash(text)))
-        .collect();
-    format!(
-        "# Log\n\n## 2026-10-02\n\n* Something\n  * **Knowledge**: {}\n",
-        named.join(", ")
-    )
-}
-
 #[test]
 fn create_adds_the_fields_the_declaration_lacks() {
     // A declaration an older Rotproof wrote, before areas existed, with comments and values of the project's own
@@ -797,8 +779,6 @@ fn create_adds_the_fields_the_declaration_lacks() {
     for (name, text) in &documents {
         fs::write(r.join("docs/knowledge").join(name), text).unwrap();
     }
-    let named: Vec<(&str, &str)> = documents.iter().map(|(n, t)| (*n, t.as_str())).collect();
-    fs::write(r.join("docs/log.md"), log_naming(&named)).unwrap();
     // A guide's tags are not areas
     fs::write(
         r.join("docs/knowledge/guide.md"),
@@ -2695,62 +2675,24 @@ fn a_hook_with_a_wrong_command_line_exits_1_never_2() {
 }
 
 #[test]
-fn every_edit_of_a_knowledge_document_is_named_in_the_log() {
+fn a_knowledge_document_is_not_named_in_the_log() {
     let root = clean_repo();
     let r = root.path();
     let arg = root_arg(r);
-    assert!(
-        r.join("docs/knowledge/rules.md").is_file(),
-        "create makes docs/knowledge/"
-    );
     let doc = "---\ntype: Knowledge\ntitle: API\ndescription: How the API is shaped.\ntags: [a]\nstatus: stable\n---\n\n# Shape\n\nOne endpoint.\n";
     fs::write(r.join("docs/knowledge/api.md"), doc).unwrap();
     assert!(run(&["--root", &arg, "index"]).status.success());
-
-    // Not in the log: the failure gives the line to write
-    let out = run(&["--root", &arg, "check"]);
-    let said = stdout(&out);
-    assert_eq!(out.status.code(), Some(1), "{said}");
-    assert!(
-        said.contains("the log names every knowledge document as it is now:"),
-        "{said}"
-    );
-    let line = said
-        .split('`')
-        .find(|part| part.starts_with("* **Knowledge**: knowledge/api.md@"))
-        .unwrap_or_else(|| panic!("no line to write: {said}"))
-        .to_string();
-
-    // Written in the log entry: it passes
-    let log = format!("# Log\n\n## 2026-10-02\n\n* Something\n  {line}\n");
-    fs::write(r.join("docs/log.md"), &log).unwrap();
+    // Added or edited, with no log entry naming it: git records the edit, and follows keeps it true to the code
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
-
-    // Edited after its entry: it fails again
-    fs::write(
-        r.join("docs/knowledge/api.md"),
-        doc.replace("One endpoint.", "Two endpoints."),
-    )
-    .unwrap();
-    let out = run(&["--root", &arg, "check"]);
-    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
-    assert!(stdout(&out).contains("knowledge/api.md: no log entry names it as it is now"));
-
-    // The log names a document that is not there
-    fs::write(r.join("docs/knowledge/api.md"), doc).unwrap();
+    // The Knowledge fields of the entries written before 1.0 stay as history, whatever they name
     fs::write(
         r.join("docs/log.md"),
-        format!("{log}  * **Knowledge**: knowledge/gone.md@0123abcd\n"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n  * **Knowledge**: knowledge/gone.md@0123abcd, knowledge/api.md@00000000\n",
     )
     .unwrap();
     let out = run(&["--root", &arg, "check"]);
-    let said = stdout(&out);
-    assert_eq!(out.status.code(), Some(1), "{said}");
-    assert!(
-        said.contains("the log points only at real knowledge documents:\n  no such document: docs/knowledge/gone.md"),
-        "{said}"
-    );
+    assert!(out.status.success(), "{}", stdout(&out));
 }
 
 /// An approvals file with one entry for each `(from, import)`.
@@ -2988,20 +2930,7 @@ fn a_knowledge_document_fails_when_what_it_follows_changes_unreviewed() {
             String::from_utf8_lossy(&out.stderr)
         );
         let said = stdout(&out);
-        let line = said
-            .split("write: ")
-            .nth(1)
-            .and_then(|rest| rest.lines().next())
-            .expect("follows prints the log line");
-        assert!(
-            line.starts_with("* **Knowledge**: knowledge/model.md@"),
-            "{said}"
-        );
-        fs::write(
-            r.join("docs/log.md"),
-            format!("# Log\n\n## 2026-10-02\n\n* Something\n  {line}\n"),
-        )
-        .unwrap();
+        assert!(said.contains("wrote docs/knowledge/model.md"), "{said}");
     };
     pin(&pins);
     let check = || {
@@ -3136,7 +3065,7 @@ fn follows_pins_the_keys_in_the_document_and_prints_the_log_line() {
     );
     assert_eq!(fs::read_to_string(&doc).unwrap(), before);
 
-    // Named from the root, the keys are added, and the log line printed is the one the check asks for
+    // Named from the root, the keys are added, and the check passes with no log line to write
     let out = run(&[
         "--root",
         &arg,
@@ -3160,14 +3089,10 @@ fn follows_pins_the_keys_in_the_document_and_prints_the_log_line() {
         text.contains("follows:\n  domain/model.py::play: \""),
         "{text}"
     );
-    let line = said
-        .split("write: ")
-        .nth(1)
-        .and_then(|rest| rest.lines().next())
-        .expect("follows prints the log line");
-    let check = stdout(&run(&["--root", &arg, "check"]));
-    assert!(!check.contains("matches the code it follows"), "{check}");
-    assert!(check.contains(line), "{check}");
+    assert!(said.contains("wrote docs/knowledge/model.md"), "{said}");
+    assert!(!said.contains("**Knowledge**"), "{said}");
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
 
     // Pinned as the code is now: nothing written
     let out = run(&["--root", &arg, "follows", "knowledge/model.md", "domain/"]);

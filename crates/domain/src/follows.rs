@@ -20,10 +20,19 @@
 //! - **What a document follows must exist.** A file, directory or definition that is gone fails, as a dangling link
 //!   does.
 //!
-//! The hash is the knowledge documents' own (`records::content_hash`): the first 8 hex digits of SHA-256 of the text,
-//! with every line ending as `\n`.
+//! The hash is [`content_hash`]: the first 8 hex digits of SHA-256 of the text, with every line ending as `\n`.
 
-use crate::records::content_hash;
+use sha2::{Digest, Sha256};
+
+/// The hash a key of `follows` is pinned at: the first 8 hex digits of SHA-256 of the text, as `read_text` reads it
+/// (every line ending as `\n` and no byte order mark, so a checkout with CRLF has the same hash).
+pub fn content_hash(text: &str) -> String {
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 /// What a key of `follows` names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,6 +243,13 @@ pub fn repinned(text: &str, pins: &[(&str, &str, &str)]) -> Result<String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hash_is_the_first_8_hex_digits_of_sha_256() {
+        // printf 'abc' | sha256sum
+        assert_eq!(content_hash("abc"), "ba7816bf");
+        assert_eq!(content_hash("line\n"), "c73b73af");
+    }
 
     #[test]
     fn a_pin_changes_only_its_hash() {

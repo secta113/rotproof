@@ -106,8 +106,8 @@ pub struct Pinned {
     pub doc: String,
     /// Each key: its hash as pinned before (`None` when it was added), and as the code is now
     pub keys: Vec<(String, Option<String>, String)>,
-    /// The document's new hash, for the log: `None` when every key was pinned as it is now, and nothing was written
-    pub written: Option<String>,
+    /// Whether the document was written: not when every key was pinned as it is now
+    pub written: bool,
 }
 
 /// An approval `rotproof approve --prune` removed: what it kept, and in which file.
@@ -150,8 +150,8 @@ pub trait Commands {
     fn prune(&self, root: &Path) -> Result<Vec<Removed>, String>;
     /// Every key of the knowledge documents whose code is not as pinned.
     fn changed(&self, root: &Path) -> Result<Vec<Drift>, String>;
-    /// Pin each of `drifts` as reviewed: each document written, with its hash for the log.
-    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<(String, String)>, String>;
+    /// Pin each of `drifts` as reviewed: the file name of each document written.
+    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<String>, String>;
     /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
     /// The answer to the agent's time hook, whose input is `input`: the time now, for the agent to read.

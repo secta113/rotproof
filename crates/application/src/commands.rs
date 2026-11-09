@@ -117,7 +117,7 @@ impl Commands for Rotproof<'_> {
         crate::follows::changed(&*self.machine.files(root), self.machine.parsers())
     }
 
-    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<(String, String)>, String> {
+    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<String>, String> {
         let files = self.machine.files(root);
         crate::follows::repin(&*files, &*files, drifts)
     }

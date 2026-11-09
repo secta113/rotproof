@@ -18,7 +18,7 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
 - **`rotproof index` rewrites the `index.md` and `rules.md` files in `docs/` and `docs/work/closed.md`** after a
   record changes. Never edit them by hand.
 - **`rotproof follows knowledge/<slug>.md <key>...` pins keys in a knowledge document's `follows`** at the hash of the
-  code as it is now, and prints the log line to write. Run it once the document is reviewed against the code, when it
+  code as it is now. Run it once the document is reviewed against the code, when it
   starts to follow something and when `rotproof check` names it, rather than editing the hashes by hand.
 - **Upgrade Rotproof in a commit of its own:** change the pinned version, install it, run `rotproof init`, then
   `rotproof check`. `rotproof init` applies what the new version brings to the files `rotproof create` wrote once
@@ -48,18 +48,13 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   for a work item and for anything dropped; a done spec that still describes how things are stays `stable`.
 - **When a task is done, add one entry to `docs/log.md`, under a `## YYYY-MM-DD` heading for the day, newest first.**
   The log is a flat list of entries under the dates (OKF 0.2, section 9): one list item per task, with its fields as
-  nested items, and no other headings. `rotproof check` fails on anything else.
+  nested items, and no other headings. `rotproof check` fails on anything else. An entry keeps only what is found
+  nowhere else, searchable in the repository when something breaks: what changed is in the commits, what was
+  measured and decided along the way in the task's issue, and what still holds in `docs/knowledge/`.
 
   ```markdown
   * **<Task name>**
-    * **Branch**: <branch>
-    * **Changes**: What changed.
-    * **Decisions**: Why, including the options that were rejected.
+    * **Issue**: The task's issue (owner/repo#n), when it has one.
     * **Problems**: What went wrong, the cause, and the workaround. "None" if none.
-    * **Open items**: Pointers to work items (docs/work/<slug>.md). "None" if none. Write the open work itself in
-      the work item: the log is history.
     * **Lessons**: What to do differently next time, and where it was recorded if it became a rule.
-    * **Knowledge**: Only when the task changed a document in docs/knowledge/: each one as
-      knowledge/<slug>.md@<hash>. `rotproof check` fails while a document's current hash is in no entry, and prints
-      the line to write.
   ```
