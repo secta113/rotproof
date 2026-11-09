@@ -44,7 +44,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/infrastructure/src/inbound/` | Content |
 |---|---|
 | `mod.rs` | The level's role |
-| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index`, `rotproof before`, `rotproof follows` and `rotproof time-hook`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here. `rotproof stop-hook`, hidden, only says that it does nothing since 1.0 |
+| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof time-hook`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here. `rotproof before` and `rotproof stop-hook`, hidden, only say that they do nothing since 1.0 |
 
 | Module of `crates/infrastructure/src/outbound/` | Content |
 |---|---|
@@ -99,7 +99,6 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
 | `approvals.rs` | Reading the approvals file from the tree, and `rotproof approve`: an entry added for a forbidden import a person approved, and the entries that match nothing removed (`--prune`), the file written back as it was written |
-| `before.rs` | `rotproof before`: the open records (with `--all`, the closed ones too) that close before a record of `docs/work/`, earliest first |
 | `bundle.rs` | Reading `docs/` from the tree, directory by directory |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |

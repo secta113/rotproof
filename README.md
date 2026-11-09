@@ -89,7 +89,6 @@ rotproof --root <repository> init    # after upgrading Rotproof: update the proj
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write every generated file in docs/ (the index files, the closed list and the rules)
-rotproof --root <repository> before <slug>  # print the open records that close before a record, earliest first (--all: the closed ones too)
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
@@ -347,16 +346,8 @@ as what it lists and counts is short of them until they are fixed; then the open
 date. A milestone's line counts the open
 records that close before it, back along the arrows and from each parent to its children, and names the open
 milestones before it, where the count stops, so that a release does not count the work of the one before it.
-`rotproof before <slug>` lists those records by depth, each after every open record it waits for, and within a depth
-by mark, which says whether a record can be worked to its end now: `started` and `ready` (nothing open closes before
-it, started or not), `waits` (something open does; `Started.` on the line says its work started), then `milestone`
-(with `Past its date.` once today is past its date). Each depth has a heading that says what it means,
-`-- nothing open closes before these --` first and `-- these close after the ones above --` after it, rather than a
-number: a depth orders the closing, not the work. Each line has the record's last measured state and the open records
-it waits for, by name; given a spec, it lists its children and what closes before them, and with `--all` the closed
-records too (`done`, `dropped`). It is how an agent learns what is left before a release, and what it can do now,
-without opening the records one by one. Work that is done but waits for something outside, such as a pull request to
-be merged, waits for a milestone of that moment (`after: [pr-12-merged]`), so it is listed as waiting, not as work.
+Work that is done but waits for something outside, such as a pull request to be merged, waits for a milestone of that
+moment (`after: [pr-12-merged]`), so it is listed as waiting, not as work.
 `knowledge/` holds how things are now, edited in place and deprecated only when it no longer holds. A done spec says
 what was decided and stays current until a later one replaces it; what it built is described in `knowledge/`, an API
 or a data model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its

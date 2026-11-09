@@ -8,7 +8,7 @@ use domain::layers::{DECLARATION, MISSING, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
 use domain::upgrade::VERSION;
 use protocol::inbound::{
-    Before, Commands, Drift, Indexed, Initialized, Made, Names, Pinned, Removed, Report,
+    Commands, Drift, Indexed, Initialized, Made, Names, Pinned, Removed, Report,
 };
 use protocol::outbound::Machine;
 
@@ -65,15 +65,6 @@ impl Commands for Rotproof<'_> {
     fn index(&self, root: &Path) -> Result<Indexed, String> {
         let files = self.machine.files(root);
         crate::index::index(&*files, &*files, self.machine.now())
-    }
-
-    fn before(&self, root: &Path, record: &str, closed: bool) -> Result<Before, String> {
-        crate::before::before(
-            &*self.machine.files(root),
-            record,
-            closed,
-            self.machine.now(),
-        )
     }
 
     fn pending(&self, root: &Path, file: &str, import: &str) -> Result<Vec<String>, String> {

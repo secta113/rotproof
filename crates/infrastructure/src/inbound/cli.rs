@@ -1,8 +1,8 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof before`, `rotproof follows` and `rotproof
-//! time-hook`, and the help that leads from one to the next. Each command is a call of an input port of
-//! `protocol.inbound`; what it prints and how it exits are decided here. `rotproof stop-hook`, hidden, only says that
-//! it does nothing since 1.0, and calls no port.
+//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof time-hook`, and the
+//! help that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it
+//! prints and how it exits are decided here. `rotproof before` and `rotproof stop-hook`, hidden, only say that they do
+//! nothing since 1.0, and call no port.
 
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -164,27 +164,15 @@ enum Command {
     /// Lists the documents it left out and why, also under `# Left out` in the index, the work items past their
     /// stale_after, and the open milestones past their date. Exits 2 when the declaration or a document cannot be read.
     Index,
-    /// Print the open records that close before a milestone, a spec or any record of docs/work/, earliest first,
-    /// writing nothing
+    /// Does nothing since 1.0, which no longer manages tasks: says so, and exits 2
     ///
-    /// Follows the arrows back from the later record to the earlier one, and from a parent to its children, through
-    /// the open records, and stops at an earlier milestone, which it lists but not the work before it: what is left
-    /// before a release, or under a spec, without opening the records one by one. Prints a line naming the record with
-    /// how many open records close before it, then one line per record: its mark, which says whether it can be worked
-    /// to its end now (started or ready, when nothing open closes before it; waits, when something does, with
-    /// "Started." if its work started; milestone; with --all, done or dropped), its file name and title, a spec's
-    /// status, an item's last measured state, a milestone's date and whether it is past, or how a closed record
-    /// closed, and the open records it waits for, by name. The records are listed by depth, each after every open
-    /// record it waits for, and within a depth in the order of the marks above, the started first. Each depth has a
-    /// heading: "nothing open closes before these" first, then "these close after the ones above"; a depth orders the
-    /// closing, not the work. Records that wait on each other come last. Exits 2 when the record is not in docs/work/
-    /// or is left out of the records, or the declaration or a document cannot be read.
+    /// Before 1.0 it printed the open records of docs/work/ that close before a record. Rotproof no longer reads
+    /// docs/work/: keep open work in issues, and run `rotproof init` to update .rotproof/AGENTS.md. Takes any
+    /// arguments, as an old guide or an agent's memory may still pass them.
+    #[command(hide = true)]
     Before {
-        /// The record, by its slug (release-0-4-0) or its file name in docs/work/
-        record: String,
-        /// List the closed records too (done or dropped), through which the listing then goes
-        #[arg(long)]
-        all: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _args: Vec<String>,
     },
     /// Pin keys in a knowledge document's follows, at the hash of the code as it is now, and print the log line to
     /// write
@@ -254,6 +242,11 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
     if let Command::TimeHook = cli.command {
         return time_hook(commands);
     }
+    // Whatever its root: it reads none
+    if let Command::Before { .. } = cli.command {
+        eprintln!("{BEFORE_REMOVED}");
+        return ExitCode::from(2);
+    }
     // A root that does not exist fails here. Read as an empty tree, it would pass every check with nothing checked
     if !cli.root.is_dir() {
         eprintln!("the root is not a directory: {}", cli.root.display());
@@ -269,7 +262,6 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
             true
         }),
         Command::Index => index(commands, root).map(|()| true),
-        Command::Before { record, all } => before(commands, root, &record, all).map(|()| true),
         Command::Approve {
             file,
             import,
@@ -288,7 +280,9 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Command::Follows { document, keys } => {
             follows(commands, root, &document, &keys).map(|()| true)
         }
-        Command::StopHook | Command::TimeHook => unreachable!("answered above"),
+        Command::StopHook | Command::TimeHook | Command::Before { .. } => {
+            unreachable!("answered above")
+        }
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,
@@ -683,12 +677,6 @@ fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Print what closes before the record, and on stderr the documents the listing could not see.
-fn before(commands: &dyn Commands, root: &Path, record: &str, all: bool) -> Result<(), String> {
-    let before = commands.before(root, record, all)?;
-    print!("{}", before.text);
-    for (name, why) in before.left_out {
-        eprintln!("left out of the records, so not listed, fix it: {name}: {why}");
-    }
-    Ok(())
-}
+/// What `rotproof before` says, on stderr, before it exits 2.
+const BEFORE_REMOVED: &str = "rotproof before does nothing since Rotproof 1.0, which no longer manages tasks: keep \
+    open work in issues. Run `rotproof init` to update .rotproof/AGENTS.md, which no longer tells you to run it.";
