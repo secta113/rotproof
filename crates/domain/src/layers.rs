@@ -458,9 +458,8 @@ pub fn parse_declaration(text: &str) -> Result<Declaration, String> {
 }
 
 /// What `areas` is, as the declaration says it above the field.
-const AREAS_COMMENT: &str = "# The areas the records are grouped by, in this order, such as \"billing\" or \"records\". Every spec,\n\
-                             # work item, milestone and knowledge document has exactly one of them in tags, and the index files\n\
-                             # group by them\n";
+const AREAS_COMMENT: &str = "# The areas the knowledge documents are grouped by, in this order, such as \"billing\" or \"records\".\n\
+                             # Every knowledge document has exactly one of them in tags, and its index groups by them\n";
 
 /// A field the declaration requires that `rotproof create` adds when it is missing, so a declaration written by an
 /// older Rotproof fails only until the upgrade runs `rotproof create`, never on its shape.

@@ -64,7 +64,7 @@ impl Commands for Rotproof<'_> {
 
     fn index(&self, root: &Path) -> Result<Indexed, String> {
         let files = self.machine.files(root);
-        crate::index::index(&*files, &*files, self.machine.now())
+        crate::index::index(&*files, &*files)
     }
 
     fn pending(&self, root: &Path, file: &str, import: &str) -> Result<Vec<String>, String> {

@@ -5,7 +5,6 @@
 //! what it decides. The ports are contracts, in `protocol`. Imports no other layer.
 
 pub mod approvals;
-pub mod arrows;
 pub mod bundle;
 pub mod code;
 pub mod direction;

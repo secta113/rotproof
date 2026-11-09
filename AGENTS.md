@@ -11,7 +11,7 @@ and why, is in `README.md`.
 | `src/` | The entry file of the root package `rotproof`, the binary named for what it ships: `main.rs` calls `composition` alone |
 | `tests/` | `cli.rs`: the tests that run the binary as a user runs it |
 | `layers/` | The layer definitions, built into the binary: `table.toml` (what the layers are, in every stack) and one layout per stack (`python.toml`, `typescript.toml`, `rust.toml`: where each layer lives, the files that make it, and the files its toolchain needs at the root) |
-| `records/` | The records skeleton, built into the binary: `work-rules.md` and `knowledge-rules.md` (the rules of `docs/work/` and `docs/knowledge/` Rotproof writes into every project), `log.md` (the log `rotproof create` starts) and `milestone.md` (the milestone it writes when `docs/work/` has none) |
+| `records/` | The records skeleton, built into the binary: `knowledge-rules.md` (the rules of `docs/knowledge/` Rotproof writes into every project) and `log.md` (the log `rotproof create` starts) |
 | `project/` | What Rotproof writes into a project outside `docs/`, built into the binary. Each file is named after the one it becomes, without a leading dot and with `.in` added, so no agent here reads a project's `AGENTS.md` as its own: the project's files at the top (`AGENTS.md.in`, `CLAUDE.md.in`, `README.md.in`, `gitattributes.in`), `gitignore/` (one per stack), `pypi/` (the pin, the workflow and the README's instructions for the stacks that install Rotproof from PyPI), `unpinned/` (the README's instructions for the others), and `rotproof/` (the parts of `.rotproof/AGENTS.md`, the guide Rotproof generates for each stack) |
 | `xtask/` | The CI entry point (`cargo xtask ci`), which also checks Rotproof's own layers with its library (`layers.rs`), that every crate takes its dependencies from the workspace (`manifests.rs`), that `domain` calls no port (`pure.rs`) and the width of comment lines (`width.rs`), and `cargo xtask licenses`, which writes `THIRD-PARTY-LICENSES.txt` (`--check`: checks it) |
 | `.cargo/` | The `cargo xtask` alias |
@@ -72,11 +72,10 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
 | `approvals.rs` | The approvals file, `.config/rotproof-approved.toml`: the imports the layer table forbids that a person approved, each keyed by its file and what it imports, matched against what the direction check found, and the file with an entry added or removed |
-| `bundle.rs` | `docs/` as one OKF bundle: its documents sorted out once they are read, the files Rotproof generates in it (the index files and the rules), the tags the records use, and the days and times of the work items that have not come |
-| `schema.rs` | The frontmatter of each document type |
-| `arrows.rs` | The arrows between the records of `docs/work/` (`after` and `until`): the records they name, the order they keep with how each record closed, the cycles they make with the parents, and what each open record waits for |
+| `bundle.rs` | The part of `docs/` Rotproof keeps, as one OKF bundle: the knowledge documents sorted out once they are read, the files Rotproof generates (the index files and the rules), and the tags the knowledge documents use |
+| `schema.rs` | The frontmatter of a knowledge document and of a guide |
 | `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory, a Python definition), the hash of a directory, what fails when one changed or is gone, the document `rotproof follows` names, and a hash replaced or a key added in the frontmatter |
-| `records.rs` | The rules of the records `rotproof check` runs on what it read: the types of documents and their places, the files Rotproof would not read, the log's structure, its days that have not come and what it points at, the hash of a knowledge document, and the floor of the bundle |
+| `records.rs` | The rules of the records `rotproof check` runs on what it read: the files under `docs/knowledge/` Rotproof would not read, the log's structure, its days that have not come and the knowledge documents it names, the hash of a knowledge document, and the floor of the bundle |
 | `tree.rs` | How Rotproof reads a file's text, how it writes the text back as the file was written (its line endings and byte order mark), and how Windows reads a name |
 | `upgrade.rs` | Upgrading a project's files: the version they are up to (`files` in the declaration), the named updates a later version brings to the files `rotproof create` writes once, and what each does to its file |
 | `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
@@ -99,8 +98,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
 | `approvals.rs` | Reading the approvals file from the tree, and `rotproof approve`: an entry added for a forbidden import a person approved, and the entries that match nothing removed (`--prune`), the file written back as it was written |
-| `bundle.rs` | Reading `docs/` from the tree, directory by directory |
-| `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/` walked and read for the rules of the records |
+| `bundle.rs` | Reading `docs/knowledge/` from the tree |
+| `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/knowledge/` and the log read for the rules of the records |
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
@@ -110,14 +109,15 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
 | `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, the re-pin of `rotproof approve --reviewed`, and the pin of `rotproof follows` |
 | `markers.rs` | The marker check, read from the tree: every code file walked, and its comments read by the reader of its language |
-| `index.rs` | `rotproof index`: every index file written from the frontmatter, and the open items to measure again |
+| `index.rs` | `rotproof index`: every index file written from the frontmatter |
 | `init.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
 | `structure.rs` | The structure check, read from the tree |
 
 ## How this repository differs from what Rotproof keeps
 
-- **No `docs/` here.** Rotproof's own specs, work items and log are kept outside this repository.
+- **No `docs/` here.** Rotproof's own records (its knowledge, its log, and the specs and work items it kept before 1.0)
+  are kept outside this repository.
 - **In layers, and no `.config/rotproof.toml`.** Every layer of the Rust layout Rotproof keeps (README) is a crate of
   its own in `crates/`, with the levels of `infrastructure` and `protocol` as modules, the entry file is `src/main.rs`
   of the root package, and `ui` is left out as that layout leaves it out. `cargo xtask ci` checks them as

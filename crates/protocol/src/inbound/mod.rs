@@ -86,10 +86,6 @@ pub struct Indexed {
     pub written: Vec<String>,
     /// Documents left out of the index files: name -> why
     pub left_out: Vec<(String, String)>,
-    /// The open work items past their `stale_after`, each with it
-    pub stale: Vec<(String, String)>,
-    /// The open milestones past their `date`, each with it
-    pub past_date: Vec<(String, String)>,
 }
 
 /// One key of a document's `follows` whose code is not as pinned.

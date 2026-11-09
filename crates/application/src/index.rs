@@ -1,16 +1,13 @@
-//! `rotproof index`: every index file written from the frontmatter, the open items to measure again, and the open
-//! milestones past their date.
+//! `rotproof index`: every index file written from the frontmatter.
 
 use crate::bundle::Bundle;
 use crate::layers::areas;
-use domain::bundle::stale;
-use domain::schema::Time;
 use protocol::inbound::Indexed;
 use protocol::outbound::{Tree, Writer};
 
-/// Write every index file of the bundle in `tree` through `out`, and find the items stale at `now`. `Err` is a
-/// declaration that cannot be read, or a file that cannot be read or written.
-pub fn index(tree: &dyn Tree, out: &dyn Writer, now: Time) -> Result<Indexed, String> {
+/// Write every index file of the bundle in `tree` through `out`. `Err` is a declaration that cannot be read, or a file
+/// that cannot be read or written.
+pub fn index(tree: &dyn Tree, out: &dyn Writer) -> Result<Indexed, String> {
     let areas = areas(tree).map_err(|e| e.to_string())??;
     let bundle = Bundle::new(tree, areas);
     let (files, problems) = bundle.expected().map_err(|e| e.to_string())?;
@@ -21,17 +18,6 @@ pub fn index(tree: &dyn Tree, out: &dyn Writer, now: Time) -> Result<Indexed, St
         indexed.written.push(path);
     }
     indexed.left_out = problems.into_iter().collect();
-    let parsed = bundle.read_work().map_err(|e| e.to_string())?;
-    for name in stale(&parsed.items, now) {
-        let at = parsed.items[&name]
-            .0
-            .stale_after
-            .expect("an item is stale only past its stale_after");
-        indexed.stale.push((name, at.to_string()));
-    }
-    for (name, date) in parsed.past_their_date(now.date_naive()) {
-        indexed.past_date.push((name, date.to_string()));
-    }
     Ok(indexed)
 }
 
@@ -48,20 +34,27 @@ mod tests {
                 "stack = \"none\"\nareas = [\"a\"]\n",
             ),
             ("docs/log.md", "# Log\n"),
-            // The directories of the bundle, with rules that are about to be rewritten
-            ("docs/work/rules.md", ""),
+            // The directory of the bundle, with rules that are about to be rewritten
             ("docs/knowledge/rules.md", ""),
+            // A project's own records, which Rotproof no longer writes into
+            ("docs/work/rules.md", "ours"),
         ]);
-        let now = chrono::DateTime::parse_from_rfc3339("2026-10-05T00:00:00+09:00").unwrap();
-        let indexed = index(&tree, &tree, now).unwrap();
-        assert!(indexed.written.contains(&"docs/work/index.md".to_string()));
+        let indexed = index(&tree, &tree).unwrap();
+        assert_eq!(
+            indexed.written,
+            [
+                "docs/index.md",
+                "docs/knowledge/rules.md",
+                "docs/knowledge/index.md"
+            ]
+        );
         for path in &indexed.written {
             assert!(tree.text(path).is_some(), "{path}");
         }
-        assert!(
-            indexed.left_out.is_empty() && indexed.stale.is_empty() && indexed.past_date.is_empty()
-        );
+        assert_eq!(tree.text("docs/work/rules.md").as_deref(), Some("ours"));
+        assert_eq!(tree.found("docs/work/index.md"), None);
+        assert!(indexed.left_out.is_empty());
         let without = Fake::new(&[("docs/log.md", "# Log\n")]);
-        assert!(index(&without, &without, now).is_err());
+        assert!(index(&without, &without).is_err());
     }
 }

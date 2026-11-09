@@ -1,6 +1,6 @@
-//! The rules of the records that `rotproof check` runs on what it has read: the types of documents and where each
-//! belongs, the files under `docs/` Rotproof would not read, the log's structure, its days that have not come and what
-//! it points at, the hash the log names a knowledge document by, and the specs at the repository root.
+//! The rules of the records that `rotproof check` runs on what it has read: the files under `docs/knowledge/` Rotproof
+//! would not read, the log's structure, its days that have not come and the knowledge documents it names, the hash it
+//! names one by, and the floor of the bundle.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -10,27 +10,11 @@ use percent_encoding::percent_decode_str;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-use crate::bundle::{Docs, latest_day};
-use crate::frontmatter::split;
+use crate::bundle::latest_day;
 use crate::markdown::{heading, visible};
 use crate::paths::{file_name, parent};
 use crate::schema::Time;
 
-/// Directory (relative to docs/, "" for the root) -> the document types allowed in it
-const TYPES: [(&str, &[&str]); 3] = [
-    ("", &["Guide"]),
-    ("work", &["Spec", "Work Item", "Milestone", "Guide"]),
-    ("knowledge", &["Knowledge", "Guide"]),
-];
-
-// How the log points to a work item. Matched without `docs/`, so pointers written while the records were at the
-// repository root (`backlog/<slug>.md`) still match an item by its slug. Matched in `backlog/` too: the log is history
-// and never rewritten, and its entries written while the items were in `docs/backlog/` name them there. A pointer
-// written with Windows separators (`docs\work\<slug>.md`) is a pointer too, and has to name an item that exists. So is
-// a link that percent-encodes the slug (`work/%E6%97%A5.md`). A path without `.md` is not taken for a pointer: in
-// prose, `work/` is also followed by words that name no file
-static ITEM_REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|[^\w])(?:work|backlog)[/\\]([\w.%-]+\.md)").unwrap());
 // The `**Knowledge**` field of a log entry: its indentation and what follows the label
 static KNOWLEDGE_FIELD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)[*+-][ \t]+\*\*Knowledge\*\*:(.*)$").unwrap());
@@ -39,9 +23,6 @@ static KNOWLEDGE_REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"knowledge[/\\]([\w.%-]+\.md)@([0-9a-f]{8})\b").unwrap());
 // A list item at any depth, once its indentation is removed
 static LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[*+-](?:[ \t]|$)").unwrap());
-// A file at the repository root with one of these names is taken for a spec
-static ROOT_SPEC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(spec|仕様).*\.md$").unwrap());
 static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
 // A bullet list item, indented by up to 3 spaces as GFM allows
 static LIST_ITEM: LazyLock<Regex> =
@@ -110,22 +91,6 @@ pub fn unlogged(documents: &BTreeMap<String, String>, refs: &[(String, String)])
             })
         })
         .collect()
-}
-
-/// The `docs/work/<slug>.md` the log points to that are not among `names` (the file names in `docs/work/`).
-pub fn dangling_item_refs(log: &str, names: &[String]) -> Vec<String> {
-    let mut dangling: Vec<String> = ITEM_REF
-        .captures_iter(log)
-        .map(|caps| {
-            percent_decode_str(&caps[1])
-                .decode_utf8_lossy()
-                .into_owned()
-        })
-        .filter(|name| !names.contains(name))
-        .collect();
-    dangling.sort();
-    dangling.dedup();
-    dangling
 }
 
 /// The knowledge documents the log names in `refs` (see [`knowledge_refs`]) that are not among `names` (the file names
@@ -233,35 +198,39 @@ pub fn log_problems(text: &str) -> Vec<String> {
     found
 }
 
-/// Path -> why, for the files under `docs/` (paths relative to it) that a reader takes for part of the bundle and
-/// Rotproof would not read.
+/// Path -> why, for the files under `docs/knowledge/` (paths relative to `docs/`) that a reader takes for knowledge
+/// and Rotproof would not read.
 ///
-/// A reserved name (OKF 0.2, section 3.1) is read only where Rotproof writes or reads it: an `index.md` in a directory
-/// that holds documents, and `log.md` at the root. Anywhere else, OKF says it follows the structure of an index or a
-/// log, and nothing would check that. A markdown file whose extension is not `.md` in lowercase (`.MD`) is shown by
-/// GitHub, but not read as a document, so a broken one would pass.
+/// Rotproof reads the documents directly in `docs/knowledge/`, so a markdown file in a directory under it would pass
+/// unchecked. A reserved name (OKF 0.2, section 3.1) is read only where Rotproof writes it, `index.md`; a `log.md`
+/// there would follow the structure of a log, and nothing would check that. A markdown file whose extension is not
+/// `.md` in lowercase (`.MD`) is shown by GitHub, but not read as a document, so a broken one would pass.
 pub fn unread_paths(paths: &[String]) -> BTreeMap<String, String> {
     let mut bad = BTreeMap::new();
     for path in paths {
         let name = file_name(path);
-        let folder = parent(path);
-        let read = match name {
-            "index.md" => TYPES.iter().any(|(known, _)| *known == folder),
-            "log.md" => folder.is_empty(),
-            _ => true,
-        };
-        if !read {
+        let markdown = name
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("md"));
+        if parent(path) != KNOWLEDGE {
+            if markdown {
+                bad.insert(
+                    path.clone(),
+                    format!(
+                        "in a directory under docs/{KNOWLEDGE}/, which Rotproof does not read: put a knowledge \
+                         document directly in docs/{KNOWLEDGE}/"
+                    ),
+                );
+            }
+        } else if name == "log.md" {
             bad.insert(
                 path.clone(),
-                "a reserved name outside the places Rotproof writes and reads (index.md in docs/ and in each directory \
-                 of documents, log.md in docs/)"
-                    .into(),
+                format!(
+                    "a reserved name where Rotproof neither writes nor reads it (index.md in docs/{KNOWLEDGE}/, \
+                     log.md in docs/)"
+                ),
             );
-        } else if !name.ends_with(".md")
-            && name
-                .rsplit_once('.')
-                .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("md"))
-        {
+        } else if markdown && !name.ends_with(".md") {
             bad.insert(
                 path.clone(),
                 "a markdown file is named with .md, in lowercase".into(),
@@ -271,72 +240,18 @@ pub fn unread_paths(paths: &[String]) -> BTreeMap<String, String> {
     bad
 }
 
+/// The directory of `docs/` that holds the knowledge documents.
+pub const KNOWLEDGE: &str = "knowledge";
+
 /// The directories and files `docs/` has to hold for the checks of the records to see anything (paths from the root):
 /// if a move or a rename makes the scan come back empty, the checks see nothing and pass.
 pub fn floor() -> Vec<String> {
-    TYPES
-        .iter()
-        .map(|(folder, _)| format!("docs/{folder}"))
-        .chain(
-            [
-                "docs/index.md",
-                "docs/work/rules.md",
-                "docs/knowledge/rules.md",
-            ]
-            .map(String::from),
-        )
-        .collect()
-}
-
-/// Path -> why the document is not a known type in its directory.
-pub fn misplaced(docs: &Docs) -> BTreeMap<String, String> {
-    let mut bad = BTreeMap::new();
-    for (path, text) in docs {
-        let folder = parent(path);
-        let kind = match split(text) {
-            Ok((meta, _)) => match meta.get(&yaml_rust2::Yaml::String("type".into())) {
-                Some(yaml_rust2::Yaml::String(kind)) => Some(kind.clone()),
-                _ => None,
-            },
-            Err(why) => {
-                bad.insert(path.clone(), why);
-                continue;
-            }
-        };
-        match TYPES.iter().find(|(name, _)| *name == folder) {
-            None => {
-                bad.insert(
-                    path.clone(),
-                    format!("no document belongs in docs/{folder}/"),
-                );
-            }
-            Some((_, allowed)) if !kind.as_deref().is_some_and(|kind| allowed.contains(&kind)) => {
-                let shown = if folder.is_empty() { "." } else { folder };
-                // The type as written, quoted; a missing or non-text type said in words, not as Rust's `None`
-                let kind = kind.map_or("no type".into(), |kind| format!("type {kind:?}"));
-                bad.insert(
-                    path.clone(),
-                    format!(
-                        "{kind} does not belong in docs/{shown} ({})",
-                        allowed.join(", ")
-                    ),
-                );
-            }
-            Some(_) => {}
-        }
-    }
-    bad
-}
-
-/// The names that look like a spec, among the files at the repository root.
-pub fn root_specs(names: &[String]) -> Vec<String> {
-    let mut found: Vec<String> = names
-        .iter()
-        .filter(|name| ROOT_SPEC.is_match(name))
-        .cloned()
-        .collect();
-    found.sort();
-    found
+    [
+        format!("docs/{KNOWLEDGE}"),
+        "docs/index.md".into(),
+        format!("docs/{KNOWLEDGE}/rules.md"),
+    ]
+    .into()
 }
 
 #[cfg(test)]
@@ -410,27 +325,6 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
-    }
-
-    #[test]
-    fn a_dangling_log_pointer_is_caught() {
-        let log = "## 2026-10-01\n\n### Something\n- **Open items**: docs/work/rules.md, \
-                   docs/work/no-such-item.md, work/rules.md, docs\\work\\rules.md, \
-                   docs\\work\\written-on-windows.md, [日](/work/%E6%97%A5.md), \
-                   [月](/work/%E6%9C%88.md), docs/backlog/rules.md, docs/backlog/gone-from-backlog.md, \
-                   network/not-a-pointer.md\n";
-        let names = ["rules.md", "index.md", "日.md"].map(String::from).to_vec();
-        // A link to a slug outside ASCII is percent-encoded, and points at the item all the same. A pointer the log
-        // wrote while the items were in docs/backlog/ names an item in docs/work/ by its slug
-        assert_eq!(
-            dangling_item_refs(log, &names),
-            [
-                "gone-from-backlog.md",
-                "no-such-item.md",
-                "written-on-windows.md",
-                "月.md"
-            ]
-        );
     }
 
     #[test]
@@ -533,63 +427,17 @@ mod tests {
         assert!(passed.is_empty(), "passed: {passed:?}");
     }
 
-    const SPEC: &str = "---\ntype: Spec\ntitle: Something\ndescription: One sentence.\nstatus: stable\n---\n\n# Goals\n";
-
     #[test]
-    fn a_known_type_in_its_place_passes() {
-        let docs = map(&[
-            ("work/good.md", SPEC),
-            ("work/item.md", "---\ntype: Work Item\n---\n"),
-            ("work/rules.md", "---\ntype: Guide\n---\n"),
-            ("guide.md", "---\ntype: Guide\n---\n"),
-        ]);
-        assert_eq!(misplaced(&docs), BTreeMap::new());
-    }
-
-    #[test]
-    fn a_misplaced_document_is_caught() {
-        let item = "---\ntype: Work Item\n---\n";
-        let bad = map(&[
-            ("knowledge/item.md", item),
-            ("item.md", item),
-            ("other/x.md", SPEC),
-            // The directories before docs/work/ hold nothing any more
-            ("backlog/old.md", "---\ntype: Backlog Item\n---\n"),
-            ("specs/old.md", SPEC),
-            ("work/old-type.md", "---\ntype: Backlog Item\n---\n"),
-            ("work/plain.md", "# Just markdown\n"),
-            ("work/no-type.md", "---\ntitle: x\n---\n"),
-            ("work/deeper/x.md", SPEC),
-        ]);
-        let found = misplaced(&bad);
-        assert_eq!(
-            found.keys().collect::<Vec<_>>(),
-            bad.keys().collect::<Vec<_>>()
-        );
-        // The type is said as written, and a missing one in words
-        assert_eq!(
-            found["knowledge/item.md"],
-            "type \"Work Item\" does not belong in docs/knowledge (Knowledge, Guide)"
-        );
-        assert_eq!(
-            found["work/no-type.md"],
-            "no type does not belong in docs/work (Spec, Work Item, Milestone, Guide)"
-        );
-        assert_eq!(found["specs/old.md"], "no document belongs in docs/specs/");
-    }
-
-    #[test]
-    fn a_reserved_name_or_a_capital_extension_is_not_read() {
+    fn a_reserved_name_a_capital_extension_or_a_deeper_document_is_not_read() {
         let paths: Vec<String> = [
-            "index.md",
-            "log.md",
-            "work/index.md",
-            "work/a.md",
-            "extra/index.md",
-            "backlog/index.md",
-            "work/log.md",
-            "work/b.MD",
-            "notes.txt",
+            "knowledge/index.md",
+            "knowledge/a.md",
+            "knowledge/diagram.png",
+            "knowledge/assets/diagram.png",
+            "knowledge/log.md",
+            "knowledge/b.MD",
+            "knowledge/deeper/c.md",
+            "knowledge/deeper/index.md",
         ]
         .map(String::from)
         .into();
@@ -597,45 +445,19 @@ mod tests {
         assert_eq!(
             found.keys().collect::<Vec<_>>(),
             [
-                "backlog/index.md",
-                "extra/index.md",
-                "work/b.MD",
-                "work/log.md"
+                "knowledge/b.MD",
+                "knowledge/deeper/c.md",
+                "knowledge/deeper/index.md",
+                "knowledge/log.md"
             ]
         );
     }
 
     #[test]
-    fn the_floor_is_every_directory_of_documents_and_the_rules() {
-        let floor = floor();
-        for path in [
-            "docs/",
-            "docs/work",
-            "docs/knowledge",
-            "docs/index.md",
-            "docs/work/rules.md",
-            "docs/knowledge/rules.md",
-        ] {
-            assert!(floor.contains(&path.to_string()), "{path}");
-        }
-        assert_eq!(floor.len(), 6, "{floor:?}");
-    }
-
-    #[test]
-    fn a_root_spec_is_caught() {
-        let names: Vec<String> = [
-            "README.md",
-            "AGENTS.md",
-            "genre_spec.md",
-            "仕様書.md",
-            "pyproject.toml",
-            "SPEC.MD",
-        ]
-        .map(String::from)
-        .into();
+    fn the_floor_is_the_directory_of_knowledge_the_root_index_and_the_rules() {
         assert_eq!(
-            root_specs(&names),
-            ["SPEC.MD", "genre_spec.md", "仕様書.md"]
+            floor(),
+            ["docs/knowledge", "docs/index.md", "docs/knowledge/rules.md"]
         );
     }
 }

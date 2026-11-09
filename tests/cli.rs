@@ -11,45 +11,9 @@ fn run(args: &[&str]) -> Output {
         .expect("the binary runs")
 }
 
-/// The comment `rotproof create` leaves in the milestone it writes, until a person writes what to look at
-const UNWRITTEN: &str = "<!-- Written by `rotproof create`";
-
-/// `rotproof create` with `args` (`--root <root> create ...`), then what a person does next: the milestone it wrote
-/// gets a `# Condition` and the index is written again. Until then the check fails, as
-/// `create_leaves_a_milestone_for_a_person_to_write` shows; the tests that go on from a made project start after it.
+/// `rotproof create` with `args` (`--root <root> create ...`).
 fn create(args: &[&str]) -> Output {
-    let out = run(args);
-    let root = args[1];
-    let milestone = Path::new(root).join("docs/work/next-milestone.md");
-    if let Ok(text) = fs::read_to_string(&milestone)
-        && let Some(start) = text.find(UNWRITTEN)
-    {
-        let written = format!(
-            "{}The release workflow of tag v0.1.0 passes every job.\n",
-            &text[..start]
-        );
-        fs::write(&milestone, written).unwrap();
-        run(&["--root", root, "index"]);
-    }
-    out
-}
-
-/// What a person does when `rotproof init` declared no area: declare `core`, put the milestone `rotproof create` wrote
-/// in it, and write the index again.
-fn declare_first_area(root: &Path) {
-    let declaration = root.join(".config/rotproof.toml");
-    let text = fs::read_to_string(&declaration).unwrap();
-    assert!(text.contains("areas = []"), "{text}");
-    fs::write(
-        &declaration,
-        text.replace("areas = []", "areas = [\"core\"]"),
-    )
-    .unwrap();
-    let milestone = root.join("docs/work/next-milestone.md");
-    let text = fs::read_to_string(&milestone).unwrap();
-    assert!(text.contains("tags: []"), "{text}");
-    fs::write(&milestone, text.replace("tags: []", "tags: [core]")).unwrap();
-    assert!(run(&["--root", &root_arg(root), "index"]).status.success());
+    run(args)
 }
 
 fn stdout(out: &Output) -> String {
@@ -59,10 +23,7 @@ fn stdout(out: &Output) -> String {
 /// A repository of records only with an empty bundle: the directories of `docs/`, nothing in them.
 fn repo() -> tempfile::TempDir {
     let root = declared("stack = \"none\"\nareas = [\"operations\"]\n");
-    let docs = root.path().join("docs");
-    for folder in ["work", "knowledge"] {
-        fs::create_dir_all(docs.join(folder)).unwrap();
-    }
+    fs::create_dir_all(root.path().join("docs/knowledge")).unwrap();
     root
 }
 
@@ -125,22 +86,18 @@ fn a_record_with_a_byte_order_mark_passes() {
     // As PowerShell 5.1 writes UTF-8 with `-Encoding UTF8`
     let root = clean_repo();
     let docs = root.path().join("docs");
-    fs::write(
-        docs.join("work/x.md"),
-        "\u{feff}---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: draft\nfiled: 2026-10-01\n\
-         verified: {by: human:a, at: 2026-10-01T10:00:00+09:00}\nuntil: [next-milestone]\n---\n\n\
-         # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n",
-    )
-    .unwrap();
+    let text = "\u{feff}---\ntype: Knowledge\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\n---\n\n# Why\n\nZ.\n";
+    fs::write(docs.join("knowledge/x.md"), text).unwrap();
+    let hash = domain::records::content_hash(&text.replace('\u{feff}', ""));
     fs::write(
         docs.join("log.md"),
-        "\u{feff}# Log\n\n## 2026-10-02\n\n* Something\n",
+        format!("\u{feff}# Log\n\n## 2026-10-02\n\n* Something\n  * **Knowledge**: knowledge/x.md@{hash}\n"),
     )
     .unwrap();
     let out = run(&["--root", &root_arg(root.path()), "index"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(
-        fs::read_to_string(docs.join("work/index.md"))
+        fs::read_to_string(docs.join("knowledge/index.md"))
             .unwrap()
             .contains("[X](x.md)")
     );
@@ -150,78 +107,46 @@ fn a_record_with_a_byte_order_mark_passes() {
 
 #[test]
 fn each_broken_rule_fails_under_its_check() {
-    let item = |details: &str| {
+    let doc = |body: &str| {
         format!(
-            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: draft\nfiled: 2026-10-01\n\
-             verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\nuntil: [next-milestone]\n---\n\n\
-             # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n{details}\n"
+            "---\ntype: Knowledge\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\n---\n\n# Why\n\n{body}\n"
         )
     };
     // Each case breaks one rule of a clean repository: (the check that must name it, what to write)
-    let cases: [(&str, &str, String); 25] = [
+    let cases: [(&str, &str, String); 17] = [
         // A day guessed rather than read from the clock
-        (
-            "no day in the records is later than today",
-            "docs/work/x.md",
-            item("[log](/log.md)").replace("at: 2026-10-01T10:00:00", "at: 2999-10-01T10:00:00"),
-        ),
         (
             "no day in the records is later than today",
             "docs/log.md",
             "# Log\n\n## 2999-01-01\n\n* Something\n".into(),
         ),
-        // Done before the milestone it comes after
         (
-            "the arrows keep their order",
-            "docs/work/x.md",
-            item("[log](/log.md)")
-                .replace("status: draft", "status: deprecated\nprogress: done")
-                .replace("until: [next-milestone]", "after: [next-milestone]")
-                .replace("# Trigger", "# Resolution\n\nDone.\n\n# Trigger"),
+            "the bundle is seen",
+            "docs/knowledge/rules.md",
+            String::new(),
         ),
-        // Open, with no parent and nothing after it: nothing says by when it is done
+        ("the bundle is seen", "docs/index.md", String::new()),
         (
-            "every open record has a parent or something after it",
-            "docs/work/x.md",
-            item("[log](/log.md)").replace("until: [next-milestone]\n", ""),
-        ),
-        // A deadline in words, from before the milestones
-        (
-            "every document in docs/work/ keeps the format",
-            "docs/work/x.md",
-            item("[log](/log.md)")
-                .replace("until: [next-milestone]", "deadline: until the next deploy"),
-        ),
-        ("the bundle is seen", "docs/work/rules.md", String::new()),
-        (
-            "every document in docs/work/ keeps the format",
-            "docs/work/x.md",
+            "every knowledge document keeps the format",
+            "docs/knowledge/x.md",
             "# no frontmatter\n".into(),
         ),
+        // The area of a document is declared
         (
-            "every link in docs/ resolves",
-            "docs/work/x.md",
-            item("[gone](/no_such.md)"),
-        ),
-        // A link outside # Details is read too
-        (
-            "every link in docs/ resolves",
-            "docs/work/x.md",
-            item("[log](/log.md)").replace(
-                "# State\n\nY.",
-                "# State\n\nY, as [the spec](/work/gone.md#its-heading) says.",
-            ),
-        ),
-        // The only link is inside a comment, so a reader sees none
-        (
-            "every # Details has a link",
-            "docs/work/x.md",
-            item("Nothing yet. <!-- [log](/log.md) -->"),
+            "every knowledge document keeps the format",
+            "docs/knowledge/x.md",
+            doc("Z.").replace("tags: [a]", "tags: [b]"),
         ),
         (
-            "the log points only at real work items",
+            "every link in docs/knowledge/ and the log resolves",
+            "docs/knowledge/x.md",
+            doc("As [the spec](/work/gone.md#its-heading) says."),
+        ),
+        // The log is history, and keeps its links to the records of work it named
+        (
+            "every link in docs/knowledge/ and the log resolves",
             "docs/log.md",
-            "# Log\n\n## 2026-10-02\n\n- docs/work/no-such-item.md\n".into(),
+            "# Log\n\n## 2026-10-02\n\n* [gone](/work/gone.md)\n".into(),
         ),
         (
             "the log keeps its structure",
@@ -233,60 +158,40 @@ fn each_broken_rule_fails_under_its_check() {
             "docs/log.md",
             "# Log\n\nNo headings, just text.\n".into(),
         ),
+        ("the log keeps its structure", "docs/log.md", String::new()),
+        // A document Rotproof would not read
         (
-            "every document is a known type in its place",
-            "docs/other/x.md",
-            "---\ntype: Spec\n---\n".into(),
-        ),
-        (
-            "every document in docs/work/ keeps the format",
-            "docs/work/y.md",
-            "---\ntype: Spec\ntitle: A\ndescription: B.\nstatus: stable\n---\n".into(),
+            "every file in docs/knowledge/ is read",
+            "docs/knowledge/deeper/x.md",
+            doc("Z."),
         ),
         (
             "every generated file is up to date",
-            "docs/work/index.md",
+            "docs/knowledge/index.md",
+            "edited by hand\n".into(),
+        ),
+        (
+            "every generated file is up to date",
+            "docs/index.md",
             "edited by hand\n".into(),
         ),
         // The rules a project reads are the rules its Rotproof checks
         (
             "every generated file is up to date",
-            "docs/work/rules.md",
-            "---\ntype: Guide\ntitle: Work rules\ndescription: Our own.\n---\n".into(),
-        ),
-        (
-            "the bundle is seen",
             "docs/knowledge/rules.md",
-            String::new(),
+            "---\ntype: Guide\ntitle: Knowledge rules\ndescription: Our own.\n---\n".into(),
         ),
         (
-            "no spec sits at the repository root",
-            "genre_spec.md",
-            "# spec\n".into(),
-        ),
-        ("the log keeps its structure", "docs/log.md", String::new()),
-        // The area of a record is declared, and the declared areas are distinct headings
-        (
-            "every document in docs/work/ keeps the format",
-            "docs/work/x.md",
-            item("[log](/log.md)").replace("tags: [a]", "tags: [b]"),
-        ),
-        (
-            "every document in docs/work/ keeps the format",
-            "docs/work/y.md",
-            "---\ntype: Spec\ntitle: A\ndescription: B.\ntags: [b]\nstatus: stable\n---\n".into(),
-        ),
-        (
-            "every document in docs/work/ keeps the format",
-            "docs/work/y.md",
-            "---\ntype: Spec\ntitle: A\ndescription: B.\nstatus: stable\n---\n".into(),
+            "the log names every knowledge document as it is now",
+            "docs/knowledge/x.md",
+            doc("Z."),
         ),
         (
             "the areas are distinct headings",
             ".config/rotproof.toml",
             "stack = \"python\"\nareas = [\"a\", \"A\"]\nabsent = [\"ui\"]\n".into(),
         ),
-        // Without the areas, no record can be judged: the check says so instead of passing them
+        // Without the areas, no document can be judged: the check says so instead of passing them
         (
             "the bundle is seen",
             ".config/rotproof.toml",
@@ -312,14 +217,45 @@ fn each_broken_rule_fails_under_its_check() {
     }
 }
 
+/// The rest of `docs/` is the project's: the records of work of a project made before 1.0, broken or not, and any
+/// directory of its own, are not read.
+#[test]
+fn the_rest_of_docs_is_not_read() {
+    let root = clean_repo();
+    let docs = root.path().join("docs");
+    for (path, text) in [
+        ("work/index.md", "edited by hand\n"),
+        ("work/rules.md", ""),
+        (
+            "work/x.md",
+            "---\ntype: Work Item\nuntil: [gone]\n---\n\n[gone](/no_such.md)\n",
+        ),
+        ("plans/next.md", "# no frontmatter\n"),
+        ("notes.md", "# no frontmatter\n"),
+    ] {
+        let full = docs.join(path);
+        fs::create_dir_all(full.parent().unwrap()).unwrap();
+        fs::write(full, text).unwrap();
+    }
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // And rotproof index writes nothing there
+    let out = run(&["--root", &root_arg(root.path()), "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert_eq!(
+        fs::read_to_string(docs.join("work/index.md")).unwrap(),
+        "edited by hand\n"
+    );
+}
+
 #[test]
 fn a_name_in_another_case_is_missing() {
     // Windows opens each of these under the name Rotproof looks for; Linux and GitHub do not. Renamed in two steps, as
     // a case-only rename is not a rename on Windows
     let cases = [
         (
-            "docs/work/rules.md",
-            "docs/work/Rules.md",
+            "docs/knowledge/rules.md",
+            "docs/knowledge/Rules.md",
             "the bundle is seen",
         ),
         ("docs/log.md", "docs/Log.md", "the log keeps its structure"),
@@ -331,8 +267,8 @@ fn a_name_in_another_case_is_missing() {
         ),
         // Not in the floor: only the comparison with what Rotproof writes sees it
         (
-            "docs/work/index.md",
-            "docs/work/Index.md",
+            "docs/knowledge/index.md",
+            "docs/knowledge/Index.md",
             "every generated file is up to date",
         ),
     ];
@@ -361,60 +297,6 @@ fn a_name_in_another_case_is_missing() {
 }
 
 #[test]
-fn a_parent_and_its_children_are_checked_together() {
-    let spec = |parent: &str, status: &str| {
-        format!(
-            "---\ntype: Spec\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: {status}\n{parent}---\n\n\
-             # Resolution\n\nDone.\n"
-        )
-    };
-    let item = |parent: &str| {
-        format!(
-            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nparent: {parent}\n\
-             filed: 2026-10-01\nverified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\n---\n\n# Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
-        )
-    };
-    // (the check that must name it, the parent's status, the child)
-    let cases = [
-        (
-            "a parent closes after its children",
-            "deprecated\nprogress: done",
-            spec("parent: big\n", "stable"),
-        ),
-        (
-            "a parent closes after its children",
-            "deprecated\nprogress: done",
-            item("big"),
-        ),
-        (
-            "every document in docs/work/ keeps the format",
-            "stable",
-            spec("parent: no-such-spec\n", "stable"),
-        ),
-        (
-            "every document in docs/work/ keeps the format",
-            "stable",
-            item("no-such-spec"),
-        ),
-    ];
-    for (check, status, child) in cases {
-        let root = clean_repo();
-        let r = root.path();
-        fs::write(r.join("docs/work/big.md"), spec("", status)).unwrap();
-        fs::write(r.join("docs/work/child.md"), child).unwrap();
-        // The index files are current, so only the relation can fail
-        assert!(run(&["--root", &root_arg(r), "index"]).status.success());
-        let out = run(&["--root", &root_arg(r), "check"]);
-        assert_eq!(out.status.code(), Some(1), "{check}: {}", stdout(&out));
-        assert!(
-            stdout(&out).contains(&format!("{check}:")),
-            "{check} did not name it: {}",
-            stdout(&out)
-        );
-    }
-}
-
-#[test]
 fn index_writes_every_index_file() {
     let root = repo();
     let out = run(&["--root", &root_arg(root.path()), "index"]);
@@ -424,10 +306,7 @@ fn index_writes_every_index_file() {
         String::from_utf8_lossy(&out.stderr)
     );
     for path in [
-        "docs/work/rules.md",
         "docs/index.md",
-        "docs/work/index.md",
-        "docs/work/closed.md",
         "docs/knowledge/rules.md",
         "docs/knowledge/index.md",
     ] {
@@ -438,210 +317,33 @@ fn index_writes_every_index_file() {
             stdout(&out)
         );
     }
-    let work = fs::read_to_string(root.path().join("docs/work/index.md")).unwrap();
-    assert!(
-        work.contains(
-            "# Guides\n\n* [Closed records](closed.md) - The closed specs, work items and milestones"
-        ) && work.contains("\n* [Work rules](rules.md) - What goes in docs/work/"),
-        "{work}"
-    );
-    // The closed list is checked as the index is: changed by hand, the check fails
-    let closed = root.path().join("docs/work/closed.md");
-    let written = fs::read_to_string(&closed).unwrap();
-    fs::write(
-        &closed,
-        format!("{written}\n* [Hand](hand.md) - Written by hand.\n"),
-    )
-    .unwrap();
-    let out = run(&["--root", &root_arg(root.path()), "check"]);
-    assert!(!out.status.success());
-    assert!(
-        stdout(&out).contains("docs/work/closed.md"),
-        "{}",
-        stdout(&out)
-    );
+    assert!(!root.path().join("docs/work").exists());
+    let knowledge = fs::read_to_string(root.path().join("docs/knowledge/index.md")).unwrap();
+    assert!(knowledge.contains("# Guides\n\n* ["), "{knowledge}");
 }
 
 #[test]
 fn index_names_what_it_left_out() {
     let root = repo();
     fs::write(
-        root.path().join("docs/work/broken.md"),
+        root.path().join("docs/knowledge/broken.md"),
         "# no frontmatter\n",
     )
     .unwrap();
     let out = run(&["--root", &root_arg(root.path()), "index"]);
     assert!(out.status.success());
     assert!(
-        stdout(&out).contains("left out of the index, fix it: work/broken.md: no frontmatter"),
+        stdout(&out).contains("left out of the index, fix it: knowledge/broken.md: no frontmatter"),
         "{}",
         stdout(&out)
     );
-    // The index says so too: a reader of the index alone would otherwise take its lists and counts as whole
-    let index = fs::read_to_string(root.path().join("docs/work/index.md")).unwrap();
+    // The index says so too: a reader of the index alone would otherwise take its lists as whole
+    let index = fs::read_to_string(root.path().join("docs/knowledge/index.md")).unwrap();
     assert!(
         index.contains(
             "# Left out\n\n* [broken.md](broken.md) - Not listed or counted below until it is fixed: no frontmatter"
         ),
         "{index}"
-    );
-}
-
-#[test]
-fn create_writes_no_milestone_beside_one_it_cannot_read() {
-    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
-    let r = root.path();
-    let arg = root_arg(r);
-    fs::create_dir_all(r.join("docs/work")).unwrap();
-    // A title cut by a comment: the milestone cannot be read, so whether the project has one is not known
-    fs::write(
-        r.join("docs/work/release.md"),
-        "---\ntype: Milestone\ntitle: v1 #1\ndescription: D.\ntags: [a]\nstatus: stable\n---\n\n# Condition\n\n\
-         The tag is pushed.\n",
-    )
-    .unwrap();
-    let out = run(&["--root", &arg, "create"]);
-    assert!(!stdout(&out).contains("next-milestone"), "{}", stdout(&out));
-    assert!(!r.join("docs/work/next-milestone.md").exists());
-    let check = run(&["--root", &arg, "check"]);
-    assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
-    for said in [
-        "work/release.md: line 3: the frontmatter holds a YAML comment",
-        "but work/release.md, left out above, may be one: fix it first, rather than write another",
-    ] {
-        assert!(stdout(&check).contains(said), "{said}: {}", stdout(&check));
-    }
-}
-
-#[test]
-fn create_leaves_a_milestone_for_a_person_to_write() {
-    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
-    let r = root.path();
-    let arg = root_arg(r);
-    let out = run(&["--root", &arg, "create"]);
-    assert!(
-        stdout(&out).contains("wrote docs/work/next-milestone.md"),
-        "{}",
-        stdout(&out)
-    );
-    // What the next moment is, the project says: until it does, the check fails on the milestone, and says to write
-    // that one rather than another
-    let check = run(&["--root", &arg, "check"]);
-    assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
-    for said in [
-        "work/next-milestone.md: body headings missing or empty: [\"Condition\"]",
-        "a milestone is open:\n  no open milestone can be read in docs/work/, but work/next-milestone.md, left out \
-         above, may be one: fix it first",
-    ] {
-        assert!(stdout(&check).contains(said), "{said}: {}", stdout(&check));
-    }
-    let milestone = r.join("docs/work/next-milestone.md");
-    let text = fs::read_to_string(&milestone).unwrap();
-    let start = text.find(UNWRITTEN).unwrap();
-    fs::write(
-        &milestone,
-        format!("{}The tag v0.1.0 is pushed.\n", &text[..start]),
-    )
-    .unwrap();
-    assert!(run(&["--root", &arg, "index"]).status.success());
-    let check = run(&["--root", &arg, "check"]);
-    assert!(check.status.success(), "{}", stdout(&check));
-    let index = fs::read_to_string(r.join("docs/work/index.md")).unwrap();
-    assert!(
-        index.contains(
-            "# Milestones\n\n* [The next milestone](next-milestone.md) - The next moment the work waits for. | \
-             Status: draft."
-        ),
-        "{index}"
-    );
-    // Once the project has a milestone, create never writes another, closed or not: the next one is the project's
-    let closed = fs::read_to_string(&milestone)
-        .unwrap()
-        .replace("status: draft", "status: deprecated\nprogress: done")
-        .replace(
-            "# Condition",
-            "# Resolution\n\nPushed on 2026-10-09.\n\n# Condition",
-        );
-    fs::write(&milestone, closed).unwrap();
-    let out = run(&["--root", &arg, "create"]);
-    assert!(!stdout(&out).contains("next-milestone"), "{}", stdout(&out));
-    let check = run(&["--root", &arg, "check"]);
-    assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
-    assert!(
-        stdout(&check).contains("no open milestone in docs/work/"),
-        "{}",
-        stdout(&check)
-    );
-}
-
-#[test]
-fn index_names_the_milestones_past_their_date() {
-    let root = repo();
-    let milestone = |slug: &str, status: &str, date: &str| {
-        fs::write(
-            root.path().join(format!("docs/work/{slug}.md")),
-            format!(
-                "---\ntype: Milestone\ntitle: {slug}\ndescription: D.\ntags: [operations]\nstatus: {status}\n\
-                 date: {date}\n---\n\n# Condition\n\nThe tag is pushed.\n"
-            ),
-        )
-        .unwrap();
-    };
-    milestone("late", "stable", "2020-01-01");
-    milestone("ahead", "stable", "2999-01-01");
-    let out = run(&["--root", &root_arg(root.path()), "index"]);
-    assert!(out.status.success());
-    assert!(
-        stdout(&out).contains(
-            "past its date and still open, close it or move its date: late.md (2020-01-01)"
-        ),
-        "{}",
-        stdout(&out)
-    );
-    assert!(!stdout(&out).contains("ahead.md"), "{}", stdout(&out));
-    // The date passing fails nothing, and the index does not depend on today
-    let check = run(&["--root", &root_arg(root.path()), "check"]);
-    assert!(!stdout(&check).contains("late.md"), "{}", stdout(&check));
-    let index = fs::read_to_string(root.path().join("docs/work/index.md")).unwrap();
-    assert!(
-        index.contains("* [late](late.md) - D. | Date: 2020-01-01.\n* [ahead](ahead.md) - D. | Date: 2999-01-01."),
-        "{index}"
-    );
-}
-
-#[test]
-fn index_names_the_items_to_measure_again() {
-    let root = repo();
-    let item = "---
-type: Work Item
-title: Old
-description: Measured long ago.
-tags: [operations]
-status: draft
-filed: 2020-01-01
-verified: {by: human:someone, at: 2020-01-02T10:00:00+09:00}
-stale_after: 2021-01-01T00:00:00+09:00
----
-
-# Trigger
-
-X.
-
-# State
-
-Y.
-
-# Details
-
-Z.
-";
-    fs::write(root.path().join("docs/work/old.md"), item).unwrap();
-    let out = run(&["--root", &root_arg(root.path()), "index"]);
-    assert!(out.status.success());
-    assert!(
-        stdout(&out).contains("past stale_after, measure the state again: old.md"),
-        "{}",
-        stdout(&out)
     );
 }
 
@@ -653,15 +355,6 @@ fn index_fails_without_the_areas() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("rotproof init --stack"));
     assert!(!root.path().join("docs/index.md").exists());
-}
-
-#[test]
-fn index_fails_without_the_work_directory() {
-    let root = repo();
-    fs::remove_dir(root.path().join("docs/work")).unwrap();
-    let out = run(&["--root", &root_arg(root.path()), "index"]);
-    assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("docs/work"));
 }
 
 #[test]
@@ -747,7 +440,7 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
         assert!(first.status.success(), "{stack}: {}", stdout(&first));
         for path in made
             .iter()
-            .chain(&["docs/log.md", "docs/work/rules.md", "docs/index.md"])
+            .chain(&["docs/log.md", "docs/knowledge/rules.md", "docs/index.md"])
         {
             assert!(
                 root.path().join(path).is_file(),
@@ -1065,18 +758,23 @@ fn create_makes_layers_only_with_yes() {
     assert!(root.path().join("ui/atoms/__init__.py").is_file());
 }
 
-/// A work item or a spec that keeps every rule, with `tag` as its area.
-fn record(kind: &str, tag: &str) -> String {
-    match kind {
-        "item" => format!(
-            "---\ntype: Work Item\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: draft\nfiled: 2026-10-01\n\
-             verified: {{by: human:a, at: 2026-10-01T10:00:00+09:00}}\nuntil: [next-milestone]\n---\n\n\
-             # Trigger\n\nX.\n\n# State\n\nY.\n\n# Details\n\n[log](/log.md)\n"
-        ),
-        _ => format!(
-            "---\ntype: Spec\ntitle: X\ndescription: Y.\ntags: [{tag}]\nstatus: deprecated\nprogress: done\n---\n\n# Resolution\n\nDone.\n"
-        ),
-    }
+/// A knowledge document that keeps every rule, titled `title`, with `tag` as its area.
+fn knowledge(title: &str, tag: &str) -> String {
+    format!(
+        "---\ntype: Knowledge\ntitle: {title}\ndescription: Y.\ntags: [{tag}]\nstatus: stable\n---\n\n# Why\n\nZ.\n"
+    )
+}
+
+/// A log whose one entry names each of `documents` (file name, text) in `docs/knowledge/` as it is now.
+fn log_naming(documents: &[(&str, &str)]) -> String {
+    let named: Vec<String> = documents
+        .iter()
+        .map(|(name, text)| format!("knowledge/{name}@{}", domain::records::content_hash(text)))
+        .collect();
+    format!(
+        "# Log\n\n## 2026-10-02\n\n* Something\n  * **Knowledge**: {}\n",
+        named.join(", ")
+    )
 }
 
 #[test]
@@ -1091,18 +789,27 @@ fn create_adds_the_fields_the_declaration_lacks() {
             .status
             .success()
     );
-    fs::write(
-        r.join("docs/log.md"),
-        "# Log\n\n## 2026-10-02\n\n* Something\n",
-    )
-    .unwrap();
-    fs::write(r.join("docs/work/one.md"), record("item", "operations")).unwrap();
-    fs::write(r.join("docs/work/two.md"), record("item", "billing")).unwrap();
-    fs::write(r.join("docs/work/three.md"), record("spec", "records")).unwrap();
+    let documents = [
+        ("one.md", knowledge("One", "operations")),
+        ("two.md", knowledge("Two", "billing")),
+        ("three.md", knowledge("Three", "records")),
+    ];
+    for (name, text) in &documents {
+        fs::write(r.join("docs/knowledge").join(name), text).unwrap();
+    }
+    let named: Vec<(&str, &str)> = documents.iter().map(|(n, t)| (*n, t.as_str())).collect();
+    fs::write(r.join("docs/log.md"), log_naming(&named)).unwrap();
     // A guide's tags are not areas
     fs::write(
-        r.join("docs/work/guide.md"),
+        r.join("docs/knowledge/guide.md"),
         "---\ntype: Guide\ntitle: G\ndescription: H.\ntags: [howto]\n---\n\nText.\n",
+    )
+    .unwrap();
+    // Nor are the tags of the records of work Rotproof no longer reads
+    fs::create_dir_all(r.join("docs/work")).unwrap();
+    fs::write(
+        r.join("docs/work/old.md"),
+        "---\ntype: Work Item\ntags: [work]\n---\n",
     )
     .unwrap();
     fs::write(r.join(".config/rotproof.toml"), older).unwrap();
@@ -1119,7 +826,7 @@ fn create_adds_the_fields_the_declaration_lacks() {
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(
         stdout(&out).contains(
-            "added to .config/rotproof.toml: areas = [\"a\", \"billing\", \"operations\", \"records\"]"
+            "added to .config/rotproof.toml: areas = [\"billing\", \"operations\", \"records\"]"
         ),
         "{}",
         stdout(&out)
@@ -1128,7 +835,7 @@ fn create_adds_the_fields_the_declaration_lacks() {
     // What was there is kept, byte for byte, and the new field says what it is and where its value came from
     assert!(now.starts_with(older), "{now}");
     assert!(
-        now.contains("# The areas the records are grouped by")
+        now.contains("# The areas the knowledge documents are grouped by")
             && now.contains("# Added by `rotproof create` with the tags the records use"),
         "{now}"
     );
@@ -1396,7 +1103,11 @@ fn check_without_a_declaration_exits_2_and_says_how_to_write_one() {
 fn the_records_are_checked_under_a_stack_that_does_not_fit() {
     let root = clean_repo();
     declare(root.path(), "stack = \"cobol\"\nareas = [\"a\"]\n");
-    fs::write(root.path().join("docs/work/broken.md"), "no frontmatter\n").unwrap();
+    fs::write(
+        root.path().join("docs/knowledge/broken.md"),
+        "no frontmatter\n",
+    )
+    .unwrap();
     let out = run(&["--root", &root_arg(root.path()), "check"]);
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{said}");
@@ -2322,17 +2033,8 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         "# Log\n\n## 2026-10-04\n\n* Started\n",
     )
     .unwrap();
-    // The milestone create wrote has no area yet, as init declared none, and the check says what is missing
-    let out = run(&["--root", &arg, "check"]);
-    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
-    assert!(
-        stdout(&out).contains("work/next-milestone.md: tags: 0 tags")
-            && stdout(&out)
-                .contains("but work/next-milestone.md, left out above, may be one: fix it first"),
-        "{}",
-        stdout(&out)
-    );
-    declare_first_area(root.path());
+    // Nothing is left for a person to write before the first check passes: no area is needed until the first
+    // knowledge document
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
@@ -2424,7 +2126,6 @@ fn init_writes_a_declaration_that_create_reads() {
         );
         let out = create(&["--root", &arg, "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
-        declare_first_area(root.path());
         let out = run(&["--root", &arg, "check"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
         let written = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
@@ -2607,7 +2308,11 @@ fn a_repository_of_records_only_makes_and_checks_only_docs() {
         stdout(&out)
     );
     // The records are still checked
-    fs::write(root.path().join("docs/work/index.md"), "edited by hand\n").unwrap();
+    fs::write(
+        root.path().join("docs/knowledge/index.md"),
+        "edited by hand\n",
+    )
+    .unwrap();
     let out = run(&["--root", &arg, "check"]);
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     // No layers means nothing to declare absent or unchecked
@@ -3044,27 +2749,6 @@ fn every_edit_of_a_knowledge_document_is_named_in_the_log() {
     assert_eq!(out.status.code(), Some(1), "{said}");
     assert!(
         said.contains("the log points only at real knowledge documents:\n  no such document: docs/knowledge/gone.md"),
-        "{said}"
-    );
-}
-
-#[test]
-fn a_knowledge_document_belongs_in_docs_knowledge() {
-    let root = clean_repo();
-    let r = root.path();
-    fs::write(
-        r.join("docs/work/api.md"),
-        "---\ntype: Knowledge\ntitle: API\ndescription: D.\ntags: [a]\nstatus: stable\n---\n",
-    )
-    .unwrap();
-    let out = run(&["--root", &root_arg(r), "check"]);
-    let said = stdout(&out);
-    assert_eq!(out.status.code(), Some(1), "{said}");
-    assert!(
-        said.contains(
-            "every document is a known type in its place:\n  work/api.md: type \"Knowledge\" does not belong in \
-             docs/work (Spec, Work Item, Milestone, Guide)"
-        ),
         "{said}"
     );
 }

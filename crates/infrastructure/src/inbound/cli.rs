@@ -44,13 +44,14 @@ layers), that each layer imports only what the layer table allows or a person ap
 .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
 comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that \
-.rotproof/AGENTS.md is up to date, and that every record in docs/ keeps its rules (the rules.md of each directory), a knowledge document \
-matching the code it follows among them. \
+.rotproof/AGENTS.md is up to date, that every knowledge document in docs/knowledge/ keeps its rules \
+(docs/knowledge/rules.md) and matches the code it follows, and that the log keeps its structure and names every \
+knowledge document as it is now. The rest of docs/ is the project's, and is not read. \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
 a rule is broken, 2 when there is no .config/rotproof.toml or a file cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
-/// import which) and the records an agent works from (specs, work items, milestones, knowledge and log in docs/).
+/// import which) and the records that keep the code's reasons (knowledge pinned to the code, and the log, in docs/).
 #[derive(Parser)]
 #[command(name = "rotproof", version, about, after_help = START)]
 struct Cli {
@@ -85,17 +86,16 @@ enum Command {
     },
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
     ///
-    /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/,
-    /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, nor a document that cannot be
-    /// read and may be one, whose condition a person writes before `rotproof check` passes, and the project's files
+    /// Makes only what is missing: each layer neither present nor declared absent, docs/knowledge/, docs/log.md, and
+    /// the project's files
     /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the time hook and
     /// the rule that denies editing the approvals file,
     /// for python and none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml and the
     /// entry file src/main.rs), each when it does not exist.
-    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files, the closed
-    /// list and the rules in docs/. Adds the fields the declaration lacks, keeping its comments and values. Never
-    /// overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing the
-    /// declaration; after upgrading Rotproof, `rotproof init` does what it does, without making a layer.
+    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), and docs/index.md and the
+    /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
+    /// Never overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing
+    /// the declaration; after upgrading Rotproof, `rotproof init` does what it does, without making a layer.
     /// Makes layers only with --yes: without it, a run that would make one lists them, writes nothing and exits 2, so
     /// the layers the project does not have are declared absent first. Exits 2 too when the declaration cannot be read
     /// or a file cannot be written.
@@ -156,13 +156,12 @@ enum Command {
         #[arg(long)]
         reviewed: bool,
     },
-    /// Write every index.md in docs/ and docs/work/closed.md from the frontmatter, and the rules.md Rotproof keeps
+    /// Write docs/index.md and docs/knowledge/index.md from the frontmatter, and the rules.md Rotproof keeps
     ///
-    /// Rewrites docs/index.md, the index.md of docs/work/ and docs/knowledge/ and the list of closed records in
-    /// docs/work/closed.md, from the frontmatter of the documents, and the rules.md Rotproof keeps in docs/work/ and
-    /// docs/knowledge/. Run it after a record changes; never edit these by hand.
-    /// Lists the documents it left out and why, also under `# Left out` in the index, the work items past their
-    /// stale_after, and the open milestones past their date. Exits 2 when the declaration or a document cannot be read.
+    /// Rewrites docs/index.md and docs/knowledge/index.md from the frontmatter of the knowledge documents, and
+    /// docs/knowledge/rules.md. Run it after a knowledge document changes; never edit these by hand. Writes nothing
+    /// in docs/work/, which Rotproof no longer reads. Lists the documents it left out and why, also under `# Left out`
+    /// in the index. Exits 2 when the declaration or a document cannot be read.
     Index,
     /// Does nothing since 1.0, which no longer manages tasks: says so, and exits 2
     ///
@@ -659,7 +658,7 @@ fn follows(
     Ok(())
 }
 
-/// Write every index file, then list what was left out of them and the items to measure again.
+/// Write every index file, then list what was left out of them.
 fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     let indexed = commands.index(root)?;
     for path in indexed.written {
@@ -667,12 +666,6 @@ fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     }
     for (name, why) in indexed.left_out {
         println!("left out of the index, fix it: {name}: {why}");
-    }
-    for (name, at) in indexed.stale {
-        println!("past stale_after, measure the state again: {name} ({at})");
-    }
-    for (name, date) in indexed.past_date {
-        println!("past its date and still open, close it or move its date: {name} ({date})");
     }
     Ok(())
 }
