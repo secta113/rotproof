@@ -4,15 +4,14 @@
 //!
 //! Rotproof keeps no `.config/rotproof.toml` and no `docs/`: its records are kept outside the repository. So the
 //! declaration is [`DECLARATION_TEXT`] below, put in place of the file on the tree the checks read, and the records
-//! are not checked. No option of the command line serves this one repository (the rust-stack spec, decision 4).
+//! are not checked. No option of the command line serves this one repository.
 
-use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
 
 use application::tree::read_code;
 use domain::layers::DECLARATION;
-use domain::markers::{MARKERS, in_file};
+use domain::markers::{KNOWLEDGE_HEADING, Markers, in_file};
 use infrastructure::outbound::disk::Disk;
 use infrastructure::outbound::readers::Readers;
 use protocol::outbound::Tree;
@@ -112,34 +111,28 @@ pub fn problems(root: &Path) -> Result<Vec<String>, String> {
     );
     let mut markers =
         application::markers::problems(&tree, &Readers, &declared).map_err(|e| e.to_string())?;
-    let (in_xtask, words) = xtask_markers(&tree)?;
-    markers.found.extend(in_xtask);
-    let mut all: BTreeSet<usize> = markers
-        .words
-        .iter()
-        .filter_map(|word| MARKERS.iter().position(|m| m == word))
-        .collect();
-    all.extend(words);
-    markers.words = all.into_iter().map(|i| MARKERS[i]).collect();
-    if !markers.found.is_empty() {
-        // As `rotproof check` prints them: the heading once, and each finding under it with the line it names
-        found.push(format!("markers: {}", markers.heading()));
-        found.extend(
-            markers
-                .found
-                .iter()
-                .map(|why| format!("  {}", why.replace('\n', "\n    "))),
-        );
+    xtask_markers(&tree, &mut markers)?;
+    // As `rotproof check` prints them: each heading once, and each finding under it with the line it names
+    for (heading, under) in [
+        (markers.heading(), &markers.found),
+        (KNOWLEDGE_HEADING.to_string(), &markers.knowledge),
+    ] {
+        if !under.is_empty() {
+            found.push(format!("markers: {heading}"));
+            found.extend(
+                under
+                    .iter()
+                    .map(|why| format!("  {}", why.replace('\n', "\n    "))),
+            );
+        }
     }
     Ok(found)
 }
 
-/// The markers in the comments of the `.rs` files in [`XTASK`], read as the marker check reads a Rust layout's: the
-/// findings, and the markers as positions in [`MARKERS`]. xtask sits outside the layers, where the Rust layout does
-/// not look, and is Rotproof's code all the same (user, 2026-10-05). The floor: at least one file is read.
-fn xtask_markers(tree: &dyn Tree) -> Result<(Vec<String>, BTreeSet<usize>), String> {
-    let mut found = Vec::new();
-    let mut words = BTreeSet::new();
+/// The markers in the comments of the `.rs` files in [`XTASK`], read as the marker check reads a Rust layout's, added
+/// to `markers`. xtask sits outside the layers, where the Rust layout does not look, and is Rotproof's code all the
+/// same (user, 2026-10-05). The floor: at least one file is read.
+fn xtask_markers(tree: &dyn Tree, markers: &mut Markers) -> Result<(), String> {
     let mut read = 0;
     let paths = tree.files(XTASK).map_err(|e| format!("{XTASK}: {e}"))?;
     for path in paths
@@ -147,19 +140,21 @@ fn xtask_markers(tree: &dyn Tree) -> Result<(Vec<String>, BTreeSet<usize>), Stri
         .filter(|path| domain::rust::is_source(domain::paths::file_name(path)))
     {
         let Some(source) =
-            read_code(tree, path, "comments", &mut found).map_err(|e| e.to_string())?
+            read_code(tree, path, "comments", &mut markers.found).map_err(|e| e.to_string())?
         else {
             continue;
         };
         read += 1;
-        let (here, positions) = in_file(path, &source, &domain::rust::comments(&source));
-        found.extend(here);
-        words.extend(positions);
+        for (finding, words) in in_file(path, &source, &domain::rust::comments(&source)) {
+            markers.add(finding, &words);
+        }
     }
     if read == 0 {
-        found.push(format!("no .rs file of {XTASK}/ was read"));
+        markers
+            .found
+            .push(format!("no .rs file of {XTASK}/ was read"));
     }
-    Ok((found, words))
+    Ok(())
 }
 
 #[cfg(test)]

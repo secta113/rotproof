@@ -6,9 +6,9 @@ use std::path::Path;
 use domain::approvals::{APPROVALS, Approved, Kept};
 use domain::layers::{DECLARATION, MISSING, RECORDS_ONLY};
 use domain::markers::{MARKERS, either};
-use domain::upgrade::{FIRST, VERSION};
+use domain::upgrade::VERSION;
 use protocol::inbound::{
-    Before, Commands, Drift, Indexed, Initialized, Made, Names, Pinned, Removed, Report,
+    Commands, Drift, Indexed, Initialized, Made, Names, Pinned, Removed, Report,
 };
 use protocol::outbound::Machine;
 
@@ -64,16 +64,7 @@ impl Commands for Rotproof<'_> {
 
     fn index(&self, root: &Path) -> Result<Indexed, String> {
         let files = self.machine.files(root);
-        crate::index::index(&*files, &*files, self.machine.now())
-    }
-
-    fn before(&self, root: &Path, record: &str, closed: bool) -> Result<Before, String> {
-        crate::before::before(
-            &*self.machine.files(root),
-            record,
-            closed,
-            self.machine.now(),
-        )
+        crate::index::index(&*files, &*files)
     }
 
     fn pending(&self, root: &Path, file: &str, import: &str) -> Result<Vec<String>, String> {
@@ -126,7 +117,7 @@ impl Commands for Rotproof<'_> {
         crate::follows::changed(&*self.machine.files(root), self.machine.parsers())
     }
 
-    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<(String, String)>, String> {
+    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<String>, String> {
         let files = self.machine.files(root);
         crate::follows::repin(&*files, &*files, drifts)
     }
@@ -134,19 +125,6 @@ impl Commands for Rotproof<'_> {
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String> {
         let files = self.machine.files(root);
         crate::follows::pin(&*files, &*files, self.machine.parsers(), document, keys)
-    }
-
-    fn stop_hook(&self, root: &Path, input: &str) -> Result<Option<String>, String> {
-        // git runs only when the decision asks for it
-        let changes = self.machine.changes(root);
-        // The version the project's files are up to. A declaration that cannot be read says nothing here: the hook
-        // only warns, and `rotproof check` names what is wrong with it
-        let files = self.machine.project(root).and_then(|project| {
-            let text = self.machine.files(&project).read(DECLARATION).ok()?;
-            let fields = domain::upgrade::fields(&text).ok()?;
-            Some(fields.files.unwrap_or_else(|| FIRST.to_string()))
-        });
-        crate::hook::run(input, changes.as_deref(), files.as_deref())
     }
 
     fn time_hook(&self, input: &str) -> Result<String, String> {

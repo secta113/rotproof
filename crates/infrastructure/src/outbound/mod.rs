@@ -10,12 +10,12 @@ pub mod python;
 pub mod readers;
 pub mod typescript;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use domain::schema::Time;
-use protocol::outbound::{Changes, Files, Machine, Parsers};
+use protocol::outbound::{Files, Machine, Parsers};
 
-use crate::outbound::disk::{Disk, project_root};
+use crate::outbound::disk::Disk;
 use crate::outbound::git::Git;
 use crate::outbound::readers::Readers;
 
@@ -39,15 +39,6 @@ impl Machine for Local {
 
     fn user_name(&self, root: &Path) -> Option<String> {
         Git::new(root).user_name()
-    }
-
-    fn changes(&self, root: &Path) -> Option<Box<dyn Changes>> {
-        // git runs only when the hook's decision asks for it, so a root outside a repository is not an error here
-        project_root(root).map(|root| Box::new(Git::new(&root)) as Box<dyn Changes>)
-    }
-
-    fn project(&self, start: &Path) -> Option<PathBuf> {
-        project_root(start)
     }
 
     fn now(&self) -> Time {

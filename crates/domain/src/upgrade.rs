@@ -6,9 +6,9 @@
 //! - **`rotproof check` fails while `files` is older than the running Rotproof,** whether or not an update applies, so
 //!   every upgrade runs `rotproof init` once and the field never stays behind unseen.
 //! - **An update has a name and belongs to the version that brings it.** It changes one file, can tell whether it is
-//!   needed, applies the same way every time, does nothing the second time, and only adds: it never changes or removes
-//!   what the project wrote. What it cannot do without a person, it says, and the project does by hand or declines by
-//!   naming the update in `declined`.
+//!   needed, applies the same way every time, does nothing the second time, and only adds, or takes out what Rotproof
+//!   itself wrote and no longer keeps, matched exactly: it never changes or removes what the project wrote. What it
+//!   cannot do without a person, it says, and the project does by hand or declines by naming the update in `declined`.
 
 use serde_json::{Map, Value, json};
 use toml_edit::DocumentMut;
@@ -23,16 +23,80 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The version the project's files are up to when the declaration has no `files`: the first release.
 pub const FIRST: &str = "0.1.0";
 
-/// A version as `major.minor.patch`, compared part by part.
+/// A version as SemVer writes and orders it: `major.minor.patch`, then an optional pre-release after `-`
+/// (`1.0.0-rc.1`, the form Cargo takes, which PyPI shows as `1.0.0rc1`). A pre-release comes before the release it
+/// leads to, so a project whose files are up to `1.0.0-rc.1` is behind `1.0.0`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Version {
+    core: (u64, u64, u64),
+    /// The identifiers of the pre-release, empty for a release
+    pre: Vec<Identifier>,
+}
+
+/// One dot-separated identifier of a pre-release: digits are compared as a number and come before any other.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum Identifier {
+    Number(u64),
+    Text(String),
+}
+
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        self.core
+            .cmp(&other.core)
+            .then_with(|| match (self.pre.is_empty(), other.pre.is_empty()) {
+                (true, true) => Ordering::Equal,
+                (true, false) => Ordering::Greater,
+                (false, true) => Ordering::Less,
+                // Identifier by identifier, and a shorter list that is a prefix of the other comes first, as SemVer
+                // orders them
+                (false, false) => self.pre.cmp(&other.pre),
+            })
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// The version `text` names, or `None` when it is not one: no `v`, no space, no build metadata (`+...`).
 pub fn version(text: &str) -> Option<Version> {
-    let mut parts = text.split('.').map(|part| {
-        // A part is digits only: no sign, no space, no pre-release
+    let (core, pre) = match text.split_once('-') {
+        Some((core, pre)) => (core, Some(pre)),
+        None => (text, None),
+    };
+    let mut parts = core.split('.').map(|part| {
+        // A part is digits only: no sign, no space
         (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
             .then(|| part.parse::<u64>().ok())
             .flatten()
     });
-    let found = (parts.next()??, parts.next()??, parts.next()??);
-    parts.next().is_none().then_some(found)
+    let core = (parts.next()??, parts.next()??, parts.next()??);
+    if parts.next().is_some() {
+        return None;
+    }
+    let pre = match pre {
+        None => Vec::new(),
+        Some(pre) => pre.split('.').map(identifier).collect::<Option<Vec<_>>>()?,
+    };
+    Some(Version { core, pre })
+}
+
+/// An identifier of a pre-release: ASCII letters, digits and `-`, not empty, and digits alone without a leading zero.
+fn identifier(text: &str) -> Option<Identifier> {
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return None;
+    }
+    if text.bytes().all(|b| b.is_ascii_digit()) {
+        if text.len() > 1 && text.starts_with('0') {
+            return None;
+        }
+        return text.parse().ok().map(Identifier::Number);
+    }
+    Some(Identifier::Text(text.to_string()))
 }
 
 /// An update of the project's files.
@@ -44,13 +108,16 @@ pub enum Update {
     StopHookOnPath,
     /// The hook that tells the agent the time on each prompt and at the start of a session, in `.claude/settings.json`
     TimeHook,
+    /// The stop hook taken out, with the hook beside it, from `.claude/settings.json`: 1.0 no longer has one
+    RemoveStopHook,
 }
 
 /// Every update, oldest first.
-pub const UPDATES: [Update; 3] = [
+pub const UPDATES: [Update; 4] = [
     Update::DenyApprovals,
     Update::StopHookOnPath,
     Update::TimeHook,
+    Update::RemoveStopHook,
 ];
 
 /// What an update does to its file.
@@ -76,6 +143,7 @@ impl Update {
             Update::DenyApprovals => "claude-deny-approvals",
             Update::StopHookOnPath => "claude-stop-hook-on-path",
             Update::TimeHook => "claude-time-hook",
+            Update::RemoveStopHook => "claude-remove-stop-hook",
         }
     }
 
@@ -84,15 +152,17 @@ impl Update {
         match self {
             Update::DenyApprovals => "0.2.0",
             Update::StopHookOnPath | Update::TimeHook => "0.4.0",
+            Update::RemoveStopHook => "1.0.0-rc.1",
         }
     }
 
     /// The file it changes, from the root
     pub fn file(self) -> &'static str {
         match self {
-            Update::DenyApprovals | Update::StopHookOnPath | Update::TimeHook => {
-                ".claude/settings.json"
-            }
+            Update::DenyApprovals
+            | Update::StopHookOnPath
+            | Update::TimeHook
+            | Update::RemoveStopHook => ".claude/settings.json",
         }
     }
 
@@ -102,6 +172,7 @@ impl Update {
             Update::DenyApprovals => deny_approvals(text),
             Update::StopHookOnPath => stop_hook_on_path(text),
             Update::TimeHook => time_hook(text),
+            Update::RemoveStopHook => remove_stop_hook(text),
         }
     }
 
@@ -226,6 +297,53 @@ fn time_hook(text: Option<&str>) -> Outcome {
     }
 }
 
+/// Take the stop hook ([`hook::COMMAND`]) and the hook beside it ([`hook::ON_PATH`]) out of Claude Code's settings,
+/// `text`: each hook that runs one of them exactly, a group left with no hook, and `Stop` when no group is left. A
+/// hook the project changed (another command that runs `rotproof stop-hook`) is not Rotproof's text, and stays: the
+/// command says, on every stop, that it does nothing now.
+fn remove_stop_hook(text: Option<&str>) -> Outcome {
+    let update = Update::RemoveStopHook;
+    let Some(text) = text else {
+        return Outcome::Done;
+    };
+    let Ok(Value::Object(mut settings)) = serde_json::from_str::<Value>(text) else {
+        return Outcome::ByHand(format!(
+            "{}: it is not a JSON object Rotproof can read. Remove the Stop hooks that run {:?} and {:?}, {}",
+            update.file(),
+            hook::COMMAND,
+            hook::ON_PATH,
+            update.declining()
+        ));
+    };
+    let Some(Value::Object(hooks)) = settings.get_mut("hooks") else {
+        return Outcome::Done;
+    };
+    let Some(Value::Array(stop)) = hooks.get_mut("Stop") else {
+        return Outcome::Done;
+    };
+    let rotproofs =
+        |hook: &Value| hook["command"] == hook::COMMAND || hook["command"] == hook::ON_PATH;
+    if !stop.iter().any(|group| {
+        group["hooks"]
+            .as_array()
+            .is_some_and(|hooks| hooks.iter().any(rotproofs))
+    }) {
+        return Outcome::Done;
+    }
+    stop.retain_mut(|group| match group.get_mut("hooks") {
+        Some(Value::Array(hooks)) => {
+            hooks.retain(|hook| !rotproofs(hook));
+            !hooks.is_empty()
+        }
+        _ => true,
+    });
+    if stop.is_empty() {
+        // Shifted out, so the events after it keep their order
+        hooks.shift_remove("Stop");
+    }
+    Outcome::Changed(written(settings))
+}
+
 /// Whether one of the hook groups `groups` of an event runs `command`.
 fn runs(groups: &[Value], command: &str) -> bool {
     groups.iter().any(|group| {
@@ -261,9 +379,6 @@ pub fn pending(files: &str, running: &str, declined: &[String]) -> Result<Vec<Up
         })
         .collect())
 }
-
-/// A version read as its three numbers.
-type Version = (u64, u64, u64);
 
 /// Both versions read, and `files` no newer than `running`.
 fn versions(files: &str, running: &str) -> Result<(Version, Version), String> {
@@ -396,22 +511,71 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_version_is_three_numbers() {
-        assert_eq!(version("0.2.0"), Some((0, 2, 0)));
-        assert_eq!(version("10.0.12"), Some((10, 0, 12)));
+    fn a_version_is_three_numbers_and_a_pre_release() {
+        for good in [
+            "0.2.0",
+            "10.0.12",
+            "1.0.0-rc.1",
+            "1.0.0-alpha",
+            "1.0.0-x-y.7.z",
+        ] {
+            assert!(version(good).is_some(), "{good}");
+        }
         for bad in [
             "0.2",
             "0.2.0.1",
             "0.2.x",
             "v0.2.0",
-            "0.2.0-rc1",
             " 0.2.0",
             "0..1",
             "+1.0.0",
+            "1.0.0-",
+            "1.0.0-rc..1",
+            "1.0.0-rc.01",
+            "1.0.0-rc_1",
+            "1.0.0+build",
+            // The form PyPI shows: the declaration takes the version as Rotproof writes it, from Cargo
+            "1.0.0rc1",
         ] {
             assert_eq!(version(bad), None, "{bad}");
         }
         assert!(version("0.10.0") > version("0.9.9"));
+    }
+
+    #[test]
+    fn a_pre_release_comes_before_its_release_in_semver_order() {
+        // SemVer 2.0.0, section 11, with the release Rotproof is going to
+        let ordered = [
+            "0.4.0",
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0-alpha.beta",
+            "1.0.0-beta",
+            "1.0.0-beta.2",
+            "1.0.0-beta.11",
+            "1.0.0-rc.1",
+            "1.0.0-rc.2",
+            "1.0.0-rc.10",
+            "1.0.0",
+            "1.0.1-rc.1",
+        ];
+        for pair in ordered.windows(2) {
+            assert!(version(pair[0]) < version(pair[1]), "{pair:?}");
+        }
+        assert_eq!(version("1.0.0-rc.1"), version("1.0.0-rc.1"));
+    }
+
+    #[test]
+    fn a_pre_release_of_rotproof_upgrades_and_checks_a_project() {
+        // A pre-release once panicked here, as its own version did not read
+        assert!(pending("0.4.0", "1.0.0-rc.1", &[]).is_ok());
+        assert_eq!(
+            problems(Some("1.0.0-rc.1"), &[], "1.0.0-rc.1"),
+            Vec::<String>::new()
+        );
+        assert!(problems(Some("0.4.0"), &[], "1.0.0-rc.1")[0].contains("run `rotproof init`"));
+        assert!(problems(Some("1.0.0-rc.1"), &[], "1.0.0")[0].contains("run `rotproof init`"));
+        assert!(problems(Some("1.0.0"), &[], "1.0.0-rc.1")[0].contains("newer than this Rotproof"));
     }
 
     #[test]
@@ -536,7 +700,11 @@ mod tests {
     #[test]
     fn untouched_settings_upgrade_to_what_a_new_project_gets() {
         let mut text = SETTINGS_0_2.to_string();
-        for update in [Update::StopHookOnPath, Update::TimeHook] {
+        for update in [
+            Update::StopHookOnPath,
+            Update::TimeHook,
+            Update::RemoveStopHook,
+        ] {
             let Outcome::Changed(changed) = update.apply(Some(&text)) else {
                 panic!("{} changes them", update.name());
             };
@@ -643,6 +811,64 @@ mod tests {
         };
         assert!(
             why.contains("declined = [\"claude-stop-hook-on-path\"]"),
+            "{why}"
+        );
+    }
+
+    /// Only Rotproof's own hooks go, matched exactly; what the project runs on Stop, beside them or in their group,
+    /// stays in its order.
+    #[test]
+    fn the_stop_hook_is_taken_out_and_only_it() {
+        let Outcome::Changed(on_path) = Update::StopHookOnPath.apply(Some(SETTINGS_0_2)) else {
+            panic!("the hook is added");
+        };
+        let Outcome::Changed(removed) = Update::RemoveStopHook.apply(Some(&on_path)) else {
+            panic!("the hooks are taken out");
+        };
+        let read: Value = serde_json::from_str(&removed).unwrap();
+        assert!(read["hooks"].get("Stop").is_none(), "{removed}");
+        assert_eq!(Update::RemoveStopHook.apply(Some(&removed)), Outcome::Done);
+        // The project's own hooks stay: a group of its own, one beside Rotproof's in a group, and a command that runs
+        // rotproof stop-hook otherwise
+        let theirs = r#"{"hooks": {"Stop": [
+            {"hooks": [{"type": "command", "command": "x"}]},
+            {"hooks": [{"type": "command", "command": "rotproof stop-hook"}, {"type": "command", "command": "y"}]},
+            {"hooks": [{"type": "command", "command": "uv run rotproof stop-hook"}]}
+        ], "SessionStart": []}}"#;
+        let Outcome::Changed(kept) = Update::RemoveStopHook.apply(Some(theirs)) else {
+            panic!("the hook is taken out");
+        };
+        let read: Value = serde_json::from_str(&kept).unwrap();
+        assert_eq!(
+            read["hooks"]["Stop"],
+            json!([group("x"), group("y"), group("uv run rotproof stop-hook")])
+        );
+        // Stop taken out, the events after it keep their order
+        let Outcome::Changed(alone) = Update::RemoveStopHook.apply(Some(
+            r#"{"hooks": {"A": [], "Stop": [{"hooks": [{"command": "rotproof stop-hook"}]}], "B": [], "C": []}}"#,
+        )) else {
+            panic!("the hook is taken out");
+        };
+        let keys: Vec<String> = serde_json::from_str::<Value>(&alone).unwrap()["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(keys, ["A", "B", "C"]);
+        // Nothing to take out
+        for text in [None, Some("{}"), Some("{\"hooks\": {\"Stop\": []}}")] {
+            assert_eq!(
+                Update::RemoveStopHook.apply(text),
+                Outcome::Done,
+                "{text:?}"
+            );
+        }
+        let Outcome::ByHand(why) = Update::RemoveStopHook.apply(Some("not json")) else {
+            panic!("needs a person");
+        };
+        assert!(
+            why.contains("declined = [\"claude-remove-stop-hook\"]"),
             "{why}"
         );
     }

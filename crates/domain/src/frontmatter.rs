@@ -18,14 +18,14 @@ pub type Sections = BTreeMap<String, String>;
 static FRONT_MATTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)\A---\n(.*?)\n---(?:\n(.*))?\z").unwrap());
 
-/// The frontmatter, and the text under each `# heading` of the body.
+/// The frontmatter, and the text under each `# heading` of the body, of `text` as [`with_lf`](crate::tree::with_lf)
+/// reads a file: every line ending is `\n`.
 ///
 /// The YAML is read as YAML 1.2: a date or a datetime is a string, quoted or not, and the schema parses it. YAML 1.1
 /// (PyYAML) types an unquoted one and leaves a quoted one a string, so the same value could pass or fail by its quotes.
 pub fn split(text: &str) -> Result<(Hash, Sections), String> {
-    let text = text.replace("\r\n", "\n");
     let caps = FRONT_MATTER
-        .captures(&text)
+        .captures(text)
         .ok_or("no frontmatter (a YAML block between `---` lines)")?;
     let docs = YamlLoader::load_from_str(&caps[1])
         .map_err(|e| format!("frontmatter is not valid YAML: {e}"))?;
@@ -100,10 +100,9 @@ fn restored(value: Yaml, stand_in: char) -> Yaml {
 }
 
 /// The first `# heading` of the body, as a reader sees the rendered page: one inside a comment or a code block does not
-/// count. `None` when the text has no frontmatter, or its body no heading.
+/// count. `None` when the text has no frontmatter, or its body no heading. `text` is read as [`split`] reads it.
 pub fn first_heading(text: &str) -> Option<String> {
-    let text = text.replace("\r\n", "\n");
-    let caps = FRONT_MATTER.captures(&text)?;
+    let caps = FRONT_MATTER.captures(text)?;
     let body = visible(caps.get(2).map_or("", |body| body.as_str()));
     body.split('\n').find_map(|line| match heading(line) {
         Some((1, heading)) => Some(heading.to_string()),
@@ -155,11 +154,6 @@ mod tests {
         assert_eq!(first_heading(text).as_deref(), Some("Resolution"));
         assert_eq!(first_heading("---\ntype: X\n---\ntext only\n"), None);
         assert_eq!(first_heading("# no frontmatter\n"), None);
-    }
-
-    #[test]
-    fn crlf_is_read_as_lf() {
-        assert!(split("---\r\ntype: X\r\n---\r\n# A\r\nb\r\n").is_ok());
     }
 
     #[test]
@@ -229,26 +223,35 @@ mod tests {
 
     #[test]
     fn the_frontmatter_a_reader_copies_reads() {
-        // The work item in the README once failed as YAML (an unquoted `: ` in its description), and its comments
-        // would now fail too: an example is copied, so it is read as a record is
+        // The work item the README showed once failed as YAML (an unquoted `: ` in its description), and its comments
+        // would now fail too: an example is copied, so it is read as a document is
         let readme = include_str!("../../../README.md");
         let rules = include_str!("../../../records/knowledge-rules.md");
-        let work_item = readme
+        let document = readme
             .split_once("```markdown\n---\n")
-            .expect("the README shows a work item")
+            .expect("the README shows a knowledge document")
             .1;
         let follows = rules
             .split_once("```yaml\n")
             .expect("the knowledge rules show follows")
             .1;
-        let examples = [
-            work_item.split_once("\n---\n").unwrap().0.to_string(),
-            // The block is indented under a list item
-            follows.split_once("```").unwrap().0.replace("\n  ", "\n"),
-        ];
-        for example in examples {
-            let text = format!("---\n{}\n---\n", example.trim_end());
-            assert!(split(&text).is_ok(), "{text}: {:?}", split(&text));
-        }
+        let document = format!("---\n{}\n---\n", document.split_once("\n---\n").unwrap().0);
+        // The README's is a whole frontmatter, so it keeps the knowledge format too
+        assert!(
+            crate::schema::knowledge_doc(&document).is_ok(),
+            "{document}: {:?}",
+            crate::schema::knowledge_doc(&document).err()
+        );
+        // The block is indented under a list item
+        let follows = format!(
+            "---\n{}\n---\n",
+            follows
+                .split_once("```")
+                .unwrap()
+                .0
+                .replace("\n  ", "\n")
+                .trim_end()
+        );
+        assert!(split(&follows).is_ok(), "{follows}: {:?}", split(&follows));
     }
 }

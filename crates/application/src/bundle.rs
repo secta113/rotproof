@@ -1,15 +1,14 @@
-//! `docs/` read from the tree: the documents of each directory, sorted out by the rules in `domain`.
+//! `docs/knowledge/` read from the tree: its documents, sorted out by the rules in `domain`.
 
 use std::io;
 
 use crate::tree::read_text;
 use domain::bundle::{
-    Docs, KnowledgeFolder, Problems, Work, expected, in_docs, is_document, knowledge_with_rules,
-    work_with_rules,
+    Docs, KnowledgeFolder, Problems, expected, in_docs, is_document, knowledge_with_rules,
 };
 use protocol::outbound::Tree;
 
-/// The bundle of one repository, `docs/` in its tree, and the areas its records are grouped by.
+/// The bundle of one repository, `docs/` in its tree, and the areas its knowledge documents are grouped by.
 pub struct Bundle<'a> {
     tree: &'a dyn Tree,
     /// In the order the index files list them
@@ -38,9 +37,8 @@ impl<'a> Bundle<'a> {
     /// Every file Rotproof generates in the bundle (the index files and the rules) -> what it should contain now, and
     /// the documents left out of the index files.
     pub fn expected(&self) -> io::Result<(Vec<(String, String)>, Problems)> {
-        let work = self.read_folder("work")?;
         let knowledge = self.read_folder("knowledge")?;
-        Ok(expected(&work, &knowledge, &self.areas))
+        Ok(expected(&knowledge, &self.areas))
     }
 
     /// The documents of `docs/knowledge/`.
@@ -49,11 +47,6 @@ impl<'a> Bundle<'a> {
             &self.read_folder("knowledge")?,
             &self.areas,
         ))
-    }
-
-    /// The documents of `docs/work/`: the work items, the specs and the guides.
-    pub fn read_work(&self) -> io::Result<Work> {
-        Ok(work_with_rules(&self.read_folder("work")?, &self.areas))
     }
 }
 

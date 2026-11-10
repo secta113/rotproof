@@ -1,7 +1,7 @@
-//! `domain` calls no port and does no I/O: a rule takes the values a use case in `application` has read (rust-stack
-//! spec, step 5: strict, so a closure that reads is not passed in either). The ports are traits in
-//! `protocol::outbound`, which `domain` cannot depend on, so the direction check keeps it from naming them; this check
-//! keeps the rest: a trait `domain` declares itself, a reader passed in as a function, and I/O.
+//! `domain` calls no port and does no I/O: a rule takes the values a use case in `application` has read, and not even
+//! a closure that reads is passed in. The ports are traits in `protocol::outbound`, which `domain` cannot depend on, so
+//! the direction check keeps it from naming them; this check keeps the rest: a trait `domain` declares itself, a reader
+//! passed in as a function, and I/O.
 //!
 //! - **Anywhere:** a port taken (every trait of `protocol::outbound`, and every trait `domain` declares, so a new one
 //!   is a port from the start), and I/O.
@@ -22,7 +22,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 /// The ports Rotproof has: each has to be found as a trait, so the check cannot pass with the traits moved away
-pub const KNOWN: [&str; 4] = ["Tree", "Writer", "Parsers", "Changes"];
+pub const KNOWN: [&str; 3] = ["Tree", "Writer", "Parsers"];
 
 /// Where the rules are
 pub const DOMAIN: &str = "crates/domain/src";
@@ -471,7 +471,7 @@ mod tests {
                 "pub trait Tree {}\n".into(),
             )],
         );
-        assert_eq!(found.len(), 3, "{found:?}");
+        assert_eq!(found.len(), KNOWN.len() - 1, "{found:?}");
         assert!(found.iter().all(|why| why.starts_with("no trait ")));
         // A port declared in domain counts for the forms, and not as the port Rotproof has among the ports
         let in_domain = [(

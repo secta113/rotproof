@@ -8,7 +8,7 @@ apply to every change**. The rules Rotproof keeps (the layers, the records, how 
 
 | Path | Content |
 |---|---|
-{map}| `docs/` | Records, as one OKF 0.2 bundle: specs and work items (`docs/work/`, open and closed), knowledge (`docs/knowledge/`: how things are now, and why), log (`docs/log.md`) |
+{map}| `docs/` | Records, as one OKF 0.2 bundle: knowledge (`docs/knowledge/`: how things are now, and why, as far as the code cannot tell it) and the log (`docs/log.md`: what each task left behind). Open work is kept in issues |
 | `.config/rotproof.toml` | The structure this project declares for Rotproof |
 | `.rotproof/` | Rotproof's own files, rewritten by `rotproof create`. Never edited by hand |
 

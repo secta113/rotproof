@@ -1,20 +1,18 @@
-//! `docs/` as one OKF 0.2 bundle: sorting out its documents once they are read, and the index file each directory
-//! should contain.
+//! The part of `docs/` Rotproof keeps, as one OKF 0.2 bundle: `docs/knowledge/` sorted out once its documents are
+//! read, the log, and the index files.
 //!
-//! Every `.md` under `docs/` except the reserved names is a document with frontmatter. The index files are never
+//! Every `.md` in `docs/knowledge/` except the reserved names is a document with frontmatter. The index files are never
 //! written by hand: `rotproof index` writes them, and `rotproof check` fails when one differs from what it would write.
+//! The rest of `docs/` is the project's: Rotproof reads none of it, `docs/work/` of a project made before 1.0 included.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::NaiveDate;
-
-use crate::arrows::Mark;
 use crate::frontmatter::{Sections, split};
 use crate::layers::DECLARATION;
 use crate::schema::{
-    CLOSED_SECTION, ClosedAs, Guide, Item, Knowledge, KnowledgeDoc, Milestone, Spec, Status, Time,
-    WHEN_SECTION, WorkDoc, knowledge_doc, work_doc,
+    CLOSED_SECTION, Guide, Knowledge, KnowledgeDoc, Status, WHEN_SECTION, knowledge_doc,
 };
+use crate::sentence::first_sentence;
 use yaml_rust2::Yaml;
 
 /// File names OKF reserves. Never used for a document
@@ -22,53 +20,13 @@ pub const RESERVED: [&str; 2] = ["index.md", "log.md"];
 /// The notice at the top of every generated index. An HTML comment, so OKF readers do not see it
 pub const GENERATED: &str = "<!-- Generated from the frontmatter by `rotproof index`. Do not edit: `rotproof check` \
                              fails when this file differs from what `rotproof index` writes. -->";
-/// The rules of `docs/work/`. Rotproof writes them like an index file, so the rules a project reads are the rules its
-/// Rotproof checks
-pub const WORK_RULES: &str = include_str!("../../../records/work-rules.md");
-/// The knowledge rules, written like the rules of `docs/work/`
+/// The rules of `docs/knowledge/`. Rotproof writes them like an index file, so the rules a project reads are the rules
+/// its Rotproof checks
 pub const KNOWLEDGE_RULES: &str = include_str!("../../../records/knowledge-rules.md");
 /// The log as `rotproof create` makes it. From then on it is the project's
 pub const LOG: &str = include_str!("../../../records/log.md");
-/// The closed list of `docs/work/`, written by Rotproof next to the index: the closed records that are no part of open
-/// work, apart from the index, which is read before every piece of work
-pub const CLOSED_LIST: &str = "closed.md";
-/// The frontmatter of the closed list: a guide, so the index links to it next to the rules. Fixed; the list follows
-const CLOSED_HEAD: &str = "---
-type: Guide
-title: Closed records
-description: The closed specs, work items and milestones of docs/work/ that are no part of open work, by area. What was decided and done, and why, kept as history; read it when you need to know why.
----
-";
-/// Where `rotproof create` writes a milestone when `docs/work/` has none
-pub const FIRST_MILESTONE: &str = "docs/work/next-milestone.md";
-
-/// The milestone `rotproof create` writes when `docs/work/` has none, in the area `area`. Its `# Condition` holds only
-/// a comment, which a reader does not see, so the check fails on it until a person writes what to look at.
-pub fn first_milestone(area: &str) -> String {
-    include_str!("../../../records/milestone.md").replace("{area}", area)
-}
-
-/// Whether any document among `docs` (those of `docs/work/`) may be a milestone, open or closed, passing or not.
-pub fn may_have_milestone(docs: &Docs) -> bool {
-    docs.values().any(|text| may_be_milestone(text))
-}
-
-/// Whether the document `text` may be a milestone: it is one, passing or not, or its type cannot be read. A document
-/// that cannot be read is not known to be none, so what is decided from there being no milestone waits for it.
-fn may_be_milestone(text: &str) -> bool {
-    split(text).map_or(true, |(meta, _)| {
-        meta.get(&Yaml::String("type".into()))
-            .and_then(Yaml::as_str)
-            .is_none_or(|kind| kind == "Milestone")
-    })
-}
 /// The bundle-root index links to these, in this order
-const ROOT_ENTRIES: [(&str, &str, &str); 3] = [
-    (
-        "Work",
-        "work/",
-        "Specs and work items: what was decided, and the work waiting on it, open and closed.",
-    ),
+const ROOT_ENTRIES: [(&str, &str, &str); 2] = [
     ("Knowledge", "knowledge/", "How things are now, and why."),
     ("Log", "log.md", "What was done, newest first."),
 ];
@@ -77,24 +35,6 @@ const ROOT_ENTRIES: [(&str, &str, &str); 3] = [
 pub type Docs = BTreeMap<String, String>;
 /// File name -> why it was left out.
 pub type Problems = BTreeMap<String, String>;
-
-/// The documents of `docs/work/`, sorted out and read together: a record names its parent by slug.
-#[derive(Debug, Default)]
-pub struct Work {
-    /// File name -> the work item, for the items that pass
-    pub items: BTreeMap<String, (Item, Sections)>,
-    /// File name -> the spec, for the specs that pass
-    pub specs: BTreeMap<String, (Spec, Sections)>,
-    /// File name -> the milestone, for the milestones that pass
-    pub milestones: BTreeMap<String, (Milestone, Sections)>,
-    /// File name -> the guide: the rules, and any a project adds
-    pub guides: BTreeMap<String, Guide>,
-    /// `work/<file name>` -> why the document is left out of the index files
-    pub problems: Problems,
-    /// The documents left out that may be a milestone (`work/<file name>`): one that does not pass, or one whose type
-    /// cannot be read
-    pub unsure_milestones: Vec<String>,
-}
 
 /// The documents of `docs/knowledge/`, sorted out.
 #[derive(Debug, Default)]
@@ -127,223 +67,6 @@ pub fn knowledge(docs: &Docs, areas: &[String]) -> KnowledgeFolder {
     out
 }
 
-impl Work {
-    /// The spec with this slug.
-    pub fn find(&self, slug: &str) -> Option<&Spec> {
-        self.specs.get(&format!("{slug}.md")).map(|(spec, _)| spec)
-    }
-
-    /// The open children of a closed spec: the parts of an epic and the work items of a spec. A parent closes after its
-    /// children, so one of the two has the wrong progress. They stay in the index files: the relation is clear, and
-    /// leaving the open child out would hide open work.
-    pub fn closed_before_its_children(&self) -> Vec<String> {
-        let specs = self
-            .specs
-            .iter()
-            .map(|(name, (spec, _))| (name, "spec", spec.parent.as_ref(), spec.is_open()));
-        let items = self
-            .items
-            .iter()
-            .map(|(name, (item, _))| (name, "work item", item.parent.as_ref(), item.is_open()));
-        specs
-            .chain(items)
-            .filter_map(|(name, kind, parent, open)| {
-                let parent_spec = self.find(parent?)?;
-                (open && !parent_spec.is_open()).then(|| {
-                    format!(
-                        "{}: its parent {} is closed while this {kind} is open. Close the {kind} first (as \
-                         dropped, if it was), or reopen the parent",
-                        in_work(name),
-                        parent.expect("found above")
-                    )
-                })
-            })
-            .collect()
-    }
-
-    /// Why the project has no next moment for its work to wait for, or nothing while a milestone is open. A milestone
-    /// left out of the index files does not count, but it may be the open one: while a document left out may be a
-    /// milestone, the message says to fix it first, not to write another beside it.
-    pub fn without_an_open_milestone(&self) -> Option<String> {
-        let open = self
-            .milestones
-            .values()
-            .any(|(milestone, _)| milestone.is_open());
-        if open {
-            return None;
-        }
-        Some(match self.unsure_milestones.as_slice() {
-            [] => "no open milestone in docs/work/: write the next moment the work waits for (a release, a deploy, \
-                   something outside the project) as a milestone; docs/work/rules.md says how"
-                .into(),
-            [one] => format!(
-                "no open milestone can be read in docs/work/, but {one}, left out above, may be one: fix it first, \
-                 rather than write another"
-            ),
-            many => format!(
-                "no open milestone can be read in docs/work/, but {}, left out above, may each be one: fix them \
-                 first, rather than write another",
-                many.join(", ")
-            ),
-        })
-    }
-
-    /// The open milestones whose `date` is before `today`, each with its date. Passing the date fails nothing: work is
-    /// late more often than not, and a check that failed on a date alone would turn CI red with no change.
-    pub fn past_their_date(&self, today: NaiveDate) -> Vec<(String, NaiveDate)> {
-        self.milestones
-            .iter()
-            .filter(|(_, (milestone, _))| milestone.is_open())
-            .filter_map(|(name, (milestone, _))| {
-                let date = milestone.date?;
-                (date < today).then(|| (name.clone(), date))
-            })
-            .collect()
-    }
-
-    /// The days of the work items that have not come anywhere at `now` ([`latest_day`]): when each was filed, and
-    /// when its state was measured (`verified`, only its day, as a time of day is never read). They are written from
-    /// the clock, and one later than today was guessed. Time alone only makes one pass, never fail, so this check
-    /// cannot turn CI red with no change.
-    pub fn not_come(&self, now: Time) -> Vec<String> {
-        let today = latest_day(now);
-        let shown = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let mut found = Vec::new();
-        for (name, (item, _)) in &self.items {
-            if item.filed > today {
-                found.push(format!(
-                    "work/{name}: filed {}, a day that has not come anywhere yet (now {shown}): write the day it was \
-                     filed, read from the clock",
-                    item.filed
-                ));
-            }
-            for stamp in item.verified.iter().filter(|stamp| stamp.at > today) {
-                found.push(format!(
-                    "work/{name}: verified on {}, a day that has not come anywhere yet (now {shown}): write the day \
-                     the state was measured, read from the clock",
-                    stamp.at
-                ));
-            }
-        }
-        found
-    }
-
-    /// Why the record `name` cannot have the spec `parent` as its parent, or `None` when it can. The parent of a spec
-    /// is an epic, which has no parent of its own; the parent of a work item is any spec.
-    fn wrong_parent(&self, name: &str, parent: &str, of_spec: bool) -> Option<String> {
-        let file = format!("{parent}.md");
-        if file == name {
-            return Some("names the record itself".into());
-        }
-        Some(match self.find(parent) {
-            Some(spec) => match (&spec.parent, of_spec) {
-                (Some(above), true) => format!(
-                    "{parent} is itself a part of {above}: an epic is one level deep, so name {above} or \
-                     remove one of the two"
-                ),
-                _ => return None,
-            },
-            None if self.problems.contains_key(&in_work(&file)) => {
-                format!("{parent} is left out of the index files itself: fix it first")
-            }
-            None => format!(
-                "names no spec in docs/work/: {parent} (a work item, a milestone or a guide is not a spec)"
-            ),
-        })
-    }
-}
-
-/// A document of `docs/work/` as the problems name it.
-fn in_work(name: &str) -> String {
-    format!("work/{name}")
-}
-
-/// Every document of `docs/work/` (file name -> text): the work items, specs, milestones and guides that pass, and
-/// why the others do not, checked one by one and against each other. A record whose area is not among `areas` does not
-/// pass, and a record is left out of the index files when its relation to its parent is undefined: the parent is
-/// missing, is not a spec, is the record itself, or, for a spec, is a part of another.
-pub fn work(docs: &Docs, areas: &[String]) -> Work {
-    let mut out = Work::default();
-    for (name, text) in docs {
-        match work_doc(text) {
-            Ok(WorkDoc::Item(item, _)) if !areas.contains(&item.tag) => {
-                out.problems
-                    .insert(in_work(name), undeclared(&item.tag, areas));
-            }
-            Ok(WorkDoc::Spec(spec, _)) if !areas.contains(&spec.tag) => {
-                out.problems
-                    .insert(in_work(name), undeclared(&spec.tag, areas));
-            }
-            Ok(WorkDoc::Milestone(milestone, _)) if !areas.contains(&milestone.tag) => {
-                out.problems
-                    .insert(in_work(name), undeclared(&milestone.tag, areas));
-            }
-            Ok(WorkDoc::Item(item, sections)) => {
-                out.items.insert(name.clone(), (item, sections));
-            }
-            Ok(WorkDoc::Spec(spec, sections)) => {
-                out.specs.insert(name.clone(), (spec, sections));
-            }
-            Ok(WorkDoc::Milestone(milestone, sections)) => {
-                out.milestones.insert(name.clone(), (milestone, sections));
-            }
-            Ok(WorkDoc::Guide(guide)) => {
-                out.guides.insert(name.clone(), guide);
-            }
-            Err(why) => {
-                out.problems.insert(in_work(name), why);
-            }
-        }
-    }
-    // The specs first: a work item whose spec is left out is then told to fix the spec first
-    let left: Problems = out
-        .specs
-        .iter()
-        .filter_map(|(name, (spec, _))| {
-            let why = out.wrong_parent(name, spec.parent.as_ref()?, true)?;
-            Some((name.clone(), why))
-        })
-        .collect();
-    for (name, why) in left {
-        out.specs.remove(&name);
-        out.problems
-            .insert(in_work(&name), format!("parent: {why}"));
-    }
-    let left: Problems = out
-        .items
-        .iter()
-        .filter_map(|(name, (item, _))| {
-            let why = out.wrong_parent(name, item.parent.as_ref()?, false)?;
-            Some((name.clone(), why))
-        })
-        .collect();
-    for (name, why) in left {
-        out.items.remove(&name);
-        out.problems
-            .insert(in_work(&name), format!("parent: {why}"));
-    }
-    // The arrows, until no record is left out: a record whose arrow names one left out here is then told to fix that
-    // one
-    loop {
-        let left = crate::arrows::unresolved(&out);
-        if left.is_empty() {
-            break;
-        }
-        for (name, why) in left {
-            out.items.remove(&name);
-            out.specs.remove(&name);
-            out.milestones.remove(&name);
-            out.problems.insert(in_work(&name), why);
-        }
-    }
-    out.unsure_milestones = docs
-        .iter()
-        .filter(|(name, text)| out.problems.contains_key(&in_work(name)) && may_be_milestone(text))
-        .map(|(name, _)| in_work(name))
-        .collect();
-    out
-}
-
 /// Why a tag is not an area, with the areas it could be.
 fn undeclared(tag: &str, areas: &[String]) -> String {
     let declared = if areas.is_empty() {
@@ -368,34 +91,22 @@ pub fn is_document(name: &str, is_dir: bool) -> bool {
 }
 
 /// Every file Rotproof generates in the bundle (the index files and the rules) -> what it should contain now, and the
-/// documents left out of the index files, from the documents read in `docs/work/` and `docs/knowledge/`.
-pub fn expected(
-    work_docs: &Docs,
-    knowledge_docs: &Docs,
-    areas: &[String],
-) -> (Vec<(String, String)>, Problems) {
-    let work = work_with_rules(work_docs, areas);
-    let mut files = vec![
-        (in_docs("work/rules.md"), WORK_RULES.into()),
+/// documents left out of the index files, from the documents read in `docs/knowledge/`.
+pub fn expected(knowledge_docs: &Docs, areas: &[String]) -> (Vec<(String, String)>, Problems) {
+    let read = knowledge_with_rules(knowledge_docs, areas);
+    let files = vec![
         (in_docs("index.md"), render_root()),
-        (in_docs("work/index.md"), render_work(&work, areas)),
+        (in_docs("knowledge/rules.md"), KNOWLEDGE_RULES.into()),
         (
-            in_docs(&format!("work/{CLOSED_LIST}")),
-            render_closed(&work, areas),
+            in_docs("knowledge/index.md"),
+            render_knowledge(&read.documents, &read.guides, &read.problems, areas),
         ),
     ];
-    let mut problems = work.problems;
-    let read = knowledge_with_rules(knowledge_docs, areas);
-    files.push((in_docs("knowledge/rules.md"), KNOWLEDGE_RULES.into()));
-    files.push((
-        in_docs("knowledge/index.md"),
-        render_knowledge(&read.documents, &read.guides, &read.problems, areas),
-    ));
-    problems.extend(
-        read.problems
-            .into_iter()
-            .map(|(name, why)| (format!("knowledge/{name}"), why)),
-    );
+    let problems = read
+        .problems
+        .into_iter()
+        .map(|(name, why)| (format!("knowledge/{name}"), why))
+        .collect();
     (files, problems)
 }
 
@@ -405,16 +116,6 @@ pub fn knowledge_with_rules(docs: &Docs, areas: &[String]) -> KnowledgeFolder {
     let mut docs = docs.clone();
     docs.insert("rules.md".into(), KNOWLEDGE_RULES.into());
     knowledge(&docs, areas)
-}
-
-/// The documents of `docs/work/`, from those read there, with the rules and the closed list read as Rotproof writes
-/// them, so the index lists them on the run that writes them. The closed list is read by its frontmatter alone, which
-/// is all the index needs of it.
-pub fn work_with_rules(docs: &Docs, areas: &[String]) -> Work {
-    let mut docs = docs.clone();
-    docs.insert("rules.md".into(), WORK_RULES.into());
-    docs.insert(CLOSED_LIST.into(), CLOSED_HEAD.into());
-    work(&docs, areas)
 }
 
 /// A title as the text of a link in the index. `[`, `]` and `\` are escaped, so a title with brackets stays the text
@@ -430,379 +131,8 @@ pub fn link_text(title: &str) -> String {
     out
 }
 
-/// The first sentence of the first paragraph of `text`, for the index. Bold text at the start counts as a sentence on
-/// its own. Works for any language: a sentence ends at "。" or at "." followed by a space or the end of the paragraph,
-/// but not inside parentheses ("（）" or "()", nested or not, either kind closing either) or inline code, where a full
-/// stop ends a sentence of the aside, not of the paragraph: "実装した（PR #1。CI は pass）。" is one sentence. A
-/// parenthesis or inline code left open is read as text, so the sentence ends at the first full stop after it that no
-/// closed bracket holds, as it would without the bracket, and not at the end of the paragraph.
-///
-/// The paragraph is read as markdown reads it (see `paragraph`), so a sentence wrapped onto the next line is one
-/// sentence, and a paragraph with no full stop is shown whole.
-pub fn first_sentence(text: &str) -> String {
-    let paragraph = paragraph(text);
-    if let Some(rest) = paragraph.strip_prefix("**")
-        && let Some(end) = rest.find('*')
-        && end > 0
-        && rest[end..].starts_with("**")
-    {
-        return paragraph[..end + 4].to_string();
-    }
-    match sentence_end(&paragraph) {
-        Some(end) => paragraph[..end].to_string(),
-        None => paragraph,
-    }
-}
-
-/// The first paragraph of `text` as one line: its lines trimmed (which takes a `\r` too) and joined with a space,
-/// except between two lines of Japanese, which are joined with none, as a space would split a word that was wrapped
-/// and Japanese is not written with spaces. The paragraph is the first line, and the lines after it up to the first
-/// that markdown would not read as part of it: a blank line, or one that starts a heading, a fenced code block, a
-/// quote, a table row or a list item (so a list's first item is a paragraph of its own, as is the line before a list).
-fn paragraph(text: &str) -> String {
-    let mut lines = text.split('\n').map(str::trim);
-    let mut paragraph = lines.next().unwrap_or("").to_string();
-    if paragraph.is_empty() {
-        return paragraph;
-    }
-    for line in lines {
-        if line.is_empty() || starts_a_block(line) {
-            break;
-        }
-        let both_wide = paragraph.chars().next_back().is_some_and(is_wide)
-            && line.chars().next().is_some_and(is_wide);
-        if !both_wide {
-            paragraph.push(' ');
-        }
-        paragraph.push_str(line);
-    }
-    paragraph
-}
-
-/// Whether a trimmed line starts a block that interrupts a paragraph: `#` (a heading, with a space or nothing after),
-/// a fence of three backticks or tildes, `>`, `|`, a bullet (`-`, `*` or `+` with a space or nothing after) or a number
-/// and a `.` or `)` with a space or nothing after. A line that only starts with such a character is text:
-/// `**bold**`, `#123`, `1.5 times`.
-fn starts_a_block(line: &str) -> bool {
-    // What follows a marker: nothing, or a space (the line is trimmed, so a tab or more spaces came from inside it)
-    let alone = |rest: &str| rest.is_empty() || rest.starts_with(' ');
-    let hashes = line.chars().take_while(|&c| c == '#').count();
-    let digits = line.chars().take_while(char::is_ascii_digit).count();
-    line.starts_with("```")
-        || line.starts_with("~~~")
-        || line.starts_with(['>', '|'])
-        || ((1..=6).contains(&hashes) && alone(&line[hashes..]))
-        || line.strip_prefix(['-', '*', '+']).is_some_and(alone)
-        || (digits > 0 && line[digits..].strip_prefix(['.', ')']).is_some_and(alone))
-}
-
-/// Whether `c` is written without spaces between words: kana, ideographs, and the punctuation and forms of full width.
-fn is_wide(c: char) -> bool {
-    matches!(c,
-        '\u{3000}'..='\u{30FF}' // punctuation, hiragana, katakana
-        | '\u{3400}'..='\u{4DBF}' // ideographs, extension A
-        | '\u{4E00}'..='\u{9FFF}' // ideographs
-        | '\u{F900}'..='\u{FAFF}' // compatibility ideographs
-        | '\u{FF00}'..='\u{FF60}' // forms of full width
-        | '\u{FFE0}'..='\u{FFE6}')
-}
-
-/// Where the first sentence of a paragraph ends, after its full stop, as `first_sentence` reads it; none when no full
-/// stop ends one, and the paragraph is one sentence.
-fn sentence_end(line: &str) -> Option<usize> {
-    // How deep in parentheses; the length of the run of backticks that opened inline code; and, while inside either,
-    // where the text after the outermost opening starts, which is read again as text when that opening is not closed
-    let mut depth = 0usize;
-    let mut code: Option<usize> = None;
-    let mut opened: Option<usize> = None;
-    let mut chars = line.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        let after = i + c.len_utf8();
-        if c == '`' {
-            let mut run = 1;
-            while chars.next_if(|&(_, next)| next == '`').is_some() {
-                run += 1;
-            }
-            // A run of another length inside inline code is code too
-            match code {
-                Some(length) if length == run => {
-                    code = None;
-                    if depth == 0 {
-                        opened = None;
-                    }
-                }
-                None => {
-                    code = Some(run);
-                    if depth == 0 {
-                        opened = Some(i + run);
-                    }
-                }
-                Some(_) => {}
-            }
-            continue;
-        }
-        if code.is_some() {
-            continue;
-        }
-        match c {
-            '（' | '(' => {
-                if depth == 0 {
-                    opened = Some(after);
-                }
-                depth += 1;
-            }
-            '）' | ')' if depth > 0 => {
-                depth -= 1;
-                if depth == 0 {
-                    opened = None;
-                }
-            }
-            '。' if depth == 0 => return Some(after),
-            '.' if depth == 0 && chars.peek().is_none_or(|(_, next)| next.is_whitespace()) => {
-                return Some(after);
-            }
-            _ => {}
-        }
-    }
-    let start = opened?;
-    sentence_end(&line[start..]).map(|end| start + end)
-}
-
-/// One record of `docs/work/` as the index lists it.
-struct Entry<'a> {
-    name: &'a str,
-    tag: &'a str,
-    parent: Option<&'a String>,
-    closed: bool,
-    /// Listed in the index, as open or a part of open work; otherwise in the closed list
-    in_index: bool,
-    /// Specs before work items under the same heading or parent; work items by filing date
-    order: (bool, Option<NaiveDate>),
-    /// The line without its parent, which is added when the entry is not listed under it
-    line: String,
-}
-
-/// The index of `work/` (an OKF index.md): the guides, the open milestones under `# Milestones`, and by area in the
-/// order `areas` declares them the open records and the closed ones that are a part of an open record. A milestone is
-/// listed across the areas: it is the moment the work of every area waits for. The other closed records are in the
-/// closed list (`render_closed`), which the index links to as a guide, so the index grows with the open work and not
-/// with the history.
-pub fn render_work(work: &Work, areas: &[String]) -> String {
-    render_lists(work, areas).0
-}
-
-/// The closed list of `work/` (`closed.md`, a guide): the closed milestones, then by area the closed records that are
-/// no part of an open record, as the index lists records.
-pub fn render_closed(work: &Work, areas: &[String]) -> String {
-    render_lists(work, areas).1
-}
-
-/// The index of `work/` and its closed list.
-///
-/// A record in the same area as its parent is listed under it, indented: the parts of an epic and the work items of a
-/// spec, and in the index the closed ones of an open parent too, so an open spec shows which of its steps are done.
-/// Any other record with a parent is listed on its own with its parent after its line, so each record appears once.
-/// Under a heading or a parent, the specs come first, then the work items by filing date.
-///
-/// Each entry has the OKF form `* [title](target) - description`, with the frontmatter's `description`, and adds after
-/// ` | ` what a reader needs: an open spec its status; an open item its status when nobody has sorted it yet, the date
-/// of the last measurement and the first sentence of its state; an open record `Started.` once its work has started,
-/// and its arrows (what it waits for, and what waits for it); a closed record how it closed (`Done:` or `Dropped:`)
-/// and the first sentence of its resolution. The separator is a symbol so the parts stay apart in any language.
-fn render_lists(work: &Work, areas: &[String]) -> (String, String) {
-    let records = crate::arrows::records(work);
-    let waiting = crate::arrows::waiting(work);
-    let reaching = crate::arrows::reaching(work);
-    // Whether an open record's work has started, then what it waits for and what waits for it, after its line. Started
-    // replaces Ready: an arrow orders the closing, not the start, so a record may start before its earlier records
-    // close, and is listed with what it still waits for. A milestone collects much of the work, so it says how many
-    // records close before it, through the arrows and the parents, instead of naming them: the records its own arrows
-    // name are only part of the work before it. It names the milestones before it, which are few, and each a moment
-    // the reader needs to see
-    let arrows = |name: &str, milestone: bool| -> String {
-        let started = records.get(name).is_some_and(|record| record.started);
-        let started = if started { " | Started." } else { "" };
-        let Some(waiting) = waiting.get(name) else {
-            return started.to_string();
-        };
-        let links = |names: &[String]| -> String {
-            let links: Vec<String> = names
-                .iter()
-                .map(|name| format!("[{}]({name})", link_text(records[name.as_str()].title)))
-                .collect();
-            links.join(", ")
-        };
-        let mut out = started.to_string();
-        if waiting.ready && started.is_empty() {
-            out.push_str(" | Ready.");
-        }
-        if milestone {
-            if let Some(reaching) = reaching.get(name) {
-                let count = match reaching.records {
-                    0 => None,
-                    1 => Some("1 open record".to_string()),
-                    n => Some(format!("{n} open records")),
-                };
-                let milestones =
-                    Some(links(&reaching.milestones)).filter(|links| !links.is_empty());
-                let parts: Vec<String> = [count, milestones].into_iter().flatten().collect();
-                out.push_str(&format!(" | Waits for: {}", parts.join(", ")));
-            }
-        } else if !waiting.before.is_empty() {
-            out.push_str(&format!(" | Waits for: {}", links(&waiting.before)));
-        }
-        if !waiting.until.is_empty() {
-            out.push_str(&format!(" | Until: {}", links(&waiting.until)));
-        }
-        out
-    };
-    let specs = work.specs.iter().map(|(name, (spec, sections))| {
-        let after = if let Some(closed_as) = spec.progress.closed_as() {
-            resolution(closed_as, sections)
-        } else {
-            format!("Status: {}.", spec.status.name())
-        };
-        Entry {
-            name,
-            tag: &spec.tag,
-            parent: spec.parent.as_ref(),
-            closed: !spec.is_open(),
-            in_index: true,
-            order: (false, None),
-            line: format!(
-                "* [{}]({name}) - {} | {after}{}",
-                link_text(&spec.title),
-                spec.description,
-                arrows(name, false)
-            ),
-        }
-    });
-    let items = work.items.iter().map(|(name, (item, sections))| Entry {
-        name,
-        tag: &item.tag,
-        parent: item.parent.as_ref(),
-        closed: !item.is_open(),
-        in_index: true,
-        order: (true, Some(item.filed)),
-        line: format!("{}{}", item_line(name, item, sections), arrows(name, false)),
-    });
-    let mut entries: Vec<Entry> = specs.chain(items).collect();
-    entries.sort_by_key(|entry| (entry.order, entry.name));
-    // The index lists the open records, and the closed ones that are a part of open work; the closed list the rest
-    let parent_open = |parent: Option<&String>| {
-        parent
-            .and_then(|parent| work.specs.get(&format!("{parent}.md")))
-            .is_some_and(|(spec, _)| spec.is_open())
-    };
-    for entry in &mut entries {
-        entry.in_index = !entry.closed || parent_open(entry.parent);
-    }
-    // The parent an entry is listed under, in the same list: any parent in the same area, except a closed one of an
-    // open record, which is listed on its own so the open record stays in the index
-    let nested_in = |entry: &Entry| -> Option<String> {
-        let name = format!("{}.md", entry.parent?);
-        let (spec, _) = work.specs.get(&name)?;
-        (spec.tag == entry.tag && (spec.is_open() || entry.closed)).then_some(name)
-    };
-    let line = |entry: &Entry| match entry.parent {
-        Some(parent) if nested_in(entry).is_none() => {
-            let spec = work
-                .find(parent)
-                .expect("work leaves out a record whose parent it cannot find");
-            format!(
-                "{} | Parent: [{}]({parent}.md)",
-                entry.line,
-                link_text(&spec.title)
-            )
-        }
-        _ => entry.line.clone(),
-    };
-    // Each entry `keep` takes that is not listed under a parent, with its children under it
-    let tree = |keep: &dyn Fn(&Entry) -> bool| {
-        let mut lines = Vec::new();
-        let mut under = vec![];
-        for entry in entries.iter().rev() {
-            if keep(entry) && nested_in(entry).is_none() {
-                under.push((entry, 0));
-            }
-        }
-        while let Some((entry, depth)) = under.pop() {
-            lines.push(format!("{}{}", "  ".repeat(depth), line(entry)));
-            for child in entries.iter().rev() {
-                if nested_in(child).as_deref() == Some(entry.name) {
-                    under.push((child, depth + 1));
-                }
-            }
-        }
-        lines
-    };
-    let section = |heading: &str, mut lines: Vec<String>| {
-        if !lines.is_empty() {
-            lines.splice(0..0, ["".into(), format!("# {heading}"), "".into()]);
-        }
-        lines
-    };
-    // The milestones: across the areas, as the moments the work in every area waits for. The open ones by date, those
-    // with none last
-    let mut milestones: Vec<_> = work.milestones.iter().collect();
-    milestones.sort_by_key(|(name, (milestone, _))| {
-        (milestone.date.is_none(), milestone.date, name.as_str())
-    });
-    let milestone_line = |name: &str, milestone: &Milestone, sections: &Sections| {
-        let after = match milestone.progress.closed_as() {
-            Some(closed_as) => format!(" | {}", resolution(closed_as, sections)),
-            None => {
-                let proposed = if milestone.status == Status::Draft {
-                    " | Status: draft."
-                } else {
-                    ""
-                };
-                let date = milestone
-                    .date
-                    .map(|date| format!(" | Date: {date}."))
-                    .unwrap_or_default();
-                format!("{proposed}{date}{}", arrows(name, true))
-            }
-        };
-        format!(
-            "* [{}]({name}) - {}{after}",
-            link_text(&milestone.title),
-            milestone.description
-        )
-    };
-    let (closed_milestones, open_milestones): (Vec<_>, Vec<_>) = milestones
-        .into_iter()
-        .map(|(name, (milestone, sections))| {
-            (
-                !milestone.is_open(),
-                milestone_line(name, milestone, sections),
-            )
-        })
-        .partition(|(closed, _)| *closed);
-    let lines = |pairs: Vec<(bool, String)>| -> Vec<String> {
-        pairs.into_iter().map(|(_, line)| line).collect()
-    };
-    let mut index = vec![GENERATED.to_string()];
-    index.extend(guide_section(&work.guides));
-    index.extend(left_out_section(&work.problems));
-    index.extend(section("Milestones", lines(open_milestones)));
-    let mut closed = vec![CLOSED_HEAD.to_string(), GENERATED.to_string()];
-    closed.extend(section("Milestones", lines(closed_milestones)));
-    for area in areas {
-        index.extend(section(
-            area,
-            tree(&|entry| entry.tag == area && entry.in_index),
-        ));
-        closed.extend(section(
-            area,
-            tree(&|entry| entry.tag == area && !entry.in_index),
-        ));
-    }
-    (index.join("\n") + "\n", closed.join("\n") + "\n")
-}
-
 /// The documents of a directory left out of its index, each with why, after its guides: what the index lists and counts
-/// below may be short of them (a milestone waits for more records than it says, an alarm is not shown), and a reader of
+/// below may be short of them (an alarm is not shown), and a reader of
 /// the index alone would not know it. Nothing when none is.
 fn left_out_section(problems: &Problems) -> Vec<String> {
     if problems.is_empty() {
@@ -810,7 +140,7 @@ fn left_out_section(problems: &Problems) -> Vec<String> {
     }
     let mut lines = vec!["".into(), "# Left out".into(), "".into()];
     lines.extend(problems.iter().map(|(key, why)| {
-        // `work/<file name>` in docs/work/, the file name in docs/knowledge/
+        // `knowledge/<file name>`: the index of docs/knowledge/ links to the file name
         let name = key.rsplit('/').next().unwrap_or(key);
         format!("* [{name}]({name}) - Not listed or counted below until it is fixed: {why}")
     }));
@@ -831,152 +161,6 @@ fn guide_section(guides: &BTreeMap<String, Guide>) -> Vec<String> {
         )
     }));
     out
-}
-
-/// How a closed record of `docs/work/` ends its index line: how it closed, and the first sentence of its resolution.
-fn resolution(closed_as: ClosedAs, sections: &Sections) -> String {
-    let how = match closed_as {
-        ClosedAs::Done => "Done",
-        ClosedAs::Dropped => "Dropped",
-    };
-    format!("{how}: {}", first_sentence(&sections[CLOSED_SECTION]))
-}
-
-/// The index line of a work item, without its parent.
-fn item_line(name: &str, item: &Item, sections: &Sections) -> String {
-    let start = format!(
-        "* [{}]({name}) - {}",
-        link_text(&item.title),
-        item.description
-    );
-    if let Some(closed_as) = item.progress.closed_as() {
-        return format!("{start} | {}", resolution(closed_as, sections));
-    }
-    let unsorted = if item.status == Status::Draft {
-        " | Status: draft."
-    } else {
-        ""
-    };
-    let stale = item
-        .stale_after
-        .map(|day| format!(" | Re-measure from {day}."))
-        .unwrap_or_default();
-    format!("{start}{unsorted} | {}{stale}", state(item, sections))
-}
-
-/// The last measurement of an open item: its day and the first sentence of its state. Whether stale_after has passed
-/// is not shown: the index would then depend on today's date, and the check that compares it with the generated text
-/// would pass on some days and fail on others.
-fn state(item: &Item, sections: &Sections) -> String {
-    let measured = item.last_verified().at;
-    format!("State ({measured}): {}", first_sentence(&sections["State"]))
-}
-
-/// The headings of the depths in what `rotproof before` prints: what a depth means, not a number, which would read as
-/// the order of the work, while a depth orders only the closing (a record deep in the list may well have started).
-/// The first depth, which nothing open closes before.
-pub const FIRST_DEPTH: &str = "-- nothing open closes before these --";
-/// Every later depth: which records each waits for, its line says.
-pub const LATER_DEPTH: &str = "-- these close after the ones above --";
-/// The records that wait on each other, last.
-pub const IN_A_CYCLE: &str = "-- these wait on each other: rotproof check fails --";
-
-/// What `rotproof before` prints for the record `name` (a file name) of `work`, with the closed records too when
-/// `closed`: a line naming it, with how many open records close before it, how many earlier milestones stop the
-/// listing and how many closed records are listed, then one line per such record as `arrows::before` orders them, each
-/// depth under its heading. Each line has its mark, its file name and title, what a reader needs to choose which to
-/// open (a spec its status, an item its last measurement, a milestone its date and whether `today` is past it, a closed
-/// record how it closed), `Started.` for a waiting record whose work started, and the open records it waits for, by
-/// name. `None` when `name` is no record that passes.
-pub fn render_before(work: &Work, name: &str, closed: bool, today: NaiveDate) -> Option<String> {
-    let listed = crate::arrows::before(work, name, closed)?;
-    let records = crate::arrows::records(work);
-    let plural = |n: usize, what: &str| match n {
-        1 => format!("1 {what}"),
-        n => format!("{n} {what}s"),
-    };
-    let count = |marks: &[Mark]| {
-        listed
-            .iter()
-            .filter(|earliest| marks.contains(&earliest.mark))
-            .count()
-    };
-    let counts: Vec<String> = [
-        (
-            count(&[Mark::Started, Mark::Ready, Mark::Waits]),
-            "open record",
-        ),
-        (count(&[Mark::Milestone]), "milestone"),
-        (count(&[Mark::Done, Mark::Dropped]), "closed record"),
-    ]
-    .into_iter()
-    .filter(|(n, _)| *n > 0)
-    .map(|(n, what)| plural(n, what))
-    .collect();
-    let counts = match (counts.is_empty(), closed) {
-        (true, false) => "nothing open closes before it".to_string(),
-        (true, true) => "nothing closes before it".to_string(),
-        (false, _) => counts.join(", "),
-    };
-    let mut out = vec![format!("{name}: {} | {counts}", records[name].title)];
-    if !listed.is_empty() {
-        out.push(String::new());
-    }
-    for (i, earliest) in listed.iter().enumerate() {
-        if i == 0 || listed[i - 1].depth != earliest.depth {
-            let heading = match earliest.depth {
-                0 => FIRST_DEPTH,
-                usize::MAX => IN_A_CYCLE,
-                _ => LATER_DEPTH,
-            };
-            out.push(heading.to_string());
-        }
-        let name = earliest.name.as_str();
-        let mark = match earliest.mark {
-            Mark::Started => "started",
-            Mark::Ready => "ready",
-            Mark::Waits => "waits",
-            Mark::Milestone => "milestone",
-            Mark::Done => "done",
-            Mark::Dropped => "dropped",
-        };
-        let sections = if let Some((_, sections)) = work.items.get(name) {
-            sections
-        } else if let Some((_, sections)) = work.specs.get(name) {
-            sections
-        } else {
-            &work.milestones[name].1
-        };
-        let detail = if let Some(closed_as) = records[name].closed_as {
-            Some(resolution(closed_as, sections))
-        } else if let Some((item, _)) = work.items.get(name) {
-            Some(state(item, sections))
-        } else if let Some((spec, _)) = work.specs.get(name) {
-            Some(format!("Status: {}.", spec.status.name()))
-        } else {
-            // The output of a command, not a file `rotproof check` compares, so it may say what today makes of the date
-            work.milestones[name].0.date.map(|date| {
-                if date < today {
-                    format!("Date: {date}. Past its date.")
-                } else {
-                    format!("Date: {date}.")
-                }
-            })
-        };
-        let started =
-            (earliest.mark == Mark::Waits && earliest.started).then(|| "Started.".to_string());
-        let waits = &earliest.waits_for;
-        let mut line = format!("{mark:<9} {name} - {}", records[name].title);
-        for part in detail
-            .into_iter()
-            .chain(started)
-            .chain((!waits.is_empty()).then(|| format!("Waits for: {}", waits.join(", "))))
-        {
-            line.push_str(&format!(" | {part}"));
-        }
-        out.push(line);
-    }
-    Some(out.join("\n") + "\n")
 }
 
 /// The knowledge index: the guides, the documents left out, the alarms that hold under `# When something happens`, the
@@ -1087,7 +271,7 @@ pub fn render_root() -> String {
     out.join("\n") + "\n"
 }
 
-/// Every tag the work items, specs, milestones and knowledge documents among `docs` use. A document that cannot be
+/// Every tag the knowledge documents among `docs` use. A document that cannot be
 /// read is left to `rotproof check`.
 pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
     let mut tags = BTreeSet::new();
@@ -1098,7 +282,7 @@ pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
         let kind = meta
             .get(&Yaml::String("type".into()))
             .and_then(Yaml::as_str);
-        if !matches!(kind, Some("Work Item" | "Spec" | "Milestone" | "Knowledge")) {
+        if kind != Some("Knowledge") {
             continue;
         }
         match meta.get(&Yaml::String("tags".into())) {
@@ -1114,331 +298,10 @@ pub fn record_tags(docs: &Docs) -> BTreeSet<String> {
     tags
 }
 
-/// The latest day it is anywhere at `now`, the day in UTC+14. A day of the records is checked against it, not against
-/// the day of `now` itself: before 09:00 in Tokyo, the day written there is still to come in UTC, where CI runs.
-pub fn latest_day(now: Time) -> NaiveDate {
-    (now.naive_utc() + chrono::Duration::hours(14)).date()
-}
-
-/// The open items past `stale_after`. As in OKF, an item is stale on and after that day: once the day has come
-/// anywhere ([`latest_day`]), as the days of the records are checked.
-pub fn stale(items: &BTreeMap<String, (Item, Sections)>, now: Time) -> Vec<String> {
-    let today = latest_day(now);
-    items
-        .iter()
-        .filter(|(_, (item, _))| item.is_open() && item.stale_after.is_some_and(|day| today >= day))
-        .map(|(name, _)| name.clone())
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use chrono::{FixedOffset, TimeZone};
 
     use super::*;
-
-    const GOOD: &str = "---
-type: Work Item
-title: Some problem
-description: Something is wrong.
-tags: [operations]
-status: draft
-filed: 2026-09-27
-verified: {by: human:someone, at: 2026-09-28T08:00:00+09:00}
----
-
-# Trigger
-
-The next deploy
-
-# State
-
-Not yet. Measured by hand.
-
-# Details
-
-[somewhere](/log.md)
-";
-
-    fn parsed(docs: &[(&str, String)]) -> Work {
-        let docs: Docs = docs
-            .iter()
-            .map(|(name, text)| (name.to_string(), text.clone()))
-            .collect();
-        let parsed = work(&docs, &areas());
-        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
-        parsed
-    }
-
-    #[test]
-    fn first_sentence_ends_at_a_full_stop_in_any_language() {
-        let cases = [
-            ("Not yet. Measured by hand.", "Not yet."),
-            (
-                "発火済み・未着手。手元の Rust は古い。",
-                "発火済み・未着手。",
-            ),
-            ("**Bold first.** Then more.", "**Bold first.**"),
-            ("Version 1.75 is old. Update it.", "Version 1.75 is old."),
-            ("Ends at the end.", "Ends at the end."),
-            ("No full stop", "No full stop"),
-            ("  Padded.  \nsecond line.", "Padded."),
-            ("**unclosed bold. Then", "**unclosed bold."),
-            ("", ""),
-        ];
-        for (text, expected) in cases {
-            assert_eq!(first_sentence(text), expected, "{text:?}");
-        }
-    }
-
-    #[test]
-    fn first_sentence_does_not_end_inside_brackets() {
-        let pr = "実装した、push 済み・未 merge（2026-10-24、secta113/rotproof の PR #1。CI は `3be3976` で全ジョブ pass）。";
-        let cases = [
-            // A full stop inside parentheses, full-width or ASCII, ends a sentence of the aside, not of the line
-            (format!("{pr}Rotproof のブランチ。"), pr),
-            (
-                "Done (see PR #1. CI passed). Then more.".into(),
-                "Done (see PR #1. CI passed).",
-            ),
-            // Nested, and either kind closing either
-            (
-                "済んだ（基準は「a」（ユーザー。全文）。b）。次。".into(),
-                "済んだ（基準は「a」（ユーザー。全文）。b）。",
-            ),
-            ("A (b (c. d) e. f) g. Next.".into(), "A (b (c. d) e. f) g."),
-            ("A（b (c。d）e)。Next。".into(), "A（b (c。d）e)。"),
-            // Inside inline code, with any run of backticks; a parenthesis in code is code
-            (
-                "Ran `a. b` and passed. Then.".into(),
-                "Ran `a. b` and passed.",
-            ),
-            ("`x。y` を足した。次。".into(), "`x。y` を足した。"),
-            ("Grep `(foo` found 3. Next.".into(), "Grep `(foo` found 3."),
-            (
-                "Wrote ``a ` b. c`` here. Next.".into(),
-                "Wrote ``a ` b. c`` here.",
-            ),
-            // Left open on the line, a bracket is read as text: the sentence does not run to the end of the line
-            ("A (unclosed. Next sentence. Third".into(), "A (unclosed."),
-            ("前置き（閉じない。次の文。".into(), "前置き（閉じない。"),
-            ("Ran `a. b and more. Next".into(), "Ran `a."),
-            ("A (b. c) d (e. f".into(), "A (b. c) d (e."),
-            ("A (x (b. c) d. e".into(), "A (x (b. c) d."),
-            ("A (no full stop".into(), "A (no full stop"),
-            // A closing parenthesis with no opening one is text
-            ("1) first. 2) second.".into(), "1) first."),
-            // No full stop outside the brackets: the line is one sentence
-            ("Text (a. b) more".into(), "Text (a. b) more"),
-        ];
-        for (text, expected) in cases {
-            assert_eq!(first_sentence(&text), expected, "{text:?}");
-        }
-    }
-
-    #[test]
-    fn first_sentence_reads_a_wrapped_paragraph_as_one() {
-        let cases = [
-            // The first sentence wrapped before its full stop
-            (
-                "Done from the tag `v1.0.0` (2026-01-02, run\n12345 passed). Then more.",
-                "Done from the tag `v1.0.0` (2026-01-02, run 12345 passed).",
-            ),
-            (
-                "It was wrapped\nonto two lines. Next.",
-                "It was wrapped onto two lines.",
-            ),
-            // Wrapped inside parentheses, and inside inline code
-            (
-                "Done (see the\nrun. It passed). Then.",
-                "Done (see the run. It passed).",
-            ),
-            ("Ran `a.\nb` and passed. Then.", "Ran `a. b` and passed."),
-            // Bold wrapped; and a sentence that ends in the second line of a paragraph of three
-            ("**Bold\nfirst.** Then more.", "**Bold first.**"),
-            ("One\ntwo. Three\nfour.", "One two."),
-            // A full stop at the end of a line ends the sentence, as before
-            ("First.\nSecond line.", "First."),
-            // Line endings and the padding of each line are not text
-            ("  One\r\n  two.\r\nThree.", "One two."),
-            ("One\r\ntwo", "One two"),
-            // The paragraph ends at a blank line: with no full stop it is shown whole, and not the next paragraph
-            (
-                "No full stop\nhere\n\nSecond paragraph. More.",
-                "No full stop here",
-            ),
-            ("Padded  \n\n  \nnext.", "Padded"),
-            // Or where another block starts: a heading, a fence, a quote, a table row, a list item
-            ("Before the list\n- one. two\n- three.", "Before the list"),
-            ("- one\n  wrapped. Two\n- three.", "- one wrapped."),
-            ("- one\n- two.", "- one"),
-            ("1) one\n2) two.", "1) one"),
-            ("Before a heading\n## Sub\nText.", "Before a heading"),
-            ("Before a fence\n```\ncode.\n```", "Before a fence"),
-            ("Before a quote\n> quoted.", "Before a quote"),
-            ("| a | b |\n|---|---|\n| 1 | 2 |", "| a | b |"),
-            // A line that only starts with such a character is text
-            (
-                "Fixed\n#123 and\n1.5 times\n**bold** too. Next.",
-                "Fixed #123 and 1.5 times **bold** too.",
-            ),
-            ("A\n-not a bullet. B", "A -not a bullet."),
-            // Japanese is joined with no space between two lines of it, and with one next to anything else
-            (
-                "実装した、push 済み・未\nmerge。次。",
-                "実装した、push 済み・未 merge。",
-            ),
-            ("実装した。\n次。", "実装した。"),
-            (
-                "実装した、手元の\n環境で確かめた。次。",
-                "実装した、手元の環境で確かめた。",
-            ),
-            (
-                "実装した（PR #1。\nCI は通った）。次。",
-                "実装した（PR #1。 CI は通った）。",
-            ),
-            (
-                "実装した（確認。\n通った）。次。",
-                "実装した（確認。通った）。",
-            ),
-            ("Rust の\nビルド。", "Rust のビルド。"),
-            ("Rust\nのビルド。", "Rust のビルド。"),
-            ("ビルドは\nRust で。", "ビルドは Rust で。"),
-            ("全角（\n括弧）。", "全角（括弧）。"),
-        ];
-        for (text, expected) in cases {
-            assert_eq!(first_sentence(text), expected, "{text:?}");
-        }
-    }
-
-    #[test]
-    fn an_open_item_shows_its_state() {
-        // Measured at 08:00 in +09:00, which is the day before in UTC: the date is the one where it was measured
-        let index = render_work(&parsed(&[("good.md", GOOD.into())]), &areas());
-        // Nobody has sorted it yet, and the line says so
-        let line = "* [Some problem](good.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet.";
-        assert_eq!(index, format!("{GENERATED}\n\n# operations\n\n{line}\n"));
-        // Sorted, it is listed under its spec without a status
-        let (spec_name, spec) = spec_doc("big", "operations", None, false);
-        let sorted = GOOD.replace("status: draft", "status: stable\nparent: big");
-        let index = render_work(
-            &parsed(&[("good.md", sorted), (&spec_name, spec)]),
-            &areas(),
-        );
-        let line =
-            "  * [Some problem](good.md) - Something is wrong. | State (2026-09-28): Not yet.";
-        assert_eq!(
-            index,
-            format!(
-                "{GENERATED}\n\n# operations\n\n* [big](big.md) - D. | Status: stable.\n{line}\n"
-            )
-        );
-    }
-
-    #[test]
-    fn a_title_with_brackets_stays_the_text_of_its_own_entry() {
-        let title = r#"title: 'Evil ](fake.md) [hacked \ end'"#;
-        let item = GOOD.replace("title: Some problem", title);
-        let index = render_work(&parsed(&[("x.md", item)]), &areas());
-        let line = index.lines().find(|l| l.starts_with("* ")).unwrap();
-        assert!(
-            line.starts_with(r"* [Evil \](fake.md) \[hacked \\ end](x.md) - "),
-            "{line}"
-        );
-        // Read back as a reader reads it, the entry is one link to its own document, with the title as its text
-        let found = crate::markdown::links(line);
-        assert_eq!(
-            found,
-            [(
-                r"Evil ](fake.md) [hacked \ end".to_string(),
-                "x.md".to_string()
-            )]
-        );
-    }
-
-    #[test]
-    fn the_stale_date_is_listed_but_not_judged() {
-        // The index shows the stale_after date; whether it has passed is answered by `stale`, given the current time
-        // (OKF: stale on and after stale_after), once the day has come anywhere: 2027-03-31 comes in UTC+14 at 19:00
-        // in Tokyo on the day before
-        let fresh = GOOD.replace("filed:", "stale_after: 2027-03-31\nfiled:");
-        let parsed = parsed(&[("fresh.md", fresh), ("plain.md", GOOD.into())]);
-        assert!(render_work(&parsed, &areas()).contains("| Re-measure from 2027-03-31."));
-        let cutoff = FixedOffset::east_opt(9 * 3600)
-            .unwrap()
-            .with_ymd_and_hms(2027, 3, 30, 19, 0, 0)
-            .unwrap();
-        assert_eq!(
-            stale(&parsed.items, cutoff - chrono::Duration::seconds(1)),
-            Vec::<String>::new()
-        );
-        assert_eq!(stale(&parsed.items, cutoff), vec!["fresh.md"]);
-    }
-
-    #[test]
-    fn a_day_or_a_time_that_has_not_come_is_named() {
-        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
-        let at = |d, h, m, s| tokyo.with_ymd_and_hms(2026, 9, d, h, m, s).unwrap();
-        // Each stamp of a list is read, and a closed item as well as an open one
-        let listed = GOOD.replace(
-            "verified: {by: human:someone, at: 2026-09-28T08:00:00+09:00}",
-            "verified:\n  - {by: human:a, at: 2026-09-27T08:00:00+09:00}\n  - {by: human:b, at: 2026-09-28T08:00:00+09:00}",
-        );
-        let closed = GOOD
-            .replace("status: draft", "status: deprecated\nprogress: done")
-            .replace(
-                "---\n\n# Trigger",
-                "---\n\n# Resolution\n\nDone.\n\n# Trigger",
-            );
-        let parsed = parsed(&[("listed.md", listed), ("closed.md", closed)]);
-        // Only the day of verified is compared: a time a few minutes ahead on a day that has come passes
-        assert_eq!(parsed.not_come(at(28, 7, 59, 59)), Vec::<String>::new());
-        // As filed is, with the latest day anywhere: 2026-09-28 comes in UTC+14 at 19:00 in Tokyo on the 27th
-        assert_eq!(parsed.not_come(at(27, 19, 0, 0)), Vec::<String>::new());
-        let early = parsed.not_come(at(27, 18, 59, 59));
-        assert_eq!(early.len(), 2, "{early:?}");
-        assert!(
-            early.iter().all(|found| found.contains(
-                "verified on 2026-09-28, a day that has not come anywhere yet (now 2026-09-27T18:59:59+09:00)"
-            )),
-            "{early:?}"
-        );
-        // The day filed is compared with the latest day anywhere: 2026-09-27 has come in UTC+14 once it is 10:00 UTC
-        // on the day before, 19:00 in Tokyo
-        let filed = |now| {
-            parsed
-                .not_come(now)
-                .into_iter()
-                .filter(|found| found.contains(": filed "))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(filed(at(26, 19, 0, 0)), Vec::<String>::new());
-        let before = filed(at(26, 18, 59, 59));
-        assert_eq!(before.len(), 2, "{before:?}");
-        assert!(
-            before[0].starts_with(
-                "work/closed.md: filed 2026-09-27, a day that has not come anywhere yet (now 2026-09-26T18:59:59+09:00)"
-            ),
-            "{before:?}"
-        );
-    }
-
-    #[test]
-    fn the_latest_day_is_the_day_in_utc_plus_14() {
-        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
-        // 08:00 in Tokyo is 23:00 of the day before in UTC, and already the same day in UTC+14
-        let morning = tokyo.with_ymd_and_hms(2026, 10, 28, 8, 0, 0).unwrap();
-        assert_eq!(
-            latest_day(morning),
-            NaiveDate::from_ymd_opt(2026, 10, 28).unwrap()
-        );
-        let evening = tokyo.with_ymd_and_hms(2026, 10, 28, 19, 0, 0).unwrap();
-        assert_eq!(
-            latest_day(evening),
-            NaiveDate::from_ymd_opt(2026, 10, 29).unwrap()
-        );
-    }
-
     #[test]
     fn the_alarms_come_first_with_what_is_seen_and_what_to_search_for() {
         let doc = |title: &str, tag: &str, matches: &str, body: &str| {
@@ -1512,12 +375,6 @@ Not yet. Measured by hand.
             ),
             "{index}"
         );
-        let docs: Docs = [("x.md".to_string(), "# no frontmatter\n".to_string())].into();
-        let index = render_work(&work(&docs, &areas()), &areas());
-        assert!(
-            index.contains("\n# Left out\n\n* [x.md](x.md) - Not listed or counted below until it is fixed: no "),
-            "{index}"
-        );
         // Nothing left out, no heading
         let read = knowledge(&Docs::new(), &areas());
         let index = render_knowledge(&read.documents, &read.guides, &read.problems, &areas());
@@ -1551,8 +408,8 @@ Not yet. Measured by hand.
                 .collect::<Vec<_>>(),
             [
                 "# Guides",
-                "* [Knowledge rules](rules.md) - What goes in docs/knowledge/, how each document and alarm is written, \
-                 and how the log names every edit. The format is OKF 0.2; rotproof check checks it.",
+                "* [Knowledge rules](rules.md) - What goes in docs/knowledge/ and how each document and alarm is \
+                 written. The format is OKF 0.2; rotproof check checks it.",
                 "# operations",
                 "* [Ops](ops.md) - D.",
                 "# billing",
@@ -1563,37 +420,18 @@ Not yet. Measured by hand.
         );
     }
 
-    #[test]
-    fn a_closed_item_leaves_the_index_for_the_closed_list() {
-        let closed = crate::schema::closed_record(GOOD, "Fixed.");
-        let work = parsed(&[("fixed.md", closed)]);
-        let index = render_work(&work, &areas());
-        assert!(
-            !index.contains("fixed.md") && !index.contains("# operations"),
-            "a closed item is still in the index: {index}"
-        );
-        let list = render_closed(&work, &areas());
-        assert!(
-            list.starts_with(CLOSED_HEAD)
-                && list.contains(GENERATED)
-                && list.contains("# operations\n\n* [")
-                && list.contains("(fixed.md) - ")
-                && list.contains("| Done: Fixed."),
-            "{list}"
-        );
-    }
-
     /// The areas the tests declare: not in alphabetical order, so an index sorted by name would differ
     fn areas() -> Vec<String> {
         ["operations", "billing", "unused"].map(String::from).into()
     }
 
     #[test]
-    fn the_tags_of_the_records_are_collected_and_others_are_not() {
+    fn the_tags_of_the_knowledge_documents_are_collected_and_others_are_not() {
         let docs: Docs = [
-            ("a.md", "---\ntype: Work Item\ntags: [billing, ops]\n---\n"),
-            ("b.md", "---\ntype: Spec\ntags: records\n---\n"),
+            ("a.md", "---\ntype: Knowledge\ntags: [billing, ops]\n---\n"),
+            ("b.md", "---\ntype: Knowledge\ntags: records\n---\n"),
             ("rules.md", "---\ntype: Guide\ntags: [guides]\n---\n"),
+            ("old.md", "---\ntype: Work Item\ntags: [work]\n---\n"),
             ("broken.md", "no frontmatter"),
         ]
         .map(|(name, text)| (name.to_string(), text.to_string()))
@@ -1605,710 +443,53 @@ Not yet. Measured by hand.
     }
 
     #[test]
+    fn a_title_with_brackets_stays_the_text_of_its_own_entry() {
+        let doc = "---\ntype: Knowledge\ntitle: 'Evil ](fake.md) [hacked \\ end'\ndescription: D.\ntags: [billing]\n\
+                   status: stable\n---\n\n# Why\n\nW.\n";
+        let read = knowledge(&[("x.md".to_string(), doc.to_string())].into(), &areas());
+        let index = render_knowledge(&read.documents, &read.guides, &read.problems, &areas());
+        let line = index.lines().find(|l| l.starts_with("* ")).unwrap();
+        assert!(
+            line.starts_with(r"* [Evil \](fake.md) \[hacked \\ end](x.md) - "),
+            "{line}"
+        );
+        // Read back as a reader reads it, the entry is one link to its own document, with the title as its text
+        let found = crate::markdown::links(line);
+        assert_eq!(
+            found,
+            [(
+                r"Evil ](fake.md) [hacked \ end".to_string(),
+                "x.md".to_string()
+            )]
+        );
+    }
+
+    #[test]
     fn every_generated_file_is_expected_with_the_rules_listed() {
         let none = Docs::new();
-        let (files, problems) = expected(&none, &none, &areas());
+        let (files, problems) = expected(&none, &areas());
         let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
         assert_eq!(
             paths,
             [
-                "docs/work/rules.md",
                 "docs/index.md",
-                "docs/work/index.md",
-                "docs/work/closed.md",
                 "docs/knowledge/rules.md",
                 "docs/knowledge/index.md",
             ]
         );
         assert!(problems.is_empty(), "{problems:?}");
-        // The rules, and the closed list, are listed on the run that writes them
+        // The rules are listed on the run that writes them
         let index = |path: &str| &files.iter().find(|(p, _)| p == path).unwrap().1;
-        for (path, guide) in [
-            ("docs/work/index.md", "](rules.md) - "),
-            ("docs/work/index.md", "* [Closed records](closed.md) - "),
-            ("docs/knowledge/index.md", "](rules.md) - "),
-        ] {
-            assert!(index(path).contains(guide), "{path}: {guide}");
-        }
-        // The closed list is a guide that passes, with nothing closed yet
-        assert!(matches!(
-            crate::schema::work_doc(index("docs/work/closed.md")),
-            Ok(crate::schema::WorkDoc::Guide(_))
-        ));
+        assert!(index("docs/knowledge/index.md").contains("](rules.md) - "));
+        // The root index links to what Rotproof keeps, and to no docs/work/
+        let root = index("docs/index.md");
+        assert!(
+            root.contains("](knowledge/) - ") && root.contains("](log.md) - "),
+            "{root}"
+        );
+        assert!(!root.contains("work/"), "{root}");
         assert!(is_document("a.md", false));
         assert!(!is_document("index.md", false) && !is_document("log.md", false));
         assert!(!is_document("a.md", true) && !is_document("a.txt", false));
-    }
-
-    /// The headings and the targets of an index, in order.
-    fn outline(index: &str) -> Vec<&str> {
-        index
-            .lines()
-            .filter(|line| line.trim_start().starts_with(['#', '*']))
-            .map(|line| line.split(')').next().unwrap())
-            .collect()
-    }
-
-    #[test]
-    fn items_are_grouped_by_area_in_the_declared_order_and_by_filing_date() {
-        let later = GOOD.replace("filed: 2026-09-27", "filed: 2026-09-28");
-        let other = GOOD.replace("tags: [operations]", "tags: [billing]");
-        let parsed = parsed(&[("a.md", later), ("b.md", GOOD.into()), ("c.md", other)]);
-        let index = render_work(&parsed, &areas());
-        // A declared area that no record uses has no heading
-        assert_eq!(
-            outline(&index),
-            [
-                "# operations",
-                "* [Some problem](b.md",
-                "* [Some problem](a.md",
-                "# billing",
-                "* [Some problem](c.md",
-            ]
-        );
-    }
-
-    #[test]
-    fn a_record_in_an_undeclared_area_is_left_out() {
-        let docs: Docs = [(
-            "x.md".to_string(),
-            GOOD.replace("tags: [operations]", "tags: [Operations]"),
-        )]
-        .into();
-        let parsed = work(&docs, &areas());
-        assert!(parsed.items.is_empty());
-        assert!(
-            parsed.problems["work/x.md"].contains("\"Operations\" is not an area declared")
-                && parsed.problems["work/x.md"].contains("operations, billing, unused"),
-            "{:?}",
-            parsed.problems
-        );
-        let spec =
-            "---\ntype: Spec\ntitle: S\ndescription: D.\ntags: [nowhere]\nstatus: stable\n---\n";
-        let Work {
-            specs: passed,
-            problems,
-            ..
-        } = work(&[("s.md".to_string(), spec.to_string())].into(), &[]);
-        assert!(passed.is_empty());
-        assert!(
-            problems["work/s.md"].contains("it declares none"),
-            "{problems:?}"
-        );
-    }
-
-    #[test]
-    fn specs_are_grouped_by_area_in_the_declared_order() {
-        let spec = |tag: &str| {
-            format!(
-                "---\ntype: Spec\ntitle: S\ndescription: D.\ntags: [{tag}]\nstatus: draft\n---\n"
-            )
-        };
-        let docs: Docs = [
-            ("a.md".to_string(), spec("billing")),
-            ("b.md".to_string(), spec("operations")),
-            ("c.md".to_string(), spec("billing")),
-        ]
-        .into();
-        let all = work(&docs, &areas());
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-        assert_eq!(
-            outline(&render_work(&all, &areas())),
-            [
-                "# operations",
-                "* [S](b.md",
-                "# billing",
-                "* [S](a.md",
-                "* [S](c.md"
-            ]
-        );
-    }
-
-    #[test]
-    fn specs_and_work_items_share_one_index_specs_first() {
-        let docs: Docs = [
-            ("item.md".to_string(), GOOD.to_string()),
-            spec_doc("spec", "operations", None, false),
-            (
-                "old-item.md".to_string(),
-                crate::schema::closed_record(GOOD, "Fixed."),
-            ),
-            spec_doc("old-spec", "operations", None, true),
-        ]
-        .into();
-        let all = work_with_rules(&docs, &areas());
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-        assert_eq!(
-            outline(&render_work(&all, &areas())),
-            [
-                "# Guides",
-                "* [Closed records](closed.md",
-                "* [Work rules](rules.md",
-                "# operations",
-                "* [spec](spec.md",
-                "* [Some problem](item.md",
-            ]
-        );
-        assert_eq!(
-            outline(&render_closed(&all, &areas())),
-            [
-                "# operations",
-                "* [old-spec](old-spec.md",
-                "* [Some problem](old-item.md",
-            ]
-        );
-    }
-
-    /// A spec titled after its slug, open or closed.
-    fn spec_doc(slug: &str, tag: &str, parent: Option<&str>, closed: bool) -> (String, String) {
-        let parent = parent.map(|p| format!("parent: {p}\n")).unwrap_or_default();
-        let (status, resolution) = if closed {
-            (
-                "deprecated\nprogress: done",
-                "\n# Resolution\n\nImplemented.\n",
-            )
-        } else {
-            ("stable", "")
-        };
-        (
-            format!("{slug}.md"),
-            format!(
-                "---\ntype: Spec\ntitle: {slug}\ndescription: D.\ntags: [{tag}]\nstatus: {status}\n{parent}---\n{resolution}"
-            ),
-        )
-    }
-
-    /// The record closed as dropped instead of done.
-    fn dropped((name, text): (String, String)) -> (String, String) {
-        assert!(text.contains("progress: done"), "{text}");
-        (name, text.replace("progress: done", "progress: dropped"))
-    }
-
-    /// `docs/work/` holding the open and the closed specs together.
-    fn spec_docs(open: Vec<(String, String)>, closed: Vec<(String, String)>) -> Docs {
-        open.into_iter().chain(closed).collect()
-    }
-
-    #[test]
-    fn a_part_is_listed_under_its_epic_or_names_it() {
-        let all = work(
-            &spec_docs(
-                vec![
-                    spec_doc("big", "operations", None, false),
-                    // Same area, same index: under the epic
-                    spec_doc("part-b", "operations", Some("big"), false),
-                    spec_doc("part-a", "operations", Some("big"), false),
-                    // Another area: under its own area, naming the epic
-                    spec_doc("part-c", "billing", Some("big"), false),
-                    spec_doc("alone", "operations", None, false),
-                ],
-                vec![
-                    // Dropped part of an open epic: in the index, under the epic
-                    dropped(spec_doc("part-d", "operations", Some("big"), true)),
-                    // A closed epic and its closed part: in the closed list, the part under its epic
-                    spec_doc("old", "operations", None, true),
-                    spec_doc("old-part", "operations", Some("old"), true),
-                ],
-            ),
-            &areas(),
-        );
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-        assert_eq!(all.closed_before_its_children(), Vec::<String>::new());
-        let listed = |text: String| -> Vec<String> {
-            text.lines()
-                .filter(|l| l.contains("](") || l.starts_with('#'))
-                .map(String::from)
-                .collect()
-        };
-        assert_eq!(
-            listed(render_work(&all, &areas())),
-            [
-                "# operations",
-                "* [alone](alone.md) - D. | Status: stable.",
-                "* [big](big.md) - D. | Status: stable.",
-                "  * [part-a](part-a.md) - D. | Status: stable.",
-                "  * [part-b](part-b.md) - D. | Status: stable.",
-                "  * [part-d](part-d.md) - D. | Dropped: Implemented.",
-                "# billing",
-                "* [part-c](part-c.md) - D. | Status: stable. | Parent: [big](big.md)",
-            ]
-        );
-        assert_eq!(
-            listed(render_closed(&all, &areas())),
-            [
-                "# operations",
-                "* [old](old.md) - D. | Done: Implemented.",
-                "  * [old-part](old-part.md) - D. | Done: Implemented.",
-            ]
-        );
-    }
-
-    #[test]
-    fn an_epic_closes_after_its_parts() {
-        let all = work(
-            &spec_docs(
-                vec![spec_doc("part", "operations", Some("big"), false)],
-                vec![spec_doc("big", "operations", None, true)],
-            ),
-            &areas(),
-        );
-        // The open part stays listed, naming its closed epic, and the check names the order
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-        assert!(render_work(&all, &areas()).contains("| Parent: [big](big.md)"));
-        let found = all.closed_before_its_children();
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].starts_with("work/part.md: its parent big is closed"));
-    }
-
-    /// Whether a record is closed is its progress, not its status: a done spec that still describes how things are
-    /// stays stable, and is closed all the same.
-    #[test]
-    fn a_done_spec_that_stays_current_is_closed() {
-        let current = |(name, text): (String, String)| {
-            (name, text.replace("status: deprecated", "status: stable"))
-        };
-        let (next, text) = spec_doc("next", "operations", None, false);
-        let next = (
-            next,
-            text.replace("status: stable", "status: stable\nafter: [big]"),
-        );
-        let all = work(
-            &spec_docs(
-                vec![spec_doc("part", "operations", Some("big"), false), next],
-                vec![current(spec_doc("big", "operations", None, true))],
-            ),
-            &areas(),
-        );
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-        let found = all.closed_before_its_children();
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].starts_with("work/part.md: its parent big is closed"));
-        let index = render_work(&all, &areas());
-        let list = render_closed(&all, &areas());
-        assert!(
-            list.contains("# operations\n\n* [big](big.md) - D. | Done: Implemented.")
-                && !index.contains("(big.md) - "),
-            "{list}"
-        );
-        assert!(
-            index.contains("* [next](next.md) - D. | Status: stable. | Ready."),
-            "{index}"
-        );
-    }
-
-    #[test]
-    fn an_undefined_epic_leaves_the_part_out() {
-        let broken = (
-            "broken.md".to_string(),
-            "---\ntype: Spec\ntitle: B\n---\n".to_string(),
-        );
-        let cases = [
-            (
-                "no such spec",
-                spec_doc("p", "operations", Some("nowhere"), false),
-                "names no spec",
-            ),
-            // A work item has a slug too, but it is not a spec
-            (
-                "a work item",
-                spec_doc("p", "operations", Some("some-item"), false),
-                "names no spec",
-            ),
-            (
-                "itself",
-                spec_doc("p", "operations", Some("p"), false),
-                "names the record itself",
-            ),
-            (
-                "a part",
-                spec_doc("p", "operations", Some("mid"), false),
-                "one level deep",
-            ),
-            (
-                "a spec that fails",
-                spec_doc("p", "operations", Some("broken"), false),
-                "left out of the index",
-            ),
-            // The rules sit among the specs, but are a guide
-            (
-                "a guide",
-                spec_doc("p", "operations", Some("rules"), false),
-                "names no spec",
-            ),
-        ];
-        for (name, part, said) in cases {
-            let all = work(
-                &spec_docs(
-                    vec![
-                        part,
-                        spec_doc("top", "operations", None, false),
-                        spec_doc("mid", "operations", Some("top"), false),
-                        broken.clone(),
-                        ("some-item.md".to_string(), GOOD.to_string()),
-                        ("rules.md".to_string(), WORK_RULES.to_string()),
-                    ],
-                    vec![],
-                ),
-                &areas(),
-            );
-            assert!(!all.specs.contains_key("p.md"), "{name}: still listed");
-            let why = all
-                .problems
-                .get("work/p.md")
-                .map(String::as_str)
-                .unwrap_or("");
-            assert!(
-                why.starts_with("parent: ") && why.contains(said),
-                "{name}: {why:?}"
-            );
-        }
-    }
-
-    /// A work item titled after its slug: sorted into `parent`, a draft without one, or closed.
-    fn item_doc(slug: &str, tag: &str, parent: Option<&str>, closed: bool) -> (String, String) {
-        let text = GOOD
-            .replace("title: Some problem", &format!("title: {slug}"))
-            .replace("tags: [operations]", &format!("tags: [{tag}]"));
-        let text = match parent {
-            Some(parent) => text.replace(
-                "status: draft",
-                &format!("status: stable\nparent: {parent}"),
-            ),
-            None => text,
-        };
-        let text = if closed {
-            crate::schema::closed_record(&text, "Fixed.")
-        } else {
-            text
-        };
-        (format!("{slug}.md"), text)
-    }
-
-    #[test]
-    fn a_work_item_is_listed_under_its_spec_or_names_it() {
-        let all = work(
-            &spec_docs(
-                vec![
-                    spec_doc("big", "operations", None, false),
-                    spec_doc("part", "operations", Some("big"), false),
-                    // Under the epic, after its parts
-                    item_doc("step-of-big", "operations", Some("big"), false),
-                    // Under the part, one level deeper
-                    item_doc("step-of-part", "operations", Some("part"), false),
-                    // Another area: under its own area, naming the spec
-                    item_doc("billing-step", "billing", Some("part"), false),
-                    // Nobody has sorted it yet: in its area, after the specs
-                    item_doc("unsorted", "operations", None, false),
-                ],
-                vec![
-                    // Done while the spec is open: in the index, under the spec
-                    item_doc("done-step", "operations", Some("big"), true),
-                    // Done while the spec is open, in another area: in the index, in its area, naming the spec
-                    item_doc("billing-done", "billing", Some("big"), true),
-                    // A closed spec and its closed step: in the closed list
-                    spec_doc("old", "operations", None, true),
-                    item_doc("old-step", "operations", Some("old"), true),
-                ],
-            ),
-            &areas(),
-        );
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-        assert_eq!(all.closed_before_its_children(), Vec::<String>::new());
-        assert_eq!(
-            outline(&render_work(&all, &areas())),
-            [
-                "# operations",
-                "* [big](big.md",
-                "  * [part](part.md",
-                "    * [step-of-part](step-of-part.md",
-                "  * [done-step](done-step.md",
-                "  * [step-of-big](step-of-big.md",
-                "* [unsorted](unsorted.md",
-                "# billing",
-                "* [billing-done](billing-done.md",
-                "* [billing-step](billing-step.md",
-            ]
-        );
-        assert_eq!(
-            outline(&render_closed(&all, &areas())),
-            [
-                "# operations",
-                "* [old](old.md",
-                "  * [old-step](old-step.md",
-            ]
-        );
-        let index = render_work(&all, &areas());
-        assert!(
-            index.contains("  * [done-step](done-step.md) - Something is wrong. | Done: "),
-            "{index}"
-        );
-        for (slug, parent) in [("billing-step", "part"), ("billing-done", "big")] {
-            assert!(
-                index.contains(&format!("({slug}.md) - Something is wrong.")),
-                "{index}"
-            );
-            let line = index
-                .lines()
-                .find(|l| l.contains(&format!("({slug}.md)")))
-                .unwrap();
-            assert!(
-                line.ends_with(&format!("| Parent: [{parent}]({parent}.md)")),
-                "{line}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_spec_closes_after_its_work_items() {
-        let all = work(
-            &spec_docs(
-                vec![item_doc("step", "operations", Some("big"), false)],
-                vec![spec_doc("big", "operations", None, true)],
-            ),
-            &areas(),
-        );
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-        let found = all.closed_before_its_children();
-        assert_eq!(
-            found,
-            [
-                "work/step.md: its parent big is closed while this work item is open. Close the work item first (as \
-              dropped, if it was), or reopen the parent"
-            ]
-        );
-        // A draft names no parent, and closes whenever it is dealt with
-        let all = work(
-            &spec_docs(
-                vec![item_doc("unsorted", "operations", None, false)],
-                vec![spec_doc("big", "operations", None, true)],
-            ),
-            &areas(),
-        );
-        assert_eq!(all.closed_before_its_children(), Vec::<String>::new());
-    }
-
-    #[test]
-    fn an_undefined_parent_leaves_the_work_item_out() {
-        let cases = [
-            ("no such spec", "nowhere", "names no spec"),
-            ("another work item", "other-item", "names no spec"),
-            ("itself", "p", "names the record itself"),
-            ("a spec that fails", "broken", "left out of the index"),
-            (
-                "a spec whose own parent is undefined",
-                "lost",
-                "left out of the index",
-            ),
-        ];
-        for (name, parent, said) in cases {
-            let all = work(
-                &spec_docs(
-                    vec![
-                        item_doc("p", "operations", Some(parent), false),
-                        item_doc("other-item", "operations", None, false),
-                        (
-                            "broken.md".to_string(),
-                            "---\ntype: Spec\ntitle: B\n---\n".to_string(),
-                        ),
-                        spec_doc("lost", "operations", Some("nowhere"), false),
-                    ],
-                    vec![],
-                ),
-                &areas(),
-            );
-            assert!(!all.items.contains_key("p.md"), "{name}: still listed");
-            let why = all
-                .problems
-                .get("work/p.md")
-                .map(String::as_str)
-                .unwrap_or("");
-            assert!(
-                why.starts_with("parent: ") && why.contains(said),
-                "{name}: {why:?}"
-            );
-        }
-        // A part of an epic is a spec, and a work item may be a part of it
-        let all = work(
-            &spec_docs(
-                vec![
-                    spec_doc("top", "operations", None, false),
-                    spec_doc("mid", "operations", Some("top"), false),
-                    item_doc("p", "operations", Some("mid"), false),
-                ],
-                vec![],
-            ),
-            &areas(),
-        );
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-    }
-
-    /// A milestone titled after its slug: open with `status` and `date`, or closed when `status` is `deprecated`.
-    fn milestone_doc(slug: &str, status: &str, date: Option<&str>) -> (String, String) {
-        let date = date.map(|d| format!("date: {d}\n")).unwrap_or_default();
-        let text = format!(
-            "---\ntype: Milestone\ntitle: {slug}\ndescription: D.\ntags: [billing]\nstatus: {}\n{date}---\n\n\
-             # Condition\n\nThe tag is pushed.\n",
-            if status == "deprecated" {
-                "stable"
-            } else {
-                status
-            }
-        );
-        let text = if status == "deprecated" {
-            crate::schema::closed_record(&text, "Pushed.")
-        } else {
-            text
-        };
-        (format!("{slug}.md"), text)
-    }
-
-    #[test]
-    fn the_milestones_come_first_across_the_areas_by_date() {
-        let all = work(
-            &[
-                milestone_doc("undated", "stable", None),
-                milestone_doc("later", "draft", Some("2026-12-01")),
-                milestone_doc("sooner", "stable", Some("2026-11-01")),
-                milestone_doc("past", "deprecated", Some("2026-01-01")),
-                spec_doc("old", "operations", None, true),
-                item_doc("unsorted", "operations", None, false),
-            ]
-            .into_iter()
-            .collect(),
-            &areas(),
-        );
-        assert!(all.problems.is_empty(), "{:?}", all.problems);
-        let listed = |text: String| -> Vec<String> {
-            text.lines()
-                .filter(|l| l.contains("](") || l.starts_with('#'))
-                .map(String::from)
-                .collect()
-        };
-        assert_eq!(
-            listed(render_work(&all, &areas())),
-            [
-                "# Milestones",
-                "* [sooner](sooner.md) - D. | Date: 2026-11-01.",
-                "* [later](later.md) - D. | Status: draft. | Date: 2026-12-01.",
-                "* [undated](undated.md) - D.",
-                "# operations",
-                "* [unsorted](unsorted.md) - Something is wrong. | Status: draft. | State (2026-09-28): Not yet.",
-            ]
-        );
-        // The closed milestones come first in the closed list too
-        assert_eq!(
-            listed(render_closed(&all, &areas())),
-            [
-                "# Milestones",
-                "* [past](past.md) - D. | Done: Pushed.",
-                "# operations",
-                "* [old](old.md) - D. | Done: Implemented.",
-            ]
-        );
-        let today = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
-        // The closed one is past its date too, but it is closed
-        assert_eq!(
-            all.past_their_date(today),
-            [(
-                "sooner.md".to_string(),
-                NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()
-            )]
-        );
-        assert_eq!(all.without_an_open_milestone(), None);
-    }
-
-    #[test]
-    fn a_project_always_has_an_open_milestone() {
-        let doc = |name: &str, text: &str| (name.to_string(), text.to_string());
-        // An item that breaks the format is known to be no milestone
-        let broken_item = doc("item.md", "---\ntype: Work Item\ntitle: I\n---\n");
-        // What is said, the left-out documents named as maybe the milestone, and whether create may write one
-        let cases = [
-            (
-                "none at all",
-                vec![],
-                "no open milestone in docs/work/:",
-                "",
-            ),
-            (
-                "only closed ones",
-                vec![
-                    milestone_doc("past", "deprecated", None),
-                    broken_item.clone(),
-                ],
-                "no open milestone in docs/work/:",
-                "",
-            ),
-            // One that breaks the format does not count, but it may be the open one: fix it, rather than write another
-            (
-                "only a broken one",
-                vec![doc("broken.md", "---\ntype: Milestone\ntitle: B\n---\n")],
-                "no open milestone can be read in docs/work/, but work/broken.md, left out above, may be one: fix it",
-                "work/broken.md",
-            ),
-            // Nor does one whose type cannot be read, or its value cut by a comment
-            (
-                "unreadable ones",
-                vec![
-                    doc("a.md", "---\ntype: Milestone\ntitle: v1 #1\n---\n"),
-                    doc("b.md", "# no frontmatter\n"),
-                    doc("c.md", "---\ntitle: no type\n---\n"),
-                    broken_item,
-                ],
-                "no open milestone can be read in docs/work/, but work/a.md, work/b.md, work/c.md, left out above, \
-                 may each be one: fix them",
-                "work/a.md work/b.md work/c.md",
-            ),
-        ];
-        for (name, docs, said, unsure) in cases {
-            let docs: Docs = docs.into_iter().collect();
-            let read = work(&docs, &areas());
-            let why = read.without_an_open_milestone().unwrap_or_default();
-            assert!(why.starts_with(said), "{name}: {why}");
-            assert_eq!(read.unsure_milestones.join(" "), unsure, "{name}");
-            // create writes one only when there is none at all, broken, closed or unreadable
-            assert_eq!(may_have_milestone(&docs), name != "none at all", "{name}");
-        }
-        // A readable open one is enough, whatever else cannot be read
-        let docs: Docs = [
-            milestone_doc("next", "stable", None),
-            doc("b.md", "# no frontmatter\n"),
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(work(&docs, &areas()).without_an_open_milestone(), None);
-        // A proposed one is open
-        let docs: Docs = [milestone_doc("next", "draft", None)].into_iter().collect();
-        assert_eq!(work(&docs, &areas()).without_an_open_milestone(), None);
-        // What create writes has no condition yet, so it does not count until a person writes one
-        let docs: Docs = [("next-milestone.md".to_string(), first_milestone("billing"))]
-            .into_iter()
-            .collect();
-        let read = work(&docs, &areas());
-        assert!(
-            read.problems["work/next-milestone.md"].contains("missing or empty: [\"Condition\"]"),
-            "{:?}",
-            read.problems
-        );
-        assert!(read.without_an_open_milestone().is_some());
-    }
-
-    #[test]
-    fn a_milestone_is_no_parent() {
-        let all = work(
-            &[
-                milestone_doc("release", "stable", None),
-                item_doc("p", "operations", Some("release"), false),
-            ]
-            .into_iter()
-            .collect(),
-            &areas(),
-        );
-        assert!(
-            all.problems["work/p.md"]
-                .contains("names no spec in docs/work/: release (a work item, a milestone"),
-            "{:?}",
-            all.problems
-        );
     }
 }

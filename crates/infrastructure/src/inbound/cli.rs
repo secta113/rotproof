@@ -1,7 +1,8 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof before`, `rotproof follows`, `rotproof
-//! stop-hook` and `rotproof time-hook`, and the help that leads from one to the next. Each command is a call of an
-//! input port of `protocol.inbound`; what it prints and how it exits are decided here.
+//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof time-hook`, and the
+//! help that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it
+//! prints and how it exits are decided here. `rotproof before` and `rotproof stop-hook`, hidden, only say that they do
+//! nothing since 1.0, and call no port.
 
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -20,18 +21,17 @@ Start a project:
                                      would make a layer lists the layers and writes nothing)
   4. rotproof check                  check them; this is the project's CI
 
-Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files, and
-moves the records when the new version changes their format), then `rotproof check`.
+Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files), then
+`rotproof check`.
 
 The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has run; `rotproof guide --stack <stack>`
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken, or
-`rotproof stop-hook` or `rotproof time-hook` fails (the stop hook fails on a --root that is not a directory, and the
-time hook reads none; a wrong command line that names a hook fails with 1 too); 2 when there is no
+`rotproof time-hook` fails (it reads no --root; a wrong command line that names a hook fails with 1 too); 2 when there is no
 .config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
 its --root is not a directory, `rotproof create` would make layers
-without --yes, `rotproof init` leaves an update of the project's files to a person or cannot move the records,
+without --yes, `rotproof init` leaves an update of the project's files to a person,
 or `rotproof approve` is not run on a terminal or not answered y.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
@@ -43,15 +43,15 @@ Checks that the tree matches .config/rotproof.toml (every layer present or decla
 layers), that each layer imports only what the layer table allows or a person approved in \
 .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
 comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
-updates them), that \
-.rotproof/AGENTS.md is up to date, that the records are in docs/work/ (from 0.3.0; `rotproof init` moves those of an \
-older project), and that every record in docs/ keeps its rules (the rules.md of each directory), a knowledge document \
-matching the code it follows among them. \
+updates them), that .rotproof/AGENTS.md is up to date, that every knowledge document in docs/knowledge/ keeps its \
+rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
+follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \
+than today. The rest of docs/ is the project's, and is not read. \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
 a rule is broken, 2 when there is no .config/rotproof.toml or a file cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
-/// import which) and the records an agent works from (specs, work items, milestones, knowledge and log in docs/).
+/// import which) and the records that keep the code's reasons (knowledge pinned to the code, and the log, in docs/).
 #[derive(Parser)]
 #[command(name = "rotproof", version, about, after_help = START)]
 struct Cli {
@@ -74,14 +74,10 @@ enum Command {
     /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
     /// the declaration to this version, adding declined = [] when the declaration lacks it. It names every field it
     /// adds to the declaration, as `rotproof create` does, and never changes its other values. What an update cannot do
-    /// without a person, it says, leaves files as it was, and exits 2. Crossing 0.3.0, it first moves the records
-    /// from docs/backlog/ and docs/specs/ to docs/work/ and points every link that reached one at its new place, in
-    /// docs/ and in the markdown files elsewhere that .gitignore does not exclude; the move cannot be declined, says
-    /// what it leaves to a person (how each closed record closed, the deadline of each open item), and stops with
-    /// nothing changed when a name is in both directories or a file there is no record. Crossing 0.4.0, which builds
-    /// the layer table on the onion architecture, it says where the code of the layers that are gone (handler, utils)
-    /// and the ports go, and moves no code: `rotproof check` names what is left until it is moved. Exits 2 too for an
-    /// unknown stack, a stack other than the declared one, a move that stopped, or a file that cannot be read or
+    /// without a person, it says, leaves files as it was, and exits 2. It never moves or rewrites a record. Crossing
+    /// 0.4.0, which builds the layer table on the onion architecture, it says where the code of the layers that are
+    /// gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left until it is
+    /// moved. Exits 2 too for an unknown stack, a stack other than the declared one, or a file that cannot be read or
     /// written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
@@ -90,17 +86,16 @@ enum Command {
     },
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
     ///
-    /// Makes only what is missing: each layer neither present nor declared absent, the directories of docs/,
-    /// docs/log.md, a milestone (docs/work/next-milestone.md) when docs/work/ has none, nor a document that cannot be
-    /// read and may be one, whose condition a person writes before `rotproof check` passes, and the project's files
-    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the stop hook, a hook
-    /// that says when rotproof is not on the PATH, the time hook and the rule that denies editing the approvals file,
+    /// Makes only what is missing: each layer neither present nor declared absent, docs/knowledge/, docs/log.md, and
+    /// the project's files
+    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the time hook and
+    /// the rule that denies editing the approvals file,
     /// for python and none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml and the
     /// entry file src/main.rs), each when it does not exist.
-    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps) and the index files, the closed
-    /// list and the rules in docs/. Adds the fields the declaration lacks, keeping its comments and values. Never
-    /// overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing the
-    /// declaration; after upgrading Rotproof, `rotproof init` does what it does, without making a layer.
+    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), and docs/index.md and the
+    /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
+    /// Never overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing
+    /// the declaration; after upgrading Rotproof, `rotproof init` does what it does, without making a layer.
     /// Makes layers only with --yes: without it, a run that would make one lists them, writes nothing and exits 2, so
     /// the layers the project does not have are declared absent first. Exits 2 too when the declaration cannot be read
     /// or a file cannot be written.
@@ -134,7 +129,7 @@ enum Command {
     /// line had it), as does --prune. `rotproof approve --reviewed`, after a refactoring that kept what the code does,
     /// lists every knowledge document whose followed code changed and what changed under it, says to read the changes
     /// first, asks for one y, writes the new hashes in their follows (each document keeps a byte order mark and its
-    /// line endings, as with rotproof follows), and prints the log lines to write; what is gone is left to edit by
+    /// line endings, as with rotproof follows), and names each document it wrote; what is gone is left to edit by
     /// hand. Both run only when stdin is a terminal, so an agent's shell cannot approve: a person does. `rotproof
     /// approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden import, needs
     /// no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not a terminal, the import
@@ -161,38 +156,24 @@ enum Command {
         #[arg(long)]
         reviewed: bool,
     },
-    /// Write every index.md in docs/ and docs/work/closed.md from the frontmatter, and the rules.md Rotproof keeps
+    /// Write docs/index.md and docs/knowledge/index.md from the frontmatter, and the rules.md Rotproof keeps
     ///
-    /// Rewrites docs/index.md, the index.md of docs/work/ and docs/knowledge/ and the list of closed records in
-    /// docs/work/closed.md, from the frontmatter of the documents, and the rules.md Rotproof keeps in docs/work/ and
-    /// docs/knowledge/. Run it after a record changes; never edit these by hand.
-    /// Lists the documents it left out and why, also under `# Left out` in the index, the work items past their
-    /// stale_after, and the open milestones past their date. Exits 2 when the declaration or a document cannot be read.
+    /// Rewrites docs/index.md and docs/knowledge/index.md from the frontmatter of the knowledge documents, and
+    /// docs/knowledge/rules.md. Run it after a knowledge document changes; never edit these by hand. Writes nothing
+    /// in docs/work/, which Rotproof no longer reads. Lists the documents it left out and why, also under `# Left out`
+    /// in the index. Exits 2 when the declaration or a document cannot be read.
     Index,
-    /// Print the open records that close before a milestone, a spec or any record of docs/work/, earliest first,
-    /// writing nothing
+    /// Does nothing since 1.0, which no longer manages tasks: says so, and exits 2
     ///
-    /// Follows the arrows back from the later record to the earlier one, and from a parent to its children, through
-    /// the open records, and stops at an earlier milestone, which it lists but not the work before it: what is left
-    /// before a release, or under a spec, without opening the records one by one. Prints a line naming the record with
-    /// how many open records close before it, then one line per record: its mark, which says whether it can be worked
-    /// to its end now (started or ready, when nothing open closes before it; waits, when something does, with
-    /// "Started." if its work started; milestone; with --all, done or dropped), its file name and title, a spec's
-    /// status, an item's last measured state, a milestone's date and whether it is past, or how a closed record
-    /// closed, and the open records it waits for, by name. The records are listed by depth, each after every open
-    /// record it waits for, and within a depth in the order of the marks above, the started first. Each depth has a
-    /// heading: "nothing open closes before these" first, then "these close after the ones above"; a depth orders the
-    /// closing, not the work. Records that wait on each other come last. Exits 2 when the record is not in docs/work/
-    /// or is left out of the records, or the declaration or a document cannot be read.
+    /// Before 1.0 it printed the open records of docs/work/ that close before a record. Rotproof no longer reads
+    /// docs/work/: keep open work in issues, and run `rotproof init` to update .rotproof/AGENTS.md. Takes any
+    /// arguments, as an old guide or an agent's memory may still pass them.
+    #[command(hide = true)]
     Before {
-        /// The record, by its slug (release-0-4-0) or its file name in docs/work/
-        record: String,
-        /// List the closed records too (done or dropped), through which the listing then goes
-        #[arg(long)]
-        all: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        _args: Vec<String>,
     },
-    /// Pin keys in a knowledge document's follows, at the hash of the code as it is now, and print the log line to
-    /// write
+    /// Pin keys in a knowledge document's follows, at the hash of the code as it is now
     ///
     /// Run it once the document is reviewed against the code: when it starts to follow something, or after what it
     /// follows changed. The document is named as rotproof check names it (knowledge/api.md) or from the root
@@ -201,10 +182,10 @@ enum Command {
     /// .py file under a directory (src/api/). A key in follows gets its new hash, and a key not in it is added at its
     /// end, with the hash quoted (follows is made at the end of the frontmatter when the document has none); nothing
     /// else in the document changes, and it keeps a byte order mark and its line endings (CRLF on every line when one
-    /// line had it). Prints each key with what was done, then, when the document changed, the line to write in the log
-    /// entry, as the check asks for it. Writes all the keys or none, and only the keys named: re-pinning every changed
-    /// document in one act is `rotproof approve --reviewed`, which a person runs. Needs no terminal: pinning one
-    /// document is an edit of it, which its log entry records. A key gone from the code is left to edit by hand. Exits
+    /// line had it). Prints each key with what was done, then whether the document was written. Writes all the keys or
+    /// none, and only the keys named: re-pinning every changed document in one act is `rotproof approve --reviewed`,
+    /// which a person runs. Needs no terminal: pinning one document is an edit of it, which git records. A key gone
+    /// from the code is left to edit by hand. Exits
     /// 2, writing nothing, when the first argument is not a knowledge document (as before 0.4.0, when follows took the
     /// keys alone), the document is not there, cannot be read, is a guide or is deprecated, or a key is not a form
     /// follows takes, names what is not there, or cannot be read.
@@ -215,16 +196,13 @@ enum Command {
         #[arg(required = true)]
         keys: Vec<String>,
     },
-    /// Run as Claude Code's Stop hook: send the agent back once when its last message leaves something open and
-    /// nothing in docs/ changed. Reads the hook input on stdin
+    /// Does nothing since 1.0: says so to the person when Claude Code runs it as the Stop hook Rotproof wrote before
     ///
-    /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it, beside a hook that says when
-    /// rotproof is not on the PATH, as this one cannot. When the agent's last message
-    /// holds a phrase that leaves something open (such as "not checked") and git shows no change in docs/, it asks the
-    /// agent once to record the finding or say where it is. When its own version is not the one the project's files
-    /// are up to (files in the declaration), it says so to the person: the hook runs the first rotproof on the PATH.
-    /// Exits 1, never 2, when it fails (a --root that is not a directory, or a command line that is wrong, among the
-    /// failures), so a broken hook never keeps the agent from stopping.
+    /// Before 1.0 it sent the agent back when its last message left something open and nothing in docs/ changed.
+    /// `rotproof init` takes it out of the project's .claude/settings.json (the update claude-remove-stop-hook). Until
+    /// then it reads the hook input on stdin, prints a systemMessage, which keeps no agent from stopping, and exits 0.
+    /// A command line that is wrong exits 1, never 2, as Claude Code takes 2 for "do not stop".
+    #[command(hide = true)]
     StopHook,
     /// Run as Claude Code's SessionStart and UserPromptSubmit hook: tell the agent the time now. Reads the hook input
     /// on stdin
@@ -255,12 +233,17 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Err(e) => return wrong_command_line(&e, &names),
     };
     // The hooks answer before the root is checked below, whose exit code 2 Claude Code takes from a hook for "block":
-    // the stop hook fails with 1 on a root that is not a directory, and the time hook reads no root
+    // neither reads a root
     if let Command::StopHook = cli.command {
-        return stop_hook(commands, &cli.root);
+        return stop_hook();
     }
     if let Command::TimeHook = cli.command {
         return time_hook(commands);
+    }
+    // Whatever its root: it reads none
+    if let Command::Before { .. } = cli.command {
+        eprintln!("{BEFORE_REMOVED}");
+        return ExitCode::from(2);
     }
     // A root that does not exist fails here. Read as an empty tree, it would pass every check with nothing checked
     if !cli.root.is_dir() {
@@ -277,7 +260,6 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
             true
         }),
         Command::Index => index(commands, root).map(|()| true),
-        Command::Before { record, all } => before(commands, root, &record, all).map(|()| true),
         Command::Approve {
             file,
             import,
@@ -296,7 +278,9 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Command::Follows { document, keys } => {
             follows(commands, root, &document, &keys).map(|()| true)
         }
-        Command::StopHook | Command::TimeHook => unreachable!("answered above"),
+        Command::StopHook | Command::TimeHook | Command::Before { .. } => {
+            unreachable!("answered above")
+        }
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,
@@ -368,12 +352,6 @@ fn init(
         }
         Initialized::Upgraded(upgraded) => upgraded,
     };
-    if upgraded.moved > 0 {
-        println!(
-            "moved {} records from docs/backlog/ and docs/specs/ to docs/work/, and the links to them",
-            upgraded.moved
-        );
-    }
     for (name, path) in &upgraded.applied {
         println!("updated {path}: {name}");
     }
@@ -472,33 +450,19 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
     Ok(found.is_empty())
 }
 
-/// Answer the agent's stop hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "do not
-/// stop", and a broken hook would keep the agent from stopping instead of being shown. A root that is not a directory
-/// is such an error: read as outside a project, it would say nothing on every stop, and the setting would go unseen.
-fn stop_hook(commands: &dyn Commands, root: &Path) -> ExitCode {
-    let mut input = String::new();
-    let answer = std::io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|e| format!("the hook input could not be read: {e}"))
-        .and_then(|_| {
-            if root.is_dir() {
-                Ok(())
-            } else {
-                Err(format!("the root is not a directory: {}", root.display()))
-            }
-        })
-        .and_then(|()| commands.stop_hook(root, &input));
-    match answer {
-        Ok(Some(out)) => {
-            println!("{out}");
-            ExitCode::SUCCESS
-        }
-        Ok(None) => ExitCode::SUCCESS,
-        Err(why) => {
-            eprintln!("rotproof stop-hook: {why}");
-            ExitCode::FAILURE
-        }
-    }
+/// What `rotproof stop-hook` says, as the JSON Claude Code reads from a hook: a `systemMessage`, shown to the person,
+/// which keeps no agent from stopping. Its text holds no `"` or `\`, so it is JSON as written.
+const STOP_HOOK_REMOVED: &str = "{\"systemMessage\": \"rotproof stop-hook does nothing since Rotproof 1.0, which \
+    no longer manages tasks. In a project, run `rotproof init`, which takes this hook out of .claude/settings.json; \
+    elsewhere, remove the Stop hook that runs rotproof stop-hook from your Claude Code settings.\"}";
+
+/// Answer a stop hook Rotproof wrote before 1.0, which a project's settings still run: say that it does nothing now,
+/// and exit 0. The input is read and not looked at, so Claude Code writes it whole; reading it fails nothing, and
+/// --root is not read, as a hook that fails is shown with less than the message says.
+fn stop_hook() -> ExitCode {
+    let _ = std::io::stdin().read_to_string(&mut String::new());
+    println!("{STOP_HOOK_REMOVED}");
+    ExitCode::SUCCESS
 }
 
 /// Answer the agent's time hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "block the
@@ -626,11 +590,8 @@ fn approve_reviewed(commands: &dyn Commands, root: &Path) -> Result<(), String> 
         if !answer.eq_ignore_ascii_case("y") {
             return Err("not re-pinned: nothing written".into());
         }
-        for (doc, hash) in commands.repin(root, &drifts)? {
+        for doc in commands.repin(root, &drifts)? {
             println!("wrote docs/knowledge/{doc}");
-            println!(
-                "  in the log entry of this change, write: * **Knowledge**: knowledge/{doc}@{hash}"
-            );
         }
     }
     if !left.is_empty() {
@@ -662,7 +623,7 @@ fn approve_prune(commands: &dyn Commands, names: &Names, root: &Path) -> Result<
     Ok(())
 }
 
-/// Pin the keys in the document, then say what was done to each and the log line to write.
+/// Pin the keys in the document, then say what was done to each.
 fn follows(
     commands: &dyn Commands,
     root: &Path,
@@ -677,23 +638,18 @@ fn follows(
             Some(before) => println!("  {key}: {before} -> {now}"),
         }
     }
-    match pinned.written {
-        Some(hash) => {
-            println!("wrote docs/knowledge/{}", pinned.doc);
-            println!(
-                "  in the log entry of this change, write: * **Knowledge**: knowledge/{}@{hash}",
-                pinned.doc
-            );
-        }
-        None => println!(
+    if pinned.written {
+        println!("wrote docs/knowledge/{}", pinned.doc);
+    } else {
+        println!(
             "nothing written: docs/knowledge/{} pins these keys as the code is now",
             pinned.doc
-        ),
+        );
     }
     Ok(())
 }
 
-/// Write every index file, then list what was left out of them and the items to measure again.
+/// Write every index file, then list what was left out of them.
 fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     let indexed = commands.index(root)?;
     for path in indexed.written {
@@ -702,21 +658,9 @@ fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     for (name, why) in indexed.left_out {
         println!("left out of the index, fix it: {name}: {why}");
     }
-    for (name, at) in indexed.stale {
-        println!("past stale_after, measure the state again: {name} ({at})");
-    }
-    for (name, date) in indexed.past_date {
-        println!("past its date and still open, close it or move its date: {name} ({date})");
-    }
     Ok(())
 }
 
-/// Print what closes before the record, and on stderr the documents the listing could not see.
-fn before(commands: &dyn Commands, root: &Path, record: &str, all: bool) -> Result<(), String> {
-    let before = commands.before(root, record, all)?;
-    print!("{}", before.text);
-    for (name, why) in before.left_out {
-        eprintln!("left out of the records, so not listed, fix it: {name}: {why}");
-    }
-    Ok(())
-}
+/// What `rotproof before` says, on stderr, before it exits 2.
+const BEFORE_REMOVED: &str = "rotproof before does nothing since Rotproof 1.0, which no longer manages tasks: keep \
+    open work in issues. Run `rotproof init` to update .rotproof/AGENTS.md, which no longer tells you to run it.";

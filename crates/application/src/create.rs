@@ -1,41 +1,17 @@
-//! `rotproof create`: make what `.config/rotproof.toml` declares and the tree does not have yet.
+//! `rotproof create`: make what `.config/rotproof.toml` declares and the tree does not have yet. What it makes and
+//! rewrites is listed for a person in the help of `rotproof create` (`cli.rs`).
 //!
-//! - Each layer of the stack's layout that is neither declared absent nor present (its path exists) is made, with its
-//!   files. A present layer is the project's, and nothing in it is touched.
-//!   A repository that keeps records only (`stack = "none"`) has no layers to make.
-//!   Layers are made only with `--yes`. Without it, a run that would make one lists them and writes nothing: a project
-//!   that ran `rotproof create` straight after `rotproof init`, never listing in absent what it lacks, would otherwise
-//!   get every layer of the stack (`ui` and its five levels in a command-line tool), and `rotproof create` never
-//!   deletes them again. A run that makes no layer, as after an upgrade, needs no `--yes`.
-//! - The records skeleton: the directories of `docs/`, `docs/log.md` with its title when it does not exist, and the
-//!   generated files (the index files and the rules of `docs/work/` and `docs/knowledge/`), which Rotproof rewrites.
-//! - A milestone, `docs/work/next-milestone.md`, when `docs/work/` has none: a project always has a next moment for
-//!   its work to wait for. What that moment is, the project says: the milestone's `# Condition` holds only a comment,
-//!   so `rotproof check` fails until a person writes it.
-//! - Rotproof's guide, `.rotproof/AGENTS.md` (`project.rs`), which Rotproof rewrites: the rules it keeps in the stack,
-//!   from the version that runs.
-//! - `.claude/settings.json` with the hook that runs `rotproof stop-hook` when the agent stops (`hook.rs`), the hook
-//!   beside it that says when `rotproof` is not on the `PATH`, and the time hook (`time_hook.rs`), when it does not
-//!   exist. A project that has one already adds the hooks to it by hand.
-//! - The project's files (`project.rs`: `AGENTS.md`, `README.md`, the pin of Rotproof, the CI workflow, a Rust
-//!   project's workspace and others), each when it does not exist. The project's name in them is its root directory's.
+//! A present layer (its path exists) is the project's, and nothing in it is touched. Layers are made only with `--yes`:
+//! a project that ran `rotproof create` straight after `rotproof init`, never listing in absent what it lacks, would
+//! otherwise get every layer of the stack (`ui` and its five levels in a command-line tool), and `rotproof create`
+//! never deletes them again. A run that makes no layer, as after an upgrade, needs no `--yes`.
 //!
-//! - The fields the declaration lacks that Rotproof requires (`ADDED` in `layers.rs`): an upgrade of Rotproof that adds
-//!   a field fails `rotproof check` until `rotproof create` runs, and then only on what the new rules find. The
-//!   comments and the values already in the declaration are kept, and a value that is present is never changed.
-//!
-//! It never overwrites a file it does not generate, apart from adding those fields, and never moves or deletes one. It
-//! runs when a project starts, and again when its declaration is changed on purpose; it never runs by itself, so a
-//! layer removed by mistake fails the check instead of coming back.
-
-use std::collections::BTreeSet;
+//! It never runs by itself, so a layer removed by mistake fails the check instead of coming back.
 
 use crate::bundle::Bundle;
 use crate::layers::declaration;
 use crate::tree::{exactly, read_text, read_written};
-use domain::bundle::{
-    FIRST_MILESTONE, LOG, first_milestone, in_docs, may_have_milestone, record_tags as tags_in,
-};
+use domain::bundle::{LOG, in_docs, record_tags as tags_in};
 use domain::hook::SETTINGS;
 use domain::layers::{
     DECLARATION, Declared, MISSING, Place, completed, lacking, parse_declaration, unreadable,
@@ -116,25 +92,10 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
     }
 
     let bundle = Bundle::new(tree, declared.declaration.areas.clone());
-    for folder in ["work", "knowledge"] {
-        let dir = in_docs(folder);
-        out.make_dir(&dir).map_err(|e| format!("{dir}: {e}"))?;
-    }
+    let dir = in_docs("knowledge");
+    out.make_dir(&dir).map_err(|e| format!("{dir}: {e}"))?;
     if tree.found(&in_docs("log.md")).is_none() {
         write(out, "docs/log.md", LOG, &mut made)?;
-    }
-    // A project always has a next moment for its work to wait for. Only when it has no milestone at all: one whose
-    // milestones are all closed is told to write the next, not given a copy of the first, and one with a document that
-    // cannot be read may have its milestone there, which the check names, so a second one would split the work
-    // waiting for the moment between two milestones
-    let work = bundle.read_folder("work").map_err(|e| e.to_string())?;
-    if !may_have_milestone(&work) && tree.found(FIRST_MILESTONE).is_none() {
-        let area = declared
-            .declaration
-            .areas
-            .first()
-            .map_or("", String::as_str);
-        write(out, FIRST_MILESTONE, &first_milestone(area), &mut made)?;
     }
     let guide = guide(&declared.declaration.stack, declared.layout.as_ref());
     if read_text(tree, GUIDE).ok().as_ref() != Some(&guide) {
@@ -190,19 +151,16 @@ fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     Ok(Some((was.restore(&text), added)))
 }
 
-/// Every tag the work items, specs and knowledge documents use, sorted by name: the first value of `areas`, so the
-/// records that fit their one-area rule keep fitting once the field exists.
+/// Every tag the knowledge documents use, sorted by name: the first value of `areas`, so the documents that fit their
+/// one-area rule keep fitting once the field exists.
 fn record_tags(tree: &dyn Tree) -> Result<Vec<String>, String> {
-    let bundle = Bundle::new(tree, Vec::new());
-    let mut tags = BTreeSet::new();
-    for folder in ["work", "knowledge"] {
-        if tree.found(&in_docs(folder)) != Some(true) {
-            continue;
-        }
-        let docs = bundle.read_folder(folder).map_err(|e| e.to_string())?;
-        tags.extend(tags_in(&docs));
+    if tree.found(&in_docs("knowledge")) != Some(true) {
+        return Ok(Vec::new());
     }
-    Ok(tags.into_iter().collect())
+    let docs = Bundle::new(tree, Vec::new())
+        .read_folder("knowledge")
+        .map_err(|e| e.to_string())?;
+    Ok(tags_in(&docs).into_iter().collect())
 }
 
 /// What `rotproof create` says when it would make `layers` and was not told to: each with its path, and how to go on.

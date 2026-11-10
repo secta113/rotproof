@@ -12,63 +12,58 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
 - **`rotproof check` checks {checked}, and fails when one breaks a rule.**
   It is the project's CI. It prints what it did not check, and why.
 - **`rotproof create` makes what `.config/rotproof.toml` declares and the tree lacks, and rewrites the files Rotproof
-  generates:** this file, and in `docs/` the `index.md` and `rules.md` files and `docs/work/closed.md`. It never
+  generates:** this file, `docs/index.md`, and `docs/knowledge/index.md` and `docs/knowledge/rules.md`. It never
   changes another file, apart from adding the fields the declaration lacks, and never moves or deletes one. Nothing
   runs it on its own.
-- **`rotproof index` rewrites the `index.md` and `rules.md` files in `docs/` and `docs/work/closed.md`** after a
-  record changes. Never edit them by hand.
-- **`rotproof before <slug>` prints the open records that close before a milestone, a spec or any record, earliest
-  first,** each with whether it can be worked to its end now (`started` or `ready`; `waits` when something open
-  closes before it), its last measured state and what it waits for, through the arrows and the parents and up to an
-  earlier milestone, under headings that say which close after which. The headings order the closing, not the work.
-  With `--all` it lists the closed records too. It writes nothing.
+- **`rotproof index` rewrites `docs/index.md`, `docs/knowledge/index.md` and `docs/knowledge/rules.md`** after a
+  knowledge document changes. Never edit them by hand.
 - **`rotproof follows knowledge/<slug>.md <key>...` pins keys in a knowledge document's `follows`** at the hash of the
-  code as it is now, and prints the log line to write. Run it once the document is reviewed against the code, when it
+  code as it is now. Run it once the document is reviewed against the code, when it
   starts to follow something and when `rotproof check` names it, rather than editing the hashes by hand.
 - **Upgrade Rotproof in a commit of its own:** change the pinned version, install it, run `rotproof init`, then
   `rotproof check`. `rotproof init` applies what the new version brings to the files `rotproof create` wrote once
   (except the updates `declined` lists in `.config/rotproof.toml`), rewrites this file, and sets `files` there to the
   new version. Until it has run, `rotproof check` fails. What an update cannot do without a person, it says: do it by
-  hand, or decline it by its name in `declined`. When the new version changes the format of the records (0.3.0 moved
-  them to `docs/work/`), `rotproof init` also rewrites the records, and the links to them in the markdown files, as
-  far as a machine can and says the rest; that cannot be declined, so review its diff before committing, and search
-  the files it does not read (code, comments, configuration) for the old paths. When the new version changes the
+  hand, or decline it by its name in `declined`. It never moves or rewrites a record. When the new version changes the
   layer table (0.4.0 built it on the onion architecture), `rotproof init` says where the code of each layer that is
   gone goes, and moves no code: move it by hand, as `rotproof check` names it until it is moved.
 {layers}
 ## The records
 
-- **Before starting work or deploying, read `docs/work/index.md` and `docs/knowledge/index.md`, and open only the
-  specs, work items and documents that concern the work.** Read the closed records (`docs/work/closed.md`) and
-  `docs/log.md` when you need to know why something was decided. The index says which open
-  records are `Ready.`, which were `Started.` and which milestones are near, and is only seen when someone opens it.
-  To know what is left before a milestone or under a spec, run `rotproof before <slug>` rather than following the
-  arrows through the records one by one, and open only the records it lists that the work needs. When a record's
-  work is done but waits for something outside it, such as a pull request to be merged, write a milestone of that
-  moment and add it to the record's `after`, so the record is listed as waiting rather than as work left.
-  Continue a started record from its `# State` rather than starting it again. When you start a record's work, set
-  `progress: started`; after measuring an item's state, update it right away.
-- **How each record is written is in the `rules.md` of its directory,** which Rotproof writes. The project's own rules
-  for a directory go in another guide in the same directory.
-- **A finding is recorded, never left in a comment.** Write it as a draft work item in `docs/work/`, with `until`
-  naming the milestone it waits for, or in the spec it belongs to. `rotproof check` fails on `TODO`, `FIXME`, `XXX`, `HACK` and `NOTE` in comments in the code.
-- **A closed record stays where it is and opens with `# Resolution`.** Closing a spec, a work item or a milestone
-  sets `progress` (`done` or `dropped`) and puts `# Resolution` first; nothing moves. `status: deprecated` follows
-  for a work item and for anything dropped; a done spec that still describes how things are stays `stable`.
+Rotproof keeps two records in `docs/`: knowledge, how things are now and why, and the log, what each task left behind.
+Open work is no record here: it is kept in issues. The rest of `docs/` is the project's, and Rotproof does not read it.
+
+- **Before starting work or deploying, read `docs/knowledge/index.md`, and open only the documents that concern the
+  work.** Its alarms, under `# When something happens`, are watched only by someone reading it. When something that
+  used to work has stopped, search `docs/` for the message as it is first. Read `docs/log.md` when you need to know
+  what went wrong before and what was learned.
+- **Keep a piece of work that can stop in the middle in an issue of its own.** Its body is the state as it is now:
+  the day, how far the work came, what comes next, what has not been checked, the open questions, and links to the
+  branch and the pull request. Overwrite it whenever you stop, so that whoever resumes reads one page; continue from
+  it rather than starting again. Add what was measured, and what was decided and why, as dated comments, and never
+  rewrite one. Before closing the issue, write what still holds in `docs/knowledge/` and what happened in the log,
+  and name both in a last comment.
+- **A knowledge document holds only what the code cannot tell:** why the code is so and what was rejected, how it
+  should behave, and what lies outside the repository (the promises of a service it calls, the data in production,
+  how to run or operate it). It is no summary of how the code works: the code says that, and a copy goes stale. When
+  a person gives a reason or corrects you, or a decision of the task binds the changes after it, ask the person
+  whether to keep it, and write what they answer rather than what the code suggests; do not write one for every
+  change. How a document is written is in `docs/knowledge/rules.md`, which Rotproof writes; the project's own rules
+  go in another guide beside it.
+- **A finding is never left in a comment.** Fix it now, write it as one line in the task's issue (an issue of its
+  own when it outlives the task), or let it go, and take the comment out. `rotproof check` fails on `TODO`, `FIXME`,
+  `XXX`, `HACK` and `NOTE` in comments in the code. A comment says why the code beside it is written so, without the
+  word; what spans several files, how to run or operate something, and what lies outside the repository go in
+  `docs/knowledge/`, tied to the code by `follows`.
 - **When a task is done, add one entry to `docs/log.md`, under a `## YYYY-MM-DD` heading for the day, newest first.**
   The log is a flat list of entries under the dates (OKF 0.2, section 9): one list item per task, with its fields as
-  nested items, and no other headings. `rotproof check` fails on anything else.
+  nested items, and no other headings. `rotproof check` fails on anything else. An entry keeps only what is found
+  nowhere else, searchable in the repository when something breaks: what changed is in the commits, what was
+  measured and decided along the way in the task's issue, and what still holds in `docs/knowledge/`.
 
   ```markdown
   * **<Task name>**
-    * **Branch**: <branch>
-    * **Changes**: What changed.
-    * **Decisions**: Why, including the options that were rejected.
+    * **Issue**: The task's issue (owner/repo#n), when it has one.
     * **Problems**: What went wrong, the cause, and the workaround. "None" if none.
-    * **Open items**: Pointers to work items (docs/work/<slug>.md). "None" if none. Write the open work itself in
-      the work item: the log is history.
     * **Lessons**: What to do differently next time, and where it was recorded if it became a rule.
-    * **Knowledge**: Only when the task changed a document in docs/knowledge/: each one as
-      knowledge/<slug>.md@<hash>. `rotproof check` fails while a document's current hash is in no entry, and prints
-      the line to write.
   ```

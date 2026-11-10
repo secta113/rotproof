@@ -7,5 +7,4 @@ python -m venv venv
 ./venv/Scripts/rotproof check                                  # on Linux: ./venv/bin/rotproof
 ```
 
-Start your agent with the venv active: its stop hook runs `rotproof stop-hook`, which has to be on the `PATH`, and
-runs the first one there. When it is not there, or is another version than the project's, the agent's session says so.
+Start your agent with the venv active: its hooks run `rotproof time-hook`, which has to be on the `PATH`.

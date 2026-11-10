@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use domain::code::{Aliases, Manifest, Source};
 use domain::schema::Time;
@@ -64,19 +64,13 @@ pub trait Parsers {
     fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)>;
 }
 
-/// The changes a project's version control shows: the port the hook asks whether anything was recorded.
-pub trait Changes {
-    /// Whether anything in `dir` (from the root) is changed, staged or new.
-    fn changed(&self, dir: &str) -> Result<bool, String>;
-}
-
 /// A project's files, read and written: what a command that writes takes.
 pub trait Files: Tree + Writer {
     /// The name of the project's root directory, which the files Rotproof writes once are named after.
     fn name(&self) -> Result<String, String>;
 }
 
-/// The machine a command runs on: the project at a root, the readers of code, version control and the clock.
+/// The machine a command runs on: the project at a root, the readers of code, git's `user.name` and the clock.
 pub trait Machine {
     /// The files of the project at `root`.
     fn files(&self, root: &Path) -> Box<dyn Files>;
@@ -84,10 +78,6 @@ pub trait Machine {
     fn parsers(&self) -> &dyn Parsers;
     /// git's `user.name` in the repository at `root`, when it is set.
     fn user_name(&self, root: &Path) -> Option<String>;
-    /// The changes of the repository that holds `root`, or `None` when no repository holds it.
-    fn changes(&self, root: &Path) -> Option<Box<dyn Changes>>;
-    /// The project that holds `start`: the nearest directory upwards with a declaration, or `None` outside one.
-    fn project(&self, start: &Path) -> Option<PathBuf>;
     /// The time now, with the machine's offset from UTC.
     fn now(&self) -> Time;
 }

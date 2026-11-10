@@ -47,8 +47,6 @@ pub struct Upgraded {
     pub from: String,
     /// Each update applied, with the file it changed
     pub applied: Vec<(&'static str, &'static str)>,
-    /// How many records moved into `docs/work/`
-    pub moved: usize,
     /// What each update that could not be applied leaves to a person
     pub by_hand: Vec<String>,
     /// How to move the project's code where the new version's layers want it, which no machine can do: said once,
@@ -88,19 +86,6 @@ pub struct Indexed {
     pub written: Vec<String>,
     /// Documents left out of the index files: name -> why
     pub left_out: Vec<(String, String)>,
-    /// The open work items past their `stale_after`, each with it
-    pub stale: Vec<(String, String)>,
-    /// The open milestones past their `date`, each with it
-    pub past_date: Vec<(String, String)>,
-}
-
-/// What `rotproof before` found.
-#[derive(Debug, Default)]
-pub struct Before {
-    /// What to print: the record, then the open records that close before it, earliest first
-    pub text: String,
-    /// Documents left out of the records, which the listing cannot see: name -> why
-    pub left_out: Vec<(String, String)>,
 }
 
 /// One key of a document's `follows` whose code is not as pinned.
@@ -121,8 +106,8 @@ pub struct Pinned {
     pub doc: String,
     /// Each key: its hash as pinned before (`None` when it was added), and as the code is now
     pub keys: Vec<(String, Option<String>, String)>,
-    /// The document's new hash, for the log: `None` when every key was pinned as it is now, and nothing was written
-    pub written: Option<String>,
+    /// Whether the document was written: not when every key was pinned as it is now
+    pub written: bool,
 }
 
 /// An approval `rotproof approve --prune` removed: what it kept, and in which file.
@@ -147,8 +132,6 @@ pub trait Commands {
     fn guide(&self, root: &Path, stack: Option<&str>) -> Result<String, String>;
     /// Write every index file, and find the items to measure again now.
     fn index(&self, root: &Path) -> Result<Indexed, String>;
-    /// The open records that close before `record`, a slug of `docs/work/`, and the closed ones too when `closed`.
-    fn before(&self, root: &Path, record: &str, closed: bool) -> Result<Before, String>;
     /// The findings an approval of `import` by `file` would keep, as `rotproof check` says them. `Err` when the import
     /// is not forbidden, or is approved already.
     fn pending(&self, root: &Path, file: &str, import: &str) -> Result<Vec<String>, String>;
@@ -167,12 +150,10 @@ pub trait Commands {
     fn prune(&self, root: &Path) -> Result<Vec<Removed>, String>;
     /// Every key of the knowledge documents whose code is not as pinned.
     fn changed(&self, root: &Path) -> Result<Vec<Drift>, String>;
-    /// Pin each of `drifts` as reviewed: each document written, with its hash for the log.
-    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<(String, String)>, String>;
+    /// Pin each of `drifts` as reviewed: the file name of each document written.
+    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<String>, String>;
     /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
-    /// The answer to the agent's stop hook, whose input is `input`: `None` to let it stop.
-    fn stop_hook(&self, root: &Path, input: &str) -> Result<Option<String>, String>;
     /// The answer to the agent's time hook, whose input is `input`: the time now, for the agent to read.
     fn time_hook(&self, input: &str) -> Result<String, String>;
 }

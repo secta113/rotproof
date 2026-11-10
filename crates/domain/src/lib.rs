@@ -5,7 +5,6 @@
 //! what it decides. The ports are contracts, in `protocol`. Imports no other layer.
 
 pub mod approvals;
-pub mod arrows;
 pub mod bundle;
 pub mod code;
 pub mod direction;
@@ -16,13 +15,13 @@ pub mod layers;
 pub mod links;
 pub mod markdown;
 pub mod markers;
-pub mod migrate;
 pub mod modules;
 pub mod paths;
 pub mod project;
 pub mod records;
 pub mod rust;
 pub mod schema;
+pub mod sentence;
 pub mod structure;
 pub mod text;
 pub mod time_hook;

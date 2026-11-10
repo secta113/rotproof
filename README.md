@@ -9,13 +9,10 @@ two structures:
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
   of dependencies stays what it was meant to be.
-- **The specs and records:** what is open, what is being changed, how things are now, and why. Specs (what was
-  decided) and work items (what waits: open defects and postponed work, each with a state), tied into one tree and
-  ordered by arrows up to milestones (the moments the work waits for); knowledge documents (an API, a data model, a
-  decision, edited in place and named in the log at every edit, and alarms for what matters only when it is seen); and
-  a log, each kept to strict rules. A
-  finding does not stay outside them: a `TODO` or `NOTE` in a code comment fails the check, and a stop hook sends an
-  agent back when its last message leaves something open that it did not record.
+- **The records:** how things are now, and why, as far as the code cannot tell it, in knowledge documents that
+  follow the code they describe, so that `rotproof check` fails once the code changes under them (and alarms, for what
+  matters only when it is seen); and a log of what each task left behind. Open work is kept in issues, not here.
+  Knowledge does not stay outside them, nor does a finding: a `TODO` or `NOTE` in a code comment fails the check.
 
 ## Principles
 
@@ -25,13 +22,13 @@ two structures:
   command adds what is missing and leaves the values a person wrote as they are: a layer or a project's file that is
   not there, a field the declaration lacks, an entry a person approved, what a named update of `rotproof init` brings
   (see "Upgrading Rotproof"), and the files Rotproof generates, which nobody writes by hand. A field the declaration
-  lacks takes its first value from the tree, once (`areas` gets the tags the records use, so the records that kept
-  the rules keep them); from then on a record with a tag the declaration does not list fails. An update of
-  `.claude/settings.json` keeps its keys, their order and their values, but writes the whole file again in Rotproof's
-  layout (two spaces of indentation, `\n` line endings). These change what a person wrote, each in a command run for
-  that. When a version of Rotproof changes the format it reads, `rotproof init` carries the files across that change,
-  doing what a machine can without reading them and saying the rest (the move to `docs/work/` at 0.3.0, below). That
-  is not a repair of drift: the files were right under the old format, and Rotproof is what changed. Once a knowledge
+  lacks takes its first value from the tree, once (`areas` gets the tags the knowledge documents use, so the documents
+  that kept the rules keep them); from then on a document with a tag the declaration does not list fails. An update of
+  `.claude/settings.json` keeps its keys, their order and their values (it takes out only the stop hook Rotproof wrote
+  before 1.0, matched exactly), but writes the whole file again in Rotproof's layout (two spaces of indentation),
+  keeping its line endings and byte order mark. These change what a person wrote, each in a command run for that.
+  Rotproof never moves or rewrites a record: from 1.0 it reads no records of work, and those of an older project stay
+  where they are, as they are. Once a knowledge
   document is reviewed against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a
   person, on a terminal) write the hashes in its `follows`: the review is the person's or the agent's, and pinning
   only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
@@ -53,8 +50,8 @@ the levels inside a crate, from the paths its code names.
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 (its `SPEC.md` as of commit `ad30107`): every document has YAML frontmatter with a `type`, `index.md` and `log.md` are
 reserved names, and the log's headings are dates. An OKF reader can read the records as a bundle. The rules on top of
-that format (a work item's state and what it is bounded by, a closed record opening with its resolution, a knowledge
-document's hash in the log, the shape of a log entry) are Rotproof's own, stricter than OKF, and not part of it.
+that format (a knowledge document pinned to the code it follows, a deprecated one opening with its resolution, an
+alarm's two headings, the shape of the log) are Rotproof's own, stricter than OKF, and not part of it.
 Rotproof is not an OKF validator. In one place the records depart from a SHOULD of OKF, which asks that every
 timestamp be a datetime with a UTC offset (section 5): the `at` of `verified` and `stale_after` are written as a day
 (`YYYY-MM-DD`), and Rotproof reads only the day of either, of a datetime too. An agent has no clock, and no check can
@@ -68,7 +65,7 @@ Rotproof is released for Windows x86_64 and Linux x86_64 (glibc 2.17 or newer). 
 upgrade, which can bring new rules, is a commit of its own:
 
 ```sh
-pip install rotproof==0.4.0
+pip install rotproof==1.0.0-rc.1
 ```
 
 The wheel carries only the binary; no Python code runs. Without Python, take the archive for your platform from
@@ -89,14 +86,12 @@ rotproof --root <repository> init --stack python  # write .config/rotproof.toml,
 rotproof --root <repository> init    # after upgrading Rotproof: update the project's files (see "Upgrading Rotproof")
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
-rotproof --root <repository> index   # write every generated file in docs/ (the index files, the closed list and the rules)
-rotproof --root <repository> before <slug>  # print the open records that close before a record, earliest first (--all: the closed ones too)
+rotproof --root <repository> index   # write every generated file in docs/ (the index files and the knowledge rules)
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
-rotproof stop-hook                   # run by Claude Code when the agent stops (see "The stop hook")
 rotproof time-hook                   # run by Claude Code on each prompt, to tell the agent the time (see "The time hook")
 ```
 
@@ -125,7 +120,8 @@ names the rest of the starter (`App.tsx`, the styles, `assets/`) as code outside
 
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
-(below), a milestone when `docs/work/` has none, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files, the closed list and the rules in `docs/`). It never
+(below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files and the
+knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
 overwrites a file it does not generate, apart from adding the fields the declaration lacks (below), and never moves or
 deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
 
@@ -138,8 +134,7 @@ The project's files are written once, as a starting point, and are the project's
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
-| `docs/work/next-milestone.md` | When `docs/work/` has no milestone, and no document that cannot be read and may be one: a draft of the next moment the work waits for, whose `# Condition` holds only a comment, so `rotproof check` fails until a person writes what that moment is |
-| `.claude/settings.json` | The stop hook and a hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), the time hook (see "The time hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
+| `.claude/settings.json` | The time hook (see "The time hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
@@ -150,7 +145,7 @@ neither the pin nor the workflow, and says so.
 
 When a newer Rotproof requires a field the declaration lacks, `rotproof check` fails and says so, and
 `rotproof create` adds the field under a comment that says what it is and where its first value came from (`areas`
-gets the tags the records use, sorted by name), keeping every comment and value already there. A value that is present
+gets the tags the knowledge documents use, sorted by name), keeping every comment and value already there. A value that is present
 is never changed, so an upgrade fails only on what the new rules find.
 
 ### Upgrading Rotproof
@@ -166,46 +161,31 @@ that has a declaration:
   or not an update applies, so every upgrade runs `rotproof init` once.
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
-  `.rotproof/AGENTS.md`, the generated files in `docs/`, and the records skeleton and the project's files where they
-  are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
-  names every field it adds to the declaration, as `rotproof create` does. Crossing a version
-  that changes the format of the records, it first moves them (below). Crossing 0.4.0, which builds the layer table
+  `.rotproof/AGENTS.md`, the generated files in `docs/`, and `docs/knowledge/`, the log and the project's files where
+  they are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
+  names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
   `rotproof check` names what is not moved yet. It never changes the declaration's other values, and once it has set
   `files`, running it again changes nothing.
-- **An update only adds,** and does nothing when its file has it already. What it cannot do without a person (its file
-  is not in a form Rotproof can read), `rotproof init` says, exits 2 and leaves `files` as it was: do it by hand, or
-  decline the update by its name in `declined`, and run `rotproof init` again. When its file is missing, the same run
-  writes the file as `rotproof create` does now, with what every update adds, and the update asks for nothing. A move
-  across a change of format (below) is not an update: it rewrites, cannot be declined, and leaves `files` as it was in
-  the same way while it leaves something to a person.
+- **An update only adds, or takes out what Rotproof itself wrote and no longer keeps, matched exactly,** and does
+  nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
+  byte order mark it had. What it cannot do without a person (its file is not in a form Rotproof can read),
+  `rotproof init` says, exits 2 and leaves `files` as it was: do it by hand, or decline the update by its name in
+  `declined`, and run `rotproof init` again. When its file is missing, the same run writes the file as
+  `rotproof create` does now, with what every update adds, and the update asks for nothing.
 
-| Update | Version | File | What it adds |
+| Update | Version | File | What it does |
 |---|---|---|---|
-| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | `"Edit(/.config/rotproof-approved.toml)"` in `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order, two spaces of indentation and `\n` line endings |
-| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | A second `Stop` hook that says when `rotproof` is not on the `PATH` (see "The stop hook"), as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
-| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | The time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above: an untouched file ends as `rotproof create` writes it now |
-
-**Crossing 0.3.0, `rotproof init` first moves the records.** Before 0.3.0 the specs were in `docs/specs/` and the
-backlog items in `docs/backlog/`; from 0.3.0 both are in `docs/work/`, and nothing reads the old places, so the move
-cannot be declined. It is what a machine can do without reading the records: each record to `docs/work/` under its own
-name; every link that reached one pointed at its new place, in `docs/` (in the log too, whose words stay as they were
-written) and in every markdown file elsewhere in the repository that `.gitignore` does not exclude, such as
-`AGENTS.md` and the READMEs, where a link starting with `/` is read from the root of the repository, as GitHub reads
-it; `type: Backlog Item` as `Work Item` and `epic` as `parent`; an open item with no parent as a draft, as a
-stable item is now one sorted into a spec; and the deadline of a closed item dropped, as it binds nothing. The rest it
-says, and `rotproof check` names it record by record: how each closed record closed (`progress`), and the deadline of
-each open item, which becomes a milestone named in `until`. It also names the markdown files outside `docs/` that
-still name `docs/backlog/` or `docs/specs/` in words, which a person points at `docs/work/` where they describe the
-project now. Files other than markdown (code and its comments, configuration) are not read: search them for the old
-paths after the move. The move is planned whole first: a name in both old
-directories, or a file it would not know where to put, stops it with nothing changed, and is renamed or moved by hand.
-Until it has run, `rotproof check` says only that the records are in the old places.
+| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
+| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
+| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
+| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, and `Stop` when no group is left (see "The time hook"). Written again as above: an untouched file ends as `rotproof create` writes it now |
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
-`layers/table.toml`), and gives the rules of the records, starting with reading the index files before work. It names
+`layers/table.toml`), and gives the rules of the records, starting with reading the knowledge index before work, and
+where open work is kept (an issue). It names
 the Rotproof version that wrote it, so after an upgrade `rotproof check` fails until `rotproof init` (or
 `rotproof create`) has rewritten it. Edited by hand, it fails too: a project's own rules go in its own `AGENTS.md`.
 
@@ -218,55 +198,15 @@ in `CLAUDE.md` for Claude Code:
 @.rotproof/AGENTS.md
 ```
 
-## The stop hook
+## The time hook
 
-An agent's findings are lost when it reports them and stops: "not checked", "out of scope" in its last message, and
-nothing in the records. `rotproof stop-hook` is [Claude Code's `Stop` hook](https://code.claude.com/docs/en/hooks),
-run when the agent stops, and reads that last message. When the message holds a phrase that leaves something open
-and `git status` shows no change in `docs/`, the hook sends the agent back once, asking it to record the finding or to
-say in one line where it already is. While the agent is
-continuing because of a stop hook, the hook lets it stop, so it never loops. A line that points at the records (the
-word `spec`, `backlog` or `knowledge`, the words `work item`, or a path through `work/`) is not read: what it leaves
-open is recorded where it points. The phrases are built in (Japanese and English); the agent decides what each one meant.
-
-`rotproof create` writes `.claude/settings.json` with the hook when it does not exist, together with the rule that
-denies Claude Code editing the approvals file (see "Approving a forbidden import"). A project that has one adds the
-hook to it:
-
-```json
-{
-  "hooks": {
-    "Stop": [{ "hooks": [{ "type": "command", "command": "rotproof stop-hook" }] }]
-  }
-}
-```
-
-`rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active), and
-the hook runs the first one there, which may not be the one the project pins. So neither goes unseen:
-
-- **Not on the `PATH`:** the hook fails with the shell's "command not found", which Claude Code may show only in its
-  debug log. `rotproof create` writes a second `Stop` hook beside it, which runs in the shell and needs no Rotproof:
-  `command -v rotproof >/dev/null 2>&1 || echo '{"systemMessage": "rotproof is not on the PATH ..."}'`. A project made
-  before 0.4.0 gets it from `rotproof init` (the update `claude-stop-hook-on-path`).
-- **Another version on the `PATH`:** `rotproof stop-hook` compares its own version with `files` in the declaration (the
-  version the project's files are up to) and, when they differ, says so in a `systemMessage`, on every stop. A
-  Rotproof older than 0.4.0 does not compare: the check comes with the hook.
-
-A `systemMessage` is shown to the person and keeps no agent from stopping. The project is the nearest directory
-upwards that holds `.config/rotproof.toml`; outside one, the hook says nothing. A hook that fails (not a git
-repository, an input from another hook, a `--root` that is not a directory, a command line that is wrong) exits 1,
-which Claude Code shows without keeping the agent from stopping; exit code 2 would keep it from stopping.
-
-### The time hook
-
-An agent has no clock of its own. It writes the day an item was filed, the day a state was measured and the day of a
-log entry from what it was last told, and a guess runs ahead of the clock: `rotproof check` fails on a day that has
-not come (see "What `rotproof check` checks"). `rotproof time-hook` is Claude Code's `SessionStart` and
-`UserPromptSubmit` hook: at the start of every session (a resumed or a compacted one too) and on every prompt, it
-gives the agent the time now, as `additionalContext`, to write from. Within a long turn the time goes on, so it says
-to read the clock for a later one. `rotproof create` writes it into `.claude/settings.json` beside the stop hook; a
-project made before 0.4.0 gets it from `rotproof init` (the update `claude-time-hook`). A project that has its own
-settings adds it:
+An agent has no clock of its own. It writes the days in the records from what it was last told, and a guess runs ahead
+of the clock: `rotproof check` fails on a day that has not come (see "What `rotproof check` checks").
+`rotproof time-hook` is [Claude Code's](https://code.claude.com/docs/en/hooks) `SessionStart` and `UserPromptSubmit`
+hook: at the start of every session (a resumed or a compacted one too) and on every prompt, it gives the agent the
+time now, as `additionalContext`, to write from. Within a long turn the time goes on, so it says to read the clock for
+a later one. `rotproof create` writes it into `.claude/settings.json`; a project made before 0.4.0 gets it from
+`rotproof init` (the update `claude-time-hook`). A project that has its own settings adds it:
 
 ```json
 {
@@ -277,8 +217,15 @@ settings adds it:
 }
 ```
 
-It fails (an input from another hook, a command line that is wrong) with exit 1, which Claude Code shows while the
-prompt goes on; exit code 2 would block the prompt. It reads no `--root`, so one that is not a directory changes nothing.
+`rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active). The
+hook fails (an input from another hook, a command line that is wrong) with exit 1, which Claude Code shows while the
+prompt goes on; exit code 2 would block the prompt. It reads no `--root`, so one that is not a directory changes
+nothing.
+
+Before 1.0, Rotproof also wrote a `Stop` hook, `rotproof stop-hook`, which sent the agent back when its last message
+left something open and nothing in `docs/` changed. It went with the records of work it asked for. `rotproof init`
+takes it out of `.claude/settings.json` (the update `claude-remove-stop-hook`); until then, the command reads the hook
+input, says in a `systemMessage` that it does nothing now, which keeps no agent from stopping, and exits 0.
 
 ## Approving a forbidden import
 
@@ -329,7 +276,7 @@ definitions are built into it, and the declaration is never shipped with it.
 
 ```toml
 stack = "python"         # python | typescript | rust | none
-areas = ["billing", "records"]  # the areas the records are grouped by, in this order (see The records)
+areas = ["billing", "records"]  # the areas knowledge is grouped by, in this order (see The records)
 absent = ["ui"]          # layers this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
 ```
@@ -370,149 +317,80 @@ case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 ```
 docs/
   index.md          generated
-  log.md            what was done, newest first
-  work/             every spec, work item and milestone, open or closed
-    rules.md        generated: the rules of the three types (type: Guide)
-    index.md        generated: the open records, and the closed parts of open ones
-    closed.md       generated: every other closed record (type: Guide)
-    <slug>.md       one record per file (type: Spec, Work Item or Milestone; status: draft, stable or deprecated;
-                    progress: started, done or dropped)
+  log.md            what each task left behind, newest first
   knowledge/        how things are now, and why (type: Knowledge, status: stable or deprecated)
     rules.md        generated: the knowledge rules (type: Guide)
     index.md        generated
+    <slug>.md       one document per file
 ```
 
-The two directories hold records that are handled differently. `work/` holds what was decided and the work waiting on
-it, closed once implemented, done or dropped, and never moved. Which type a sentence belongs to is one question: if
-the work were finished today, would it be false? A spec holds what stays true (what was decided, why, what was
-rejected); a work item holds what would then be false (what is not done or measured yet, and how far it has come).
-Whether a record is decided is its `status`: a draft spec is not agreed yet, a draft work item is not sorted yet. How
-far its work has come is its `progress`: `started`, then `done` or `dropped` once it is closed. A
-milestone holds neither: it is a moment the work waits for (a release, an agreement, something outside the project),
-with a `# Condition` that says what to look at to know it came, and an optional `date` that fails nothing when it
-passes. A project always has an open one, its next moment: `rotproof create` writes `next-milestone.md` when
-`docs/work/` has none, with a condition that is only a comment, so the check fails until a person writes what the next
-moment is. A document that cannot be read is not known to be no milestone: while one may be, create writes none, and
-the check says to fix it rather than write another. The index lists the documents left out of it first, each with why,
-as what it lists and counts is short of them until they are fixed; then the open milestones, across the areas, by
-date. A milestone's line counts the open
-records that close before it, back along the arrows and from each parent to its children, and names the open
-milestones before it, where the count stops, so that a release does not count the work of the one before it.
-`rotproof before <slug>` lists those records by depth, each after every open record it waits for, and within a depth
-by mark, which says whether a record can be worked to its end now: `started` and `ready` (nothing open closes before
-it, started or not), `waits` (something open does; `Started.` on the line says its work started), then `milestone`
-(with `Past its date.` once today is past its date). Each depth has a heading that says what it means,
-`-- nothing open closes before these --` first and `-- these close after the ones above --` after it, rather than a
-number: a depth orders the closing, not the work. Each line has the record's last measured state and the open records
-it waits for, by name; given a spec, it lists its children and what closes before them, and with `--all` the closed
-records too (`done`, `dropped`). It is how an agent learns what is left before a release, and what it can do now,
-without opening the records one by one. Work that is done but waits for something outside, such as a pull request to
-be merged, waits for a milestone of that moment (`after: [pr-12-merged]`), so it is listed as waiting, not as work.
-`knowledge/` holds how things are now, edited in place and deprecated only when it no longer holds. A done spec says
-what was decided and stays current until a later one replaces it; what it built is described in `knowledge/`, an API
-or a data model, or why something was decided. Every edit of a knowledge document is named in the log by a hash of its
-contents, under the label `**Knowledge**` (`* **Knowledge**: knowledge/api.md@a3f9c1d2`), and `rotproof check` fails
-an edit the log does not name. A knowledge document that describes code names it in `follows`, each with its hash when
-the document was last reviewed: a file in any language, and in Python also a function or class
-(`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). Once the document is reviewed against
-the code, `rotproof follows knowledge/api.md <key>...` (or `docs/knowledge/api.md`) pins each key at its hash as the
-code is now, adding a key `follows` lacks with its hash quoted, writes all the keys or none, and prints the log line to
-write: pinning changes the document, so its log entry records the review. Nothing else in the document changes: it
-keeps a byte order mark and its line endings (CRLF on every line when one line had it). Run it when a document starts
-to follow something, and when `rotproof check` fails because what it follows changed since: the check names the
-command to run. It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand.
-After a refactoring that moved code without changing what it does, a person can re-pin every changed hash in one act:
+Rotproof keeps two records, and nothing that is open. Open work (what is left, how far a task has come, the questions
+it raised) is kept in the project's issues: it opens, moves and closes, and is no description of how things are. What
+goes stale is a description of how things are once the code changes, and that is what Rotproof keeps from going stale.
+The rest of `docs/` is the project's, and Rotproof reads none of it: the `docs/work/` of a project made before 1.0
+stays as it is, no longer checked or written.
+
+`knowledge/` holds how things are now, and why, as far as the code cannot tell it: why the code is so and what was
+rejected, how it should behave where the code says only how it does, and what lies outside the repository (the
+promises of a service it calls, the data in production, how to run or operate it). A summary of how the code works is
+left out: the code says that, and a copy goes stale. A document is edited in place, git keeping its history, and is
+deprecated, opening with `# Resolution`, only when it no longer holds. A document that describes code names it in
+`follows`, each with its hash when the document was last reviewed: a file in any language, and in Python also a
+function or class (`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). Once the document is
+reviewed against the code, `rotproof follows knowledge/api.md <key>...` (or `docs/knowledge/api.md`) pins each key at
+its hash as the code is now, adding a key `follows` lacks with its hash quoted, and writes all the keys or none:
+pinning changes the document, so its commit records the review. Nothing else in the document changes: it keeps a byte
+order mark and its line endings (CRLF on every line when one line had it). Run it when a document starts to follow
+something, and when `rotproof check` fails because what it follows changed since: the check names the command to run.
+It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand. After a
+refactoring that moved code without changing what it does, a person can re-pin every changed hash in one act:
 `rotproof approve --reviewed` lists each document and what changed under it, says to read the changes first (a hash
 says only that the code changed), asks for one `y` on a terminal (an agent's shell has none), writes the new hashes
-(each document keeping a byte order mark and its line endings, as `rotproof follows` does), and prints the log lines
-to write. What is gone is left for the person to edit. No LLM judges whether the meaning
-changed: the agent that refactors is usually one.
+(each document keeping a byte order mark and its line endings, as `rotproof follows` does), and names the documents
+it wrote. What is gone is left for the person to edit. No LLM judges whether the meaning changed: the agent that
+refactors is usually one.
 
 Some knowledge matters only when something is seen: a service refuses an upload, a CI image moves. Such a document is
 an alarm, with `# When` (what is seen and where, in the words of the output) and `# Do` (what to do then, usually
-filing a draft work item until the next milestone), and optionally `match`, the short strings of the output that stay
-when its wording changes. It is knowledge and not work: nothing waits yet, and it may never come, so a milestone for
-it would stay open forever. The knowledge index lists the alarms first, under `# When something happens`, with what
-is seen and the strings: whoever meets a message searches `docs/` for it, and reading the index before work watches
-for them.
+opening an issue), and optionally `match`, the short strings of the output that stay when its wording changes. It is
+knowledge and not work: nothing waits yet, and it may never come, so an issue for it would stay open forever. The
+knowledge index lists the alarms first, under `# When something happens`, with what is seen and the strings: whoever
+meets a message searches `docs/` for it, and reading the index before work watches for them.
 
-A record stays where it was written when it closes: its `progress` says it is closed and how (`done` or `dropped`).
-Its path, and every link to it, never changes, so closing a record is a change to that record and its lines in the
-generated lists only. The index, read before every piece of work, keeps the open records and the closed parts of open
-ones; every other closed record is listed in `docs/work/closed.md`, generated next to it and linked from it, so the
-index grows with the open work and not with the history. How it closed is a field and not only words in its resolution, as work
-that waits on a dropped record does not get what it waited for. `status` keeps the meaning OKF gives it, whether the
-document is current, as a reader that knows only OKF reads `status` alone: a done work item and anything dropped are
-`deprecated`, while a done spec that still describes how things are stays `stable`. `progress: started` says that
-someone has started an open record's work, and the index says `Started.`, so the next reader continues it instead of
-starting again.
+Every knowledge document belongs to exactly one area: its only tag, one of the `areas` the declaration lists. The
+index groups by area, in the order of `areas`, so the project puts the largest or most active area first. An area says
+where a document belongs (the layers, billing), and never closes. A declared area that no document uses passes, so an
+area is declared before its first document. Renaming an area is editing `areas` and the tag of every document in it,
+deprecated ones included. Guides keep their optional tags, which name no area.
 
-Every spec, work item and knowledge document belongs to exactly one area: its only tag, one of the `areas` the
-declaration lists. The index files group by area, in the order of `areas`, so the project puts the largest or most
-active area first. An area says where a record belongs (the layers, the records, billing), and never closes. A
-declared area that no record uses passes, so an area is declared before its first record. Renaming an area is editing
-`areas` and the tag of every record in it, closed ones included: the tag is frontmatter for the index, not history.
-Guides keep their optional tags, which name no area.
-
-The records form a tree: an epic, its parts, and the work items of each. A record names the spec it is a part of by
-slug (its file name without `.md`) in `parent`. A large piece of work is split into specs that are parts of an epic,
-which is a spec like any other, with goals and decisions of its own; the work a spec waits on is its work items, each
-with its own state, instead of a list of steps in its body:
-
-```yaml
-type: Spec
-title: Publish Rotproof for every stack
-status: stable
-tags: [rotproof]
-parent: template-multi-stack
-```
-
-The area and the parent are independent: an area says where a record belongs and never closes, a parent says which
-piece of work a record is part of and closes after its children. A part may be in another area than its epic. A spec
-that cannot name one area mixes two, so it is split into one part per area, and the epic ties the parts back into one
-piece of work. In an index, a record in the same area as its parent, and open or closed as its parent is, is listed
-under it, indented; any other record with a parent is listed on its own with `Parent: [<title>](...)` after its line,
-so each record appears once.
-
-The order of the work is a third, independent thing: arrows. `after: [a]` on B, or `until: [b]` on A, says "A, then
-B", between any two records, a milestone included: the deadline of a work item is `until: [release-0-3-0]`. The later
-record closes after the earlier one; one that waits for a dropped record is pointed elsewhere; the arrows and the
-parents make no cycle. The index shows what each open record waits for, and says `Ready.` once all of it is done, so
-work whose conditions came true is seen instead of waiting for someone to notice; once its work has started, it says
-`Started.` instead. An arrow orders the closing, not the start.
-
-A work item has this frontmatter and these body headings:
+A knowledge document has this frontmatter; its body is free, apart from `# Resolution` and an alarm's two headings:
 
 ```markdown
 ---
-type: Work Item
-title: Some problem
-description: 'One sentence: what is waiting.'
-tags: [area]
+type: Knowledge
+title: Uploads are tried three times
+description: 'The storage service drops about one upload in a thousand: why three tries, and why not more.'
+tags: [storage]
 status: stable
-progress: started
-parent: some-spec
-after: [design]
-until: [release-0-3-0]
-filed: 2026-10-01
+follows:
+  src/infrastructure/outbound/storage.py::upload: "3e1f0a9c"
 verified: {by: human:someone, at: 2026-10-01}
 stale_after: 2027-01-01
 ---
-
-# Resolution    (only when closed, and then first)
-# Trigger       (optional: what starts it, when no record after can name holds it)
-# State
-# Details
 ```
 
-- `tags`: exactly one, declared in `areas`; the index groups items by it.
-- `status`: `draft` = open and not sorted yet, `stable` = open and sorted, `deprecated` = closed.
-- `progress`: optional while open: `started`; once closed, required: `done` or `dropped`.
-- `parent`: the spec it is a part of; required for `stable`.
-- `after`, optional: the records that come before it. `until`, optional: the records that come after it, often a
-  milestone.
-- `verified`: who measured the state, and the day (`at`). A datetime with a time zone passes too, read as its day there.
-- `stale_after`, optional: the day from which to measure the state again.
+- `tags`: exactly one, declared in `areas`; the index groups documents by it.
+- `status`: `stable` = holds, `deprecated` = no longer holds, with `# Resolution` first: what replaced it.
+- `follows`, optional: the code it describes, each key with its hash when the document was last reviewed.
+- `match`, optional, an alarm's only: the strings of the output it is found by.
+- `verified`, optional: who reviewed it, and the day (`at`). A datetime with a time zone passes too, read as its day
+  there.
+- `stale_after`, optional: the day from which to look at it again.
+
+The log holds one entry per task, under the day's `## YYYY-MM-DD` heading, newest first: the task, its issue, what went
+wrong and what was learned, which is found nowhere else, and searchable in the repository when something breaks. What
+changed is in the commits, what was measured and decided along the way in the task's issue, and what still holds in
+`knowledge/`.
 
 ## What `rotproof check` checks
 
@@ -577,105 +455,76 @@ stale_after: 2027-01-01
 - **The project's files are up to this version of Rotproof** (see "Upgrading Rotproof"): `files` in the declaration
   (0.1.0 when it is missing) is a version as `major.minor.patch`, neither older nor newer than the running Rotproof,
   and every name in `declined` is an update.
+- **`.rotproof/AGENTS.md` is up to date:** it equals what `rotproof create` writes for the stack with this version of
+  Rotproof (see "Upgrading Rotproof"), so it fails after an upgrade until `rotproof init` has run, and when edited by
+  hand.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
   outside `unchecked` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
   a crate's `tests/` and `build.rs` included, read by Rotproof's own scanner, which skips strings, raw strings and
-  character literals as Rust's lexer does. Work left to do belongs in a work item, where it is listed and closed, and
-  a decision with its reason in the spec or the log entry of the change; a comment that explains how to read the code
-  stays, without the word. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
+  character literals as Rust's lexer does. The first four put off a finding: it is fixed now, written as one line in
+  the task's issue, or let go, and the comment taken out. `NOTE` keeps knowledge where only someone reading that code
+  finds it, and is printed under a heading of its own: what explains only the code beside it stays as a plain comment
+  without the word, and what spans files, says how to run or operate something, or lies outside the repository moves
+  to `docs/knowledge/`, tied to the code by `follows`. A line that holds both is named under the first heading alone,
+  as taking the comment out settles both. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
   strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
 
-- **The records are in `docs/work/`:** no `docs/backlog/` or `docs/specs/` is left from before 0.3.0. When one is,
-  this is the only finding on the records, as nothing else reads the old places: `rotproof init` moves them (see
-  "Upgrading Rotproof").
-- **The bundle is there:** `docs/`, `docs/index.md`, `docs/work/`, `docs/work/rules.md`, `docs/knowledge/` and
-  `docs/knowledge/rules.md` exist, and the declaration with its `areas` can be read. Without them every other check
-  would pass with nothing checked.
+- **The bundle is there:** `docs/knowledge/`, `docs/index.md` and `docs/knowledge/rules.md` exist, and the declaration
+  with its `areas` can be read. Without them every other check would pass with nothing checked.
 - **Every name is compared exactly,** wherever Rotproof looks for a file or a directory: a link's target, the files
   above, the layers and the declaration. Rotproof reads the names the directories hold instead of asking the
   operating system, which on Windows also finds `README.md` for `readme.md`, `README.md.`, `README.md `, a stream
   (`README.md:secret`) or a short name (`README~1.MD`). Linux and GitHub find none of them, so each fails, and the
   message says what the disk has.
 - **The areas are distinct headings:** none is empty, has a space at either end or a line break, and no two differ only in case.
-- **Every work item keeps the format:** the fields above with their types, a `parent` once it is `stable`, and
-  non-empty State and Details (and Resolution when closed, as the first heading); a Trigger, when there is one, is not
-  empty either. A field Rotproof does not know passes as an extension, as OKF allows, unless it looks
-  like a misspelling of a field the document type has (`stale_afer`, `staleAfter`, `Title`), or is a field
-  other types have and this one does not (a work item's `filed` on a spec, the `parent` of a spec or a work item on
-  a knowledge document), or is a field Rotproof no longer reads (`epic`, which says to write `parent`; `deadline_kind`
-  and `deadline`, which say to write the moment as a milestone and name it in `until`): those fail, in every document
-  type, as a misspelled optional field would otherwise be silently dropped. The `at` of `verified` and `stale_after` are a day, or a datetime with a time zone read as its day there; every other time has a time zone. `stale_after` is a later day than the last `verified`. A required text is not blank (spaces alone
-  are empty), in every document type, and no tag is empty. What the index lists (`title`, `description` and the
-  tags) is on one line: a line break would end the entry and start a heading or an entry of its own. A
-  title is written into the index with `[`, `]` and `\` escaped, so it stays the text of its own link. The one tag
-  is a declared area, and the message lists the declared ones.
-- **Every `# Details` has a link, and every link in `docs/` resolves:** in every document under `docs/` and in the
-  log, not only in `# Details`, each read from the document's own directory, with heading anchors computed as GitHub
-  computes them. A path with a drive
-  letter (`C:/...`) or a `file:` URL fails: it names a file on one machine. Only a URL (`https:`, `mailto:`) is not
-  checked, and a file name with a line number (`check.rs:104`) is a path, not a URL. A path is separated with `/`:
-  only Windows reads a backslash as a separator, so a path with one fails. A path that climbs above the repository
-  fails: GitHub serves only the repository. Links are read as a CommonMark reader reads them: with a title
-  (`[a](b.md "title")`), in angle brackets, as reference links defined in the document, as images, and as `href` in
-  HTML, and not inside code or comments. A link to a `.py` file names, in its text, a function
-  or class defined there, at any depth. The file is parsed as Python, so a `def` line inside a string or a docstring
-  does not count. The text is one name exactly as defined (``[`render_index`](../tests/bundle.py)``), not a call
-  (`render_index()`) or a dotted path (`Bundle.render`); when it names nothing, the message says which name to write
-  or lists the names the file defines.
-- **Every spec keeps the format:** `title`, `description`, `status` and exactly one declared area in `tags`, and,
-  once it is closed (`progress: done` or `dropped`), a non-empty `# Resolution` as the first heading. `progress` is
-  `started`, `done` or `dropped`, and agrees with `status`: a deprecated record is closed, anything dropped is
-  deprecated, a done work item is deprecated, and a done spec is stable (still current) or deprecated (replaced); a
-  knowledge document has no `progress`. `parent`, when present, is the slug of another spec in `docs/work/`
-  (not a path, not a work item or a guide, not the spec itself), and that spec has no `parent` of its own: one level
-  only. The `parent` of a work item is the slug of any spec. A record that breaks one of these is left out of the index
-  files.
-- **A milestone is open,** and every milestone keeps the format: `title`, `description`, `status` and exactly one
-  declared area, a non-empty `# Condition`, and once it is closed (`progress: done` or `dropped`) a non-empty
-  `# Resolution` as the first heading. A milestone is never `started`; one that came is stable or deprecated, and one
-  withdrawn is deprecated. `date` is a day (`YYYY-MM-DD`). A milestone has no `parent`, and no record names one as its parent.
-- **Every open record has a parent or something after it:** an open spec or work item without a parent has an
-  `until` of its own, or is named in another record's `after`. So every open record reaches a milestone, by its parent
-  or its arrows, and a milestone cannot close while work bounded by it is open: that is the deadline, as records.
-- **The arrows keep their order:** `after` and `until` are lists of slugs of records that pass (not a guide, not the
-  record itself). An arrow is written once, on either side; the later record is not closed as done while the earlier
-  one is open; no open record comes after, or before, a dropped one; and the arrows and the parents (a child before
-  its parent) make no cycle. The index says `Ready.` on an open record whose earlier records are all done, and
-  `Started.` in its place once its work has started; a record may start before its earlier records close.
-- **A parent closes after its children:** no closed spec has an open part or an open work item. A child that is
-  dropped closes as dropped, as any record does.
-- **The log exists, points only at work items that exist** (`work/<slug>.md`, or `backlog/<slug>.md` as entries
-  written before `docs/work/` name them, written with `/` or `\`, the slug percent-encoded or not), and its second-level headings are dates, newest first. Below the title, the log is
-  a flat list of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented
-  lines (wrapped text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the
-  first date fails. A new log, with only its title and HTML comments, passes.
-- **No day in the records is later than today:** a work item's `filed` and every `at` of its `verified`, and the
-  log's date headings. They are read from the clock when written, and one that has not come was guessed. Each is a
-  day, the day of a datetime too (a time of day is never compared), and is compared with the latest day anywhere (the
-  day in UTC+14), so CI in UTC passes a day written in Tokyo before 09:00. Time alone only makes one pass, so this
-  never turns CI red with no change. Claude Code is given the time by the time hook (see "The stop hook").
-- **Every knowledge document keeps the format,** as a spec does (without `parent`, and `status` `stable` or
-  `deprecated`), and **the log names it as it is now:** some `**Knowledge**` field of a log entry, with its wrapped
-  lines, names it with the first 8 hex digits of SHA-256 of the whole file (every line ending as `\n`). An edit the
-  log does not name fails, and the failure prints the line to write. A `**Knowledge**` field that names a document
-  `docs/knowledge/` does not have fails too. An alarm has both `# When` and `# Do`, neither empty, and only an alarm
-  has `match`: a list of strings, each on one line and named once.
+- **Every knowledge document keeps the format:** `type`, `title`, `description`, `status` (`stable` or `deprecated`)
+  and exactly one declared area in `tags`, and, once it is deprecated, a non-empty `# Resolution` as the first
+  heading. A field Rotproof does not know passes as an extension, as OKF allows, unless it looks like a misspelling of
+  a field a knowledge document has (`stale_afer`, `staleAfter`, `Title`): that fails, as a misspelled optional field
+  would otherwise be silently dropped. The `at` of `verified` and `stale_after` are a day, or a datetime with a time
+  zone read as its day there. A required text is not blank (spaces alone are empty), and no tag is empty. What the
+  index lists (`title`, `description` and the tags) is on one line: a line break would end the entry and start a
+  heading or an entry of its own. A title is written into the index with `[`, `]` and `\` escaped, so it stays the text
+  of its own link. The one tag is a declared area, and the message lists the declared ones. An alarm has both
+  `# When` and `# Do`, neither empty, and only an alarm has `match`: a list of strings, each on one line and named
+  once. A document that breaks one of these is left out of the index, which lists it first, with why.
 - **Every knowledge document matches the code it follows:** each key of `follows` names a path from the root with
   `/` (a file; a directory with a `/` at its end; a definition of a `.py` file after `::`, as `f`, `Class` or
   `Class.method`) with a hash of 8 lower-case hex digits, and that hash is what it names now: the file's text, every
   line ending as `\n`; the definition's source from its first decorator to its end; or every `.py` file under the
   directory (outside what the project's `.gitignore` files exclude, and hidden ones), each with its path. What is not
   there fails. A deprecated document no longer holds, so what it follows is not read.
-- **Every document is a known type in its directory.** The fields OKF defines for a document pass as OKF writes them
-  (`generated` needs only `by`; every entry of `sources` needs a `resource`; `usage_window` is a `{from, to}` range).
-  The names OKF reserves appear only where Rotproof writes and reads them: `index.md` in `docs/` and in each directory
-  of documents, `log.md` in `docs/`. A markdown file is named `.md`, in lowercase: GitHub shows a `.MD` file, but
-  Rotproof would not read it.
-- **Every file Rotproof generates equals what `rotproof index` writes:** the index files and `docs/work/closed.md`, so
-  nobody maintains a list by hand, and `docs/work/rules.md` and `docs/knowledge/rules.md`, so the rules a project reads are the rules its Rotproof
-  checks. A project's own rules go in another guide in the same directory.
-- **No spec sits at the repository root.**
+- **Every link in `docs/knowledge/` and the log resolves:** each read from the document's own directory, with heading
+  anchors computed as GitHub computes them, a link from the log into the `docs/work/` of an older project included. A
+  path with a drive letter (`C:/...`) or a `file:` URL fails: it names a file on one machine. Only a URL (`https:`,
+  `mailto:`) is not checked, and a file name with a line number (`check.rs:104`) is a path, not a URL. A path is
+  separated with `/`: only Windows reads a backslash as a separator, so a path with one fails. A path that climbs
+  above the repository fails: GitHub serves only the repository. Links are read as a CommonMark reader reads them:
+  with a title (`[a](b.md "title")`), in angle brackets, as reference links defined in the document, as images, and as
+  `href` in HTML, and not inside code or comments. A link to a `.py` file names, in its text, a function or class
+  defined there, at any depth. The file is parsed as Python, so a `def` line inside a string or a docstring does not
+  count. The text is one name exactly as defined (``[`render_index`](../tests/bundle.py)``), not a call
+  (`render_index()`) or a dotted path (`Bundle.render`); when it names nothing, the message says which name to write
+  or lists the names the file defines.
+- **The log exists, and its second-level headings are dates, newest first.** Below the title, the log is a flat list
+  of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented lines (wrapped
+  text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the first date fails.
+  A new log, with only its title and HTML comments, passes. Its entries' fields are not checked: an entry written
+  before 1.0 keeps the fields it had.
+- **No day in the log is later than today:** its date headings are read from the clock when written, and one that
+  has not come was guessed. Each is compared with the latest day anywhere (the day in UTC+14), so CI in UTC passes a
+  day written in Tokyo before 09:00. Time alone only makes one pass, so this never turns CI red with no change. Claude
+  Code is given the time by the time hook (see "The time hook").
+- **Every markdown file under `docs/knowledge/` is a document Rotproof reads:** it sits in `docs/knowledge/` itself (a
+  markdown file in a directory under it fails, as Rotproof would not read it; a picture there passes), is named `.md`
+  in lowercase (GitHub shows a `.MD` file, but Rotproof would not read it), is not `log.md`, a name OKF reserves for
+  the log in `docs/`, and is a knowledge document or a guide. The fields OKF defines for a document pass as OKF writes
+  them (`generated` needs only `by`; every entry of `sources` needs a `resource`; `usage_window` is a `{from, to}`
+  range).
+- **Every file Rotproof generates equals what `rotproof index` writes:** `docs/index.md` and `docs/knowledge/index.md`,
+  so nobody maintains a list by hand, and `docs/knowledge/rules.md`, so the rules a project reads are the rules its
+  Rotproof checks. A project's own rules go in another guide beside it.
 
 The frontmatter is read as YAML 1.2: quoting a date or a datetime never changes whether it passes. It holds no comment: a `#`
 after a space or at the start of a line starts one, which YAML reads as nothing, so an unquoted `title: PR #1` would

@@ -10,18 +10,14 @@
 //!   failing until it is done or declined. An update whose file is missing asks no person when the refresh then
 //!   writes that file with what the update adds, as it writes `.claude/settings.json`. It adds `declined`, empty,
 //!   when the declaration lacks it, names every field it adds, and never changes the declaration's other values.
-//! - **Crossing 0.3.0,** it first moves the records from `docs/backlog/` and `docs/specs/` into `docs/work/`
-//!   (`migrate.rs` in `domain`), which cannot be declined: Rotproof from 0.3.0 reads no other place.
-
-use std::collections::BTreeMap;
+//!   It never moves or rewrites a record: from 1.0, Rotproof reads no records of work, wherever they are.
 
 use crate::create::refresh;
 use crate::tree::{exactly, read_text, read_written};
-use domain::bundle::DOCS;
 use domain::layers::{
     DECLARATION, ONION, PORTS_MOVED, crosses_onion, declaration_text, known_stacks, layout, retired,
 };
-use domain::migrate;
+use domain::tree::Written;
 use domain::upgrade::{FIRST, Update, fields, pending, with_files};
 use protocol::inbound::{Initialized, Upgraded};
 use protocol::outbound::{Tree, Writer};
@@ -80,10 +76,6 @@ fn upgrade(
         from: from.clone(),
         ..Upgraded::default()
     };
-    // Before the refresh, which writes docs/work/ and reads the records there for the areas a declaration lacks
-    if migrate::due(&from, running) {
-        move_records(tree, out, &mut upgraded)?;
-    }
     let mut asked = Vec::new();
     for update in pending(&from, running, &declared.declined)? {
         if let Some(why) = apply(tree, out, update, &mut upgraded)? {
@@ -133,54 +125,6 @@ fn onion_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
     moves
 }
 
-/// Move the records of a project made before 0.3.0 into `docs/work/` (`migrate.rs` in `domain`): every file under
-/// `docs/` and every markdown file elsewhere read, the move planned whole, then written. A move that cannot be planned
-/// changes nothing.
-fn move_records(tree: &dyn Tree, out: &dyn Writer, upgraded: &mut Upgraded) -> Result<(), String> {
-    if tree.found(DOCS) != Some(true) {
-        return Ok(());
-    }
-    let mut files = BTreeMap::new();
-    let mut dirs = vec![DOCS.to_string()];
-    while let Some(dir) = dirs.pop() {
-        for (name, is_dir) in tree.entries(&dir).map_err(|e| format!("{dir}: {e}"))? {
-            let path = format!("{dir}/{name}");
-            if is_dir {
-                dirs.push(path);
-            } else {
-                // Only markdown is read: any other file is placed by name, or stops the move
-                let text = if name.ends_with(".md") {
-                    read_text(tree, &path).map_err(|e| format!("{path}: {e}"))?
-                } else {
-                    String::new()
-                };
-                files.insert(path, text);
-            }
-        }
-    }
-    // The markdown files elsewhere in the repository, as AGENTS.md and READMEs link to the records. Those the
-    // project's .gitignore excludes are not the project's, and are not read
-    for path in tree.files("").map_err(|e| format!("the repository: {e}"))? {
-        if path.ends_with(".md") && !path.starts_with(&format!("{DOCS}/")) {
-            let text = read_text(tree, &path).map_err(|e| format!("{path}: {e}"))?;
-            files.insert(path, text);
-        }
-    }
-    let plan = migrate::plan(&files)?;
-    for (path, text) in &plan.writes {
-        out.write(path, text).map_err(|e| format!("{path}: {e}"))?;
-    }
-    for path in &plan.removes {
-        out.remove(path).map_err(|e| format!("{path}: {e}"))?;
-    }
-    for dir in &plan.dirs {
-        out.remove_dir(dir).map_err(|e| format!("{dir}: {e}"))?;
-    }
-    upgraded.moved = plan.moved;
-    upgraded.by_hand.extend(plan.by_hand);
-    Ok(())
-}
-
 /// Apply one update to its file, or return what it leaves to a person.
 fn apply(
     tree: &dyn Tree,
@@ -189,14 +133,18 @@ fn apply(
     upgraded: &mut Upgraded,
 ) -> Result<Option<String>, String> {
     let path = update.file();
-    let text = match exactly(tree, path) {
-        Ok((found, false)) => Some(read_text(tree, &found).map_err(|e| format!("{path}: {e}"))?),
-        _ => None,
+    // Read with how it was written, so the text written back keeps the file's line endings and byte order mark
+    let (text, how) = match exactly(tree, path) {
+        Ok((found, false)) => {
+            let (text, how) = read_written(tree, &found).map_err(|e| format!("{path}: {e}"))?;
+            (Some(text), how)
+        }
+        _ => (None, Written::default()),
     };
     match update.apply(text.as_deref()) {
         domain::upgrade::Outcome::Done => {}
         domain::upgrade::Outcome::Changed(written) => {
-            out.write(path, &written)
+            out.write(path, &how.restore(&written))
                 .map_err(|e| format!("{path}: {e}"))?;
             upgraded.applied.push((update.name(), path));
         }
@@ -377,6 +325,61 @@ mod tests {
         }
     }
 
+    /// An update writes its file back as the project wrote it, as `files` is set: the settings came back all LF and
+    /// without the byte order mark.
+    #[test]
+    fn an_update_keeps_the_line_endings_and_the_byte_order_mark_of_its_file() {
+        for (crlf, bom) in [(true, true), (true, false), (false, true), (false, false)] {
+            let tree = made_by_first();
+            let lf = tree.text(SETTINGS).unwrap();
+            let text = if crlf { lf.replace('\n', "\r\n") } else { lf };
+            let raw = if bom { format!("\u{feff}{text}") } else { text };
+            tree.write(SETTINGS, &raw).unwrap();
+            let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.2.0") else {
+                panic!("upgraded");
+            };
+            assert_eq!(upgraded.applied, [("claude-deny-approvals", SETTINGS)]);
+            let now = tree.text(SETTINGS).unwrap();
+            let said = format!("crlf {crlf}, bom {bom}: {now:?}");
+            assert_eq!(now.starts_with('\u{feff}'), bom, "{said}");
+            if crlf {
+                assert!(!now.replace("\r\n", "").contains('\n'), "{said}");
+            } else {
+                assert!(!now.contains('\r'), "{said}");
+            }
+            assert!(
+                now.contains("Edit(/.config/rotproof-approved.toml)"),
+                "{said}"
+            );
+        }
+    }
+
+    /// Upgraded to 1.0, the settings 0.4.0 wrote lose the stop hook and end as a new project's, in their line endings.
+    #[test]
+    fn the_stop_hook_is_taken_out_on_the_way_to_1_0() {
+        let tree = made_by_first();
+        let new = domain::hook::SETTINGS[0].1;
+        let stop = "\"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \
+                    \"type\": \"command\",\n            \"command\": \"rotproof stop-hook\"\n          }\n        ]\n      \
+                    }\n    ],\n";
+        let old = new.replacen("\"hooks\": {\n", stop, 1);
+        assert_ne!(old, new);
+        tree.write(SETTINGS, &old.replace('\n', "\r\n")).unwrap();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "1.0.0-rc.1")
+        else {
+            panic!("upgraded");
+        };
+        assert!(
+            upgraded
+                .applied
+                .contains(&("claude-remove-stop-hook", SETTINGS)),
+            "{:?}",
+            upgraded.applied
+        );
+        assert!(upgraded.by_hand.is_empty(), "{:?}", upgraded.by_hand);
+        assert_eq!(tree.text(SETTINGS), Some(new.replace('\n', "\r\n")));
+    }
+
     /// A project of records as 0.2.0 laid it out: specs in docs/specs/, backlog items in docs/backlog/
     fn made_by_0_2() -> Fake {
         let tree = Fake::default();
@@ -416,71 +419,35 @@ mod tests {
         tree
     }
 
+    /// The records of a project made before 0.3.0 stay where they are, as they were: Rotproof no longer moves them,
+    /// and the upgrade asks no person about them.
     #[test]
-    fn the_upgrade_to_0_3_moves_the_records_once() {
+    fn the_records_of_an_old_layout_stay_as_they_are() {
         let tree = made_by_0_2();
-        // A README of the project's own links to a record, as AGENTS.md may
-        tree.write(
-            "src/README.md",
-            "See [the item](../docs/backlog/item.md).\n",
-        )
-        .unwrap();
-        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.3.0") else {
-            panic!("upgraded");
-        };
-        assert_eq!(upgraded.moved, 2);
-        assert_eq!(
-            tree.text("src/README.md").unwrap(),
-            "See [the item](../docs/work/item.md).\n"
-        );
-        for gone in [
-            "docs/backlog",
-            "docs/specs",
+        let before: Vec<Option<String>> = [
             "docs/backlog/item.md",
-            "docs/specs/rules.md",
-        ] {
-            assert_eq!(tree.found(gone), None, "{gone} is still there");
-        }
-        let item = tree.text("docs/work/item.md").unwrap();
-        assert!(
-            item.contains("type: Work Item\n") && item.contains("[spec](/work/design.md)"),
-            "{item}"
-        );
-        assert!(tree.text("docs/work/design.md").is_some());
-        assert_eq!(
-            tree.text("docs/log.md").unwrap(),
-            "# Log\n\n## 2026-10-01\n\n* [x](/work/item.md)\n"
-        );
-        // The refresh wrote docs/work/ after the move: its rules, its index, and a milestone for a person to write
-        for path in [
-            "docs/work/rules.md",
-            "docs/work/index.md",
-            "docs/work/next-milestone.md",
-        ] {
-            assert!(tree.text(path).is_some(), "{path}");
-        }
-        // The deadline of the open item and the draft it became are left to a person, so files stays where it was
-        assert_eq!(upgraded.by_hand.len(), 2, "{:?}", upgraded.by_hand);
-        assert!(!upgraded.files_set);
-        assert_eq!(
-            read_fields(&tree.text(DECLARATION).unwrap())
-                .unwrap()
-                .files
-                .as_deref(),
-            Some("0.2.0")
-        );
-
-        // Run again: nothing more moves, and files reaches the running version. What is left to a person, the check
-        // names from then on, record by record
-        let Ok(Initialized::Upgraded(again)) = init(&tree, &tree, None, "x", "0.3.0") else {
+            "docs/specs/design.md",
+            "docs/log.md",
+        ]
+        .iter()
+        .map(|p| tree.text(p))
+        .collect();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "1.0.0-rc.1")
+        else {
             panic!("upgraded");
         };
-        assert_eq!(again.moved, 0);
-        assert!(
-            again.by_hand.is_empty() && again.files_set,
-            "{:?}",
-            again.by_hand
-        );
+        assert!(upgraded.by_hand.is_empty(), "{:?}", upgraded.by_hand);
+        assert!(upgraded.files_set);
+        let after: Vec<Option<String>> = [
+            "docs/backlog/item.md",
+            "docs/specs/design.md",
+            "docs/log.md",
+        ]
+        .iter()
+        .map(|p| tree.text(p))
+        .collect();
+        assert_eq!(before, after);
+        assert_eq!(tree.found("docs/work/item.md"), None);
     }
 
     #[test]
@@ -520,34 +487,14 @@ mod tests {
         // A repository of records only has no layers to move
         let records = Fake::default();
         assert!(init(&records, &records, Some("none"), "x", "0.3.0").is_ok());
+        let written = records.text(DECLARATION).unwrap();
+        records
+            .write(DECLARATION, &written.replace(&running, "files = \"0.3.0\""))
+            .unwrap();
         let Ok(Initialized::Upgraded(none)) = init(&records, &records, None, "x", "0.4.0") else {
             panic!("upgraded");
         };
         assert!(none.moves.is_empty());
-    }
-
-    #[test]
-    fn the_move_waits_for_the_version_and_stops_whole() {
-        // Not crossing 0.3.0: nothing moves
-        let tree = made_by_0_2();
-        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", "0.2.0") else {
-            panic!("upgraded");
-        };
-        assert_eq!(upgraded.moved, 0);
-        assert!(tree.text("docs/backlog/item.md").is_some());
-
-        // A name in both directories: nothing changes at all
-        let tree = made_by_0_2();
-        tree.write("docs/specs/item.md", "---\ntype: Spec\n---\n")
-            .unwrap();
-        let before = tree.text("docs/backlog/item.md");
-        let why = init(&tree, &tree, None, "x", "0.3.0").unwrap_err();
-        assert!(
-            why.contains("docs/backlog/item.md and docs/specs/item.md have the same name"),
-            "{why}"
-        );
-        assert_eq!(tree.text("docs/backlog/item.md"), before);
-        assert_eq!(tree.found("docs/work"), None);
     }
 
     #[test]
