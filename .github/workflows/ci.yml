@@ -34,8 +34,9 @@ jobs:
           python-version: "3.13"
       - run: pip install -r requirements-build.txt
       - run: maturin build --release --out dist
-      # The wheel installs, and its binary runs, as it will for a user
-      - run: pip install --find-links dist rotproof
+      # The wheel installs, and its binary runs, as it will for a user. From dist only: with PyPI too, pip takes its
+      # release over a pre-release built here, and the smoke runs the published Rotproof
+      - run: pip install --no-index --find-links dist rotproof
       - run: rotproof --version
       # Run as a user runs it, as release.yml does, so a change of behaviour that breaks it is seen on the push that
       # makes it, not on the day of a tag
