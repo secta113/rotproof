@@ -26,7 +26,7 @@ use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
 /// The check of the days written in the records
-const NOT_COME: &str = "no day in the records is later than today";
+const NOT_COME: &str = "no day in the log is later than today";
 
 /// Every broken rule in the repository `tree` holds, at `now`. An error is a file that could not be read at all.
 pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Report> {

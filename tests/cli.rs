@@ -115,7 +115,7 @@ fn each_broken_rule_fails_under_its_check() {
     let cases: [(&str, &str, String); 16] = [
         // A day guessed rather than read from the clock
         (
-            "no day in the records is later than today",
+            "no day in the log is later than today",
             "docs/log.md",
             "# Log\n\n## 2999-01-01\n\n* Something\n".into(),
         ),
