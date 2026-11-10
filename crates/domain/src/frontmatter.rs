@@ -229,26 +229,35 @@ mod tests {
 
     #[test]
     fn the_frontmatter_a_reader_copies_reads() {
-        // The work item in the README once failed as YAML (an unquoted `: ` in its description), and its comments
-        // would now fail too: an example is copied, so it is read as a record is
+        // The work item the README showed once failed as YAML (an unquoted `: ` in its description), and its comments
+        // would now fail too: an example is copied, so it is read as a document is
         let readme = include_str!("../../../README.md");
         let rules = include_str!("../../../records/knowledge-rules.md");
-        let work_item = readme
+        let document = readme
             .split_once("```markdown\n---\n")
-            .expect("the README shows a work item")
+            .expect("the README shows a knowledge document")
             .1;
         let follows = rules
             .split_once("```yaml\n")
             .expect("the knowledge rules show follows")
             .1;
-        let examples = [
-            work_item.split_once("\n---\n").unwrap().0.to_string(),
-            // The block is indented under a list item
-            follows.split_once("```").unwrap().0.replace("\n  ", "\n"),
-        ];
-        for example in examples {
-            let text = format!("---\n{}\n---\n", example.trim_end());
-            assert!(split(&text).is_ok(), "{text}: {:?}", split(&text));
-        }
+        let document = format!("---\n{}\n---\n", document.split_once("\n---\n").unwrap().0);
+        // The README's is a whole frontmatter, so it keeps the knowledge format too
+        assert!(
+            crate::schema::knowledge_doc(&document).is_ok(),
+            "{document}: {:?}",
+            crate::schema::knowledge_doc(&document).err()
+        );
+        // The block is indented under a list item
+        let follows = format!(
+            "---\n{}\n---\n",
+            follows
+                .split_once("```")
+                .unwrap()
+                .0
+                .replace("\n  ", "\n")
+                .trim_end()
+        );
+        assert!(split(&follows).is_ok(), "{follows}: {:?}", split(&follows));
     }
 }
