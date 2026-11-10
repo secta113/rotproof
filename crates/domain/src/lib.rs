@@ -21,6 +21,7 @@ pub mod project;
 pub mod records;
 pub mod rust;
 pub mod schema;
+pub mod sentence;
 pub mod structure;
 pub mod text;
 pub mod time_hook;

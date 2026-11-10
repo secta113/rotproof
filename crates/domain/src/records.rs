@@ -7,7 +7,6 @@ use std::sync::LazyLock;
 use chrono::NaiveDate;
 use regex::Regex;
 
-use crate::bundle::latest_day;
 use crate::markdown::{heading, visible};
 use crate::paths::{file_name, parent};
 use crate::schema::Time;
@@ -165,13 +164,36 @@ pub fn floor() -> Vec<String> {
     .into()
 }
 
+/// The latest day it is anywhere at `now`, the day in UTC+14. A day of the records is checked against it, not against
+/// the day of `now` itself: before 09:00 in Tokyo, the day written there is still to come in UTC, where CI runs.
+pub fn latest_day(now: Time) -> NaiveDate {
+    (now.naive_utc() + chrono::Duration::hours(14)).date()
+}
+
 #[cfg(test)]
 mod tests {
+    use chrono::{FixedOffset, TimeZone};
+
     use super::*;
 
     #[test]
+    fn the_latest_day_is_the_day_in_utc_plus_14() {
+        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
+        // 08:00 in Tokyo is 23:00 of the day before in UTC, and already the same day in UTC+14
+        let morning = tokyo.with_ymd_and_hms(2026, 10, 28, 8, 0, 0).unwrap();
+        assert_eq!(
+            latest_day(morning),
+            NaiveDate::from_ymd_opt(2026, 10, 28).unwrap()
+        );
+        let evening = tokyo.with_ymd_and_hms(2026, 10, 28, 19, 0, 0).unwrap();
+        assert_eq!(
+            latest_day(evening),
+            NaiveDate::from_ymd_opt(2026, 10, 29).unwrap()
+        );
+    }
+
+    #[test]
     fn a_log_day_that_has_not_come_is_named() {
-        use chrono::{FixedOffset, TimeZone};
         let log = "# Log\n\n## 2026-10-29\n\n* **B**\n\n## 2026-10-28\n\n* **A**\n\n<!--\n## 2026-12-01\n-->\n\n### 2026-12-02\n";
         let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
         // 2026-10-29 comes in UTC+14 at 10:00 UTC on 10-28, 19:00 in Tokyo. A heading in a comment, or at another

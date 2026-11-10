@@ -75,7 +75,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `bundle.rs` | The part of `docs/` Rotproof keeps, as one OKF bundle: the knowledge documents sorted out once they are read, the files Rotproof generates (the index files and the rules), and the tags the knowledge documents use |
 | `schema.rs` | The frontmatter of a knowledge document and of a guide |
 | `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory, a Python definition), the hash a key is pinned at and the hash of a directory, what fails when one changed or is gone, the document `rotproof follows` names, and a hash replaced or a key added in the frontmatter |
-| `records.rs` | The rules of the records `rotproof check` runs on what it read: the files under `docs/knowledge/` Rotproof would not read, the log's structure, its days that have not come, and the floor of the bundle |
+| `records.rs` | The rules of the records `rotproof check` runs on what it read: the files under `docs/knowledge/` Rotproof would not read, the log's structure, its days that have not come (against the latest day it is anywhere), and the floor of the bundle |
 | `tree.rs` | How Rotproof reads a file's text, how it writes the text back as the file was written (its line endings and byte order mark), and how Windows reads a name |
 | `upgrade.rs` | Upgrading a project's files: the version they are up to (`files` in the declaration), the named updates a later version brings to the files `rotproof create` writes once, and what each does to its file |
 | `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
@@ -90,6 +90,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way, judged from the paths it names and the code files of the directories it lists |
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
 | `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
+| `sentence.rs` | The first sentence of a paragraph, as the index shows it: the paragraph read as markdown reads it, in any language, with no sentence ending inside parentheses or inline code |
 | `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals, the code alone with both blanked, and its tokens, the paths it names, its modules with a body and its attributes |
 | `paths.rs` | Paths from the root with `/`: the parent, the name, a join, without `.` and `..`, whether one sits in another, and the paths in messages |
 | `text.rs` | The line at a position in a text, for messages |
