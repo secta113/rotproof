@@ -487,6 +487,10 @@ mod tests {
         // A repository of records only has no layers to move
         let records = Fake::default();
         assert!(init(&records, &records, Some("none"), "x", "0.3.0").is_ok());
+        let written = records.text(DECLARATION).unwrap();
+        records
+            .write(DECLARATION, &written.replace(&running, "files = \"0.3.0\""))
+            .unwrap();
         let Ok(Initialized::Upgraded(none)) = init(&records, &records, None, "x", "0.4.0") else {
             panic!("upgraded");
         };
