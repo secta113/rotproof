@@ -15,7 +15,9 @@ use protocol::inbound::{Drift, Pinned};
 use protocol::outbound::Parsers;
 use protocol::outbound::{Tree, Writer};
 
-/// The hash of what `key` names as it is now: `Ok(None)` when it is not there, `Err` when it cannot be read.
+/// The hash of what `key` names as it is now: `Ok(None)` when it is not there, `Err` when it cannot be read. Every
+/// file is read as `read_text` reads it, so a checkout with CRLF or a byte order mark hashes as one with LF, a
+/// definition too, as it is cut out of that text.
 pub fn current(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -33,7 +35,7 @@ pub fn current(
         Followed::File(path) => Ok(file_text(&path)?.map(|text| content_hash(&text))),
         Followed::Definition { file, name } => Ok(file_text(&file)?
             .and_then(|source| parsers.python_definition(&source, &name))
-            .map(|text| content_hash(&text.replace("\r\n", "\n")))),
+            .map(|text| content_hash(&text))),
         Followed::Directory(dir) => {
             if !matches!(exactly(tree, &dir), Ok((_, true))) {
                 return Ok(None);
@@ -285,6 +287,22 @@ mod tests {
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].key, "domain/gone.py");
         assert_eq!(left[0].now, Ok(None));
+    }
+
+    #[test]
+    fn a_file_written_with_crlf_and_a_byte_order_mark_hashes_as_its_lf() {
+        let tree = project(&[]);
+        let keys = ["domain/model.py", "domain/model.py::play", "domain/"];
+        let hashes = |tree: &Fake| -> Vec<Option<String>> {
+            keys.iter()
+                .map(|key| current(tree, &Readers, key).unwrap())
+                .collect()
+        };
+        let lf = hashes(&tree);
+        assert!(lf.iter().all(Option::is_some), "{lf:?}");
+        tree.write("domain/model.py", "\u{feff}def play():\r\n    return 1\r\n")
+            .unwrap();
+        assert_eq!(hashes(&tree), lf);
     }
 
     #[test]

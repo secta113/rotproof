@@ -18,14 +18,14 @@ pub type Sections = BTreeMap<String, String>;
 static FRONT_MATTER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)\A---\n(.*?)\n---(?:\n(.*))?\z").unwrap());
 
-/// The frontmatter, and the text under each `# heading` of the body.
+/// The frontmatter, and the text under each `# heading` of the body, of `text` as [`with_lf`](crate::tree::with_lf)
+/// reads a file: every line ending is `\n`.
 ///
 /// The YAML is read as YAML 1.2: a date or a datetime is a string, quoted or not, and the schema parses it. YAML 1.1
 /// (PyYAML) types an unquoted one and leaves a quoted one a string, so the same value could pass or fail by its quotes.
 pub fn split(text: &str) -> Result<(Hash, Sections), String> {
-    let text = text.replace("\r\n", "\n");
     let caps = FRONT_MATTER
-        .captures(&text)
+        .captures(text)
         .ok_or("no frontmatter (a YAML block between `---` lines)")?;
     let docs = YamlLoader::load_from_str(&caps[1])
         .map_err(|e| format!("frontmatter is not valid YAML: {e}"))?;
@@ -100,10 +100,9 @@ fn restored(value: Yaml, stand_in: char) -> Yaml {
 }
 
 /// The first `# heading` of the body, as a reader sees the rendered page: one inside a comment or a code block does not
-/// count. `None` when the text has no frontmatter, or its body no heading.
+/// count. `None` when the text has no frontmatter, or its body no heading. `text` is read as [`split`] reads it.
 pub fn first_heading(text: &str) -> Option<String> {
-    let text = text.replace("\r\n", "\n");
-    let caps = FRONT_MATTER.captures(&text)?;
+    let caps = FRONT_MATTER.captures(text)?;
     let body = visible(caps.get(2).map_or("", |body| body.as_str()));
     body.split('\n').find_map(|line| match heading(line) {
         Some((1, heading)) => Some(heading.to_string()),
@@ -155,11 +154,6 @@ mod tests {
         assert_eq!(first_heading(text).as_deref(), Some("Resolution"));
         assert_eq!(first_heading("---\ntype: X\n---\ntext only\n"), None);
         assert_eq!(first_heading("# no frontmatter\n"), None);
-    }
-
-    #[test]
-    fn crlf_is_read_as_lf() {
-        assert!(split("---\r\ntype: X\r\n---\r\n# A\r\nb\r\n").is_ok());
     }
 
     #[test]
