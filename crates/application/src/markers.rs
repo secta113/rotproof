@@ -1,12 +1,11 @@
 //! The marker check, read from the tree: every code file walked and read, its comments found by the reader of its
 //! language, and judged by the rules in `domain`.
 
-use std::collections::BTreeSet;
 use std::io;
 
 use crate::tree::{code_files, read_code};
 use domain::layers::{Declared, Language};
-use domain::markers::{Markers, has_comments, in_file, is_unchecked, markers};
+use domain::markers::{Markers, has_comments, in_file, is_unchecked};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -20,26 +19,26 @@ pub fn problems(
         // A repository of records only has no code to read
         return Ok(Markers::default());
     };
-    let mut found = Vec::new();
-    let mut words = BTreeSet::new();
+    let mut markers = Markers::default();
     let mut read = 0;
     for path in code_files(tree, &layout.scope, |name| has_comments(layout, name))? {
         if is_unchecked(declared, &path) {
             continue;
         }
-        let Some(source) = read_code(tree, &path, "comments", &mut found)? else {
+        let Some(source) = read_code(tree, &path, "comments", &mut markers.found)? else {
             continue;
         };
         read += 1;
-        let (in_this, words_here) = in_file(
+        for (finding, words) in in_file(
             &path,
             &source,
             &comments(parsers, layout.language, &source, &path),
-        );
-        found.extend(in_this);
-        words.extend(words_here);
+        ) {
+            markers.add(finding, &words);
+        }
     }
-    Ok(markers(declared, found, words, read))
+    markers.floor(declared, read);
+    Ok(markers)
 }
 
 /// The comments of a source file, by the reader of its language: offset and text.
@@ -65,15 +64,20 @@ mod tests {
     /// The lines of a source with a marker in a comment, as the reader of `language` finds its comments, and the
     /// markers on them in order
     fn words(language: Language, source: &str, path: &str) -> (Vec<usize>, Vec<&'static str>) {
-        let (found, positions) = in_file(path, source, &comments(&Readers, language, source, path));
+        let found = in_file(path, source, &comments(&Readers, language, source, path));
         let lines = found
             .iter()
-            .map(|finding| {
+            .map(|(finding, _)| {
                 let at = finding.split_once('\n').unwrap().0;
                 at.rsplit(':').next().unwrap().parse().unwrap()
             })
             .collect();
-        (lines, positions.into_iter().map(|i| MARKERS[i]).collect())
+        let markers = found
+            .into_iter()
+            .flat_map(|(_, positions)| positions)
+            .map(|i| MARKERS[i])
+            .collect();
+        (lines, markers)
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! The marker check: no comment in the code holds a marker, one of the words in [`MARKERS`].
 //!
-//! - The first four mark work left to do that no record holds: nothing lists it, and nothing asks when it is done.
-//!   The last marks knowledge kept where nothing can filter or link it.
+//! - The first four mark a finding put off where nothing lists it and nothing asks when it is done. The last, at
+//!   [`KNOWLEDGE`], marks knowledge kept in the code, which only someone reading that code finds: it is printed under
+//!   a heading of its own, which asks where it belongs.
 //! - The words count in upper case, as whole words, and only in comments: a task board's status named after one, or
 //!   a phone format written with the letter X, is not a marker. Docstrings are strings, so they are not read.
 //! - Every code file of the layout is read, `tests/` and the other paths that are not layers included, except the
@@ -16,7 +17,7 @@
 //!
 //! The rules here judge the comments of a file once they are read; `application` walks the files and reads them.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -26,8 +27,18 @@ use crate::layers::{Declared, Language, Layout};
 use crate::paths::within;
 use crate::text::line_of;
 
-/// The words that fail in a comment.
+/// The words that fail in a comment: the first four put off a finding, and the last, at [`KNOWLEDGE`], keeps
+/// knowledge in the code.
 pub const MARKERS: [&str; 5] = ["TODO", "FIXME", "XXX", "HACK", "NOTE"];
+
+/// The position in [`MARKERS`] of the marker that keeps knowledge in the code.
+pub const KNOWLEDGE: usize = 4;
+
+/// The heading a comment that holds the marker at [`KNOWLEDGE`] is printed under: where what it says belongs.
+pub const KNOWLEDGE_HEADING: &str = "no comment holds NOTE (if it explains only the code beside it, keep it as a plain \
+                                comment without the word; if it spans files, says how to run or operate something, \
+                                or lies outside the repository, move it to docs/knowledge/ and tie it to the code by \
+                                follows)";
 
 static MARKER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"\b(?:{})\b", MARKERS.join("|"))).unwrap());
@@ -35,27 +46,59 @@ static MARKER: LazyLock<Regex> =
 /// What the marker check found.
 #[derive(Debug, Default)]
 pub struct Markers {
-    /// Every comment that holds a marker, as `path:line` and the line under it as a traceback shows it, and every
-    /// file that could not be read
+    /// Every comment that holds a marker of a finding put off, as `path:line` and the line under it as a traceback
+    /// shows it, and every file that could not be read
     pub found: Vec<String>,
-    /// The markers found, in the order of [`MARKERS`], each once
+    /// The markers of a finding put off that were found, in the order of [`MARKERS`], each once
     pub words: Vec<&'static str>,
+    /// Every comment that holds the marker at [`KNOWLEDGE`] and no other, as `found` names it
+    pub knowledge: Vec<String>,
 }
 
 impl Markers {
-    /// The heading the findings are printed under: the markers found, and where the text goes instead. All of them
-    /// when none was found (a file that could not be read, or no file at all).
+    /// The heading `found` is printed under: the markers found, and what to do with the finding instead. Every marker
+    /// of a finding put off when none was found (a file that could not be read, or no file at all).
     pub fn heading(&self) -> String {
         let words = if self.words.is_empty() {
-            &MARKERS[..]
+            &MARKERS[..KNOWLEDGE]
         } else {
             &self.words[..]
         };
         format!(
-            "no comment holds {} (work left to do goes in docs/work/, a decision and its reason in the spec or the \
-             log entry of the change, how to read the code in a plain comment without the word)",
+            "no comment holds {} (fix the finding now, write it as one line in the task's issue, or let it go; \
+             then take the comment out. Why the code is written so stays, without the word)",
             either(words)
         )
+    }
+
+    /// Sorts in `finding`, a line whose comments hold the markers at `positions` in [`MARKERS`]: into `found` when one
+    /// of them puts off a finding, as taking the comment out settles the knowledge beside it too, and into
+    /// `knowledge` otherwise.
+    pub fn add(&mut self, finding: String, positions: &[usize]) {
+        let put_off: Vec<&'static str> = positions
+            .iter()
+            .filter(|&&at| at != KNOWLEDGE)
+            .map(|&at| MARKERS[at])
+            .collect();
+        if put_off.is_empty() {
+            self.knowledge.push(finding);
+            return;
+        }
+        self.found.push(finding);
+        self.words.extend(put_off);
+        self.words
+            .sort_by_key(|word| MARKERS.iter().position(|m| m == word));
+        self.words.dedup();
+    }
+
+    /// The floor of the check in a project of `declared`: `read` files read, of which at least one.
+    pub fn floor(&mut self, declared: &Declared, read: usize) {
+        if read == 0 {
+            self.found.push(format!(
+                "no code file was read: the {} layout finds none in the tree",
+                declared.declaration.stack
+            ));
+        }
     }
 }
 
@@ -90,42 +133,18 @@ pub fn is_unchecked(declared: &Declared, path: &str) -> bool {
 }
 
 /// The findings in the file at `path`, whose text is `source` and whose reader found `comments` (byte offset, text):
-/// each line whose comments hold a marker, as `path:line` and the line, and the markers on them as positions in
+/// each line whose comments hold a marker, as `path:line` and the line, with the markers on it as positions in
 /// [`MARKERS`].
 pub fn in_file(
     path: &str,
     source: &str,
     comments: &[(usize, String)],
-) -> (Vec<String>, Vec<usize>) {
+) -> Vec<(String, Vec<usize>)> {
     let lines: Vec<&str> = source.lines().collect();
-    let mut found = Vec::new();
-    let mut words = Vec::new();
-    for (line, in_comment) in in_comments(source, comments) {
-        found.push(format!("{path}:{line}\n{}", lines[line - 1].trim()));
-        words.extend(in_comment);
-    }
-    (found, words)
-}
-
-/// What the marker check found in a project of `declared`, from the findings and the positions of the markers in
-/// them, with its floor: `read` files read, of which at least one.
-pub fn markers(
-    declared: &Declared,
-    mut found: Vec<String>,
-    words: BTreeSet<usize>,
-    read: usize,
-) -> Markers {
-    if read == 0 {
-        found.push(format!(
-            "no code file was read: the {} layout finds none in the tree",
-            declared.declaration.stack
-        ));
-    }
-    Markers {
-        found,
-        // In the order of MARKERS: a set of their positions
-        words: words.into_iter().map(|i| MARKERS[i]).collect(),
-    }
+    in_comments(source, comments)
+        .into_iter()
+        .map(|(line, words)| (format!("{path}:{line}\n{}", lines[line - 1].trim()), words))
+        .collect()
 }
 
 /// Every line of a source whose comments hold a marker, and the markers on it as positions in [`MARKERS`], from the
@@ -150,24 +169,43 @@ mod tests {
 
     #[test]
     fn a_marker_is_named_at_its_line_in_the_comments_given() {
-        let source = "x = 1  # TODO(me) and NOTE\ny = 2\n\"\"\"\nFIXME in a string\n\"\"\"\n# a plain\n# HACK\n";
+        let source = "x = 1  # TODO(me) and NOTE\ny = 2\n\"\"\"\nFIXME in a string\n\"\"\"\n# NOTE why\n# XXX\n";
         // As a reader gives them: the docstring is no comment
         let comments = [
             (7, "# TODO(me) and NOTE".to_string()),
-            (59, "# a plain".into()),
-            (69, "# HACK".into()),
+            (59, "# NOTE why".into()),
+            (70, "# XXX".into()),
         ];
-        let (found, words) = in_file("x.py", source, &comments);
+        let found = in_file("x.py", source, &comments);
         assert_eq!(
             found,
-            ["x.py:1\nx = 1  # TODO(me) and NOTE", "x.py:7\n# HACK"]
+            [
+                ("x.py:1\nx = 1  # TODO(me) and NOTE".to_string(), vec![0, 4]),
+                ("x.py:6\n# NOTE why".into(), vec![4]),
+                ("x.py:7\n# XXX".into(), vec![2]),
+            ]
         );
-        assert_eq!(words, [0, 4, 3]);
         // Upper case and whole words only
         let other = [(0, "# todo, TODOS, NOTES, NOTE_X, XXXL".to_string())];
+        assert!(in_file("x.py", "# todo, TODOS, NOTES, NOTE_X, XXXL\n", &other).is_empty());
+    }
+
+    #[test]
+    fn a_note_alone_is_sorted_apart_from_the_findings_put_off() {
+        let mut markers = Markers::default();
+        markers.add("x.py:1\n# TODO and NOTE".into(), &[0, KNOWLEDGE]);
+        markers.add("x.py:6\n# NOTE why".into(), &[KNOWLEDGE]);
+        markers.add("x.py:7\n# XXX and TODO".into(), &[2, 0]);
+        // Taking out the comment of a finding put off settles the knowledge in it too
         assert_eq!(
-            in_file("x.py", "# todo, TODOS, NOTES, NOTE_X, XXXL\n", &other).0,
-            Vec::<String>::new()
+            markers.found,
+            ["x.py:1\n# TODO and NOTE", "x.py:7\n# XXX and TODO"]
+        );
+        assert_eq!(markers.words, ["TODO", "XXX"]);
+        assert_eq!(markers.knowledge, ["x.py:6\n# NOTE why"]);
+        assert!(
+            KNOWLEDGE_HEADING.starts_with("no comment holds NOTE (")
+                && KNOWLEDGE_HEADING.contains("docs/knowledge/")
         );
     }
 
@@ -205,14 +243,15 @@ mod tests {
             crate::layers::parse_declaration("stack = \"python\"\nareas = []\n").unwrap(),
         )
         .unwrap();
-        let none = markers(&declared, Vec::new(), BTreeSet::new(), 0);
+        let mut none = Markers::default();
+        none.floor(&declared, 0);
         assert_eq!(
             none.found,
             ["no code file was read: the python layout finds none in the tree"]
         );
-        let some = markers(&declared, Vec::new(), [4, 0].into(), 1);
+        let mut some = Markers::default();
+        some.floor(&declared, 1);
         assert!(some.found.is_empty());
-        assert_eq!(some.words, ["TODO", "NOTE"]);
     }
 
     #[test]
@@ -225,19 +264,19 @@ mod tests {
             let heading = found.heading();
             heading[..heading.find(" (").unwrap()].to_string()
         };
-        assert_eq!(heading(vec!["NOTE"]), "no comment holds NOTE");
+        assert_eq!(heading(vec!["HACK"]), "no comment holds HACK");
         assert_eq!(
-            heading(vec!["TODO", "NOTE"]),
-            "no comment holds TODO or NOTE"
+            heading(vec!["TODO", "HACK"]),
+            "no comment holds TODO or HACK"
         );
         assert_eq!(
-            heading(vec!["TODO", "XXX", "NOTE"]),
-            "no comment holds TODO, XXX or NOTE"
+            heading(vec!["TODO", "XXX", "HACK"]),
+            "no comment holds TODO, XXX or HACK"
         );
-        // Nothing found but a file that could not be read: every marker
+        // Nothing found but a file that could not be read: every marker of a finding put off
         assert_eq!(
             heading(Vec::new()),
-            "no comment holds TODO, FIXME, XXX, HACK or NOTE"
+            "no comment holds TODO, FIXME, XXX or HACK"
         );
     }
 }

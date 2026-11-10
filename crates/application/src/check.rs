@@ -7,7 +7,7 @@
 //!   `.config/rotproof-approved.toml` passes and is printed on every run, and an approval that matches no forbidden
 //!   import fails (`approvals.rs`).
 //! - **No comment holds a marker**, one of the words in `markers::MARKERS` (`markers.rs`): a finding is not left in a
-//!   comment.
+//!   comment, and knowledge is not kept in one.
 //! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
 //!   this version of Rotproof (`project.rs`).
 //! - **Every knowledge document keeps the format**, and matches the code it follows (`follows.rs`).
@@ -97,6 +97,10 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {
             check: heading.clone().into(),
+            detail,
+        }));
+        findings.extend(markers.knowledge.into_iter().map(|detail| Finding {
+            check: domain::markers::KNOWLEDGE_HEADING.into(),
             detail,
         }));
         findings.extend(

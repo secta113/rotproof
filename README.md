@@ -521,9 +521,12 @@ stale_after: 2027-01-01
   outside `unchecked` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
   a crate's `tests/` and `build.rs` included, read by Rotproof's own scanner, which skips strings, raw strings and
-  character literals as Rust's lexer does. Work left to do belongs in a work item, where it is listed and closed, and
-  a decision with its reason in the spec or the log entry of the change; a comment that explains how to read the code
-  stays, without the word. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
+  character literals as Rust's lexer does. The first four put off a finding: it is fixed now, written as one line in
+  the task's issue, or let go, and the comment taken out. `NOTE` keeps knowledge where only someone reading that code
+  finds it, and is printed under a heading of its own: what explains only the code beside it stays as a plain comment
+  without the word, and what spans files, says how to run or operate something, or lies outside the repository moves
+  to `docs/knowledge/`, tied to the code by `follows`. A line that holds both is named under the first heading alone,
+  as taking the comment out settles both. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
   strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
 
 - **The bundle is there:** `docs/`, `docs/index.md`, `docs/work/`, `docs/work/rules.md`, `docs/knowledge/` and

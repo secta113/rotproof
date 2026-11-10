@@ -2319,6 +2319,7 @@ fn a_marker_in_a_comment_fails_wherever_the_code_is() {
         fs::write(full, text).unwrap();
     };
     write("domain/model.py", "X = 1\n# TODO: split this\n");
+    write("domain/song.py", "Y = 2  # HACK about y\n");
     write("tests/test_model.py", "x = 1  # NOTE about x\n");
     // Not a comment, or in a path the project lists in unchecked
     write("domain/states.py", "TODO = 1\nPHONE = \"XXX-XXXX\"\n");
@@ -2333,7 +2334,10 @@ fn a_marker_in_a_comment_fails_wherever_the_code_is() {
     assert_eq!(out.status.code(), Some(1), "{said}");
     // The heading names only what was found; each finding is its place, and the line under it as written
     assert!(
-        said.contains("no comment holds TODO or NOTE (work left to do goes in docs/work/"),
+        said.contains(
+            "no comment holds TODO or HACK (fix the finding now, write it as one line in the task's issue, or let \
+             it go; then take the comment out. Why the code is written so stays, without the word)"
+        ),
         "{said}"
     );
     assert!(
@@ -2341,15 +2345,25 @@ fn a_marker_in_a_comment_fails_wherever_the_code_is() {
         "{said}"
     );
     assert!(
-        said.contains("  tests/test_model.py:1\n    x = 1  # NOTE about x\n"),
+        said.contains("  domain/song.py:1\n    Y = 2  # HACK about y\n"),
         "{said}"
     );
+    // Knowledge kept in a comment, under a heading of its own, which asks where it belongs
+    let note = said
+        .find(domain::markers::KNOWLEDGE_HEADING)
+        .unwrap_or_else(|| panic!("{said}"));
+    assert!(
+        said[note..].contains("  tests/test_model.py:1\n    x = 1  # NOTE about x\n"),
+        "{said}"
+    );
+    assert!(!said[note..].contains("domain/"), "{said}");
     assert!(
         !said.contains("states.py") && !said.contains("generated.py"),
         "{said}"
     );
     // The same text without the markers passes
     write("domain/model.py", "X = 1\n# Split this when it grows\n");
+    write("domain/song.py", "Y = 2  # about y\n");
     write("tests/test_model.py", "x = 1  # about x\n");
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
@@ -2379,7 +2393,7 @@ fn a_marker_in_a_typescript_comment_fails() {
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{said}");
     assert!(
-        said.contains("no comment holds TODO (work left to do"),
+        said.contains("no comment holds TODO (fix the finding now"),
         "{said}"
     );
     assert!(
@@ -2449,7 +2463,8 @@ fn a_marker_in_a_rust_comment_fails() {
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{said}");
     assert!(
-        said.contains("no comment holds TODO, FIXME, HACK or NOTE (work left to do"),
+        said.contains("no comment holds TODO, FIXME or HACK (fix the finding now")
+            && said.contains(domain::markers::KNOWLEDGE_HEADING),
         "{said}"
     );
     for found in [

@@ -41,8 +41,11 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
   `progress: started`; after measuring an item's state, update it right away.
 - **How each record is written is in the `rules.md` of its directory,** which Rotproof writes. The project's own rules
   for a directory go in another guide in the same directory.
-- **A finding is recorded, never left in a comment.** Write it as a draft work item in `docs/work/`, with `until`
-  naming the milestone it waits for, or in the spec it belongs to. `rotproof check` fails on `TODO`, `FIXME`, `XXX`, `HACK` and `NOTE` in comments in the code.
+- **A finding is never left in a comment.** Fix it now, write it as one line in the task's issue (an issue of its
+  own when it outlives the task), or let it go, and take the comment out. `rotproof check` fails on `TODO`, `FIXME`,
+  `XXX`, `HACK` and `NOTE` in comments in the code. A comment says why the code beside it is written so, without the
+  word; what spans several files, how to run or operate something, and what lies outside the repository go in
+  `docs/knowledge/`, tied to the code by `follows`.
 - **A closed record stays where it is and opens with `# Resolution`.** Closing a spec, a work item or a milestone
   sets `progress` (`done` or `dropped`) and puts `# Resolution` first; nothing moves. `status: deprecated` follows
   for a work item and for anything dropped; a done spec that still describes how things are stays `stable`.
