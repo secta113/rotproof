@@ -1,7 +1,7 @@
-//! `domain` calls no port and does no I/O: a rule takes the values a use case in `application` has read (rust-stack
-//! spec, step 5: strict, so a closure that reads is not passed in either). The ports are traits in
-//! `protocol::outbound`, which `domain` cannot depend on, so the direction check keeps it from naming them; this check
-//! keeps the rest: a trait `domain` declares itself, a reader passed in as a function, and I/O.
+//! `domain` calls no port and does no I/O: a rule takes the values a use case in `application` has read, and not even
+//! a closure that reads is passed in. The ports are traits in `protocol::outbound`, which `domain` cannot depend on, so
+//! the direction check keeps it from naming them; this check keeps the rest: a trait `domain` declares itself, a reader
+//! passed in as a function, and I/O.
 //!
 //! - **Anywhere:** a port taken (every trait of `protocol::outbound`, and every trait `domain` declares, so a new one
 //!   is a port from the start), and I/O.

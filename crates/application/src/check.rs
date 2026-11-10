@@ -1,27 +1,7 @@
-//! `rotproof check`: every rule of the structure and the records, run against one repository.
-//!
-//! - **The tree matches `.config/rotproof.toml`**: the layers of the stack are present or declared absent, and no code
-//!   sits outside them (`structure.rs`).
-//! - **The layers import only what the table allows** (`direction.rs`): the imports of `python` and `typescript`, and
-//!   the dependencies each crate of `rust` declares. A forbidden import a person approved in
-//!   `.config/rotproof-approved.toml` passes and is printed on every run, and an approval that matches no forbidden
-//!   import fails (`approvals.rs`).
-//! - **No comment holds a marker**, one of the words in `markers::MARKERS` (`markers.rs`): a finding is not left in a
-//!   comment, and knowledge is not kept in one.
-//! - **Rotproof's guide is up to date**: `.rotproof/AGENTS.md` equals what `rotproof create` writes for the stack with
-//!   this version of Rotproof (`project.rs`).
-//! - **Every knowledge document keeps the format**, and matches the code it follows (`follows.rs`).
-//! - **Every link in `docs/knowledge/` and the log resolves.**
-//! - **Every knowledge document has one declared area**: the areas in `.config/rotproof.toml` are distinct headings,
-//!   and the one tag of every knowledge document is one of them.
-//! - **What Rotproof keeps in `docs/` is one OKF bundle**: every markdown file under `docs/knowledge/` is a document it
-//!   reads, and every file Rotproof generates (the index files and the rules) equals what `rotproof index` writes. The
-//!   rest of `docs/` is the project's, and is not read.
-//! - **The log keeps the OKF log structure**: every second-level heading is a date, newest first, and the entries
-//!   are a flat list of list items under those dates.
-//! - **No day in the log is later than today**: its date headings are read from the clock when written, and compared
-//!   with the latest day anywhere, so CI in UTC passes a day written in Tokyo. Time alone only makes one pass, so this
-//!   never turns CI red with no change.
+//! `rotproof check`: every rule of the structure and the records, run against one repository. The rules are listed
+//! for a person in the help of `rotproof check` (`CHECK_HELP` in `cli.rs`) and in the README ("What `rotproof
+//! check` checks"); each is judged in the module of `domain` that holds it, and this use case reads what it needs and
+//! runs them.
 //!
 //! Each check has a floor: when the scan finds nothing at all, it fails instead of passing with nothing checked.
 

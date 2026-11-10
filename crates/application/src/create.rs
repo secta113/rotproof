@@ -1,28 +1,12 @@
-//! `rotproof create`: make what `.config/rotproof.toml` declares and the tree does not have yet.
+//! `rotproof create`: make what `.config/rotproof.toml` declares and the tree does not have yet. What it makes and
+//! rewrites is listed for a person in the help of `rotproof create` (`cli.rs`).
 //!
-//! - Each layer of the stack's layout that is neither declared absent nor present (its path exists) is made, with its
-//!   files. A present layer is the project's, and nothing in it is touched.
-//!   A repository that keeps records only (`stack = "none"`) has no layers to make.
-//!   Layers are made only with `--yes`. Without it, a run that would make one lists them and writes nothing: a project
-//!   that ran `rotproof create` straight after `rotproof init`, never listing in absent what it lacks, would otherwise
-//!   get every layer of the stack (`ui` and its five levels in a command-line tool), and `rotproof create` never
-//!   deletes them again. A run that makes no layer, as after an upgrade, needs no `--yes`.
-//! - The records skeleton: `docs/knowledge/`, `docs/log.md` with its title when it does not exist, and the generated
-//!   files (`docs/index.md`, and the index and the rules of `docs/knowledge/`), which Rotproof rewrites.
-//! - Rotproof's guide, `.rotproof/AGENTS.md` (`project.rs`), which Rotproof rewrites: the rules it keeps in the stack,
-//!   from the version that runs.
-//! - `.claude/settings.json` with the time hook (`time_hook.rs`) and the rule that denies editing the approvals file
-//!   (`hook.rs`), when it does not exist. A project that has one already adds them to it by hand.
-//! - The project's files (`project.rs`: `AGENTS.md`, `README.md`, the pin of Rotproof, the CI workflow, a Rust
-//!   project's workspace and others), each when it does not exist. The project's name in them is its root directory's.
+//! A present layer (its path exists) is the project's, and nothing in it is touched. Layers are made only with `--yes`:
+//! a project that ran `rotproof create` straight after `rotproof init`, never listing in absent what it lacks, would
+//! otherwise get every layer of the stack (`ui` and its five levels in a command-line tool), and `rotproof create`
+//! never deletes them again. A run that makes no layer, as after an upgrade, needs no `--yes`.
 //!
-//! - The fields the declaration lacks that Rotproof requires (`ADDED` in `layers.rs`): an upgrade of Rotproof that adds
-//!   a field fails `rotproof check` until `rotproof create` runs, and then only on what the new rules find. The
-//!   comments and the values already in the declaration are kept, and a value that is present is never changed.
-//!
-//! It never overwrites a file it does not generate, apart from adding those fields, and never moves or deletes one. It
-//! runs when a project starts, and again when its declaration is changed on purpose; it never runs by itself, so a
-//! layer removed by mistake fails the check instead of coming back.
+//! It never runs by itself, so a layer removed by mistake fails the check instead of coming back.
 
 use crate::bundle::Bundle;
 use crate::layers::declaration;

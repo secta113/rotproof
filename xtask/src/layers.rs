@@ -4,7 +4,7 @@
 //!
 //! Rotproof keeps no `.config/rotproof.toml` and no `docs/`: its records are kept outside the repository. So the
 //! declaration is [`DECLARATION_TEXT`] below, put in place of the file on the tree the checks read, and the records
-//! are not checked. No option of the command line serves this one repository (the rust-stack spec, decision 4).
+//! are not checked. No option of the command line serves this one repository.
 
 use std::io;
 use std::path::Path;
