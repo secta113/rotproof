@@ -45,8 +45,8 @@ layers), that each layer imports only what the layer table allows or a person ap
 comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that \
 .rotproof/AGENTS.md is up to date, that every knowledge document in docs/knowledge/ keeps its rules \
-(docs/knowledge/rules.md) and matches the code it follows, and that the log keeps its structure and names every \
-knowledge document as it is now. The rest of docs/ is the project's, and is not read. \
+(docs/knowledge/rules.md) and matches the code it follows, that every link in them and in the log resolves, and \
+that the log keeps its structure. The rest of docs/ is the project's, and is not read. \
 Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
 a rule is broken, 2 when there is no .config/rotproof.toml or a file cannot be read.";
 

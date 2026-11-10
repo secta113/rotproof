@@ -8,10 +8,15 @@ description: What goes in docs/knowledge/ and how each document and alarm is wri
 
 # What goes here
 
-How things are now, and why. A spec is a proposed change and becomes history once it closes; a knowledge document
-holds what the change left behind and stays current: an API, a data model, a glossary, or why something was decided,
-with its background, its cost and what would reverse it. Proposed changes and open problems go in `docs/work/`, as
-specs and work items, and what was done in `docs/log.md`. Start from [index.md](index.md).
+How things are now, and why, as far as the code cannot tell it: why the code is so and what was rejected, with the
+background, the cost and what would reverse it; how it should behave, where the code says only how it does; and what
+lies outside the repository (the promises of a service it calls, the data in production, how to run or operate it).
+A summary of how the code works does not go here: the code says that, and a copy goes stale. Open work goes in
+issues, and what each task left behind in `docs/log.md`. Start from [index.md](index.md).
+
+A document has two kinds of reader. Whoever changes the code reads what it does and why it was designed so, and the
+document follows that code. Whoever runs it, or meets a failure, reads the procedures, the alarms and the costs
+measured, and the document follows the scripts and the configuration they rely on.
 
 A shape that code can generate exactly (an OpenAPI document, a schema) stays generated. The knowledge document links
 to it and says what the code cannot: why it has this shape, and what changing it promises.
@@ -74,7 +79,7 @@ alarm:
 | Heading | Content |
 |---|---|
 | `# When` | What is seen, and where: the strings as they were observed (an error message, an exit code, an HTTP status), not in other words, and the job or the command whose output shows them |
-| `# Do` | What to do then. Usually: file a draft work item with `until` naming the next milestone, and what to look at first |
+| `# Do` | What to do then. Usually: open an issue for the work, and what to look at first |
 
 - **Write what is seen as it is seen.** Whoever meets the message searches `docs/` for it before anything else, and
   finds the alarm only if its words are the message's words. When a version of a tool changes the wording, write each
@@ -82,8 +87,8 @@ alarm:
 - **`match` holds the parts that stay.** Short strings that appear in the output as they are (`403`,
   `trusted publisher`), so a search finds the alarm even when the rest of the message changed. `tags` holds the area,
   so the strings have a field of their own. A number is matched as the text it is printed as.
-- **An alarm is not a milestone.** A moment that may never come would stay open forever, and the check that there is
-  always an open milestone would never fail again.
+- **An alarm is not an issue.** A moment that may never come would keep an issue open forever, though no work waits
+  yet.
 - **Noticing the symptom is not something the records can guarantee.** Rotproof does not search by meaning: an answer
   that changes from one asking to the next is not a check. Searching for the exact string is.
 
