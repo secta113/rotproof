@@ -31,7 +31,7 @@ impl Parsers for Readers {
         match language {
             Language::Python => Ok(crate::outbound::python::outline(source)),
             Language::TypeScript => crate::outbound::typescript::outline(source, path),
-            Language::Rust => Ok(domain::rust::outline::outline(source)),
+            Language::Rust => Ok(domain::rust::outline(source)),
         }
     }
 

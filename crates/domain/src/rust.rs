@@ -11,7 +11,9 @@
 //!
 //! [`outline`] reads the definitions of a file from its tokens, for a knowledge document that follows one.
 
-pub mod outline;
+mod outline;
+
+pub use outline::outline;
 
 /// Whether a file name is Rust source. Case does not count: Windows compiles `LIB.RS` for `mod lib`.
 pub fn is_source(name: &str) -> bool {
