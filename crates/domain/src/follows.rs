@@ -13,8 +13,8 @@
 //! after its type's name: `::Router.add`), or a directory, for every file under it that Rotproof reads as code. The
 //! frontmatter holds no comment (`frontmatter.rs`).
 //!
-//! - **The review is pinned in the document.** Writing the new hash changes the document, so the log entry that names
-//!   it with its new hash (`records.rs`) records the review: no rule of its own.
+//! - **The review is pinned in the document.** Writing the new hash changes the document, so the commit that writes it
+//!   records the review: no rule of its own.
 //! - **A file is the unit in every stack;** the languages Rotproof reads go further: a definition is hashed on its own
 //!   source, from its first decorator or attribute to its end, so a change elsewhere in its file does not fail it. A
 //!   directory is hashed on the files of those languages under it, whatever the stack of the project.
