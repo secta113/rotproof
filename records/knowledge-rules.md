@@ -35,6 +35,8 @@ value with a `#` after a space in it (`title: 'PR #1 is merged'`).
 | `tags` | Exactly one area, one of the `areas` declared in `.config/rotproof.toml`. The index groups documents by it, in that order |
 | `status` | `stable` (holds) or `deprecated` (no longer holds) |
 | `match` | Only for an alarm, and optional: a list of short strings, each as it appears in what is observed. See "Alarms" |
+| `verified` | Optional: who reviewed the document and on which day, `{by: human:<name>, at: YYYY-MM-DD}`, read from the clock |
+| `stale_after` | Optional: the day to look at it again, for what it says of outside the code, which `follows` cannot watch (a service's promise, data in production). From that day `rotproof check` warns of it on every run and fails nothing: measure again, then write the day in `verified` and the next one here |
 
 The body is free, except that a deprecated document opens with `# Resolution`: what replaced it, and that an alarm has
 `# When` and `# Do`.
@@ -94,7 +96,7 @@ alarm:
 
 - **Write what is seen as it is seen.** Whoever meets the message searches `docs/` for it before anything else, and
   finds the alarm only if its words are the message's words. When a version of a tool changes the wording, write each
-  wording, and set `stale_after` to look again.
+  wording, and set `stale_after` to the day to look again: `rotproof check` warns of it from then.
 - **`match` holds the parts that stay.** Short strings that appear in the output as they are (`403`,
   `trusted publisher`), so a search finds the alarm even when the rest of the message changed. `tags` holds the area,
   so the strings have a field of their own. A number is matched as the text it is printed as.

@@ -9,7 +9,7 @@ use regex::Regex;
 
 use crate::markdown::{heading, visible};
 use crate::paths::{file_name, parent};
-use crate::schema::Time;
+use crate::schema::{Knowledge, Status, Time};
 
 static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
 // A bullet list item, indented by up to 3 spaces as GFM allows
@@ -164,6 +164,27 @@ pub fn floor() -> Vec<String> {
     .into()
 }
 
+/// The knowledge documents that hold, of `documents` (name -> document), whose `stale_after` has come on the day of
+/// `now` in its own zone, the zone of the machine that runs the check, each with what to do. A warning, never a broken
+/// rule: time alone turns no check from green to red, and a line on every run is enough for whoever reads the check to
+/// look again. Unlike the log's days it is not compared with [`latest_day`]: that bound keeps a failure from depending
+/// on where CI runs, and a warning that fails nothing needs no such bound.
+pub fn due(documents: &BTreeMap<String, Knowledge>, now: Time) -> Vec<String> {
+    let today = now.date_naive();
+    documents
+        .iter()
+        .filter(|(_, doc)| doc.status == Status::Stable)
+        .filter_map(|(name, doc)| Some((name, doc.stale_after?)))
+        .filter(|(_, day)| *day <= today)
+        .map(|(name, day)| {
+            format!(
+                "knowledge/{name}: stale_after {day} has come: measure again what it says of outside the code, then \
+                 write the day in verified and the next day to look again in stale_after"
+            )
+        })
+        .collect()
+}
+
 /// The latest day it is anywhere at `now`, the day in UTC+14. A day of the records is checked against it, not against
 /// the day of `now` itself: before 09:00 in Tokyo, the day written there is still to come in UTC, where CI runs.
 pub fn latest_day(now: Time) -> NaiveDate {
@@ -190,6 +211,53 @@ mod tests {
             latest_day(evening),
             NaiveDate::from_ymd_opt(2026, 10, 29).unwrap()
         );
+    }
+
+    #[test]
+    fn a_knowledge_document_is_due_from_its_stale_after_and_a_deprecated_one_never() {
+        let doc = |stale_after: &str, status: &str| {
+            let heading = if status == "deprecated" {
+                "Resolution"
+            } else {
+                "Why"
+            };
+            let text = format!(
+                "---\ntype: Knowledge\ntitle: T\ndescription: D.\ntags: [a]\nstatus: {status}\n{stale_after}---\n\n# {heading}\n\nBecause.\n"
+            );
+            match crate::schema::knowledge_doc(&text).unwrap() {
+                crate::schema::KnowledgeDoc::Knowledge(doc, _) => doc,
+                _ => panic!("not knowledge: {text}"),
+            }
+        };
+        let documents: BTreeMap<String, Knowledge> = [
+            ("past.md", doc("stale_after: 2026-10-27\n", "stable")),
+            ("today.md", doc("stale_after: 2026-10-28\n", "stable")),
+            ("tomorrow.md", doc("stale_after: 2026-10-29\n", "stable")),
+            ("never set.md", doc("", "stable")),
+            (
+                "deprecated.md",
+                doc("stale_after: 2026-01-01\n", "deprecated"),
+            ),
+        ]
+        .into_iter()
+        .map(|(name, doc)| (name.to_string(), doc))
+        .collect();
+        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
+        // 23:00 in Tokyo on 10-28 is already 10-29 in UTC+14, and the day where the check runs is what counts
+        let late = tokyo.with_ymd_and_hms(2026, 10, 28, 23, 0, 0).unwrap();
+        let found = due(&documents, late);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found[0].starts_with("knowledge/past.md: stale_after 2026-10-27 has come"));
+        assert!(found[1].starts_with("knowledge/today.md: stale_after 2026-10-28 has come"));
+        // 08:00 in Tokyo on 10-28 is still 10-27 in UTC: the same instant is a day earlier where CI runs
+        let morning = tokyo.with_ymd_and_hms(2026, 10, 28, 8, 0, 0).unwrap();
+        assert_eq!(due(&documents, morning).len(), 2);
+        let found = due(
+            &documents,
+            morning.with_timezone(&chrono::Utc).fixed_offset(),
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].starts_with("knowledge/past.md"));
     }
 
     #[test]

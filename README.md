@@ -397,7 +397,8 @@ stale_after: 2027-01-01
 - `match`, optional, an alarm's only: the strings of the output it is found by.
 - `verified`, optional: who reviewed it, and the day (`at`). A datetime with a time zone passes too, read as its day
   there.
-- `stale_after`, optional: the day from which to look at it again.
+- `stale_after`, optional: the day from which to look at it again, for what it says of outside the code. From that
+  day `rotproof check` warns of it, and fails nothing.
 
 The log holds one entry per task, under the day's `## YYYY-MM-DD` heading, newest first: the task, its issue, what went
 wrong and what was learned, which is found nowhere else, and searchable in the repository when something breaks. What
@@ -539,6 +540,12 @@ changed is in the commits, what was measured and decided along the way in the ta
 - **Every file Rotproof generates equals what `rotproof index` writes:** `docs/index.md` and `docs/knowledge/index.md`,
   so nobody maintains a list by hand, and `docs/knowledge/rules.md`, so the rules a project reads are the rules its
   Rotproof checks. A project's own rules go in another guide beside it.
+
+One thing is a warning and fails nothing: **a knowledge document whose `stale_after` has come** (the day in the time
+zone of the machine that runs the check) is printed on every run from that day, with what to do: measure again what it
+says of outside the code, which `follows` cannot watch, then write the day in `verified` and the next day in
+`stale_after`. Failing would turn CI red with no change, from the clock alone. A deprecated document is not read for
+it.
 
 The frontmatter is read as YAML 1.2: quoting a date or a datetime never changes whether it passes. It holds no comment: a `#`
 after a space or at the start of a line starts one, which YAML reads as nothing, so an unquoted `title: PR #1` would

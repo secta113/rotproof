@@ -113,21 +113,25 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
             });
         }
     }
-    findings.extend(records(tree, parsers, structure.areas, now)?);
+    let mut due = Vec::new();
+    findings.extend(records(tree, parsers, structure.areas, now, &mut due)?);
     Ok(Report {
         findings,
         skipped: structure.skipped,
         layers_checked,
         approved,
+        due,
     })
 }
 
-/// Every broken rule of the records at `now`, grouped by `areas`: `None` when the declaration cannot be read.
+/// Every broken rule of the records at `now`, grouped by `areas`: `None` when the declaration cannot be read. The
+/// knowledge documents whose `stale_after` has come go in `due`, as warnings.
 fn records(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     areas: Option<Vec<String>>,
     now: Time,
+    due: &mut Vec<String>,
 ) -> io::Result<Vec<Finding>> {
     let mut found = Vec::new();
     let mut add = |check: &'static str, details: Vec<String>| {
@@ -195,6 +199,7 @@ fn records(
         .into_iter()
         .map(|(name, (doc, _))| (name, doc))
         .collect();
+    *due = domain::records::due(&held, now);
     add(
         "every knowledge document matches the code it follows",
         crate::follows::drift(tree, parsers, &held),

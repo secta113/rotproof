@@ -77,6 +77,9 @@ pub struct Report {
     pub layers_checked: bool,
     /// Every forbidden import a person approved, as printed on every run: one line per entry that approves something
     pub approved: Vec<String>,
+    /// Every knowledge document whose `stale_after` has come, with what to do: a warning on every run, which fails
+    /// nothing
+    pub due: Vec<String>,
 }
 
 /// What `rotproof index` did.

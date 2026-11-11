@@ -105,6 +105,40 @@ fn a_record_with_a_byte_order_mark_passes() {
 }
 
 #[test]
+fn a_knowledge_document_past_its_stale_after_is_warned_of_and_fails_nothing() {
+    let root = clean_repo();
+    let docs = root.path().join("docs");
+    let with = |stale_after: &str| {
+        format!(
+            "---\ntype: Knowledge\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nstale_after: {stale_after}\n\
+             ---\n\n# Why\n\nZ.\n"
+        )
+    };
+    fs::write(docs.join("knowledge/x.md"), with("2026-01-01")).unwrap();
+    let out = run(&["--root", &root_arg(root.path()), "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains("past their stale_after (a warning, which fails nothing) (1):\n  knowledge/x.md: stale_after 2026-01-01 has come"),
+        "{said}"
+    );
+    assert!(
+        said.contains("the layers and every record keep the rules"),
+        "{said}"
+    );
+    // A day far ahead warns of nothing
+    fs::write(docs.join("knowledge/x.md"), with("9999-01-01")).unwrap();
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    let said = stdout(&out);
+    assert!(
+        out.status.success() && !said.contains("stale_after"),
+        "{said}"
+    );
+}
+
+#[test]
 fn each_broken_rule_fails_under_its_check() {
     let doc = |body: &str| {
         format!(
