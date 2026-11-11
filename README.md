@@ -335,20 +335,32 @@ rejected, how it should behave where the code says only how it does, and what li
 promises of a service it calls, the data in production, how to run or operate it). A summary of how the code works is
 left out: the code says that, and a copy goes stale. A document is edited in place, git keeping its history, and is
 deprecated, opening with `# Resolution`, only when it no longer holds. A document that describes code names it in
-`follows`, each with its hash when the document was last reviewed: a file in any language, and in Python also a
-function or class (`src/api.py::Router.add`) or every `.py` file under a directory (`src/api/`). Once the document is
-reviewed against the code, `rotproof follows knowledge/api.md <key>...` (or `docs/knowledge/api.md`) pins each key at
-its hash as the code is now, adding a key `follows` lacks with its hash quoted, and writes all the keys or none:
-pinning changes the document, so its commit records the review. Nothing else in the document changes: it keeps a byte
-order mark and its line endings (CRLF on every line when one line had it). Run it when a document starts to follow
-something, and when `rotproof check` fails because what it follows changed since: the check names the command to run.
-It pins only the keys named, needs no terminal, and leaves a key gone from the code to edit by hand. After a
-refactoring that moved code without changing what it does, a person can re-pin every changed hash in one act:
-`rotproof approve --reviewed` lists each document and what changed under it, says to read the changes first (a hash
-says only that the code changed), asks for one `y` on a terminal (an agent's shell has none), writes the new hashes
-(each document keeping a byte order mark and its line endings, as `rotproof follows` does), and names the documents
-it wrote. What is gone is left for the person to edit. No LLM judges whether the meaning changed: the agent that
-refactors is usually one.
+`follows`, each with its hash when the document was last reviewed: a file in any language; in Python, TypeScript,
+JavaScript and Rust also a definition, written `<file>::<Name>.<Name>` in all of them (`src/api.py::Router.add`,
+`src/api.ts::Router.add`, `crates/x/src/cli.rs::Command.Before`); or every file Rotproof reads as code under a
+directory (`src/api/`: `.py`, `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` and `.rs`, in any case,
+whatever the stack of the project). A definition is hashed on its own source, so a change elsewhere in its file does
+not fail it. A name that is more than one piece in its file (overloads, a getter and its setter, a Python property and
+its `@x.setter`, an interface merged with a class, the `impl` blocks of a Rust type) is hashed on all of them, in the
+order they appear, joined with a line break. Every definition counts, exported or not. In Python, a function or class
+and its methods, from the first decorator; in TypeScript and JavaScript, a function, class, interface, type, enum or
+namespace, a variable (`export const f = () => ...`, the whole statement), the members of a class, an interface and an
+enum, and `default` for an `export default` that has no name; in Rust, a `fn`, `struct`, `enum` and its variants,
+`union`, `trait` and its items, `type`, `const`, `static`, `macro_rules!` and an inline `mod` with its items
+(`tests.helper`). A Rust type's key covers its definition and every `impl` block for it in the file, `Type.method` is
+the method of that name in any of them, and a Rust definition starts at its first attribute or `///` doc comment. What
+a macro defines is not seen. Once the document is reviewed against the code, `rotproof follows knowledge/api.md
+<key>...` (or `docs/knowledge/api.md`) pins each key at its hash as the code is now, adding a key `follows` lacks with
+its hash quoted, and writes all the keys or none: pinning changes the document, so its commit records the review.
+Nothing else in the document changes: it keeps a byte order mark and its line endings (CRLF on every line when one
+line had it). Run it when a document starts to follow something, and when `rotproof check` fails because what it
+follows changed since: the check names the command to run. It pins only the keys named, needs no terminal, and leaves
+a key gone from the code to edit by hand. After a refactoring that moved code without changing what it does, a person
+can re-pin every changed hash in one act: `rotproof approve --reviewed` lists each document and what changed under it,
+says to read the changes first (a hash says only that the code changed), asks for one `y` on a terminal (an agent's
+shell has none), writes the new hashes (each document keeping a byte order mark and its line endings, as `rotproof
+follows` does), and names the documents it wrote. What is gone is left for the person to edit. No LLM judges whether
+the meaning changed: the agent that refactors is usually one.
 
 Some knowledge matters only when something is seen: a service refuses an upload, a CI image moves. Such a document is
 an alarm, with `# When` (what is seen and where, in the words of the output) and `# Do` (what to do then, usually
@@ -490,10 +502,12 @@ changed is in the commits, what was measured and decided along the way in the ta
   `# When` and `# Do`, neither empty, and only an alarm has `match`: a list of strings, each on one line and named
   once. A document that breaks one of these is left out of the index, which lists it first, with why.
 - **Every knowledge document matches the code it follows:** each key of `follows` names a path from the root with
-  `/` (a file; a directory with a `/` at its end; a definition of a `.py` file after `::`, as `f`, `Class` or
-  `Class.method`) with a hash of 8 lower-case hex digits, and that hash is what it names now: the file's text, every
-  line ending as `\n`; the definition's source from its first decorator to its end; or every `.py` file under the
-  directory (outside what the project's `.gitignore` files exclude, and hidden ones), each with its path. What is not
+  `/` (a file; a directory with a `/` at its end; a definition of a Python, TypeScript, JavaScript or Rust file after
+  `::`, as `f`, `Class` or `Class.method`) with a hash of 8 lower-case hex digits, and that hash is what it names now:
+  the file's text, every line ending as `\n`; the definition's source from its first decorator or attribute to its
+  end, all the pieces of a name defined more than once in the order they appear, joined with `\n`; or every file read
+  as code under the directory (`.py`, `.rs` and the TypeScript and JavaScript extensions, in any case, whatever the
+  stack; outside what the project's `.gitignore` files exclude, and hidden ones), each with its path. What is not
   there fails. A deprecated document no longer holds, so what it follows is not read.
 - **Every link in `docs/knowledge/` and the log resolves:** each read from the document's own directory, with heading
   anchors computed as GitHub computes them, a link from the log into the `docs/work/` of an older project included. A

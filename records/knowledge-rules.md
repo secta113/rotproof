@@ -57,17 +57,28 @@ The body is free, except that a deprecated document opens with `# Resolution`: w
     src/api/: "51c0d2aa"
   ```
 
-  A key is a file, in any language (`src/api/routes.py`), a function or class of a Python file (`::create_user`), a
-  method (`::Router.add`), or a directory, for every `.py` file under it (`src/api/`).
+  A key is a file, in any language (`src/api/routes.py`); a definition in a Python, TypeScript, JavaScript or Rust file,
+  written `<file>::<Name>.<Name>` in all of them (`::create_user`, a method `::Router.add`, `cli.rs::Command.Before`);
+  or a directory, for every file under it that Rotproof reads as code (`.py`, `.rs`, `.ts`, `.tsx`, `.js` and the other
+  TypeScript and JavaScript extensions), whatever the stack (`src/api/`). Every definition counts, exported or not: in
+  Python a function or class and its methods; in TypeScript and JavaScript a function, class, interface, type, enum,
+  namespace or variable (`export const f = () => ...`), the members of a class, interface and enum, and `default` for
+  an `export default` with no name; in Rust a `fn`, `struct`, `enum` and its variants, `union`, `trait` and its items,
+  `type`, `const`, `static`, `macro_rules!` and an inline `mod` with its items (`tests.helper`). A Rust type's key
+  covers its definition and every `impl` block for it in the file, and `Type.method` the method of that name in any of
+  them. What a macro defines is not seen.
 
   `rotproof follows knowledge/api.md <key>...` writes these lines, with the hashes as the code is now: run it when a
-  document starts to follow something, once the document says what the code does, and when the check names it. It pins only the keys named, all of them or none, and a key not in `follows` is
-  added at its end. A hash is quoted, as YAML reads `12345678` as a number.
-  A definition is hashed from its first decorator to its end, so a change elsewhere in its file does not fail it. What
-  a document follows must exist: a file, directory or definition that is gone fails. Writing the new hash changes the
-  document, so its commit records the review. A document about a decision follows nothing. After a refactoring
-  that kept what the code does, a person re-pins every changed hash in one act with `rotproof approve --reviewed`, on
-  a terminal.
+  document starts to follow something, once the document says what the code does, and when the check names it. It pins
+  only the keys named, all of them or none, and a key not in `follows` is added at its end. A hash is quoted, as YAML
+  reads `12345678` as a number.
+  A definition is hashed from its first decorator or attribute to its end (a Rust `///` doc comment is an attribute),
+  so a change elsewhere in its file does not fail it. A name that is more than one piece in its file (overloads, a
+  getter and its setter, a Python `@property` and its `@x.setter`, the `impl` blocks of a type) is hashed on all of
+  them, in the order they appear. What a document follows must exist: a file, directory or definition that is gone
+  fails. Writing the new hash changes the document, so its commit records the review. A document about a decision
+  follows nothing. After a refactoring that kept what the code does, a person re-pins every changed hash in one act
+  with `rotproof approve --reviewed`, on a terminal.
 
 # Alarms
 
