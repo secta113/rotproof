@@ -10,14 +10,14 @@
 //! ```
 //!
 //! A key is a file, in any stack, a definition in a file of a language Rotproof reads (`::create_user`, or a method
-//! after its type's name: `::Router.add`), or a directory, for every `.py` file under it. The frontmatter holds no
-//! comment (`frontmatter.rs`).
+//! after its type's name: `::Router.add`), or a directory, for every file under it that Rotproof reads as code. The
+//! frontmatter holds no comment (`frontmatter.rs`).
 //!
 //! - **The review is pinned in the document.** Writing the new hash changes the document, so the log entry that names
 //!   it with its new hash (`records.rs`) records the review: no rule of its own.
 //! - **A file is the unit in every stack;** the languages Rotproof reads go further: a definition is hashed on its own
-//!   source, from its first decorator or attribute to its end, so a change elsewhere in its file does not fail it, and
-//!   a directory on the `.py` files under it.
+//!   source, from its first decorator or attribute to its end, so a change elsewhere in its file does not fail it. A
+//!   directory is hashed on the files of those languages under it, whatever the stack of the project.
 //! - **A reader gives the outline of a file, and `definitions.rs` reads the key from it.** The readers turn what a
 //!   parser gives into [`Definition`](crate::definitions::Definition)s, and [`crate::definitions`] is the one place a
 //!   key is matched and its pieces joined, so the hash of a name does not depend on the language it was read in. A
@@ -47,7 +47,8 @@ pub fn content_hash(text: &str) -> String {
 pub enum Followed {
     /// A file, from the root
     File(String),
-    /// Every `.py` file under a directory, from the root, written with a `/` at its end
+    /// Every file Rotproof reads as code under a directory ([`language_of`]), from the root, written with a `/` at its
+    /// end
     Directory(String),
     /// A definition in a file of a language Rotproof reads: the file, the language it is read as, and the dotted name
     /// (`f`, `Class`, `Class.method`)
@@ -124,7 +125,7 @@ pub fn followed(key: &str) -> Result<Followed, String> {
     }
 }
 
-/// The hash of a directory: of its `.py` files, each as its path from the root and its text, in the order of their
+/// The hash of a directory: of its code files, each as its path from the root and its text, in the order of their
 /// paths. A file added, removed, renamed or changed changes it.
 pub fn directory_hash(files: &[(String, String)]) -> String {
     let mut sorted: Vec<&(String, String)> = files.iter().collect();

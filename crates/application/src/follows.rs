@@ -9,7 +9,7 @@ use domain::bundle::in_docs;
 use domain::definitions::selected;
 use domain::follows::content_hash;
 use domain::follows::{
-    Followed, added, directory_hash, document_name, drifted, followed, repinned,
+    Followed, added, directory_hash, document_name, drifted, followed, language_of, repinned,
 };
 use domain::schema::{Knowledge, KnowledgeDoc, Status, knowledge_doc};
 use protocol::inbound::{Drift, Pinned};
@@ -59,7 +59,9 @@ pub fn current(
                 .files(&dir)
                 .map_err(|e| format!("{dir}/ cannot be read: {e}"))?;
             let mut files = Vec::new();
-            for path in paths.into_iter().filter(|p| p.ends_with(".py")) {
+            // Every file Rotproof reads as code, whatever the stack of the project: a root that holds Rust under
+            // `stack = "none"` follows a directory of it
+            for path in paths.into_iter().filter(|p| language_of(p).is_some()) {
                 let text =
                     read_text(tree, &path).map_err(|e| format!("{path} cannot be read: {e}"))?;
                 files.push((path, text));
@@ -367,6 +369,41 @@ mod tests {
         );
         // The file as a whole is still followed
         assert!(current(&tree, &Readers, "domain/api.ts").unwrap().is_some());
+    }
+
+    #[test]
+    fn a_directory_is_hashed_on_every_code_file_under_it_whatever_the_stack() {
+        // The project declares `stack = "none"`: its directories still cover the code of every language
+        let tree = project(&[]);
+        tree.write("domain/lib.rs", "pub fn a() {}\n").unwrap();
+        tree.write("domain/view.TSX", "export const V = 1;\n")
+            .unwrap();
+        tree.write("domain/Old.PY", "x = 1\n").unwrap();
+        tree.write("domain/notes.md", "notes\n").unwrap();
+        let now = |tree: &Fake| current(tree, &Readers, "domain/").unwrap().unwrap();
+        let before = now(&tree);
+
+        // What is not code is not read
+        tree.write("domain/notes.md", "other notes\n").unwrap();
+        tree.write("domain/data.json", "{}\n").unwrap();
+        assert_eq!(now(&tree), before);
+        // Each language is
+        for (path, text) in [
+            ("domain/lib.rs", "pub fn a() { 1; }\n"),
+            ("domain/view.TSX", "export const V = 2;\n"),
+            ("domain/Old.PY", "x = 2\n"),
+            ("domain/model.py", "def play():\n    return 2\n"),
+            ("domain/new.mjs", "export {};\n"),
+        ] {
+            let was = tree.text(path);
+            tree.write(path, text).unwrap();
+            assert_ne!(now(&tree), before, "{path}");
+            match was {
+                Some(was) => tree.write(path, &was).unwrap(),
+                None => tree.remove(path).unwrap(),
+            }
+            assert_eq!(now(&tree), before, "{path}");
+        }
     }
 
     #[test]

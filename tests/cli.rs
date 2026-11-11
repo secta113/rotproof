@@ -3025,6 +3025,110 @@ fn a_knowledge_document_fails_when_what_it_follows_changes_unreviewed() {
 }
 
 #[test]
+fn a_records_only_repository_follows_definitions_and_directories_of_any_language() {
+    // `stack = "none"`: no layers, and the keys still read the code of every language
+    let root = repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    fs::create_dir_all(r.join("web")).unwrap();
+    let router =
+        "export class Router {\n  add(a: string) { return 1; }\n}\nexport const other = 1;\n";
+    let table = "/// A table.\npub struct Table;\n\nimpl Table {\n    pub fn add(&self) -> u8 {\n        1\n    }\n}\n\n\
+                 fn other() {}\n";
+    fs::write(r.join("web/api.ts"), router).unwrap();
+    fs::write(r.join("web/table.rs"), table).unwrap();
+    let keys = ["web/api.ts::Router.add", "web/table.rs::Table", "web/"];
+    let follows: String = keys
+        .iter()
+        .map(|key| format!("  {key}: \"00000000\"\n"))
+        .collect();
+    fs::write(
+        r.join("docs/knowledge/model.md"),
+        format!(
+            "---\ntype: Knowledge\ntitle: Model\ndescription: The model.\ntags: [operations]\nstatus: stable\n\
+             follows:\n{follows}---\n\n# Shape\n\nA table.\n"
+        ),
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+    let check = || {
+        let out = run(&["--root", &arg, "check"]);
+        (out.status.code(), stdout(&out))
+    };
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(to_pin(&said), keys, "{said}");
+    let pin = |keys: &[String]| {
+        let mut args = vec!["--root", &arg, "follows", "knowledge/model.md"];
+        args.extend(keys.iter().map(String::as_str));
+        let out = run(&args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    pin(&to_pin(&said));
+    let (code, said) = check();
+    assert_eq!(code, Some(0), "{said}");
+
+    // Code outside the definitions followed fails the directory alone
+    fs::write(r.join("web/api.ts"), router.replace("= 1;", "= 2;")).unwrap();
+    fs::write(
+        r.join("web/table.rs"),
+        table.replace("fn other() {}", "fn other() { }"),
+    )
+    .unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(to_pin(&said), ["web/"], "{said}");
+    pin(&to_pin(&said));
+
+    // A change inside them fails the definition and the directory, and not the other definition
+    fs::write(r.join("web/api.ts"), router.replace("return 1", "return 3")).unwrap();
+    fs::write(
+        r.join("web/table.rs"),
+        table.replace("        1\n", "        2\n"),
+    )
+    .unwrap();
+    let (_, said) = check();
+    assert_eq!(
+        to_pin(&said),
+        ["web/api.ts::Router.add", "web/table.rs::Table", "web/"],
+        "{said}"
+    );
+    pin(&to_pin(&said));
+
+    // A definition gone fails as a dangling link does
+    fs::write(r.join("web/api.ts"), "export const other = 1;\n").unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("follows web/api.ts::Router.add, which is not there"),
+        "{said}"
+    );
+
+    // A file the parser gives up on fails as unreadable, not as a definition gone
+    fs::write(r.join("web/api.ts"), router.replace("= 1;", "= ;")).unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "follows web/api.ts::Router.add: web/api.ts cannot be parsed, so its definitions cannot be read: line 4:"
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("which is not there"), "{said}");
+}
+
+#[test]
 fn the_re_pin_of_followed_code_refuses_without_a_terminal() {
     let root = clean_repo();
     let r = root.path();
