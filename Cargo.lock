@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "application"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "chrono",
  "domain",
@@ -299,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "composition"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "application",
  "infrastructure",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "domain"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "chrono",
  "percent-encoding",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "infrastructure"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "chrono",
  "clap",
@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "protocol"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "domain",
 ]
@@ -1384,7 +1384,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rotproof"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "chrono",
  "composition",
