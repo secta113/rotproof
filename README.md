@@ -178,7 +178,7 @@ that has a declaration:
 | Update | Version | File | What it does |
 |---|---|---|---|
 | `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
-| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
+| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above. Not applied in an upgrade that also crosses `claude-remove-stop-hook`, which would take it out again |
 | `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
 | `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, and `Stop` when no group is left (see "The time hook"). Written again as above: an untouched file ends as `rotproof create` writes it now |
 

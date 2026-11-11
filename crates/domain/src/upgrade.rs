@@ -368,15 +368,23 @@ fn written(settings: Map<String, Value>) -> String {
 
 /// The updates a project whose files are up to `files` takes to reach `running`, without the `declined` ones, oldest
 /// first. `Err` when a version cannot be read, or `files` is newer than `running`.
+///
+/// The hook beside the stop hook is not added when the stop hook is taken out in the same upgrade: it would be taken
+/// out with it, and a file Rotproof cannot read would ask a person to add it and to remove it at once.
 pub fn pending(files: &str, running: &str, declined: &[String]) -> Result<Vec<Update>, String> {
     let (from, to) = versions(files, running)?;
-    Ok(UPDATES
+    let found: Vec<Update> = UPDATES
         .iter()
         .copied()
         .filter(|update| {
             let at = version(update.version()).expect("every update names a version");
             from < at && at <= to && !declined.iter().any(|d| d == update.name())
         })
+        .collect();
+    let removed = found.contains(&Update::RemoveStopHook);
+    Ok(found
+        .into_iter()
+        .filter(|update| !(removed && *update == Update::StopHookOnPath))
         .collect())
 }
 
@@ -604,6 +612,19 @@ mod tests {
         assert_eq!(
             pending("0.1.0", "0.3.0", &["claude-deny-approvals".into()]),
             Ok(vec![])
+        );
+        // The hook beside the stop hook is added only when the stop hook stays
+        assert_eq!(
+            pending("0.3.0", "0.4.0", &[]),
+            Ok(vec![Update::StopHookOnPath, Update::TimeHook])
+        );
+        assert_eq!(
+            pending("0.3.0", "1.0.0-rc.1", &[]),
+            Ok(vec![Update::TimeHook, Update::RemoveStopHook])
+        );
+        assert_eq!(
+            pending("0.3.0", "1.0.0-rc.1", &["claude-remove-stop-hook".into()]),
+            Ok(vec![Update::StopHookOnPath, Update::TimeHook])
         );
         assert!(
             pending("0.3.0", "0.2.0", &[])
