@@ -7,6 +7,7 @@
 pub mod approvals;
 pub mod bundle;
 pub mod code;
+pub mod definitions;
 pub mod direction;
 pub mod follows;
 pub mod frontmatter;

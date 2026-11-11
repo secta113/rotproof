@@ -9,20 +9,28 @@
 //!   src/api/: "51c0d2aa"
 //! ```
 //!
-//! A key is a file, in any stack, a function or class of a Python file (`::create_user`), a method (`::Router.add`),
-//! or a directory, for every `.py` file under it. The frontmatter holds no comment (`frontmatter.rs`).
+//! A key is a file, in any stack, a definition in a file of a language Rotproof reads (`::create_user`, or a method
+//! after its type's name: `::Router.add`), or a directory, for every file under it that Rotproof reads as code. The
+//! frontmatter holds no comment (`frontmatter.rs`).
 //!
 //! - **The review is pinned in the document.** Writing the new hash changes the document, so the log entry that names
 //!   it with its new hash (`records.rs`) records the review: no rule of its own.
-//! - **A file is the unit in every stack;** Python goes further, since Rotproof reads its definitions: a definition is
-//!   hashed on its own source, from its first decorator to its end, so a change elsewhere in its file does not fail
-//!   it, and a directory on the `.py` files under it.
+//! - **A file is the unit in every stack;** the languages Rotproof reads go further: a definition is hashed on its own
+//!   source, from its first decorator or attribute to its end, so a change elsewhere in its file does not fail it. A
+//!   directory is hashed on the files of those languages under it, whatever the stack of the project.
+//! - **A reader gives the outline of a file, and `definitions.rs` reads the key from it.** The readers turn what a
+//!   parser gives into [`Definition`](crate::definitions::Definition)s, and [`crate::definitions`] is the one place a
+//!   key is matched and its pieces joined, so the hash of a name does not depend on the language it was read in. A
+//!   name that is more than one piece in its file (an overload and its implementation, a getter and its setter, the
+//!   `impl` blocks of a type) is hashed on all of them, in the order they appear.
 //! - **What a document follows must exist.** A file, directory or definition that is gone fails, as a dangling link
 //!   does.
 //!
 //! The hash is [`content_hash`]: the first 8 hex digits of SHA-256 of the text, with every line ending as `\n`.
 
 use sha2::{Digest, Sha256};
+
+use crate::layers::Language;
 
 /// The hash a key of `follows` is pinned at: the first 8 hex digits of SHA-256 of the text, as `read_text` reads it
 /// (every line ending as `\n` and no byte order mark, so a checkout with CRLF has the same hash).
@@ -39,10 +47,40 @@ pub fn content_hash(text: &str) -> String {
 pub enum Followed {
     /// A file, from the root
     File(String),
-    /// Every `.py` file under a directory, from the root, written with a `/` at its end
+    /// Every file Rotproof reads as code under a directory ([`language_of`]), from the root, written with a `/` at its
+    /// end
     Directory(String),
-    /// A function or class of a Python file: the file, and its dotted name (`f`, `Class`, `Class.method`)
-    Definition { file: String, name: String },
+    /// A definition in a file of a language Rotproof reads: the file, the language it is read as, and the dotted name
+    /// (`f`, `Class`, `Class.method`)
+    Definition {
+        file: String,
+        language: Language,
+        name: String,
+    },
+}
+
+/// The language a file is read as, by its extension in any case (Windows runs `Api.PY` and compiles `LIB.RS`), or
+/// `None` for a file Rotproof reads no definitions in.
+pub fn language_of(path: &str) -> Option<Language> {
+    if path.to_ascii_lowercase().ends_with(".py") {
+        Some(Language::Python)
+    } else if crate::code::is_source(path) {
+        Some(Language::TypeScript)
+    } else if crate::rust::is_source(path) {
+        Some(Language::Rust)
+    } else {
+        None
+    }
+}
+
+/// Whether `part` can be one name of a key after `::` in a file of `language`: letters, digits and `_`, not starting
+/// with a digit, and `$` as a letter in TypeScript and JavaScript. The readers name a definition only by such a part,
+/// so a key can always be written for what they find.
+pub fn is_name(language: Language, part: &str) -> bool {
+    let dollar = language == Language::TypeScript;
+    let letter = |c: char| c.is_alphabetic() || c == '_' || (dollar && c == '$');
+    part.chars().next().is_some_and(letter)
+        && part.chars().all(|c| letter(c) || c.is_alphanumeric())
 }
 
 /// What the key `key` of `follows` names, or why it names nothing Rotproof can follow.
@@ -66,30 +104,28 @@ pub fn followed(key: &str) -> Result<Followed, String> {
     match name {
         None if path.ends_with('/') => Ok(Followed::Directory(bare.to_string())),
         None => Ok(Followed::File(path.to_string())),
-        Some(_) if path.ends_with('/') || !path.ends_with(".py") => Err(format!(
-            "{key:?} names a definition outside a .py file: only Python's definitions are read"
-        )),
         Some(name) => {
-            let identifier = |part: &str| {
-                part.chars()
-                    .next()
-                    .is_some_and(|c| c.is_alphabetic() || c == '_')
-                    && part.chars().all(|c| c.is_alphanumeric() || c == '_')
-            };
-            if !name.split('.').all(identifier) {
+            let Some(language) = language_of(path) else {
                 return Err(format!(
-                    "{key:?} names no definition after ::, which is a function or class, or Class.method"
+                    "{key:?} names a definition outside the files whose definitions are read: .py, .rs, and \
+                     TypeScript and JavaScript source"
+                ));
+            };
+            if !name.split('.').all(|part| is_name(language, part)) {
+                return Err(format!(
+                    "{key:?} names no definition after ::, which is a name, or names joined by dots (Class.method)"
                 ));
             }
             Ok(Followed::Definition {
                 file: path.to_string(),
+                language,
                 name: name.to_string(),
             })
         }
     }
 }
 
-/// The hash of a directory: of its `.py` files, each as its path from the root and its text, in the order of their
+/// The hash of a directory: of its code files, each as its path from the root and its text, in the order of their
 /// paths. A file added, removed, renamed or changed changes it.
 pub fn directory_hash(files: &[(String, String)]) -> String {
     let mut sorted: Vec<&(String, String)> = files.iter().collect();
@@ -321,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn a_key_names_a_file_a_directory_or_a_python_definition() {
+    fn a_key_names_a_file_a_directory_or_a_definition() {
         assert_eq!(
             followed("src/api.py"),
             Ok(Followed::File("src/api.py".into()))
@@ -334,13 +370,31 @@ mod tests {
             followed("src/api/"),
             Ok(Followed::Directory("src/api".into()))
         );
-        assert_eq!(
-            followed("src/api.py::Router.add"),
-            Ok(Followed::Definition {
-                file: "src/api.py".into(),
-                name: "Router.add".into()
-            })
-        );
+        // The language is the file's, by its extension in any case, and the names are the same form in each
+        for (key, language) in [
+            ("src/api.py::Router.add", Language::Python),
+            ("src/Api.PY::Router.add", Language::Python),
+            ("src/api.ts::Router.add", Language::TypeScript),
+            ("src/api.TSX::Router.add", Language::TypeScript),
+            ("src/api.mjs::Router.add", Language::TypeScript),
+            ("src/api.rs::Router.add", Language::Rust),
+            ("src/API.RS::Router.add", Language::Rust),
+        ] {
+            let (file, _) = key.split_once("::").unwrap();
+            assert_eq!(
+                followed(key),
+                Ok(Followed::Definition {
+                    file: file.into(),
+                    language,
+                    name: "Router.add".into()
+                }),
+                "{key}"
+            );
+        }
+        // `$` is a letter of TypeScript and JavaScript names only
+        assert!(followed("src/api.ts::$el.$on").is_ok());
+        assert!(followed("src/api.py::$el").is_err());
+        assert!(followed("src/api.rs::$el").is_err());
         for bad in [
             "",
             "/src/api.py",
@@ -349,12 +403,16 @@ mod tests {
             "./api.py",
             "src//api.py",
             "/",
-            "src/api.rs::f",
+            "src/api.md::f",
+            "src/api::f",
             "src/::f",
+            "src/api.py/::f",
             "src/api.py::",
             "src/api.py::f()",
             "src/api.py::1f",
             "src/api.py::a..b",
+            "src/api.rs::a::b",
+            "src/api.ts::#private",
         ] {
             assert!(followed(bad).is_err(), "{bad:?}");
         }

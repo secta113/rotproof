@@ -6,9 +6,10 @@ use std::collections::BTreeMap;
 use crate::bundle::Bundle;
 use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::in_docs;
+use domain::definitions::selected;
 use domain::follows::content_hash;
 use domain::follows::{
-    Followed, added, directory_hash, document_name, drifted, followed, repinned,
+    Followed, added, directory_hash, document_name, drifted, followed, language_of, repinned,
 };
 use domain::schema::{Knowledge, KnowledgeDoc, Status, knowledge_doc};
 use protocol::inbound::{Drift, Pinned};
@@ -33,9 +34,23 @@ pub fn current(
     };
     match followed(key)? {
         Followed::File(path) => Ok(file_text(&path)?.map(|text| content_hash(&text))),
-        Followed::Definition { file, name } => Ok(file_text(&file)?
-            .and_then(|source| parsers.python_definition(&source, &name))
-            .map(|text| content_hash(&text))),
+        Followed::Definition {
+            file,
+            language,
+            name,
+        } => {
+            let Some(source) = file_text(&file)? else {
+                return Ok(None);
+            };
+            let outline = parsers
+                .outline(language, &source, &file)
+                .map_err(|(line, why)| {
+                    format!(
+                        "{file} cannot be parsed, so its definitions cannot be read: line {line}: {why}"
+                    )
+                })?;
+            Ok(selected(&source, &outline, &name).map(|text| content_hash(&text)))
+        }
         Followed::Directory(dir) => {
             if !matches!(exactly(tree, &dir), Ok((_, true))) {
                 return Ok(None);
@@ -44,7 +59,9 @@ pub fn current(
                 .files(&dir)
                 .map_err(|e| format!("{dir}/ cannot be read: {e}"))?;
             let mut files = Vec::new();
-            for path in paths.into_iter().filter(|p| p.ends_with(".py")) {
+            // Every file Rotproof reads as code, whatever the stack of the project: a root that holds Rust under
+            // `stack = "none"` follows a directory of it
+            for path in paths.into_iter().filter(|p| language_of(p).is_some()) {
                 let text =
                     read_text(tree, &path).map_err(|e| format!("{path} cannot be read: {e}"))?;
                 files.push((path, text));
@@ -303,6 +320,148 @@ mod tests {
         tree.write("domain/model.py", "\u{feff}def play():\r\n    return 1\r\n")
             .unwrap();
         assert_eq!(hashes(&tree), lf);
+    }
+
+    #[test]
+    fn a_definition_in_a_typescript_file_hashes_on_its_own_text() {
+        let tree = project(&[]);
+        let source = "export function a(x: string): void;\nexport function a(x: number): void;\n\
+                      export function a(x: any) { return 1; }\nexport function b() { return 1; }\n";
+        tree.write("domain/api.ts", source).unwrap();
+        let now = |tree: &Fake, key: &str| current(tree, &Readers, key).unwrap();
+        let (a, b, file) = (
+            now(&tree, "domain/api.ts::a"),
+            now(&tree, "domain/api.ts::b"),
+            now(&tree, "domain/api.ts"),
+        );
+        assert!(a.is_some() && b.is_some() && a != b);
+        assert_eq!(now(&tree, "domain/api.ts::c"), None);
+
+        // A change in another definition fails the file, not this definition
+        tree.write(
+            "domain/api.ts",
+            &source.replace("b() { return 1", "b() { return 2"),
+        )
+        .unwrap();
+        assert_eq!(now(&tree, "domain/api.ts::a"), a);
+        assert_ne!(now(&tree, "domain/api.ts::b"), b);
+        assert_ne!(now(&tree, "domain/api.ts"), file);
+
+        // Every piece of a name counts: the implementation after the overloads is part of its definition
+        tree.write("domain/api.ts", &source.replace("x: any", "x: unknown"))
+            .unwrap();
+        assert_ne!(now(&tree, "domain/api.ts::a"), a);
+        assert_eq!(now(&tree, "domain/api.ts::b"), b);
+    }
+
+    #[test]
+    fn a_typescript_file_the_parser_gives_up_on_cannot_be_read_and_is_not_a_definition_gone() {
+        let tree = project(&[]);
+        // The definition above the error is not read either: oxc gives an empty program
+        tree.write("domain/api.ts", "export function a() {}\nconst = ;\n")
+            .unwrap();
+        let why = current(&tree, &Readers, "domain/api.ts::a").unwrap_err();
+        assert!(
+            why.starts_with(
+                "domain/api.ts cannot be parsed, so its definitions cannot be read: line 2:"
+            ),
+            "{why}"
+        );
+        // The file as a whole is still followed
+        assert!(current(&tree, &Readers, "domain/api.ts").unwrap().is_some());
+    }
+
+    #[test]
+    fn a_directory_is_hashed_on_every_code_file_under_it_whatever_the_stack() {
+        // The project declares `stack = "none"`: its directories still cover the code of every language
+        let tree = project(&[]);
+        tree.write("domain/lib.rs", "pub fn a() {}\n").unwrap();
+        tree.write("domain/view.TSX", "export const V = 1;\n")
+            .unwrap();
+        tree.write("domain/Old.PY", "x = 1\n").unwrap();
+        tree.write("domain/notes.md", "notes\n").unwrap();
+        let now = |tree: &Fake| current(tree, &Readers, "domain/").unwrap().unwrap();
+        let before = now(&tree);
+
+        // What is not code is not read
+        tree.write("domain/notes.md", "other notes\n").unwrap();
+        tree.write("domain/data.json", "{}\n").unwrap();
+        assert_eq!(now(&tree), before);
+        // Each language is
+        for (path, text) in [
+            ("domain/lib.rs", "pub fn a() { 1; }\n"),
+            ("domain/view.TSX", "export const V = 2;\n"),
+            ("domain/Old.PY", "x = 2\n"),
+            ("domain/model.py", "def play():\n    return 2\n"),
+            ("domain/new.mjs", "export {};\n"),
+        ] {
+            let was = tree.text(path);
+            tree.write(path, text).unwrap();
+            assert_ne!(now(&tree), before, "{path}");
+            match was {
+                Some(was) => tree.write(path, &was).unwrap(),
+                None => tree.remove(path).unwrap(),
+            }
+            assert_eq!(now(&tree), before, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_rust_type_is_hashed_with_every_impl_block_of_it() {
+        let tree = project(&[]);
+        let source = "/// A table.\n#[derive(Debug)]\npub struct Table {\n    rows: u8,\n}\n\nimpl Table {\n    \
+                      pub fn add(&self) -> u8 {\n        1\n    }\n}\n\nstruct Other;\n\nimpl Default for Table \
+                      {\n    fn default() -> Self {\n        Table { rows: 0 }\n    }\n}\n";
+        tree.write("domain/table.rs", source).unwrap();
+        let now = |tree: &Fake, key: &str| current(tree, &Readers, key).unwrap();
+        let (table, add, other) = (
+            now(&tree, "domain/table.rs::Table"),
+            now(&tree, "domain/table.rs::Table.add"),
+            now(&tree, "domain/table.rs::Other"),
+        );
+        assert!(table.is_some() && add.is_some() && other.is_some());
+        assert_eq!(now(&tree, "domain/table.rs::Missing"), None);
+
+        // A change in the trait impl fails the type, not the method of the other block or the other type
+        tree.write("domain/table.rs", &source.replace("rows: 0", "rows: 9"))
+            .unwrap();
+        assert_ne!(now(&tree, "domain/table.rs::Table"), table);
+        assert_eq!(now(&tree, "domain/table.rs::Table.add"), add);
+        assert_eq!(now(&tree, "domain/table.rs::Other"), other);
+
+        // A change in the doc comment, which is an attribute, fails the type
+        tree.write("domain/table.rs", &source.replace("A table.", "A grid."))
+            .unwrap();
+        assert_ne!(now(&tree, "domain/table.rs::Table"), table);
+        assert_eq!(now(&tree, "domain/table.rs::Table.add"), add);
+
+        // A comment above it is not part of it
+        tree.write("domain/table.rs", &format!("// Note.\n{source}"))
+            .unwrap();
+        assert_eq!(now(&tree, "domain/table.rs::Table"), table);
+    }
+
+    #[test]
+    fn a_python_name_defined_twice_is_hashed_on_all_its_pieces() {
+        let tree = project(&[]);
+        let getter = "@property\n    def size(self):\n        return 1";
+        let setter = "@size.setter\n    def size(self, value):\n        pass";
+        let source = |setter: &str| {
+            format!("class C:\n    {getter}\n\n    {setter}\n\n\ndef other():\n    pass\n")
+        };
+        tree.write("domain/model.py", &source(setter)).unwrap();
+        let size = || current(&tree, &Readers, "domain/model.py::C.size").unwrap();
+        // The pieces in the order they appear, joined with a line break
+        assert_eq!(size(), Some(content_hash(&format!("{getter}\n{setter}"))));
+
+        // A change in the setter fails the key, which the getter alone missed
+        let was = size();
+        tree.write(
+            "domain/model.py",
+            &source("@size.setter\n    def size(self, value):\n        self._v = value"),
+        )
+        .unwrap();
+        assert_ne!(size(), was);
     }
 
     #[test]

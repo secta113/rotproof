@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 use std::io;
 
 use domain::code::{Aliases, Manifest, Source};
+use domain::definitions::Definition;
+use domain::layers::Language;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -20,8 +22,17 @@ impl Parsers for Readers {
         crate::outbound::python::definitions(source)
     }
 
-    fn python_definition(&self, source: &str, dotted: &str) -> Option<String> {
-        crate::outbound::python::definition(source, dotted)
+    fn outline(
+        &self,
+        language: Language,
+        source: &str,
+        path: &str,
+    ) -> Result<Vec<Definition>, (usize, String)> {
+        match language {
+            Language::Python => Ok(crate::outbound::python::outline(source)),
+            Language::TypeScript => crate::outbound::typescript::outline(source, path),
+            Language::Rust => Ok(domain::rust::outline(source)),
+        }
     }
 
     fn typescript(&self, source: &str, path: &str) -> Source<String> {
