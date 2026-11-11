@@ -8,6 +8,10 @@
 //!
 //! A string or a comment left open runs to the end of the file. Rust itself fails on such a file, so it is not reported
 //! here.
+//!
+//! [`outline`] reads the definitions of a file from its tokens, for a knowledge document that follows one.
+
+pub mod outline;
 
 /// Whether a file name is Rust source. Case does not count: Windows compiles `LIB.RS` for `mod lib`.
 pub fn is_source(name: &str) -> bool {

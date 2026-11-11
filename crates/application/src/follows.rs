@@ -370,6 +370,41 @@ mod tests {
     }
 
     #[test]
+    fn a_rust_type_is_hashed_with_every_impl_block_of_it() {
+        let tree = project(&[]);
+        let source = "/// A table.\n#[derive(Debug)]\npub struct Table {\n    rows: u8,\n}\n\nimpl Table {\n    \
+                      pub fn add(&self) -> u8 {\n        1\n    }\n}\n\nstruct Other;\n\nimpl Default for Table \
+                      {\n    fn default() -> Self {\n        Table { rows: 0 }\n    }\n}\n";
+        tree.write("domain/table.rs", source).unwrap();
+        let now = |tree: &Fake, key: &str| current(tree, &Readers, key).unwrap();
+        let (table, add, other) = (
+            now(&tree, "domain/table.rs::Table"),
+            now(&tree, "domain/table.rs::Table.add"),
+            now(&tree, "domain/table.rs::Other"),
+        );
+        assert!(table.is_some() && add.is_some() && other.is_some());
+        assert_eq!(now(&tree, "domain/table.rs::Missing"), None);
+
+        // A change in the trait impl fails the type, not the method of the other block or the other type
+        tree.write("domain/table.rs", &source.replace("rows: 0", "rows: 9"))
+            .unwrap();
+        assert_ne!(now(&tree, "domain/table.rs::Table"), table);
+        assert_eq!(now(&tree, "domain/table.rs::Table.add"), add);
+        assert_eq!(now(&tree, "domain/table.rs::Other"), other);
+
+        // A change in the doc comment, which is an attribute, fails the type
+        tree.write("domain/table.rs", &source.replace("A table.", "A grid."))
+            .unwrap();
+        assert_ne!(now(&tree, "domain/table.rs::Table"), table);
+        assert_eq!(now(&tree, "domain/table.rs::Table.add"), add);
+
+        // A comment above it is not part of it
+        tree.write("domain/table.rs", &format!("// Note.\n{source}"))
+            .unwrap();
+        assert_eq!(now(&tree, "domain/table.rs::Table"), table);
+    }
+
+    #[test]
     fn a_python_name_defined_twice_is_hashed_on_all_its_pieces() {
         let tree = project(&[]);
         let getter = "@property\n    def size(self):\n        return 1";

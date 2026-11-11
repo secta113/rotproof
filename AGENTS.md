@@ -92,9 +92,13 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
 | `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
 | `sentence.rs` | The first sentence of a paragraph, as the index shows it: the paragraph read as markdown reads it, in any language, with no sentence ending inside parentheses or inline code |
-| `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals, the code alone with both blanked, and its tokens, the paths it names, its modules with a body and its attributes |
+| `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals, the code alone with both blanked, and its tokens, the paths it names, its modules with a body and its attributes, and, in `rust/`, its outline |
 | `paths.rs` | Paths from the root with `/`: the parent, the name, a join, without `.` and `..`, whether one sits in another, and the paths in messages |
 | `text.rs` | The line at a position in a text, for messages |
+
+| Module of `crates/domain/src/rust/` | Content |
+|---|---|
+| `outline.rs` | The outline of a Rust file, read from the scanner's tokens: functions, types, traits, constants, macros and inline modules, the variants of an enum and the items of a trait and of an `impl` block, each from its first attribute or doc comment to its end, an `impl` block a definition of the type it is for |
 
 | Module of `crates/application/src/` | Content |
 |---|---|
