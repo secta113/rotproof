@@ -84,6 +84,7 @@ cargo build --release   # the binary is target/release/rotproof (rotproof.exe on
 ```sh
 rotproof --root <repository> init --stack python  # write .config/rotproof.toml, when there is none
 rotproof --root <repository> init    # after upgrading Rotproof: update the project's files (see "Upgrading Rotproof")
+rotproof --root <repository> create  # list the layers it would make, writing nothing (makes docs/ when it makes no layer)
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write every generated file in docs/ (the index files and the knowledge rules)
@@ -104,8 +105,10 @@ each command's output names the next step. A test follows that path from an empt
 
 Start a project with `rotproof init --stack <stack>` (`python`, `typescript`, `rust`, or `none` for a repository
 that keeps records only). It writes only the declaration, so you declare in `absent` the layers you do not want before
-anything is made. Then run `rotproof create --yes`. Run on a project that has a declaration, `rotproof init` upgrades
-the project's files instead (see "Upgrading Rotproof"), and never changes the declaration's values but `files`.
+anything is made. Then run `rotproof create`, which lists the layers it would make and writes nothing, and
+`rotproof create --yes` once `absent` lists every layer the project lacks. Run on a project that has a declaration,
+`rotproof init` upgrades the project's files instead (see "Upgrading Rotproof"), and never changes the declaration's
+values but `files`.
 
 `rotproof create` makes layers only with `--yes`. Without it, a run that would make one lists the layers, writes
 nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer of the stack, `ui` and its
@@ -178,7 +181,7 @@ that has a declaration:
 | Update | Version | File | What it does |
 |---|---|---|---|
 | `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
-| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
+| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above. Not applied in an upgrade that also crosses `claude-remove-stop-hook`, which would take it out again |
 | `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
 | `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, and `Stop` when no group is left (see "The time hook"). Written again as above: an untouched file ends as `rotproof create` writes it now |
 
@@ -397,7 +400,8 @@ stale_after: 2027-01-01
 - `match`, optional, an alarm's only: the strings of the output it is found by.
 - `verified`, optional: who reviewed it, and the day (`at`). A datetime with a time zone passes too, read as its day
   there.
-- `stale_after`, optional: the day from which to look at it again.
+- `stale_after`, optional: the day from which to look at it again, for what it says of outside the code. From that
+  day `rotproof check` warns of it, and fails nothing.
 
 The log holds one entry per task, under the day's `## YYYY-MM-DD` heading, newest first: the task, its issue, what went
 wrong and what was learned, which is found nowhere else, and searchable in the repository when something breaks. What
@@ -539,6 +543,12 @@ changed is in the commits, what was measured and decided along the way in the ta
 - **Every file Rotproof generates equals what `rotproof index` writes:** `docs/index.md` and `docs/knowledge/index.md`,
   so nobody maintains a list by hand, and `docs/knowledge/rules.md`, so the rules a project reads are the rules its
   Rotproof checks. A project's own rules go in another guide beside it.
+
+One thing is a warning and fails nothing: **a knowledge document whose `stale_after` has come** (the day in the time
+zone of the machine that runs the check) is printed on every run from that day, with what to do: measure again what it
+says of outside the code, which `follows` cannot watch, then write the day in `verified` and the next day in
+`stale_after`. Failing would turn CI red with no change, from the clock alone. A deprecated document is not read for
+it.
 
 The frontmatter is read as YAML 1.2: quoting a date or a datetime never changes whether it passes. It holds no comment: a `#`
 after a space or at the start of a line starts one, which YAML reads as nothing, so an unquoted `title: PR #1` would

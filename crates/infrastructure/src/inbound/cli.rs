@@ -17,9 +17,11 @@ const START: &str = "\
 Start a project:
   1. rotproof init --stack <stack>   write .config/rotproof.toml (python, typescript, rust, or none for records only)
   2. edit it: list in absent the layers the project does not have
-  3. rotproof create --yes           make the layers, docs/ and the project's files (without --yes, a run that
-                                     would make a layer lists the layers and writes nothing)
-  4. rotproof check                  check them; this is the project's CI
+  3. rotproof create                 list the layers it would make, writing nothing (with none, it makes docs/ and
+                                     the project's files: go on to 5)
+  4. rotproof create --yes           once absent lists every layer the project lacks: make the layers, docs/ and the
+                                     project's files
+  5. rotproof check                  check them; this is the project's CI
 
 Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files), then
 `rotproof check`.
@@ -47,8 +49,10 @@ updates them), that .rotproof/AGENTS.md is up to date, that every knowledge docu
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
 follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \
 than today. The rest of docs/ is the project's, and is not read. \
-Prints every broken rule under the check that found it, and what was not checked and why. Writes nothing. Exits 1 when \
-a rule is broken, 2 when there is no .config/rotproof.toml or a file cannot be read.";
+Prints every broken rule under the check that found it, and what was not checked and why. Warns of every knowledge \
+document whose stale_after has come, on every run from that day, and fails nothing for it: time alone never turns \
+the check red. Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
 /// import which) and the records that keep the code's reasons (knowledge pinned to the code, and the log, in docs/).
@@ -429,6 +433,16 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
             report.approved.len()
         );
         for line in &report.approved {
+            println!("  {line}");
+        }
+    }
+    // A warning: printed on every run from the day, and failing nothing
+    if !report.due.is_empty() {
+        println!(
+            "to look at again, past their stale_after (a warning, which fails nothing) ({}):",
+            report.due.len()
+        );
+        for line in &report.due {
             println!("  {line}");
         }
     }

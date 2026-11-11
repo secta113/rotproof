@@ -99,6 +99,9 @@ pub struct Knowledge {
     pub tag: String,
     /// `Stable` = holds / `Deprecated` = no longer holds. A deprecated document stays, so links to it keep working
     pub status: Status,
+    /// The day from which to look at it again, for what it says of outside the code, which `follows` cannot watch.
+    /// `rotproof check` warns from that day and fails nothing ([`crate::records::due`])
+    pub stale_after: Option<NaiveDate>,
     /// What it follows, each key with its hash when the document was last reviewed (`follows.rs`), in the order written
     pub follows: Vec<(String, String)>,
     /// For an alarm (a document with `# When`): short strings, each as it appears in what is observed, so a search for
@@ -213,7 +216,7 @@ fn knowledge_fields(fields: &mut Fields) -> Option<Knowledge> {
     let tag = fields.required("tags", one_tag);
     let status = fields.required("status", status(&[Status::Stable, Status::Deprecated]));
     fields.optional("verified", stamps);
-    fields.optional("stale_after", day);
+    let stale_after = fields.optional("stale_after", day);
     let follows = fields.optional("follows", followed_hashes);
     let matches = fields.optional("match", match_strings);
     okf_optional(fields);
@@ -222,6 +225,7 @@ fn knowledge_fields(fields: &mut Fields) -> Option<Knowledge> {
         description: description?,
         tag: tag?,
         status: status?,
+        stale_after: stale_after?,
         follows: follows?.unwrap_or_default(),
         matches: matches?.unwrap_or_default(),
     })
