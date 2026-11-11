@@ -3013,13 +3013,13 @@ fn a_knowledge_document_fails_when_what_it_follows_changes_unreviewed() {
     // A key Rotproof cannot follow fails the document's format
     fs::write(
         r.join("docs/knowledge/model.md"),
-        document(&[("domain/model.rs::f".into(), "00000000".into())]),
+        document(&[("domain/model.md::f".into(), "00000000".into())]),
     )
     .unwrap();
     let (code, said) = check();
     assert_eq!(code, Some(1), "{said}");
     assert!(
-        said.contains("only Python's definitions are read"),
+        said.contains("outside the files whose definitions are read"),
         "{said}"
     );
 }

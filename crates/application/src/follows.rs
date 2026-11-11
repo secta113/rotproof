@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use crate::bundle::Bundle;
 use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::in_docs;
+use domain::definitions::selected;
 use domain::follows::content_hash;
 use domain::follows::{
     Followed, added, directory_hash, document_name, drifted, followed, repinned,
@@ -33,9 +34,23 @@ pub fn current(
     };
     match followed(key)? {
         Followed::File(path) => Ok(file_text(&path)?.map(|text| content_hash(&text))),
-        Followed::Definition { file, name } => Ok(file_text(&file)?
-            .and_then(|source| parsers.python_definition(&source, &name))
-            .map(|text| content_hash(&text))),
+        Followed::Definition {
+            file,
+            language,
+            name,
+        } => {
+            let Some(source) = file_text(&file)? else {
+                return Ok(None);
+            };
+            let outline = parsers
+                .outline(language, &source, &file)
+                .map_err(|(line, why)| {
+                    format!(
+                        "{file} cannot be parsed, so its definitions cannot be read: line {line}: {why}"
+                    )
+                })?;
+            Ok(selected(&source, &outline, &name).map(|text| content_hash(&text)))
+        }
         Followed::Directory(dir) => {
             if !matches!(exactly(tree, &dir), Ok((_, true))) {
                 return Ok(None);
@@ -303,6 +318,29 @@ mod tests {
         tree.write("domain/model.py", "\u{feff}def play():\r\n    return 1\r\n")
             .unwrap();
         assert_eq!(hashes(&tree), lf);
+    }
+
+    #[test]
+    fn a_python_name_defined_twice_is_hashed_on_all_its_pieces() {
+        let tree = project(&[]);
+        let getter = "@property\n    def size(self):\n        return 1";
+        let setter = "@size.setter\n    def size(self, value):\n        pass";
+        let source = |setter: &str| {
+            format!("class C:\n    {getter}\n\n    {setter}\n\n\ndef other():\n    pass\n")
+        };
+        tree.write("domain/model.py", &source(setter)).unwrap();
+        let size = || current(&tree, &Readers, "domain/model.py::C.size").unwrap();
+        // The pieces in the order they appear, joined with a line break
+        assert_eq!(size(), Some(content_hash(&format!("{getter}\n{setter}"))));
+
+        // A change in the setter fails the key, which the getter alone missed
+        let was = size();
+        tree.write(
+            "domain/model.py",
+            &source("@size.setter\n    def size(self, value):\n        self._v = value"),
+        )
+        .unwrap();
+        assert_ne!(size(), was);
     }
 
     #[test]

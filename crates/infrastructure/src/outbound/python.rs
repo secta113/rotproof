@@ -8,6 +8,8 @@
 //!   Imports built at run time (`importlib.import_module`, `__import__`) are not seen.
 //! - **Its comments,** `#` to the end of the line. A docstring is a string, so it is not a comment.
 //! - **What it defines** ([`definitions`]), for a link to a `.py` file in the records.
+//! - **Its outline** ([`outline`]), every function and class with its names and its range, for a knowledge document
+//!   that follows one.
 
 use std::collections::BTreeSet;
 
@@ -16,6 +18,7 @@ use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::{PySourceType, Stmt};
 
 use domain::code::{Source, module_parts};
+use domain::definitions::Definition;
 use domain::text::line_of;
 
 /// Read one file, whose path from the root names the package its relative imports start from.
@@ -141,60 +144,115 @@ pub fn definitions(source: &str) -> BTreeSet<String> {
     definitions.0
 }
 
-/// The source text of the definition `dotted` names in a Python file: a function or class at the top, or one inside
-/// a class or a function named before it (`Class.method`), from its first decorator to its end. `None` when the file
-/// does not define it so.
-pub fn definition(source: &str, dotted: &str) -> Option<String> {
+/// The outline of a Python file: every function and class at the top, and inside a class or a function (a method, a
+/// function in a function), each with its names from the outermost and its range from its first decorator to its end,
+/// for a knowledge document that follows it (`follows.rs` in `domain`). What sits in an `if` or a `try` is not in the
+/// outline, as a name after `::` leads through classes and functions alone. A file with a syntax error is read as far
+/// as the parser recovers.
+pub fn outline(source: &str) -> Vec<Definition> {
     let module = ruff_python_parser::parse_unchecked_source(source, PySourceType::Python);
-    let mut body: &[Stmt] = &module.syntax().body;
-    let mut found = None;
-    for name in dotted.split('.') {
-        let (range, decorators, inner) = body.iter().find_map(|stmt| match stmt {
-            Stmt::FunctionDef(def) if def.name.as_str() == name => {
-                Some((def.range, &def.decorator_list, &def.body))
-            }
-            Stmt::ClassDef(class) if class.name.as_str() == name => {
-                Some((class.range, &class.decorator_list, &class.body))
-            }
-            _ => None,
-        })?;
+    let mut found = Vec::new();
+    nested(&module.syntax().body, &mut Vec::new(), &mut found);
+    found
+}
+
+/// The definitions in `body`, under the names in `scope`, and in the body of each.
+fn nested(body: &[Stmt], scope: &mut Vec<String>, found: &mut Vec<Definition>) {
+    for stmt in body {
+        let (name, range, decorators, inner) = match stmt {
+            Stmt::FunctionDef(def) => (&def.name, def.range, &def.decorator_list, &def.body),
+            Stmt::ClassDef(class) => (&class.name, class.range, &class.decorator_list, &class.body),
+            _ => continue,
+        };
         let start = decorators
             .iter()
             .map(|d| d.range.start())
             .chain([range.start()])
             .min()
             .expect("the definition's own start is there");
-        found = Some((start.to_usize(), range.end().to_usize()));
-        body = inner;
+        scope.push(name.to_string());
+        found.push(Definition {
+            names: scope.clone(),
+            start: start.to_usize(),
+            end: range.end().to_usize(),
+        });
+        nested(inner, scope, found);
+        scope.pop();
     }
-    let (start, end) = found?;
-    source.get(start..end).map(str::to_string)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::definitions::pieces;
+
+    /// The source of every definition of that name in a file, as a key hashes it.
+    fn found(source: &str, dotted: &str) -> Vec<String> {
+        pieces(source, &outline(source), dotted)
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    }
 
     #[test]
     fn a_definition_is_cut_from_its_first_decorator_to_its_end() {
         let source = "import x\n\n@first\n@second(1)\ndef f(a):\n    return a\n\n\nclass C:\n    \
                       @staticmethod\n    def m():\n        pass\n\n    def n(self):\n        pass\n";
         assert_eq!(
-            definition(source, "f").as_deref(),
-            Some("@first\n@second(1)\ndef f(a):\n    return a")
+            found(source, "f"),
+            ["@first\n@second(1)\ndef f(a):\n    return a"]
         );
         assert_eq!(
-            definition(source, "C.m").as_deref(),
-            Some("@staticmethod\n    def m():\n        pass")
+            found(source, "C.m"),
+            ["@staticmethod\n    def m():\n        pass"]
         );
-        assert!(
-            definition(source, "C")
-                .unwrap()
-                .ends_with("def n(self):\n        pass")
-        );
+        let class = found(source, "C");
+        assert_eq!(class.len(), 1);
+        assert!(class[0].ends_with("def n(self):\n        pass"));
         for missing in ["g", "C.f", "f.a", "x", "C.m.z"] {
-            assert_eq!(definition(source, missing), None, "{missing}");
+            assert_eq!(found(source, missing), Vec::<String>::new(), "{missing}");
         }
+    }
+
+    #[test]
+    fn the_outline_names_each_definition_from_the_outermost() {
+        let source = "def f():\n    def inner():\n        pass\n\nclass C:\n    class D:\n        def m(self):\n            \
+                      pass\n\nif True:\n    def hidden():\n        pass\n";
+        let names: Vec<Vec<String>> = outline(source).into_iter().map(|d| d.names).collect();
+        assert_eq!(
+            names,
+            [
+                vec!["f"],
+                vec!["f", "inner"],
+                vec!["C"],
+                vec!["C", "D"],
+                vec!["C", "D", "m"],
+            ]
+        );
+    }
+
+    #[test]
+    fn a_name_defined_more_than_once_gives_every_piece_in_the_order_they_appear() {
+        let source = "class C:\n    @property\n    def x(self):\n        return 1\n\n    @x.setter\n    \
+                      def x(self, v):\n        pass\n\n\ndef f():\n    return 1\n\n\ndef f():\n    return 2\n\n\n\
+                      class C:\n    def x(self):\n        return 3\n";
+        assert_eq!(
+            found(source, "C.x"),
+            [
+                "@property\n    def x(self):\n        return 1",
+                "@x.setter\n    def x(self, v):\n        pass",
+                "def x(self):\n        return 3",
+            ]
+        );
+        assert_eq!(
+            found(source, "f"),
+            ["def f():\n    return 1", "def f():\n    return 2"]
+        );
+        // A class opened twice gives both of its pieces
+        let classes = found(source, "C");
+        assert_eq!(classes.len(), 2, "{classes:?}");
+        assert!(classes[0].starts_with("class C:\n    @property"));
+        assert_eq!(classes[1], "class C:\n    def x(self):\n        return 3");
     }
 
     fn parts(dotted: &str) -> Vec<String> {

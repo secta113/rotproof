@@ -9,6 +9,8 @@ use std::io;
 use std::path::Path;
 
 use domain::code::{Aliases, Manifest, Source};
+use domain::definitions::Definition;
+use domain::layers::Language;
 use domain::schema::Time;
 
 /// The files of a project, as a check reads them.
@@ -52,9 +54,17 @@ pub trait Parsers {
     fn python(&self, source: &str, path: &str) -> Source<Vec<String>>;
     /// The names of the functions and classes a Python file defines, at any depth.
     fn python_definitions(&self, source: &str) -> BTreeSet<String>;
-    /// The source text of the definition `dotted` names in a Python file (`f`, `Class`, `Class.method`), from its
-    /// first decorator to its end: `None` when the file does not define it so.
-    fn python_definition(&self, source: &str, dotted: &str) -> Option<String>;
+    /// The outline of a file of `language`, whose path from the root is `path`: every definition in it, each with its
+    /// names from the outermost and the range of its source, from its first decorator or attribute to its end.
+    /// Which key names a definition, and how the pieces of a name are joined, is the rule of
+    /// `domain::definitions::selected`, the same for every language. `Err` with the line of the first error and
+    /// what the parser says when the file cannot be parsed far enough to read any definition in it.
+    fn outline(
+        &self,
+        language: Language,
+        source: &str,
+        path: &str,
+    ) -> Result<Vec<Definition>, (usize, String)>;
     /// A TypeScript or JavaScript file, whose path from the root says how to read it: every specifier it imports.
     fn typescript(&self, source: &str, path: &str) -> Source<String>;
     /// The aliases of the TypeScript project in `tree`, from its `tsconfig*.json` files. An error is a config that
