@@ -50,7 +50,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `mod.rs` | The level's role, and `Local`: the `Machine` Rotproof runs on, from the modules below and the local clock |
 | `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, the functions and classes a file defines, and the outline of a file (every function and class with its names and range) |
-| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, and the aliases of the `tsconfig*.json` files |
+| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, the outline of a file (a function, class, interface, type, enum or namespace, a variable, and their members, each with its names and range), and the aliases of the `tsconfig*.json` files |
 | `cargo.rs` | Reading a crate's `Cargo.toml` with toml_edit: the dependencies it declares on a path or its workspace, and its workspace |
 | `readers.rs` | `Parsers` with the readers above |
 | `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, the project's name, and the project a directory sits in |

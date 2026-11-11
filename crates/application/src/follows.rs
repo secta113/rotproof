@@ -321,6 +321,55 @@ mod tests {
     }
 
     #[test]
+    fn a_definition_in_a_typescript_file_hashes_on_its_own_text() {
+        let tree = project(&[]);
+        let source = "export function a(x: string): void;\nexport function a(x: number): void;\n\
+                      export function a(x: any) { return 1; }\nexport function b() { return 1; }\n";
+        tree.write("domain/api.ts", source).unwrap();
+        let now = |tree: &Fake, key: &str| current(tree, &Readers, key).unwrap();
+        let (a, b, file) = (
+            now(&tree, "domain/api.ts::a"),
+            now(&tree, "domain/api.ts::b"),
+            now(&tree, "domain/api.ts"),
+        );
+        assert!(a.is_some() && b.is_some() && a != b);
+        assert_eq!(now(&tree, "domain/api.ts::c"), None);
+
+        // A change in another definition fails the file, not this definition
+        tree.write(
+            "domain/api.ts",
+            &source.replace("b() { return 1", "b() { return 2"),
+        )
+        .unwrap();
+        assert_eq!(now(&tree, "domain/api.ts::a"), a);
+        assert_ne!(now(&tree, "domain/api.ts::b"), b);
+        assert_ne!(now(&tree, "domain/api.ts"), file);
+
+        // Every piece of a name counts: the implementation after the overloads is part of its definition
+        tree.write("domain/api.ts", &source.replace("x: any", "x: unknown"))
+            .unwrap();
+        assert_ne!(now(&tree, "domain/api.ts::a"), a);
+        assert_eq!(now(&tree, "domain/api.ts::b"), b);
+    }
+
+    #[test]
+    fn a_typescript_file_the_parser_gives_up_on_cannot_be_read_and_is_not_a_definition_gone() {
+        let tree = project(&[]);
+        // The definition above the error is not read either: oxc gives an empty program
+        tree.write("domain/api.ts", "export function a() {}\nconst = ;\n")
+            .unwrap();
+        let why = current(&tree, &Readers, "domain/api.ts::a").unwrap_err();
+        assert!(
+            why.starts_with(
+                "domain/api.ts cannot be parsed, so its definitions cannot be read: line 2:"
+            ),
+            "{why}"
+        );
+        // The file as a whole is still followed
+        assert!(current(&tree, &Readers, "domain/api.ts").unwrap().is_some());
+    }
+
+    #[test]
     fn a_python_name_defined_twice_is_hashed_on_all_its_pieces() {
         let tree = project(&[]);
         let getter = "@property\n    def size(self):\n        return 1";

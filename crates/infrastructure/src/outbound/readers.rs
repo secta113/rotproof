@@ -26,11 +26,12 @@ impl Parsers for Readers {
         &self,
         language: Language,
         source: &str,
-        _path: &str,
+        path: &str,
     ) -> Result<Vec<Definition>, (usize, String)> {
         match language {
             Language::Python => Ok(crate::outbound::python::outline(source)),
-            Language::TypeScript | Language::Rust => Ok(Vec::new()),
+            Language::TypeScript => crate::outbound::typescript::outline(source, path),
+            Language::Rust => Ok(Vec::new()),
         }
     }
 
