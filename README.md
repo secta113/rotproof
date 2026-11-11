@@ -84,6 +84,7 @@ cargo build --release   # the binary is target/release/rotproof (rotproof.exe on
 ```sh
 rotproof --root <repository> init --stack python  # write .config/rotproof.toml, when there is none
 rotproof --root <repository> init    # after upgrading Rotproof: update the project's files (see "Upgrading Rotproof")
+rotproof --root <repository> create  # list the layers it would make, writing nothing (makes docs/ when it makes no layer)
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write every generated file in docs/ (the index files and the knowledge rules)
@@ -104,8 +105,10 @@ each command's output names the next step. A test follows that path from an empt
 
 Start a project with `rotproof init --stack <stack>` (`python`, `typescript`, `rust`, or `none` for a repository
 that keeps records only). It writes only the declaration, so you declare in `absent` the layers you do not want before
-anything is made. Then run `rotproof create --yes`. Run on a project that has a declaration, `rotproof init` upgrades
-the project's files instead (see "Upgrading Rotproof"), and never changes the declaration's values but `files`.
+anything is made. Then run `rotproof create`, which lists the layers it would make and writes nothing, and
+`rotproof create --yes` once `absent` lists every layer the project lacks. Run on a project that has a declaration,
+`rotproof init` upgrades the project's files instead (see "Upgrading Rotproof"), and never changes the declaration's
+values but `files`.
 
 `rotproof create` makes layers only with `--yes`. Without it, a run that would make one lists the layers, writes
 nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer of the stack, `ui` and its

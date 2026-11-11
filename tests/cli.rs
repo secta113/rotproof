@@ -1984,10 +1984,13 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     // No arguments: what Rotproof is, and the order to start in
     let help = stderr(&run(&[]));
     assert!(help.contains("Keeps a project's structure"), "{help}");
+    // `rotproof create` alone first, to see the layers it would make, then with --yes: the help does not lead past the
+    // moment the layers are decided
     let steps = [
         "rotproof init --stack <stack>",
         "list in absent",
-        "rotproof create",
+        "rotproof create   ",
+        "rotproof create --yes",
         "rotproof check",
     ];
     let start = &help[help
