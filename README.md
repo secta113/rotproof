@@ -607,10 +607,12 @@ under Microsoft's license. Both serve for trying the wheels, not for release.
 A release is a pushed tag `v<version>` that matches `Cargo.toml`. `.github/workflows/release.yml` checks the licenses,
 builds the Linux wheel in the manylinux2014 image (glibc 2.17) and the Windows wheel on Windows, installs each into a
 fresh venv on its platform and runs it (`.github/smoke.sh`), and installs the Linux wheel in the manylinux2014 image
-too, so the oldest glibc the tag claims is tested. It then publishes the wheels to PyPI and makes the GitHub Release
-with the wheels, an archive of the binary per platform taken out of the tested wheel, and `SHA256SUMS`. Run by hand
-(`gh workflow run release.yml`), it does everything but publish. CI builds and tests the Windows wheel natively on
-Windows too. Other platforms (macOS, Linux aarch64) are welcome as contributions.
+too, so the oldest glibc the tag claims is tested. It packs an archive of the binary per platform, taken out of the
+tested wheel, and `SHA256SUMS`, and installs them as the CI `rotproof create` writes for rust and none does
+(`.github/project-ci.sh`), so a project's CI is known to find the archive before it is published: the releases are
+immutable. It then publishes the wheels to PyPI and makes the GitHub Release with the wheels, the archives and
+`SHA256SUMS`. Run by hand (`gh workflow run release.yml`), it does everything but publish. CI builds and tests the
+Windows wheel natively on Windows too. Other platforms (macOS, Linux aarch64) are welcome as contributions.
 
 ## License
 
