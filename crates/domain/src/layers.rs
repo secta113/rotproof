@@ -16,9 +16,12 @@ use crate::upgrade::VERSION;
 pub const DECLARATION: &str = ".config/rotproof.toml";
 /// What to do when the declaration is missing, with every stack: a test keeps the list equal to [`known_stacks`]
 pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotproof init --stack <stack>` (python, \
-                           typescript, rust, or none for records only)";
+                           typescript, rust, or none for records only) and `--ui atomic` or `--ui none` for python \
+                           and typescript";
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
+/// The UI of a project with no screens: none of the layers that name a UI in the table
+pub const NO_UI: &str = "none";
 
 /// The version whose table is built on the onion architecture. Crossing it, `rotproof init` says how to move a
 /// project's layers, and moves nothing: an entry point and its wiring may sit in one file of `handler`, and each part
@@ -43,17 +46,21 @@ pub const RETIRED: [(&str, &str); 2] = [
 pub const PORTS_MOVED: &str = "the ports (the interfaces to the outside) move from domain to protocol.outbound, and \
                                the use cases the entry points call get interfaces in protocol.inbound, with plain data";
 
-/// The version whose table splits the UI into the view (`ui`) and the Presentation Model (`presentation`). Crossing
-/// it, `rotproof init` says what a project declares and what moves, and moves nothing: which part of a page is the
-/// state of the screen and which is its view, no machine can tell.
+/// The version whose table splits the UI into the view (`ui`) and the Presentation Model (`presentation`), and whose
+/// declaration says which UI a project has (`ui`). Crossing it, `rotproof init` says what moves, and moves nothing:
+/// which part of a page is the state of the screen and which is its view, no machine can tell.
 pub const PRESENTATION: &str = "1.0.0-rc.3";
 
-/// What crossing [`PRESENTATION`] asks of every project whose layout has `presentation`: the new layer is missing
-/// until it is made or declared absent, and `rotproof check` fails until then.
-pub const PRESENTATION_ADDED: &str = "the layer presentation is new: what a screen holds and decides goes in \
-                                      presentation.models, and the plain data it hands the view in \
-                                      presentation.display. A project with no screens lists presentation in absent \
-                                      in .config/rotproof.toml; one with screens runs `rotproof create --yes`";
+/// What crossing [`PRESENTATION`] asks of a project whose `ui` is there, which the upgrade declares `ui = "atomic"`:
+/// the new layer is missing until it is made, and `rotproof check` fails until then.
+pub const PRESENTATION_ADDED: &str = "the layer presentation is new, and comes with ui = \"atomic\": what a screen \
+                                      holds and decides goes in presentation.models, and the plain data it hands the \
+                                      view in presentation.display. Run `rotproof create --yes` to make it";
+
+/// What crossing [`PRESENTATION`] asks of a project that declared `ui` absent, which the upgrade declares
+/// `ui = "none"`: the entry in absent names a layer the declaration no longer has.
+pub const UI_NONE: &str = "ui = \"none\" now says that this project has no screens, so neither ui nor presentation \
+                           is made or checked: take ui out of absent in .config/rotproof.toml";
 
 /// What moved at [`PRESENTATION`] inside `ui`, said to a project that has it.
 pub const UI_SPLIT: &str = "ui imports neither application nor domain any more: the state of a page and its calls \
@@ -106,6 +113,9 @@ pub struct Level {
 #[serde(deny_unknown_fields)]
 pub struct Layer {
     pub name: String,
+    /// The UI it belongs to: there only in a project that declares this UI. `None` for a layer of every project
+    #[serde(default)]
+    pub ui: Option<String>,
     /// Layers, or levels of other layers as `<layer>.<level>`
     pub imports: Vec<String>,
     pub role: String,
@@ -172,8 +182,15 @@ pub struct Layout {
     pub not_layers: Vec<String>,
     /// Each line of a layer's documentation starts with this
     pub doc_prefix: String,
-    /// Layers of the table this stack does not have
+    /// The UIs a project of this stack may declare besides [`NO_UI`], in the order the declaration lists them
     #[serde(default)]
+    pub uis: Vec<String>,
+    /// The UI this layout is for, which [`layout`] sets
+    #[serde(skip)]
+    pub ui: String,
+    /// Layers of the table this layout does not have: those of the UIs other than [`Layout::ui`], which [`layout`]
+    /// sets
+    #[serde(skip)]
     pub without: Vec<String>,
     pub layer: Shape,
     /// The levels of the layers that have them: in `path`, `{layer}` is the layer's name and `{name}` the level's.
@@ -230,8 +247,25 @@ pub struct Place {
     pub files: Vec<(String, String)>,
 }
 
-/// The layout of a stack, or `None` when Rotproof has none by that name.
-pub fn layout(stack: &str) -> Option<Layout> {
+/// The layout of a stack for a project whose UI is `ui`, or `None` when Rotproof has no stack by that name or the stack
+/// offers no such UI ([`uis`]).
+pub fn layout(stack: &str, ui: &str) -> Option<Layout> {
+    let mut layout = stack_layout(stack)?;
+    if ui != NO_UI && !layout.uis.iter().any(|u| u == ui) {
+        return None;
+    }
+    layout.ui = ui.to_string();
+    layout.without = table()
+        .layers
+        .iter()
+        .filter(|l| l.ui.as_ref().is_some_and(|u| u != ui))
+        .map(|l| l.name.clone())
+        .collect();
+    Some(layout)
+}
+
+/// The layout of a stack as its file writes it, before a UI is chosen.
+fn stack_layout(stack: &str) -> Option<Layout> {
     STACKS
         .iter()
         .find(|(name, _)| *name == stack)
@@ -239,6 +273,20 @@ pub fn layout(stack: &str) -> Option<Layout> {
             toml::from_str(text)
                 .unwrap_or_else(|e| panic!("layers/{name}.toml is valid, a test reads it: {e}"))
         })
+}
+
+/// The UIs a project of `stack` may declare, [`NO_UI`] last, or `None` when Rotproof has no stack by that name.
+pub fn uis(stack: &str) -> Option<Vec<String>> {
+    let layout = stack_layout(stack)?;
+    Some(layout.uis.into_iter().chain([NO_UI.to_string()]).collect())
+}
+
+/// The UI a project of `stack` shows when none is chosen: the first it offers, or [`NO_UI`] when it offers none. For
+/// what Rotproof says of a stack without a project, as the guide of `rotproof guide --stack`.
+pub fn fullest_ui(stack: &str) -> String {
+    uis(stack)
+        .and_then(|uis| uis.into_iter().next())
+        .unwrap_or_else(|| NO_UI.to_string())
 }
 
 impl Layout {
@@ -418,6 +466,11 @@ pub struct Declaration {
     /// The areas the records are grouped by, in this order. Required, so a declaration written before areas existed
     /// fails with the field it lacks rather than with every record's tag
     pub areas: Vec<String>,
+    /// The UI, which picks the layers of the screens: one of [`uis`] of the stack. Required with a stack that has
+    /// layers, and `rotproof create` adds it ([`ADDED`]); never set for a repository of records only. Read as optional
+    /// so that a declaration without it reaches the check that names it, rather than failing to read
+    #[serde(default)]
+    pub ui: Option<String>,
     #[serde(default)]
     pub absent: Vec<String>,
     #[serde(default)]
@@ -479,6 +532,10 @@ pub fn parse_declaration(text: &str) -> Result<Declaration, String> {
 const AREAS_COMMENT: &str = "# The areas the knowledge documents are grouped by, in this order, such as \"billing\" or \"records\".\n\
                              # Every knowledge document has exactly one of them in tags, and its index groups by them\n";
 
+/// What `ui` is, as the declaration says it above the field.
+const UI_COMMENT: &str = "# The UI of this project, which picks the layers of its screens: \"none\" for a project with no screens\n\
+                          # (a command-line tool, a library, a server), so none is made or checked\n";
+
 /// A field the declaration requires that `rotproof create` adds when it is missing, so a declaration written by an
 /// older Rotproof fails only until the upgrade runs `rotproof create`, never on its shape.
 pub struct Added {
@@ -487,34 +544,54 @@ pub struct Added {
     pub comment: &'static str,
     /// Where the first value came from, and what to do with it, written under the comment
     pub first_value: &'static str,
+    /// Required only with a stack that has layers: a repository of records only never gets it
+    pub layers_only: bool,
 }
 
 /// Every field `rotproof create` adds. Each has a rule for its first value in `create.rs`.
-pub const ADDED: [Added; 1] = [Added {
-    name: "areas",
-    comment: AREAS_COMMENT,
-    first_value: "# Added by `rotproof create` with the tags the records use, sorted by name: put them in the order\n\
-                  # the index files should show them\n",
-}];
+pub const ADDED: [Added; 2] = [
+    Added {
+        name: "areas",
+        comment: AREAS_COMMENT,
+        first_value: "# Added by `rotproof create` with the tags the records use, sorted by name: put them in the order\n\
+                      # the index files should show them\n",
+        layers_only: false,
+    },
+    Added {
+        name: "ui",
+        comment: UI_COMMENT,
+        first_value: "# Added by `rotproof create`: the UI whose layers the tree held, or \"none\" when it held none\n",
+        layers_only: true,
+    },
+];
 
 /// The names of the fields of [`ADDED`] the declaration `text` lacks, in that order. `None` when it is not TOML: then
 /// its own error stands.
 pub fn lacking(text: &str) -> Option<Vec<&'static str>> {
     let document = text.parse::<DocumentMut>().ok()?;
+    let records_only = document.get("stack").and_then(Item::as_str) == Some(RECORDS_ONLY);
     Some(
         ADDED
             .iter()
+            .filter(|field| !(field.layers_only && records_only))
             .map(|field| field.name)
             .filter(|name| !document.contains_key(name))
             .collect(),
     )
 }
 
+/// The first value of a field `rotproof create` adds: a list (`areas`) or a name (`ui`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum First {
+    List(Vec<String>),
+    Name(String),
+}
+
 /// The declaration `text` with each field of `values` (a name of [`ADDED`], and its first value) added under its
 /// comment, and the fields added as `name = value`. The comments and the values already there are kept, and the
 /// lines end with `\n`, as `text` was read: the caller writes it as the project wrote the file
 /// ([`Written`](crate::tree::Written)).
-pub fn completed(text: &str, values: &[(&str, Vec<String>)]) -> (String, Vec<String>) {
+pub fn completed(text: &str, values: &[(&str, First)]) -> (String, Vec<String>) {
     let mut document = text
         .parse::<DocumentMut>()
         .expect("lacking read it as TOML");
@@ -524,9 +601,15 @@ pub fn completed(text: &str, values: &[(&str, Vec<String>)]) -> (String, Vec<Str
             .iter()
             .find(|field| field.name == *name)
             .unwrap_or_else(|| panic!("{name} is a field of ADDED"));
-        let mut array = Array::new();
-        array.extend(value.iter().map(String::as_str));
-        document.insert(field.name, Item::Value(Value::Array(array)));
+        let value = match value {
+            First::List(items) => {
+                let mut array = Array::new();
+                array.extend(items.iter().map(String::as_str));
+                Value::Array(array)
+            }
+            First::Name(name) => Value::from(name.as_str()),
+        };
+        document.insert(field.name, Item::Value(value));
         let mut key = document
             .key_mut(field.name)
             .expect("the field was inserted just before");
@@ -546,9 +629,9 @@ pub fn known_stacks() -> Vec<&'static str> {
         .collect()
 }
 
-/// The declaration `rotproof init` writes for a stack: every field with what it means, so the project edits it rather
-/// than looking it up.
-pub fn declaration_text(stack: &str) -> String {
+/// The declaration `rotproof init` writes for a stack and, with layers, its UI: every field with what it means, so the
+/// project edits it rather than looking it up.
+pub fn declaration_text(stack: &str, ui: &str) -> String {
     let head = "# What Rotproof keeps in this project. Edit it, then run `rotproof create` to make what is missing.\n\
                 # `rotproof check` fails when the tree and this file differ, either way.\n";
     let stacks = known_stacks().join(" | ");
@@ -561,9 +644,10 @@ pub fn declaration_text(stack: &str) -> String {
              stack = \"{stack}\"\n\n{areas}{upgrades}"
         );
     }
+    let offered = uis(stack).unwrap_or_default().join(" | ");
     format!(
-        "{head}\n# {stacks}\nstack = \"{stack}\"\n\n{areas}\n\
-         # Layers this project does not have, such as \"ui\" or \"ui.templates\". Delete the directory too\n\
+        "{head}\n# {stacks}\nstack = \"{stack}\"\n\n{areas}\n{UI_COMMENT}# {offered}\nui = \"{ui}\"\n\n\
+         # Layers this project does not have, such as \"ui.templates\". Delete the directory too\n\
          absent = []\n\n\
          # Paths outside the layers that Rotproof does not look into, such as \"scripts\" (helper scripts, generated\n\
          # or vendored code). A path that holds a layer, or does not exist, fails\n\
@@ -586,6 +670,9 @@ pub struct Declared {
     /// `None` for a repository that keeps records only (`stack = "none"`)
     pub layout: Option<Layout>,
     pub places: Vec<Place>,
+    /// What `absent` names in a layer the declared UI leaves out (`ui` with `ui = "none"`): it says nothing, and the
+    /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs
+    pub left_out: Vec<String>,
 }
 
 impl Declared {
@@ -602,6 +689,11 @@ impl Declared {
                     ));
                 }
             }
+            if let Some(ui) = &declaration.ui {
+                found.push(format!(
+                    "{DECLARATION}: stack = \"none\" has no layers, so it has no ui: take out ui = {ui:?}"
+                ));
+            }
             if !found.is_empty() {
                 return Err(found);
             }
@@ -609,34 +701,56 @@ impl Declared {
                 declaration,
                 layout: None,
                 places: Vec::new(),
+                left_out: Vec::new(),
             });
         }
-        let Some(layout) = layout(&declaration.stack) else {
+        let Some(offered) = uis(&declaration.stack) else {
             return Err(vec![format!(
                 "{DECLARATION}: unknown stack {:?} (known: {})",
                 declaration.stack,
                 known_stacks().join(", ")
             )]);
         };
+        let Some(ui) = &declaration.ui else {
+            return Err(vec![format!(
+                "{DECLARATION}: missing field `ui`: run `rotproof create`, which adds it"
+            )]);
+        };
+        let Some(layout) = layout(&declaration.stack, ui) else {
+            return Err(vec![format!(
+                "{DECLARATION}: unknown ui {ui:?} for the {} stack (known: {})",
+                declaration.stack,
+                offered.join(", ")
+            )]);
+        };
         let places = layout.places(&table());
-        let unknown: Vec<String> = declaration
+        let in_layer = |name: &str| {
+            name.split_once('.')
+                .map_or(name, |(layer, _)| layer)
+                .to_string()
+        };
+        let (left_out, unknown): (Vec<String>, Vec<String>) = declaration
             .absent
             .iter()
             .filter(|name| !places.iter().any(|p| &p.name == *name))
-            .map(|name| {
-                format!(
-                    "{DECLARATION}: absent names {name:?}, which the {} layout does not have",
-                    declaration.stack
-                )
-            })
-            .collect();
+            .cloned()
+            .partition(|name| layout.without.contains(&in_layer(name)));
         if !unknown.is_empty() {
-            return Err(unknown);
+            return Err(unknown
+                .iter()
+                .map(|name| {
+                    format!(
+                        "{DECLARATION}: absent names {name:?}, which the {} layout does not have",
+                        declaration.stack
+                    )
+                })
+                .collect());
         }
         Ok(Declared {
             declaration,
             layout: Some(layout),
             places,
+            left_out,
         })
     }
 
@@ -726,8 +840,24 @@ mod tests {
                 }
             }
         }
-        for (stack, _) in STACKS {
-            let layout = layout(stack).unwrap();
+        // A UI a layer names is one a layout offers, and the reverse: a UI with no layer would change nothing, and a
+        // layer of a UI no stack offers would never be made
+        let named: std::collections::BTreeSet<&String> =
+            table.layers.iter().filter_map(|l| l.ui.as_ref()).collect();
+        let offered: std::collections::BTreeSet<String> = STACKS
+            .iter()
+            .flat_map(|(stack, _)| stack_layout(stack).unwrap().uis)
+            .collect();
+        assert_eq!(named, offered.iter().collect());
+        assert!(!offered.contains(NO_UI), "{NO_UI} is every stack's already");
+        let every = STACKS.iter().flat_map(|(stack, _)| {
+            uis(stack)
+                .unwrap()
+                .into_iter()
+                .map(move |ui| (stack, layout(stack, &ui).unwrap()))
+        });
+        for (stack, layout) in every {
+            let stack = &format!("{stack} with ui {}", layout.ui);
             for name in layout.without.iter().chain(layout.layers.keys()) {
                 assert!(
                     table.layers.iter().any(|l| &l.name == name),
@@ -805,7 +935,7 @@ mod tests {
     #[test]
     fn a_layer_is_documented_as_its_stack_writes_it() {
         let table = table();
-        let python = layout("python").unwrap().places(&table);
+        let python = layout("python", "atomic").unwrap().places(&table);
         let domain = python.iter().find(|p| p.name == "domain").unwrap();
         assert_eq!(domain.files[0].0, "domain/__init__.py");
         assert!(
@@ -834,7 +964,7 @@ mod tests {
                 .any(|p| p.name == "handler" || p.name == "utils")
         );
 
-        let rust = layout("rust").unwrap().places(&table);
+        let rust = layout("rust", "none").unwrap().places(&table);
         assert!(!rust.iter().any(|p| p.name.starts_with("ui")));
         let protocol = rust.iter().find(|p| p.name == "protocol").unwrap();
         let paths: Vec<&str> = protocol.files.iter().map(|(p, _)| p.as_str()).collect();
@@ -868,7 +998,7 @@ mod tests {
             }
         }
 
-        let typescript = layout("typescript").unwrap().places(&table);
+        let typescript = layout("typescript", "atomic").unwrap().places(&table);
         let atoms = typescript.iter().find(|p| p.name == "ui.atoms").unwrap();
         assert_eq!(atoms.path, "src/ui/atoms");
         assert_eq!(atoms.parent.as_deref(), Some("ui"));
@@ -887,11 +1017,56 @@ mod tests {
     #[test]
     fn the_declaration_init_writes_reads_back() {
         for stack in known_stacks() {
-            let declaration: Declaration = parse_declaration(&declaration_text(stack))
-                .unwrap_or_else(|e| panic!("{stack}: {e}"));
-            assert_eq!(declaration.stack, stack);
-            assert!(Declared::new(declaration).is_ok(), "{stack}");
+            for ui in uis(stack).unwrap_or_else(|| vec![String::new()]) {
+                let declaration: Declaration = parse_declaration(&declaration_text(stack, &ui))
+                    .unwrap_or_else(|e| panic!("{stack}: {e}"));
+                assert_eq!(declaration.stack, stack);
+                assert_eq!(declaration.ui, (!ui.is_empty()).then_some(ui.clone()));
+                assert!(Declared::new(declaration).is_ok(), "{stack} {ui}");
+            }
         }
+    }
+
+    #[test]
+    fn the_ui_picks_the_layers_of_the_screens() {
+        let declared = |text: &str| Declared::new(parse_declaration(text).unwrap());
+        let names = |declared: &Declared| -> Vec<String> {
+            declared.places.iter().map(|p| p.name.clone()).collect()
+        };
+        let atomic = declared("stack = \"python\"\nareas = []\nui = \"atomic\"\n").unwrap();
+        assert!(names(&atomic).contains(&"ui.pages".to_string()));
+        assert!(names(&atomic).contains(&"presentation.models".to_string()));
+        let none = declared("stack = \"python\"\nareas = []\nui = \"none\"\n").unwrap();
+        assert!(
+            !names(&none)
+                .iter()
+                .any(|n| n.starts_with("ui") || n.starts_with("presentation")),
+            "{:?}",
+            names(&none)
+        );
+        // Nothing imports a layer that is not there: composition loses ui and presentation
+        let composition = none
+            .places
+            .iter()
+            .find(|p| p.name == "composition")
+            .unwrap();
+        assert!(!composition.imports.contains(&"ui".to_string()));
+        // absent naming a layer the UI leaves out reads, so an upgrade still runs, and is kept for the check to name
+        let left = declared("stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"ui\", \"presentation.display\"]\n")
+            .unwrap();
+        assert_eq!(left.left_out, ["ui", "presentation.display"]);
+        assert_eq!(
+            declared("stack = \"python\"\nareas = []\n").unwrap_err(),
+            [".config/rotproof.toml: missing field `ui`: run `rotproof create`, which adds it"]
+        );
+        assert_eq!(
+            declared("stack = \"rust\"\nareas = []\nui = \"atomic\"\n").unwrap_err(),
+            [".config/rotproof.toml: unknown ui \"atomic\" for the rust stack (known: none)"]
+        );
+        assert!(
+            declared("stack = \"none\"\nareas = []\nui = \"none\"\n").unwrap_err()[0]
+                .contains("has no ui")
+        );
     }
 
     #[test]
@@ -913,11 +1088,21 @@ mod tests {
         assert_eq!(lacking("stack = \"none\"\nareas = []\n"), Some(Vec::new()));
         assert_eq!(lacking("stack = "), None);
         let tags = vec!["billing".to_string(), "ops".to_string()];
-        let (text, added) = completed(old, &[("areas", tags)]);
+        let (text, added) = completed(old, &[("areas", First::List(tags))]);
         assert_eq!(added, ["areas = [\"billing\", \"ops\"]"]);
         assert!(text.starts_with(old), "{text}");
         assert!(text.contains(&format!("\n{AREAS_COMMENT}")), "{text}");
         assert_eq!(parse_declaration(&text).unwrap().areas, ["billing", "ops"]);
+        // ui only with layers
+        let python = "stack = \"python\"\nareas = []\n";
+        assert_eq!(lacking(python), Some(vec!["ui"]));
+        let (text, added) = completed(python, &[("ui", First::Name("none".into()))]);
+        assert_eq!(added, ["ui = \"none\""]);
+        assert!(text.contains(&format!("\n{UI_COMMENT}")), "{text}");
+        assert_eq!(
+            parse_declaration(&text).unwrap().ui.as_deref(),
+            Some("none")
+        );
     }
 
     #[test]
@@ -945,7 +1130,7 @@ mod tests {
 
     #[test]
     fn code_is_matched_by_name() {
-        let mut layout = layout("python").unwrap();
+        let mut layout = layout("python", "atomic").unwrap();
         assert!(layout.is_code("a.py") && !layout.is_code("a.pyi") && !layout.is_code("README.md"));
         // Windows runs these with Python all the same
         assert!(layout.is_code("stray.PY") && layout.is_code("Stray.Py"));

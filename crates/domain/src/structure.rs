@@ -1,6 +1,7 @@
 //! The structure check: the tree agrees with `.config/rotproof.toml`, either way.
 //!
 //! - Every layer of the stack's layout is present or declared absent, and no layer declared absent is present.
+//!   `absent` names no layer the declared UI leaves out.
 //! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`) and the paths the
 //!   project lists in `unchecked`. A path in `unchecked` exists and holds no layer, so a layer cannot be switched
 //!   off by listing it.
@@ -89,7 +90,16 @@ fn with_levels<'a>(declared: &'a Declared, seen: &Seen) -> Vec<(&'a Place, Vec<&
 
 /// Every way the tree, as `seen`, differs from the declaration of a project with layers.
 pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> {
-    let mut found = Vec::new();
+    let mut found: Vec<String> = declared
+        .left_out
+        .iter()
+        .map(|name| {
+            format!(
+                "absent names {name:?}, which ui = {:?} leaves out already: take it out of absent in {DECLARATION}",
+                layout.ui
+            )
+        })
+        .collect();
     let mut any = false;
     for place in &declared.places {
         // A level is judged only when its layer is there and not declared absent: otherwise the layer's own finding
@@ -269,7 +279,9 @@ mod tests {
 
     #[test]
     fn a_layer_with_levels_is_listed_only_while_it_is_there_and_not_absent() {
-        let with_ui = declared("stack = \"python\"\nareas = []\nunchecked = [\"scripts/\"]\n");
+        let with_ui = declared(
+            "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"scripts/\"]\n",
+        );
         let layout = with_ui.layout.as_ref().unwrap();
         assert!(named(&with_ui).contains(&"ui/atoms".to_string()));
         assert!(named(&with_ui).contains(&"scripts".to_string()));
@@ -286,7 +298,8 @@ mod tests {
             listed(&with_ui, layout, &seen),
             ["", "presentation", "infrastructure", "protocol"]
         );
-        let without_ui = declared("stack = \"python\"\nareas = []\nabsent = [\"ui\"]\n");
+        let without_ui =
+            declared("stack = \"python\"\nareas = []\nui = \"atomic\"\nabsent = [\"ui\"]\n");
         let mut seen = Seen::default();
         for path in named(&without_ui) {
             seen.named.insert(path, Ok(()));
@@ -295,11 +308,37 @@ mod tests {
             listed(&without_ui, without_ui.layout.as_ref().unwrap(), &seen),
             ["", "presentation", "infrastructure", "protocol"]
         );
+        // With no UI, neither is named at all
+        let no_ui = declared("stack = \"python\"\nareas = []\nui = \"none\"\n");
+        assert!(
+            !named(&no_ui)
+                .iter()
+                .any(|p| p.starts_with("ui") || p.starts_with("presentation"))
+        );
+    }
+
+    #[test]
+    fn absent_naming_a_layer_the_ui_leaves_out_fails() {
+        let left = declared("stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"ui\"]\n");
+        let layout = left.layout.as_ref().unwrap();
+        let mut seen = Seen::default();
+        for path in named(&left) {
+            seen.named.insert(path, Ok(()));
+        }
+        for dir in listed(&left, layout, &seen) {
+            seen.code.insert(dir, Vec::new());
+        }
+        let found = problems(&left, layout, &seen);
+        assert_eq!(
+            found[0],
+            "absent names \"ui\", which ui = \"none\" leaves out already: take it out of absent in \
+             .config/rotproof.toml"
+        );
     }
 
     #[test]
     fn code_beside_the_levels_is_named_by_its_entry_in_the_layer() {
-        let python = declared("stack = \"python\"\nareas = []\n");
+        let python = declared("stack = \"python\"\nareas = []\nui = \"atomic\"\n");
         let layout = python.layout.as_ref().unwrap();
         let mut seen = Seen::default();
         for path in named(&python) {

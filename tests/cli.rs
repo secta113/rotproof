@@ -49,6 +49,16 @@ fn up_to_date(declaration: &str) -> String {
     }
 }
 
+/// The line of the declaration that gives `stack` its fullest UI: every layer the stack can have. Empty for a
+/// repository of records only, which has no UI.
+fn ui_line(stack: &str) -> &'static str {
+    match stack {
+        "python" | "typescript" => "ui = \"atomic\"\n",
+        "none" => "",
+        _ => "ui = \"none\"\n",
+    }
+}
+
 fn root_arg(root: &Path) -> String {
     root.to_string_lossy().into_owned()
 }
@@ -62,7 +72,7 @@ fn a_missing_root_fails() {
 
 /// A repository that keeps every rule: what `rotproof create` makes for a Python project without `ui`, and a log entry.
 fn clean_repo() -> tempfile::TempDir {
-    let root = declared("stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n");
+    let root = declared("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\n");
     let out = create(&["--root", &root_arg(root.path()), "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
     fs::write(
@@ -217,13 +227,13 @@ fn each_broken_rule_fails_under_its_check() {
         (
             "the areas are distinct headings",
             ".config/rotproof.toml",
-            "stack = \"python\"\nareas = [\"a\", \"A\"]\nabsent = [\"ui\"]\n".into(),
+            "stack = \"python\"\nareas = [\"a\", \"A\"]\nui = \"none\"\n".into(),
         ),
         // Without the areas, no document can be judged: the check says so instead of passing them
         (
             "the bundle is seen",
             ".config/rotproof.toml",
-            "stack = \"python\"\nabsent = [\"ui\"]\n".into(),
+            "stack = \"python\"\nui = \"none\"\n".into(),
         ),
     ];
     for (check, path, text) in cases {
@@ -462,7 +472,10 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
         ),
     ];
     for (stack, made, not_made) in stacks {
-        let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
+            ui_line(stack)
+        ));
         let arg = root_arg(root.path());
         let first = create(&["--root", &arg, "create", "--yes"]);
         assert!(first.status.success(), "{stack}: {}", stdout(&first));
@@ -528,7 +541,10 @@ fn create_writes_the_projects_files_once() {
         };
         fs::write(
             root.join(".config/rotproof.toml"),
-            up_to_date(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n{absent}")),
+            up_to_date(&format!(
+                "stack = \"{stack}\"\nareas = [\"a\"]\n{}{absent}",
+                ui_line(stack)
+            )),
         )
         .unwrap();
         let arg = root_arg(&root);
@@ -674,7 +690,10 @@ fn create_writes_the_projects_files_once() {
 #[test]
 fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
     for stack in ["python", "typescript", "rust", "none"] {
-        let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
+            ui_line(stack)
+        ));
         let arg = root_arg(root.path());
         assert!(
             create(&["--root", &arg, "create", "--yes"])
@@ -730,7 +749,7 @@ fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
 #[test]
 fn create_respects_absent_and_leaves_what_it_does_not_own() {
     let root = declared(
-        "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui.templates\", \"infrastructure\"]\n",
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"atomic\"\nabsent = [\"ui.templates\", \"infrastructure\"]\n",
     );
     let arg = root_arg(root.path());
     // Files of the project: a layer it already has, and a log with entries
@@ -789,8 +808,8 @@ fn create_makes_layers_only_with_yes() {
             .success()
     );
 
-    // Once made, a run that makes no layer needs no --yes; a layer taken out of absent later is listed alone
-    let root = declared("stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n");
+    // Once made, a run that makes no layer needs no --yes; the layers of a UI declared later are listed alone
+    let root = declared("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\n");
     let arg = root_arg(root.path());
     assert!(
         create(&["--root", &arg, "create", "--yes"])
@@ -798,7 +817,10 @@ fn create_makes_layers_only_with_yes() {
             .success()
     );
     assert!(create(&["--root", &arg, "create"]).status.success());
-    declare(root.path(), "stack = \"python\"\nareas = [\"a\"]\n");
+    declare(
+        root.path(),
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"atomic\"\n",
+    );
     let out = create(&["--root", &arg, "create"]);
     assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
     let said = String::from_utf8_lossy(&out.stderr);
@@ -812,6 +834,9 @@ fn create_makes_layers_only_with_yes() {
             "  ui/organisms/ (ui.organisms)",
             "  ui/molecules/ (ui.molecules)",
             "  ui/atoms/ (ui.atoms)",
+            "  presentation/ (presentation)",
+            "  presentation/models/ (presentation.models)",
+            "  presentation/display/ (presentation.display)",
         ]
     );
     assert!(!root.path().join("ui").exists());
@@ -832,9 +857,13 @@ fn knowledge(title: &str, tag: &str) -> String {
 
 #[test]
 fn create_adds_the_fields_the_declaration_lacks() {
-    // A declaration an older Rotproof wrote, before areas existed, with comments and values of the project's own
-    let older = &up_to_date("# Ours\nstack = \"python\"\nabsent = [\"ui\"]  # no UI here\n");
-    let root = declared("stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n");
+    // A declaration an older Rotproof wrote, before areas and ui existed, with comments and values of the project's own
+    let older = &up_to_date(
+        "# Ours\nstack = \"python\"\nabsent = [\"ui.templates\"]  # no templates here\n",
+    );
+    let root = declared(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"atomic\"\nabsent = [\"ui.templates\"]\n",
+    );
     let r = root.path();
     let arg = root_arg(r);
     assert!(
@@ -882,6 +911,8 @@ fn create_adds_the_fields_the_declaration_lacks() {
         "{}",
         stdout(&out)
     );
+    // The UI whose layers the tree holds: ui/ is there
+    assert!(stdout(&out).contains("ui = \"atomic\""), "{}", stdout(&out));
     let now = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
     // What was there is kept, byte for byte, and the new field says what it is and where its value came from
     assert!(now.starts_with(older), "{now}");
@@ -963,7 +994,7 @@ fn create_fails_without_a_declaration_it_can_read() {
             "unknown stack",
         ),
         (
-            Some("stack = \"rust\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n"),
+            Some("stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"ui\"]\n"),
             "does not have",
         ),
         (
@@ -1009,9 +1040,28 @@ fn each_difference_from_the_declaration_fails() {
             "domain is missing",
             Box::new(|r| fs::remove_dir_all(r.join("domain")).unwrap()),
         ),
+        // With ui = "none", ui/ is no layer
         (
-            "ui is declared absent, but ui/ exists",
+            "code outside the layers: ui",
             Box::new(|r| plant_file(r, "ui/__init__.py")),
+        ),
+        (
+            "absent names \"ui\", which ui = \"none\" leaves out already",
+            Box::new(|r| {
+                declare(
+                    r,
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"ui\"]\n",
+                )
+            }),
+        ),
+        (
+            "domain is declared absent, but domain/ exists",
+            Box::new(|r| {
+                declare(
+                    r,
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"domain\"]\n",
+                )
+            }),
         ),
         (
             "code outside the layers: scripts",
@@ -1046,7 +1096,7 @@ fn each_difference_from_the_declaration_fails() {
             Box::new(|r| {
                 declare(
                     r,
-                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\", \"service\"]\n",
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"service\"]\n",
                 )
             }),
         ),
@@ -1055,7 +1105,7 @@ fn each_difference_from_the_declaration_fails() {
             Box::new(|r| {
                 declare(
                     r,
-                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\nextra = 1\n",
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nextra = 1\n",
                 )
             }),
         ),
@@ -1065,7 +1115,7 @@ fn each_difference_from_the_declaration_fails() {
             Box::new(|r| {
                 declare(
                     r,
-                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\nunchecked = [\"domain\"]\n",
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nunchecked = [\"domain\"]\n",
                 )
             }),
         ),
@@ -1076,7 +1126,7 @@ fn each_difference_from_the_declaration_fails() {
                 plant_file(r, "scripts/tool.py");
                 declare(
                     r,
-                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\nunchecked = [\"./scripts\"]\n",
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nunchecked = [\"./scripts\"]\n",
                 );
             }),
         ),
@@ -1085,7 +1135,7 @@ fn each_difference_from_the_declaration_fails() {
             Box::new(|r| {
                 declare(
                     r,
-                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\nunchecked = [\"scripts\"]\n",
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nunchecked = [\"scripts\"]\n",
                 )
             }),
         ),
@@ -1095,7 +1145,6 @@ fn each_difference_from_the_declaration_fails() {
             Box::new(|r| {
                 for layer in [
                     "composition",
-                    "presentation",
                     "infrastructure",
                     "application",
                     "protocol",
@@ -1105,7 +1154,7 @@ fn each_difference_from_the_declaration_fails() {
                 }
                 declare(
                     r,
-                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"composition\", \"ui\", \"presentation\", \
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"composition\", \
                      \"infrastructure\", \"application\", \"protocol\", \"domain\"]\n",
                 );
             }),
@@ -1168,10 +1217,12 @@ fn the_records_are_checked_under_a_stack_that_does_not_fit() {
     assert!(said.contains("broken.md"), "{said}");
 }
 
-/// A repository that keeps every rule, with `ui`: what `rotproof create` makes for `stack`, and a log entry.
+/// A repository that keeps every rule, with every layer `stack` can have (`ui` where it offers it): what
+/// `rotproof create` makes, and a log entry.
 fn repo_with_ui(stack: &str, absent: &str) -> tempfile::TempDir {
     let root = declared(&format!(
-        "stack = \"{stack}\"\nareas = [\"a\"]\nabsent = [{absent}]\n"
+        "stack = \"{stack}\"\nareas = [\"a\"]\n{}absent = [{absent}]\n",
+        ui_line(stack)
     ));
     let out = create(&["--root", &root_arg(root.path()), "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
@@ -1344,15 +1395,20 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
             import: |to| format!("{to} = {{ path = \"../{to}\" }}\n"),
             said_as: |to| format!("depends on {to} (crates/{to})"),
             verb: "depends on",
-            forbidden: 18,
+            forbidden: 11,
         },
     ];
     for stack in stacks {
         let name = stack.name;
         let root = repo_with_ui(name, "");
         let r = root.path();
-        let has =
-            |place: &&str| name != "rust" || !(place.starts_with("ui") || place.contains('.'));
+        // Rust has no UI, and its levels are modules, not manifests
+        let has = |place: &&str| {
+            name != "rust"
+                || !(place.starts_with("ui")
+                    || place.starts_with("presentation")
+                    || place.contains('.'))
+        };
         let places: Vec<(usize, &str)> = PLACES
             .iter()
             .copied()
@@ -1817,7 +1873,7 @@ fn vites_starter_keeps_its_entry_point_and_says_where_the_rest_goes() {
     fs::remove_dir_all(r.join("src/composition")).unwrap();
     declare(
         r,
-        "stack = \"typescript\"\nareas = [\"a\"]\nabsent = [\"composition\"]\n",
+        "stack = \"typescript\"\nareas = [\"a\"]\nui = \"atomic\"\nabsent = [\"composition\"]\n",
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
@@ -1926,7 +1982,10 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
 #[test]
 fn every_stack_with_layers_checks_everything() {
     for stack in ["python", "typescript", "rust"] {
-        let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
+            ui_line(stack)
+        ));
         let arg = root_arg(root.path());
         assert!(
             create(&["--root", &arg, "create", "--yes"])
@@ -1966,7 +2025,7 @@ fn code_that_is_not_the_projects_is_not_looked_at() {
     }
     declare(
         r,
-        "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\nunchecked = [\"scripts/\"]\n",
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nunchecked = [\"scripts/\"]\n",
     );
     let out = run(&["--root", &root_arg(r), "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
@@ -1986,7 +2045,7 @@ fn only_the_projects_own_gitignore_hides_code() {
     fs::create_dir_all(r.join(".config")).unwrap();
     declare(
         &r,
-        "stack = \"typescript\"\nareas = [\"a\"]\nabsent = [\"ui\"]\n",
+        "stack = \"typescript\"\nareas = [\"a\"]\nui = \"none\"\n",
     );
     assert!(
         create(&["--root", &root_arg(&r), "create", "--yes"])
@@ -2032,6 +2091,7 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     // moment the layers are decided
     let steps = [
         "rotproof init --stack <stack>",
+        "--ui <ui>",
         "list in absent",
         "rotproof create   ",
         "rotproof create --yes",
@@ -2053,7 +2113,8 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     // The stacks, from init's help and from a check with nothing declared
     let init_help = stdout(&run(&["init", "--help"]));
     assert!(
-        init_help.contains("python, typescript, rust, or none"),
+        init_help.contains("python, typescript, rust, or none")
+            && init_help.contains("atomic (the view in ui"),
         "{init_help}"
     );
     let out = run(&["--root", &arg, "check"]);
@@ -2066,7 +2127,9 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
     );
 
     // Each command names the next
-    let out = run(&["--root", &arg, "init", "--stack", "python"]);
+    let out = run(&[
+        "--root", &arg, "init", "--stack", "python", "--ui", "atomic",
+    ]);
     assert!(
         stdout(&out).contains("then run `rotproof create`"),
         "{}",
@@ -2128,7 +2191,10 @@ fn guide_prints_what_create_writes_with_or_without_a_project() {
     let empty = tempfile::tempdir().unwrap();
     let empty_arg = root_arg(empty.path());
     for stack in ["python", "typescript", "rust", "none"] {
-        let root = declared(&format!("stack = \"{stack}\"\nareas = [\"a\"]\n"));
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
+            ui_line(stack)
+        ));
         let arg = root_arg(root.path());
         assert!(
             create(&["--root", &arg, "create", "--yes"])
@@ -2162,7 +2228,11 @@ fn init_writes_a_declaration_that_create_reads() {
     for stack in ["python", "typescript", "rust", "none"] {
         let root = tempfile::tempdir().unwrap();
         let arg = root_arg(root.path());
-        let out = run(&["--root", &arg, "init", "--stack", stack]);
+        let mut args = vec!["--root", &arg, "init", "--stack", stack];
+        if matches!(stack, "python" | "typescript") {
+            args.extend(["--ui", "atomic"]);
+        }
+        let out = run(&args);
         assert!(
             out.status.success(),
             "{stack}: {}",
@@ -2216,6 +2286,14 @@ fn init_needs_a_known_stack() {
     let out = run(&["--root", &arg, "init"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("name the stack with --stack"));
+    // A stack that offers a UI needs it named: one with screens and one without start from the same command
+    let out = run(&["--root", &arg, "init", "--stack", "typescript"]);
+    assert_eq!(out.status.code(), Some(2));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("name the UI with --ui (atomic, none)"),
+        "{said}"
+    );
     assert!(tree(root.path()).is_empty(), "{:?}", tree(root.path()));
 }
 
@@ -2407,7 +2485,7 @@ fn a_marker_in_a_comment_fails_wherever_the_code_is() {
     write("scripts/generated.py", "# FIXME written by a tool\n");
     declare(
         r,
-        "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\"]\nunchecked = [\"scripts\"]\n",
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nunchecked = [\"scripts\"]\n",
     );
     let arg = root_arg(r);
     let out = run(&["--root", &arg, "check"]);
@@ -2535,7 +2613,7 @@ fn a_marker_in_a_rust_comment_fails() {
     fs::write(
         r.join(".config/rotproof.toml"),
         up_to_date(
-            "stack = \"rust\"\nareas = [\"a\"]\nabsent = []\nunchecked = [\"crates/generated\"]\n",
+            "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nabsent = []\nunchecked = [\"crates/generated\"]\n",
         ),
     )
     .unwrap();

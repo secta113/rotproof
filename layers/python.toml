@@ -12,6 +12,8 @@ not_layers = ["tests"]
 doc_prefix = ""
 # What Rotproof reads the code as: its imports for the direction check, its comments for the marker check
 language = "python"
+# The UIs a project may declare besides "none" (the layers of table.toml that name one in `ui`)
+uis = ["atomic"]
 # The entry file, which `python .` runs
 entry = "__main__.py"
 

@@ -16,9 +16,9 @@ use infrastructure::outbound::disk::Disk;
 use infrastructure::outbound::readers::Readers;
 use protocol::outbound::Tree;
 
-/// Rotproof's declaration: the Rust layout, every layer present but `presentation`, since a command-line tool has no
-/// screens. The records are kept outside, so it names no area
-pub const DECLARATION_TEXT: &str = "stack = \"rust\"\nareas = []\nabsent = [\"presentation\"]\n";
+/// Rotproof's declaration: the Rust layout with no UI, every layer present. The records are kept outside, so it names
+/// no area
+pub const DECLARATION_TEXT: &str = "stack = \"rust\"\nareas = []\nui = \"none\"\n";
 
 /// Where xtask sits, outside the layers: its comments are read for markers too
 const XTASK: &str = "xtask";

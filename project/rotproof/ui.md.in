@@ -1,4 +1,6 @@
-- **`ui` is the view, and `presentation` what the screens hold and decide (the Presentation Model).** `ui` follows
+- **`ui` is the view, and `presentation` what the screens hold and decide (the Presentation Model).** Both come with
+  `ui = "atomic"` in `.config/rotproof.toml`, and go together: a project with no screens declares `ui = "none"` and
+  has neither, rather than listing them in `absent`. `ui` follows
   atomic design (`pages` > `templates` > `organisms` > `molecules` > `atoms`), `presentation` holds `models` and
   `display`, and each holds only its levels. Besides direction, the table limits what each level knows: only `pages`
   know the models, giving them the use cases `composition` passes in; `organisms` and `templates` know only the plain

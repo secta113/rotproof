@@ -10,6 +10,10 @@
 # below it, as listed (the atomic levels of `ui`); otherwise the levels of a layer never import each other. A layer
 # with levels holds nothing beside them.
 #
+# A layer with `ui` is there only in a project that declares that UI (`ui = "atomic"` in `.config/rotproof.toml`),
+# and in a stack whose layout offers it; one that declares `ui = "none"` has none of them. The others are in every
+# project of a stack with layers.
+#
 # Order matters: `rotproof create` makes the layers in this order, and the documentation lists the imports in it.
 
 # The file the program starts from, which each layout names (`__main__.py`, `src/main.tsx`): no layer, and nothing
@@ -35,6 +39,7 @@ a clock) is built here and passed to each."""
 # `domain`, and the table is closed under chaining, so naming a layer would let `ui` import `domain`
 [[layer]]
 name = "ui"
+ui = "atomic"
 imports = ["presentation.models", "presentation.display", "protocol.inbound"]
 role = """
 The view: what the user sees and touches, written with the UI framework (components, widgets). `composition`
@@ -101,6 +106,7 @@ If a part cannot be named without referring to where it is used, it is not an at
 # the closure; its levels import less
 [[layer]]
 name = "presentation"
+ui = "atomic"
 imports = ["protocol", "domain"]
 role = """
 The state and behaviour of the screens, apart from the views that draw them: what a screen holds and decides, so

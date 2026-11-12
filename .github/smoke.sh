@@ -7,7 +7,7 @@ set -euo pipefail
 
 rotproof --version
 project=$(mktemp -d)
-rotproof --root "$project" init --stack python
+rotproof --root "$project" init --stack python --ui atomic
 rotproof --root "$project" create --yes
 
 # check exits with $1 on the project, or the smoke fails saying what it was doing

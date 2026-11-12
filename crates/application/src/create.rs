@@ -14,9 +14,11 @@ use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::{LOG, in_docs, record_tags as tags_in};
 use domain::hook::SETTINGS;
 use domain::layers::{
-    DECLARATION, Declared, MISSING, Place, completed, lacking, parse_declaration, unreadable,
+    DECLARATION, Declared, First, MISSING, NO_UI, Place, completed, lacking, layout,
+    parse_declaration, table, uis, unreadable,
 };
 use domain::project::{GUIDE, guide, project_files};
+use domain::upgrade::fields;
 use protocol::inbound::Made;
 use protocol::outbound::{Tree, Writer};
 
@@ -54,7 +56,8 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
     let mut made = Made::default();
     let (declared, completed) = match declaration(tree).map_err(|e| e.to_string())? {
         None => return Err(MISSING.into()),
-        Some(Err(why)) => match complete(tree)? {
+        // A declaration that lacks `ui` reads, and fails only once the stack is known: it is completed all the same
+        Some(read) => match complete(tree)? {
             // Written only once the completed declaration reads and fits its stack, so a declaration that fails for
             // another reason is left as it was
             Some((text, added)) => {
@@ -62,12 +65,12 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
                 let declared = Declared::new(declaration).map_err(|found| found.join("\n"))?;
                 (declared, Some((text, added)))
             }
-            None => return Err(unreadable(&why)),
+            None => (
+                Declared::new(read.map_err(|why| unreadable(&why))?)
+                    .map_err(|found| found.join("\n"))?,
+                None,
+            ),
         },
-        Some(Ok(declaration)) => (
-            Declared::new(declaration).map_err(|found| found.join("\n"))?,
-            None,
-        ),
     };
     // A level whose layer is declared absent is absent too. A level of a layer about to be made is not there either
     let mut layers: Vec<&Place> = declared
@@ -138,7 +141,11 @@ fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     let mut values = Vec::new();
     for name in lacking {
         let value = match name {
-            "areas" => record_tags(tree)?,
+            "areas" => First::List(record_tags(tree)?),
+            "ui" => {
+                let stack = fields(&text)?.stack.unwrap_or_default();
+                First::Name(ui_in_tree(tree, &stack))
+            }
             name => {
                 unreachable!("every field Rotproof adds has a rule for its first value: {name}")
             }
@@ -149,6 +156,27 @@ fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     // would otherwise change on every line, not only where a field was added
     let (text, added) = completed(&text, &values);
     Ok(Some((was.restore(&text), added)))
+}
+
+/// The UI whose layers `tree` holds: the first UI `stack` offers with a layer of the table there, or
+/// [`NO_UI`] when none is. The first value of `ui`, so a project keeps the layers it made: one with `ui/` keeps it,
+/// and one without, which had declared it absent or never made it, is checked for no screens.
+pub fn ui_in_tree(tree: &dyn Tree, stack: &str) -> String {
+    let Some(base) = layout(stack, NO_UI) else {
+        return NO_UI.to_string();
+    };
+    let table = table();
+    uis(stack)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|ui| {
+            table
+                .layers
+                .iter()
+                .filter(|l| l.ui.as_ref() == Some(ui))
+                .any(|l| tree.found(&base.layer.path.replace("{name}", &l.name)) == Some(true))
+        })
+        .unwrap_or_else(|| NO_UI.to_string())
 }
 
 /// Every tag the knowledge documents use, sorted by name: the first value of `areas`, so the documents that fit their

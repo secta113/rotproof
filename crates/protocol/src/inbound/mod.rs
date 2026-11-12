@@ -125,8 +125,13 @@ pub struct Removed {
 pub trait Commands {
     /// What the entry point names in its help and its messages.
     fn names(&self) -> Names;
-    /// Write the declaration for `stack`, or upgrade the project's files to the running version.
-    fn init(&self, root: &Path, stack: Option<&str>) -> Result<Initialized, String>;
+    /// Write the declaration for `stack` and `ui`, or upgrade the project's files to the running version.
+    fn init(
+        &self,
+        root: &Path,
+        stack: Option<&str>,
+        ui: Option<&str>,
+    ) -> Result<Initialized, String>;
     /// Make what the declaration names and the tree lacks; layers only when `yes`.
     fn create(&self, root: &Path, yes: bool) -> Result<Made, String>;
     /// Every broken rule.

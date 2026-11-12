@@ -15,7 +15,8 @@
 //! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
 
 use crate::layers::{
-    Declared, Language, Layout, RECORDS_ONLY, importable, known_stacks, layout, listed, table,
+    Declared, Language, Layout, RECORDS_ONLY, fullest_ui, importable, known_stacks, layout, listed,
+    table,
 };
 
 /// Rotproof's guide, from the root
@@ -191,7 +192,7 @@ pub fn guide_named(stack: &str) -> Result<String, String> {
     if stack == RECORDS_ONLY {
         return Ok(guide(stack, None));
     }
-    match layout(stack) {
+    match layout(stack, &fullest_ui(stack)) {
         Some(layout) => Ok(guide(stack, Some(&layout))),
         None => Err(format!(
             "unknown stack {stack:?} (known: {})",
@@ -293,13 +294,18 @@ fn layers_section(layout: &Layout) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layers::STACKS;
+    use crate::layers::{NO_UI, STACKS, uis};
 
     #[test]
     fn every_stack_has_a_guide_with_every_placeholder_filled() {
         let mut guides: Vec<String> = STACKS
             .iter()
-            .map(|(stack, _)| guide(stack, layout(stack).as_ref()))
+            .flat_map(|(stack, _)| {
+                uis(stack)
+                    .unwrap()
+                    .into_iter()
+                    .map(move |ui| guide(stack, layout(stack, &ui).as_ref()))
+            })
             .collect();
         guides.push(guide(RECORDS_ONLY, None));
         for text in &guides {
@@ -325,8 +331,13 @@ mod tests {
 
     #[test]
     fn the_table_lists_every_place_of_the_layout() {
-        for (stack, _) in STACKS {
-            let layout = layout(stack).unwrap();
+        let every = STACKS.iter().flat_map(|(stack, _)| {
+            uis(stack)
+                .unwrap()
+                .into_iter()
+                .map(move |ui| (*stack, layout(stack, &ui).unwrap()))
+        });
+        for (stack, layout) in every {
             let text = guide(stack, Some(&layout));
             let places = layout.places(&table());
             assert!(!places.is_empty());
@@ -344,7 +355,7 @@ mod tests {
 
     #[test]
     fn the_table_says_what_each_place_may_import_as_its_documentation_does() {
-        let layout = layout("python").unwrap();
+        let layout = layout("python", "atomic").unwrap();
         let text = guide("python", Some(&layout));
         for row in [
             "| `ui` | `ui/` | Nothing: it holds only its levels |",
@@ -404,6 +415,7 @@ mod tests {
             let declared = Declared::new(Declaration {
                 stack: stack.to_string(),
                 areas: Vec::new(),
+                ui: (stack != RECORDS_ONLY).then(|| NO_UI.to_string()),
                 absent: Vec::new(),
                 unchecked: Vec::new(),
                 files: None,
