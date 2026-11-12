@@ -610,8 +610,13 @@ fresh venv on its platform and runs it (`.github/smoke.sh`), and installs the Li
 too, so the oldest glibc the tag claims is tested. It packs an archive of the binary per platform, taken out of the
 tested wheel, and `SHA256SUMS`, and installs them as the CI `rotproof create` writes for rust and none does
 (`.github/project-ci.sh`), so a project's CI is known to find the archive before it is published: the releases are
-immutable. It then publishes the wheels to PyPI and makes the GitHub Release with the wheels, the archives and
-`SHA256SUMS`. Run by hand (`gh workflow run release.yml`), it does everything but publish. CI builds and tests the
+immutable. From the archives it makes the npm packages (`npm/pack.py`): one per platform (`@rotproof/linux-x64`,
+`@rotproof/win32-x64`) holding the binary and the licenses, and `rotproof`, whose script runs the binary of the one
+npm installed (they are its optional dependencies, each for its own os and cpu). It installs them into a fresh
+package on each platform and runs them through `smoke.sh`. It then publishes the wheels to PyPI and the packages to
+npm (a version with a pre-release part under the dist-tag `next`), and, once both took the version, makes the GitHub
+Release with the wheels, the archives and `SHA256SUMS`. Run by hand (`gh workflow run release.yml`), it does
+everything but publish. CI builds and tests the
 Windows wheel natively on Windows too. Other platforms (macOS, Linux aarch64) are welcome as contributions.
 
 ## License
@@ -620,4 +625,4 @@ Licensed under either of [MIT](https://github.com/secta113/rotproof/blob/main/LI
 [Apache-2.0](https://github.com/secta113/rotproof/blob/main/LICENSE-APACHE), at your option. The crates the binary
 includes are under their own licenses, listed with their texts in
 [THIRD-PARTY-LICENSES.txt](https://github.com/secta113/rotproof/blob/main/THIRD-PARTY-LICENSES.txt). The links are full
-URLs so that they work on PyPI, where this README is the project's page.
+URLs so that they work on PyPI and npm, where this README is the project's page.

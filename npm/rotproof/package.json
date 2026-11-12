@@ -1,0 +1,12 @@
+{
+  "name": "rotproof",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/secta113/rotproof.git"
+  },
+  "homepage": "https://github.com/secta113/rotproof#readme",
+  "bin": {
+    "rotproof": "bin/rotproof.js"
+  }
+}

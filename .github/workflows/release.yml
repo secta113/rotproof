@@ -1,8 +1,9 @@
 name: Release
 
-# A pushed tag v<version> releases Rotproof: the wheels to PyPI, and the wheels with an archive of the binary per
-# platform to a GitHub Release. What is released is what was tested: the archives hold the binary taken out of the
-# tested wheel. Run by hand (workflow_dispatch), it builds, tests and packages everything and publishes nothing
+# A pushed tag v<version> releases Rotproof: the wheels to PyPI, a package per platform and the package rotproof to
+# npm, and the wheels with an archive of the binary per platform to a GitHub Release. What is released is what was
+# tested: the archives and the npm packages hold the binary taken out of the tested wheel. Run by hand
+# (workflow_dispatch), it builds, tests and packages everything and publishes nothing
 on:
   push:
     tags: ["v*"]
@@ -181,6 +182,13 @@ jobs:
           mkdir assets
           cp dist/*.whl archives/* SHA256SUMS assets/
           bash .github/project-ci.sh assets
+      # The npm packages are made from the archives, so they hold the binary of the tested wheel too. Packed here, on
+      # Linux, so the binary of the Linux package keeps the x bit the archive gives it
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Make the npm packages
+        run: python3 npm/pack.py archives npm-packages
       - uses: actions/upload-artifact@v7
         with:
           name: release
@@ -189,11 +197,54 @@ jobs:
             archives/*
             SHA256SUMS
           if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm
+          path: npm-packages/*.tgz
+          if-no-files-found: error
+
+  # The npm packages installed into a fresh package on each platform, as the README of a typescript project says
+  # (npm install -D -E), and run through smoke.sh. The platform package is named as well, from its file: the
+  # registry does not have it yet, and npm leaves out an optional dependency it cannot find
+  npm-test:
+    needs: package
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            npm: linux-x64
+          - os: windows-latest
+            npm: win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm
+          path: npm-packages
+      - name: Install into a fresh package, and run
+        run: |
+          repository=$PWD
+          packages=$PWD/npm-packages
+          mkdir ../project
+          cd ../project
+          npm init -y > /dev/null
+          npm install -D -E "$packages"/rotproof-[0-9]*.tgz "$packages/rotproof-${{ matrix.npm }}"-*.tgz
+          # Without --, npx takes --version as its own and prints npm's version
+          npx --no -- rotproof --version
+          PATH="$PWD/node_modules/.bin:$PATH" bash "$repository/.github/smoke.sh"
 
   # Trusted Publishing: no token is stored. The PyPI project trusts this repository, this workflow and the environment
   pypi:
     if: github.ref_type == 'tag'
-    needs: package
+    needs: [package, npm-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: pypi
@@ -208,9 +259,50 @@ jobs:
         with:
           packages-dir: release/dist
 
+  # Trusted Publishing, as for PyPI: each of the three packages on npm trusts this repository, this workflow and the
+  # environment, and npm adds the provenance, which needs the repository.url of each package.json to be this
+  # repository's. The platform packages go first, so the package rotproof never names a version npm lacks
+  npm:
+    if: github.ref_type == 'tag'
+    needs: [package, npm-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # Trusted Publishing needs npm 11.15.0 or newer (the documentation of npm trust), which the npm Node brings
+      # may not be
+      - run: npm install -g npm@11.21.2
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm
+          path: npm
+      - name: Publish
+        # A version with a pre-release part (1.0.0-rc.1) goes under the dist-tag next, so latest stays a release. A
+        # package npm has at this version already is passed over, so a run that failed after publishing some of them
+        # (one package's Trusted Publishing set wrongly) can be run again once the setting is fixed
+        run: |
+          shopt -s extglob
+          tag=latest
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then tag=next; fi
+          for package in npm/rotproof-!([0-9]*).tgz npm/rotproof-[0-9]*.tgz; do
+            spec=$(tar -xOzf "$package" package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); `${p.name}@${p.version}`')
+            if [ -n "$(npm view "$spec" version 2>/dev/null)" ]; then
+              echo "$spec is on npm already"
+              continue
+            fi
+            npm publish "$package" --access public --tag "$tag"
+          done
+
+  # Made last, once both registries took the version: a release cannot be changed once published, and the CI of a
+  # rust or none project installs from it
   github-release:
     if: github.ref_type == 'tag'
-    needs: pypi
+    needs: [pypi, npm]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
