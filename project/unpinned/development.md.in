@@ -1,3 +1,0 @@
-[Rotproof](https://github.com/secta113/rotproof) keeps the layers and the records in `docs/`. Run `rotproof check`
-before handing over a change. How a {stack} project pins Rotproof is not decided yet: install the version that made
-this project (Rotproof {version}) from its GitHub Releases, and put it on the `PATH` your agent runs hooks with.
