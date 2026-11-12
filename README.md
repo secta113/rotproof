@@ -34,7 +34,8 @@ two structures:
   person, on a terminal) write the hashes in its `follows`: the review is the person's or the agent's, and pinning
   only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
   `rotproof check` fails on: it only takes away, so nothing passes that failed before. Code it never moves: when the
-  layer table changes (0.4.0), `rotproof init` says where each layer's code goes, and the person moves it.
+  layer table changes (0.4.0, 1.0.0-rc.3), `rotproof init` says where each layer's code goes, and the person moves
+  it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
 - **A check with nothing to check fails.** A check that passes on an empty tree protects nothing.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
@@ -185,8 +186,11 @@ that has a declaration:
   names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
-  `rotproof check` names what is not moved yet. It never changes the declaration's other values, and once it has set
-  `files`, running it again changes nothing.
+  `rotproof check` names what is not moved yet. Crossing 1.0.0-rc.3, which splits the UI into the view (`ui`) and the
+  state of the screens (`presentation`), it says, as the same lines, that `presentation` is to be made (`rotproof
+  create --yes`) or declared absent, and, when `ui` is there, that the state of a page and its calls of the use cases
+  move to `presentation.models` and the domain values the parts show to `presentation.display`. It never changes the
+  declaration's other values, and once it has set `files`, running it again changes nothing.
 - **An update only adds, or takes out what Rotproof itself wrote and no longer keeps, matched exactly,** and does
   nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
   byte order mark it had. What it cannot do without a person (its file is not in a form Rotproof can read),

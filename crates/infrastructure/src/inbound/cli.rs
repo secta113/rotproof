@@ -81,7 +81,9 @@ enum Command {
     /// without a person, it says, leaves files as it was, and exits 2. It never moves or rewrites a record. Crossing
     /// 0.4.0, which builds the layer table on the onion architecture, it says where the code of the layers that are
     /// gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left until it is
-    /// moved. Exits 2 too for an unknown stack, a stack other than the declared one, or a file that cannot be read or
+    /// moved. Crossing 1.0.0-rc.3, which splits the UI into the view (ui) and the state of the screens
+    /// (presentation), it says to make presentation or declare it absent, and what moves out of ui, and moves no code
+    /// either. Exits 2 too for an unknown stack, a stack other than the declared one, or a file that cannot be read or
     /// written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet

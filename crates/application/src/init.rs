@@ -15,7 +15,8 @@
 use crate::create::refresh;
 use crate::tree::{exactly, read_text, read_written};
 use domain::layers::{
-    DECLARATION, ONION, PORTS_MOVED, crosses_onion, declaration_text, known_stacks, layout, retired,
+    DECLARATION, ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_SPLIT, crosses,
+    declaration_text, known_stacks, layout, retired,
 };
 use domain::tree::Written;
 use domain::upgrade::{FIRST, Update, fields, pending, with_files};
@@ -82,8 +83,13 @@ fn upgrade(
             asked.push((update, why));
         }
     }
-    if crosses_onion(&from, running) {
+    if crosses(ONION, &from, running) {
         upgraded.moves = onion_moves(tree, declared.stack.as_deref());
+    }
+    if crosses(PRESENTATION, &from, running) {
+        upgraded
+            .moves
+            .extend(presentation_moves(tree, declared.stack.as_deref()));
     }
     upgraded.made = refresh(tree, out, name)?;
     // An update that asked a person for a file the refresh then wrote with what the update adds asks no more
@@ -122,6 +128,25 @@ fn onion_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
         })
         .collect();
     moves.push(format!("in the layers that stay, {PORTS_MOVED}"));
+    moves
+}
+
+/// What a project of `stack` does on the table that splits the UI: make the new layer `presentation` or declare it
+/// absent, and, when its `ui` is there, move what a page holds and decides out of it. Nothing for a repository of
+/// records only.
+fn presentation_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
+    let Some(layout) = stack.and_then(layout) else {
+        return Vec::new();
+    };
+    let has = |name: &str| !layout.without.iter().any(|w| w == name);
+    let mut moves = Vec::new();
+    if has("presentation") {
+        moves.push(PRESENTATION_ADDED.to_string());
+    }
+    let ui = layout.layer.path.replace("{name}", "ui");
+    if has("ui") && tree.found(&ui) == Some(true) {
+        moves.push(format!("{ui}/: {UI_SPLIT}"));
+    }
     moves
 }
 
@@ -495,6 +520,55 @@ mod tests {
             panic!("upgraded");
         };
         assert!(none.moves.is_empty());
+    }
+
+    #[test]
+    fn crossing_the_split_of_the_ui_says_what_to_declare_and_what_moves_once() {
+        let running = format!("files = \"{}\"", domain::upgrade::VERSION);
+        // A project at `files` of `stack`, with the files `planted`, upgraded to the table that splits the UI
+        let moves = |stack: &str, planted: &[&str]| {
+            let tree = Fake::default();
+            assert!(init(&tree, &tree, Some(stack), "x", "1.0.0-rc.2").is_ok());
+            let written = tree.text(DECLARATION).unwrap();
+            assert!(written.contains(&running), "{written}");
+            tree.write(
+                DECLARATION,
+                &written.replace(&running, "files = \"1.0.0-rc.2\""),
+            )
+            .unwrap();
+            for path in planted {
+                tree.write(path, "").unwrap();
+            }
+            let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, "x", PRESENTATION)
+            else {
+                panic!("upgraded");
+            };
+            assert!(upgraded.files_set && upgraded.by_hand.is_empty());
+            // Said once: the next run does not cross it
+            let Ok(Initialized::Upgraded(again)) = init(&tree, &tree, None, "x", PRESENTATION)
+            else {
+                panic!("upgraded");
+            };
+            assert!(again.moves.is_empty(), "{:#?}", again.moves);
+            // It moves nothing and makes no layer
+            assert_eq!(tree.found("presentation"), None);
+            upgraded.moves
+        };
+        let python = moves("python", &["ui/pages/__init__.py"]);
+        assert_eq!(python.len(), 2, "{python:#?}");
+        assert!(python[0].starts_with("the layer presentation is new"));
+        assert!(python[1].starts_with("ui/: ui imports neither application nor domain"));
+        // Without ui, only the new layer is said
+        let python = moves("python", &[]);
+        assert_eq!(python, [PRESENTATION_ADDED]);
+        let typescript = moves("typescript", &["src/ui/index.ts"]);
+        assert!(typescript[1].starts_with("src/ui/: "), "{typescript:#?}");
+        // The Rust layout has presentation and no ui
+        assert_eq!(
+            moves("rust", &["crates/ui/Cargo.toml"]),
+            [PRESENTATION_ADDED]
+        );
+        assert!(moves("none", &[]).is_empty());
     }
 
     #[test]

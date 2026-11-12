@@ -43,9 +43,27 @@ pub const RETIRED: [(&str, &str); 2] = [
 pub const PORTS_MOVED: &str = "the ports (the interfaces to the outside) move from domain to protocol.outbound, and \
                                the use cases the entry points call get interfaces in protocol.inbound, with plain data";
 
-/// Whether an upgrade from `files` to `running` crosses [`ONION`].
-pub fn crosses_onion(files: &str, running: &str) -> bool {
-    let at = crate::upgrade::version(ONION);
+/// The version whose table splits the UI into the view (`ui`) and the Presentation Model (`presentation`). Crossing
+/// it, `rotproof init` says what a project declares and what moves, and moves nothing: which part of a page is the
+/// state of the screen and which is its view, no machine can tell.
+pub const PRESENTATION: &str = "1.0.0-rc.3";
+
+/// What crossing [`PRESENTATION`] asks of every project whose layout has `presentation`: the new layer is missing
+/// until it is made or declared absent, and `rotproof check` fails until then.
+pub const PRESENTATION_ADDED: &str = "the layer presentation is new: what a screen holds and decides goes in \
+                                      presentation.models, and the plain data it hands the view in \
+                                      presentation.display. A project with no screens lists presentation in absent \
+                                      in .config/rotproof.toml; one with screens runs `rotproof create --yes`";
+
+/// What moved at [`PRESENTATION`] inside `ui`, said to a project that has it.
+pub const UI_SPLIT: &str = "ui imports neither application nor domain any more: the state of a page and its calls \
+                            of the use cases move to a model in presentation.models, which the page uses, and the \
+                            domain values that organisms and templates show become plain values in \
+                            presentation.display";
+
+/// Whether an upgrade from `files` to `running` crosses the version `at`.
+pub fn crosses(at: &str, files: &str, running: &str) -> bool {
+    let at = crate::upgrade::version(at);
     crate::upgrade::version(files) < at && at <= crate::upgrade::version(running)
 }
 
