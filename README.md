@@ -642,8 +642,10 @@ immutable. From the archives it makes the npm packages (`npm/pack.py`): one per 
 npm installed (they are its optional dependencies, each for its own os and cpu). It installs them into a fresh
 package on each platform and runs them through `smoke.sh`. It then publishes the wheels to PyPI and the packages to
 npm (a version with a pre-release part under the dist-tag `next`), and, once both took the version, makes the GitHub
-Release with the wheels, the archives and `SHA256SUMS`. Run by hand (`gh workflow run release.yml`), it does
-everything but publish. CI builds and tests the
+Release with the wheels, the archives and `SHA256SUMS`. A registry that has the version already is passed over, so
+a run that failed after one of them took it can be made again on the same tag. Run by hand
+(`gh workflow run release.yml`), it does everything but publish, and runs the publish to npm with `--dry-run`. CI
+builds and tests the
 Windows wheel natively on Windows too. Other platforms (macOS, Linux aarch64) are welcome as contributions.
 
 ## License
