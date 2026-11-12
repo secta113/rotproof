@@ -164,9 +164,9 @@ pub fn toolchain_problems(toolchain: &str, dockerfile: &str, ci: &str) -> Vec<St
     found
 }
 
-/// Where the version the README installs (`pip install rotproof==<version>`) differs from the one in `Cargo.toml`. The
-/// README is the page on PyPI, so a version left behind would tell every reader to install an old Rotproof. A README
-/// that names no version is a problem too.
+/// Where a version the README installs (`pip install rotproof==<version>`, `npm install -D -E rotproof@<version>`)
+/// differs from the one in `Cargo.toml`. The README is the page on PyPI and on npm, so a version left behind would tell
+/// every reader to install an old Rotproof. A README that names no version for one of them is a problem too.
 pub fn install_problems(cargo_toml: &str, readme: &str) -> Vec<String> {
     // The version every crate of the workspace takes, written once under [workspace.package]
     let mut in_workspace_package = false;
@@ -182,22 +182,34 @@ pub fn install_problems(cargo_toml: &str, readme: &str) -> Vec<String> {
     let Some(version) = version else {
         return vec!["Cargo.toml names no version under [workspace.package]".into()];
     };
-    let installed: Vec<&str> = readme
-        .split("pip install rotproof==")
-        .skip(1)
-        .filter_map(|rest| {
-            rest.split(|c: char| !(c.is_ascii_alphanumeric() || ".-+".contains(c)))
-                .next()
-        })
-        .collect();
-    if installed.is_empty() {
-        return vec!["README.md installs no version (pip install rotproof==<version>)".into()];
+    // Each command the README installs Rotproof with, and how it names the package with its version. The README is
+    // the page on npm too
+    let commands = [
+        ("pip install rotproof==", "rotproof=="),
+        ("npm install -D -E rotproof@", "rotproof@"),
+    ];
+    let mut problems = Vec::new();
+    for (command, package) in commands {
+        let installed: Vec<&str> = readme
+            .split(command)
+            .skip(1)
+            .filter_map(|rest| {
+                rest.split(|c: char| !(c.is_ascii_alphanumeric() || ".-+".contains(c)))
+                    .next()
+            })
+            .collect();
+        if installed.is_empty() {
+            problems.push(format!(
+                "README.md installs no version ({command}<version>)"
+            ));
+        }
+        problems.extend(
+            installed.iter().filter(|v| **v != version).map(|v| {
+                format!("README.md installs {package}{v}, but Cargo.toml names {version}")
+            }),
+        );
     }
-    installed
-        .iter()
-        .filter(|v| **v != version)
-        .map(|v| format!("README.md installs rotproof=={v}, but Cargo.toml names {version}"))
-        .collect()
+    problems
 }
 
 #[cfg(test)]
@@ -417,24 +429,35 @@ Also tracked: `c`.
 
     #[test]
     fn the_version_the_readme_installs_is_the_one_in_cargo_toml() {
-        let readme = "```sh\npip install rotproof==0.2.0\n```\n";
+        let readme = "```sh\npip install rotproof==0.2.0\nnpm install -D -E rotproof@0.2.0\n```\n";
         assert_eq!(install_problems(CARGO, readme), Vec::<String>::new());
     }
 
     #[test]
     fn an_old_version_in_the_readme_fails() {
-        let readme = "pip install rotproof==0.2.0\n\nor `pip install rotproof==0.1.0`\n";
+        let readme = "pip install rotproof==0.2.0\n\nor `pip install rotproof==0.1.0`\n\n\
+                      `npm install -D -E rotproof@0.1.0-rc.1`, and npm install -D -E rotproof@0.2.0\n";
         assert_eq!(
             install_problems(CARGO, readme),
-            ["README.md installs rotproof==0.1.0, but Cargo.toml names 0.2.0"]
+            [
+                "README.md installs rotproof==0.1.0, but Cargo.toml names 0.2.0",
+                "README.md installs rotproof@0.1.0-rc.1, but Cargo.toml names 0.2.0"
+            ]
         );
     }
 
     #[test]
     fn a_version_that_cannot_be_found_fails_too() {
         assert_eq!(
-            install_problems(CARGO, "pip install rotproof\n"),
+            install_problems(
+                CARGO,
+                "pip install rotproof\nnpm install -D -E rotproof@0.2.0\n"
+            ),
             ["README.md installs no version (pip install rotproof==<version>)"]
+        );
+        assert_eq!(
+            install_problems(CARGO, "pip install rotproof==0.2.0\nnpm install rotproof\n"),
+            ["README.md installs no version (npm install -D -E rotproof@<version>)"]
         );
         assert_eq!(
             // A version of the package alone, or one under [workspace], is not the one every crate takes

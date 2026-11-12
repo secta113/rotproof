@@ -515,7 +515,7 @@ fn create_writes_the_projects_files_once() {
     for (stack, channel) in [
         ("python", "pypi"),
         ("none", "release"),
-        ("typescript", "unpinned"),
+        ("typescript", "npm"),
         ("rust", "release"),
     ] {
         let parent = tempfile::tempdir().unwrap();
@@ -599,10 +599,24 @@ fn create_writes_the_projects_files_once() {
             );
             assert!(!stdout(&out).contains("not written"), "{}", stdout(&out));
         } else {
-            assert!(!requirements.exists() && !workflow.exists(), "{stack}");
+            // npm: the pin goes in package.json, the project's own file, so create writes the workflow, which runs
+            // only the Rotproof the lockfile names, and says how to add the pin
+            assert_eq!(channel, "npm");
+            assert!(!requirements.exists(), "{stack}");
+            assert!(!root.join("package.json").exists(), "{stack}");
+            let workflow = fs::read_to_string(&workflow).unwrap();
+            for part in [
+                "timeout-minutes:",
+                "- run: npm ci",
+                "- run: npx --no -- rotproof check",
+            ] {
+                assert!(workflow.contains(part), "{stack}: {part}: {workflow}");
+            }
+            let pin = format!("npm install -D -E rotproof@{}", env!("CARGO_PKG_VERSION"));
+            assert!(readme.contains(&pin), "{stack}: {readme}");
             assert!(
                 stdout(&out).contains(&format!(
-                    "not written: Rotproof is not pinned and no CI workflow is written: how a {stack} project"
+                    "not written: the pin in package.json, which is the project's: until it pins Rotproof (`{pin}`)"
                 )),
                 "{stack}: {}",
                 stdout(&out)

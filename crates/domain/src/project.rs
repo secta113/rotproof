@@ -6,7 +6,8 @@
 //!   records. It names the version that wrote it, so an upgrade fails `rotproof check` until `rotproof create` has run.
 //! - **The project's files** ([`project_files`]): `AGENTS.md`, `CLAUDE.md`, `README.md`, `.gitignore`,
 //!   `.gitattributes`, a GitHub Actions workflow that installs the pinned Rotproof and runs `rotproof check` (with
-//!   `requirements-dev.txt` where the stack installs it from PyPI; none yet for `typescript`), and the files the
+//!   `requirements-dev.txt` where the stack installs it from PyPI; for `typescript` the pin goes in `package.json`,
+//!   the project's own file, which Rotproof does not write), and the files the
 //!   stack's layout lists for its toolchain (the workspace's `Cargo.toml` for `rust`). `rotproof create` writes each
 //!   once, when it does not exist, and never again: from then on it is the project's.
 //!
@@ -53,13 +54,14 @@ enum Channel {
     /// release's `SHA256SUMS`. The releases are immutable, so the version fixes the binary; the binary cannot know the
     /// hash of the archive it is in, so no hash is written
     Release,
-    /// Not decided yet: nothing is pinned
-    Unpinned,
+    /// npm, pinned in `package.json`, which exists before Rotproof runs (Vite writes it) and is the project's, so
+    /// `rotproof create` writes the workflow and says how to add the pin, and never writes the pin itself
+    Npm,
 }
 /// Stack -> where it installs Rotproof from. A project that does not write Python needs no Python for it
 const CHANNEL: [(&str, Channel); 4] = [
     ("python", Channel::Pypi),
-    ("typescript", Channel::Unpinned),
+    ("typescript", Channel::Npm),
     ("rust", Channel::Release),
     ("none", Channel::Release),
 ];
@@ -68,7 +70,8 @@ const PYPI_WORKFLOW: &str = include_str!("../../../project/pypi/ci.yml.in");
 const PYPI_DEVELOPMENT: &str = include_str!("../../../project/pypi/development.md.in");
 const RELEASE_WORKFLOW: &str = include_str!("../../../project/release/ci.yml.in");
 const RELEASE_DEVELOPMENT: &str = include_str!("../../../project/release/development.md.in");
-const UNPINNED_DEVELOPMENT: &str = include_str!("../../../project/unpinned/development.md.in");
+const NPM_WORKFLOW: &str = include_str!("../../../project/npm/ci.yml.in");
+const NPM_DEVELOPMENT: &str = include_str!("../../../project/npm/development.md.in");
 
 fn channel(stack: &str) -> Channel {
     CHANNEL
@@ -94,7 +97,7 @@ pub fn project_files<'a>(
     let development = match channel {
         Channel::Pypi => PYPI_DEVELOPMENT,
         Channel::Release => RELEASE_DEVELOPMENT,
-        Channel::Unpinned => UNPINNED_DEVELOPMENT,
+        Channel::Npm => NPM_DEVELOPMENT,
     };
     let gitignore = GITIGNORE
         .iter()
@@ -129,12 +132,14 @@ pub fn project_files<'a>(
             files.push((".github/workflows/ci.yml", PYPI_WORKFLOW.to_string()));
         }
         Channel::Release => files.push((".github/workflows/ci.yml", fill(RELEASE_WORKFLOW))),
-        Channel::Unpinned => {
+        Channel::Npm => {
+            files.push((".github/workflows/ci.yml", NPM_WORKFLOW.to_string()));
             return (
                 files,
                 Some(format!(
-                    "Rotproof is not pinned and no CI workflow is written: how a {stack} project installs Rotproof \
-                     is not decided yet"
+                    "the pin in package.json, which is the project's: until it pins Rotproof \
+                     (`npm install -D -E rotproof@{}`), the CI workflow fails",
+                    env!("CARGO_PKG_VERSION")
                 )),
             );
         }
@@ -401,9 +406,16 @@ mod tests {
             })
             .unwrap();
             let (files, not_written) = project_files(&declared, "x");
+            // Only the pin npm keeps in package.json, the project's own file, is left to the project
             assert_eq!(
-                channel(stack) == Channel::Unpinned,
+                channel(stack) == Channel::Npm,
                 not_written.is_some(),
+                "{stack}"
+            );
+            assert!(
+                files
+                    .iter()
+                    .any(|(path, _)| *path == ".github/workflows/ci.yml"),
                 "{stack}"
             );
             assert!(files.iter().any(|(path, _)| *path == ".gitignore"));

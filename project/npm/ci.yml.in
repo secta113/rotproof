@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rotproof:
+    runs-on: ubuntu-latest
+    # Without a limit, a job that hangs runs for GitHub's default of six hours
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      # Rotproof is pinned in package.json (npm install -D -E rotproof@<version>), and the lockfile names the binary
+      - run: npm ci
+      # --no: run the Rotproof package.json pins, never one npx would download
+      - run: npx --no -- rotproof check
