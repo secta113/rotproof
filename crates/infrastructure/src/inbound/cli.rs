@@ -94,8 +94,9 @@ enum Command {
     /// the project's files
     /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the time hook and
     /// the rule that denies editing the approvals file,
-    /// for python and none the pin of Rotproof and a CI workflow, and for rust the workspace's Cargo.toml and the
-    /// entry file src/main.rs), each when it does not exist.
+    /// for python, rust and none a CI workflow that installs the pinned Rotproof (from PyPI with requirements-dev.txt
+    /// for python, from the GitHub Release for the others), and for rust the workspace's Cargo.toml and the entry
+    /// file src/main.rs), each when it does not exist.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), and docs/index.md and the
     /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
     /// Never overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing

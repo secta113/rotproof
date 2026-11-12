@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rotproof:
+    runs-on: ubuntu-latest
+    # Without a limit, a job that hangs runs for GitHub's default of six hours
+    timeout-minutes: 5
+    env:
+      # Pinned, so an upgrade, which can bring new rules, is a commit of its own. After changing it, install that
+      # version, run `rotproof init`, then `rotproof check`. Rotproof's releases are immutable, so the version fixes
+      # the binary
+      ROTPROOF_VERSION: "{version}"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rotproof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir="$RUNNER_TEMP/rotproof"
+          gh release download "v$ROTPROOF_VERSION" --repo secta113/rotproof --dir "$dir" \
+            --pattern '*-x86_64-unknown-linux-gnu.tar.gz' --pattern SHA256SUMS
+          cd "$dir"
+          sha256sum --check --ignore-missing SHA256SUMS
+          tar -xzf ./*.tar.gz --strip-components=1
+          echo "$dir" >> "$GITHUB_PATH"
+      - run: rotproof check
