@@ -5,10 +5,10 @@
 //!   Rotproof, the layers (their table is written from `layers/table.toml`, so the two cannot disagree) and the
 //!   records. It names the version that wrote it, so an upgrade fails `rotproof check` until `rotproof create` has run.
 //! - **The project's files** ([`project_files`]): `AGENTS.md`, `CLAUDE.md`, `README.md`, `.gitignore`,
-//!   `.gitattributes`, where the stack installs Rotproof from PyPI, `requirements-dev.txt` with Rotproof pinned and a
-//!   GitHub Actions workflow that runs `rotproof check`, and the files the stack's layout lists for its toolchain (the
-//!   workspace's `Cargo.toml` for `rust`). `rotproof create` writes each once, when it does not exist, and never again:
-//!   from then on it is the project's.
+//!   `.gitattributes`, a GitHub Actions workflow that installs the pinned Rotproof and runs `rotproof check` (with
+//!   `requirements-dev.txt` where the stack installs it from PyPI; none yet for `typescript`), and the files the
+//!   stack's layout lists for its toolchain (the workspace's `Cargo.toml` for `rust`). `rotproof create` writes each
+//!   once, when it does not exist, and never again: from then on it is the project's.
 //!
 //! The texts are in `project/`, built into the binary. Each is named after the file it becomes, without a leading dot
 //! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
@@ -44,13 +44,39 @@ const GITIGNORE: [(&str, &str); 4] = [
     ("rust", include_str!("../../../project/gitignore/rust.in")),
     ("none", include_str!("../../../project/gitignore/none.in")),
 ];
-/// The stacks that install Rotproof from PyPI, pinned in `requirements-dev.txt`. How the others pin it is decided
-/// with each stack
-const PYPI: [&str; 2] = ["python", "none"];
+/// Where a project installs Rotproof from, which decides how `rotproof create` pins it
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Channel {
+    /// PyPI, pinned in `requirements-dev.txt`, which a Python project installs anyway
+    Pypi,
+    /// The archive of the GitHub Release, pinned by its version in the workflow, which checks it against the
+    /// release's `SHA256SUMS`. The releases are immutable, so the version fixes the binary; the binary cannot know the
+    /// hash of the archive it is in, so no hash is written
+    Release,
+    /// Not decided yet: nothing is pinned
+    Unpinned,
+}
+/// Stack -> where it installs Rotproof from. A project that does not write Python needs no Python for it
+const CHANNEL: [(&str, Channel); 4] = [
+    ("python", Channel::Pypi),
+    ("typescript", Channel::Unpinned),
+    ("rust", Channel::Release),
+    ("none", Channel::Release),
+];
 const PYPI_REQUIREMENTS: &str = include_str!("../../../project/pypi/requirements-dev.txt.in");
 const PYPI_WORKFLOW: &str = include_str!("../../../project/pypi/ci.yml.in");
 const PYPI_DEVELOPMENT: &str = include_str!("../../../project/pypi/development.md.in");
+const RELEASE_WORKFLOW: &str = include_str!("../../../project/release/ci.yml.in");
+const RELEASE_DEVELOPMENT: &str = include_str!("../../../project/release/development.md.in");
 const UNPINNED_DEVELOPMENT: &str = include_str!("../../../project/unpinned/development.md.in");
+
+fn channel(stack: &str) -> Channel {
+    CHANNEL
+        .iter()
+        .find(|(s, _)| *s == stack)
+        .map(|(_, channel)| *channel)
+        .expect("every stack has a channel: a test reads every stack")
+}
 
 /// The project's files `rotproof create` writes once, for the project named `name` (its directory's name): path from
 /// the root -> text, and what was not written for the stack, and why.
@@ -64,11 +90,11 @@ pub fn project_files<'a>(
             .replace("{stack}", stack)
             .replace("{version}", env!("CARGO_PKG_VERSION"))
     };
-    let pypi = PYPI.contains(&stack);
-    let development = if pypi {
-        PYPI_DEVELOPMENT
-    } else {
-        UNPINNED_DEVELOPMENT
+    let channel = channel(stack);
+    let development = match channel {
+        Channel::Pypi => PYPI_DEVELOPMENT,
+        Channel::Release => RELEASE_DEVELOPMENT,
+        Channel::Unpinned => UNPINNED_DEVELOPMENT,
     };
     let gitignore = GITIGNORE
         .iter()
@@ -97,17 +123,22 @@ pub fn project_files<'a>(
             )
         }));
     }
-    if !pypi {
-        return (
-            files,
-            Some(format!(
-                "Rotproof is not pinned and no CI workflow is written: how a {stack} project installs Rotproof is \
-                 not decided yet"
-            )),
-        );
+    match channel {
+        Channel::Pypi => {
+            files.push(("requirements-dev.txt", fill(PYPI_REQUIREMENTS)));
+            files.push((".github/workflows/ci.yml", PYPI_WORKFLOW.to_string()));
+        }
+        Channel::Release => files.push((".github/workflows/ci.yml", fill(RELEASE_WORKFLOW))),
+        Channel::Unpinned => {
+            return (
+                files,
+                Some(format!(
+                    "Rotproof is not pinned and no CI workflow is written: how a {stack} project installs Rotproof \
+                     is not decided yet"
+                )),
+            );
+        }
     }
-    files.push(("requirements-dev.txt", fill(PYPI_REQUIREMENTS)));
-    files.push((".github/workflows/ci.yml", PYPI_WORKFLOW.to_string()));
     (files, None)
 }
 
@@ -370,7 +401,11 @@ mod tests {
             })
             .unwrap();
             let (files, not_written) = project_files(&declared, "x");
-            assert_eq!(PYPI.contains(&stack), not_written.is_none(), "{stack}");
+            assert_eq!(
+                channel(stack) == Channel::Unpinned,
+                not_written.is_some(),
+                "{stack}"
+            );
             assert!(files.iter().any(|(path, _)| *path == ".gitignore"));
         }
     }

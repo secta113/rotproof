@@ -1,0 +1,15 @@
+[Rotproof](https://github.com/secta113/rotproof) keeps the layers and the records in `docs/`. Its version is pinned
+as `ROTPROOF_VERSION` in `.github/workflows/ci.yml`, and CI installs that version from its GitHub Release and runs
+`rotproof check`.
+
+Install the same version on your machine: take the archive for your platform and `SHA256SUMS` from the release, check
+the one against the other, and put the binary on the `PATH`.
+
+```sh
+# the version ROTPROOF_VERSION names; on Windows the archive is '*-x86_64-pc-windows-msvc.zip'
+gh release download v{version} --repo secta113/rotproof --pattern '*-x86_64-unknown-linux-gnu.tar.gz' --pattern SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+rotproof check
+```
+
+Your agent's hooks run `rotproof time-hook`, which has to be on the `PATH` they run with.

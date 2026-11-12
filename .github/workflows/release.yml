@@ -130,6 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
         with:
           pattern: wheel-*
@@ -152,6 +153,9 @@ jobs:
             exit 1
           fi
           mkdir archives
+          # The names and the layout of the archives are what the CI rotproof create writes for rust and none
+          # downloads (project/release/ci.yml.in), which the next step checks. A project's ci.yml is written once, so
+          # changing them also needs an update in crates/domain/src/upgrade.rs for the projects made before
           pack() { # wheel, target, binary name, archive command
             local wheel=$1 target=$2 binary=$3 version dir
             version=$(basename "$wheel" | cut -d- -f2)
@@ -171,6 +175,12 @@ jobs:
           (cd archives && sha256sum -- *) >> SHA256SUMS
           cat SHA256SUMS
           for a in archives/*; do echo "$a:"; (tar -tzf "$a" 2>/dev/null || unzip -Z1 "$a") | sed 's/^/  /'; done
+      # The assets as the GitHub Release will hold them, installed as a project's CI installs them (.github/project-ci.sh)
+      - name: Install as the CI of a rust or none project does, and run
+        run: |
+          mkdir assets
+          cp dist/*.whl archives/* SHA256SUMS assets/
+          bash .github/project-ci.sh assets
       - uses: actions/upload-artifact@v7
         with:
           name: release

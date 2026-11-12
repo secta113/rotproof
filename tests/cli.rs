@@ -511,12 +511,12 @@ const PROJECT_FILES: [&str; 4] = [
 
 #[test]
 fn create_writes_the_projects_files_once() {
-    // (stack, whether Rotproof is pinned from PyPI)
-    for (stack, pinned) in [
-        ("python", true),
-        ("none", true),
-        ("typescript", false),
-        ("rust", false),
+    // (stack, where it installs Rotproof from)
+    for (stack, channel) in [
+        ("python", "pypi"),
+        ("none", "release"),
+        ("typescript", "unpinned"),
+        ("rust", "release"),
     ] {
         let parent = tempfile::tempdir().unwrap();
         let root = parent.path().join("my-app");
@@ -567,12 +567,35 @@ fn create_writes_the_projects_files_once() {
         assert!(!agents.contains("application/` |"), "{stack}: {agents}");
         let requirements = root.join("requirements-dev.txt");
         let workflow = root.join(".github/workflows/ci.yml");
-        if pinned {
+        let readme = fs::read_to_string(root.join("README.md")).unwrap();
+        if channel == "pypi" {
             let pin = format!("rotproof=={}\n", env!("CARGO_PKG_VERSION"));
             assert!(fs::read_to_string(&requirements).unwrap().contains(&pin));
             let workflow = fs::read_to_string(&workflow).unwrap();
             assert!(
                 workflow.contains("timeout-minutes:") && workflow.contains("- run: rotproof check")
+            );
+            assert!(!stdout(&out).contains("not written"), "{}", stdout(&out));
+        } else if channel == "release" {
+            // No Python: the version is pinned in the workflow, which takes the release's archive and checks it
+            assert!(!requirements.exists(), "{stack}");
+            let workflow = fs::read_to_string(&workflow).unwrap();
+            let version = env!("CARGO_PKG_VERSION");
+            for part in [
+                format!("ROTPROOF_VERSION: \"{version}\""),
+                "gh release download \"v$ROTPROOF_VERSION\" --repo secta113/rotproof".into(),
+                "sha256sum --check --ignore-missing SHA256SUMS".into(),
+                "timeout-minutes:".into(),
+                "- run: rotproof check".into(),
+            ] {
+                assert!(workflow.contains(&part), "{stack}: {part}: {workflow}");
+            }
+            assert!(workflow.contains("${{ github.token }}"), "{workflow}");
+            assert!(
+                readme.contains(&format!(
+                    "gh release download v{version} --repo secta113/rotproof"
+                )),
+                "{stack}: {readme}"
             );
             assert!(!stdout(&out).contains("not written"), "{}", stdout(&out));
         } else {

@@ -70,7 +70,9 @@ pip install rotproof==1.0.0-rc.2
 
 The wheel carries only the binary; no Python code runs. Without Python, take the archive for your platform from
 [GitHub Releases](https://github.com/secta113/rotproof/releases) and check it against `SHA256SUMS` there. Each archive
-holds the binary with `LICENSE-MIT`, `LICENSE-APACHE` and `THIRD-PARTY-LICENSES.txt`.
+holds the binary with `LICENSE-MIT`, `LICENSE-APACHE` and `THIRD-PARTY-LICENSES.txt`. The releases are immutable from
+the release after 1.0.0-rc.2: once published, their archives cannot be replaced, so a version names one binary. A
+`rust` or `none` project made by `rotproof create` installs Rotproof this way in CI.
 
 On another platform, pip finds no Rotproof to install. Build it from source with [rustup](https://rustup.rs/) installed
 (the toolchain version comes from `rust-toolchain.toml`):
@@ -138,13 +140,16 @@ The project's files are written once, as a starting point, and are the project's
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
 | `.claude/settings.json` | The time hook (see "The time hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
-| `requirements-dev.txt` | `python` and `none`: Rotproof pinned with `==` |
-| `.github/workflows/ci.yml` | `python` and `none`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit |
+| `requirements-dev.txt` | `python`: Rotproof pinned with `==` |
+| `.github/workflows/ci.yml` | `python`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
 | `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program |
 
-How a `typescript` or `rust` project pins Rotproof is not decided yet, so for those stacks `rotproof create` writes
-neither the pin nor the workflow, and says so.
+A project that does not write Python needs no Python for Rotproof: `rust` and `none` pin only the version, as
+Rotproof's GitHub Releases are immutable, so a version names one binary, as on PyPI. A binary cannot know the hash of
+the archive it is in, so `rotproof create` writes no hash, and an upgrade changes only the version. How a
+`typescript` project pins Rotproof is not decided yet, so for it `rotproof create` writes neither the pin nor the
+workflow, and says so.
 
 When a newer Rotproof requires a field the declaration lacks, `rotproof check` fails and says so, and
 `rotproof create` adds the field under a comment that says what it is and where its first value came from (`areas`
@@ -602,10 +607,12 @@ under Microsoft's license. Both serve for trying the wheels, not for release.
 A release is a pushed tag `v<version>` that matches `Cargo.toml`. `.github/workflows/release.yml` checks the licenses,
 builds the Linux wheel in the manylinux2014 image (glibc 2.17) and the Windows wheel on Windows, installs each into a
 fresh venv on its platform and runs it (`.github/smoke.sh`), and installs the Linux wheel in the manylinux2014 image
-too, so the oldest glibc the tag claims is tested. It then publishes the wheels to PyPI and makes the GitHub Release
-with the wheels, an archive of the binary per platform taken out of the tested wheel, and `SHA256SUMS`. Run by hand
-(`gh workflow run release.yml`), it does everything but publish. CI builds and tests the Windows wheel natively on
-Windows too. Other platforms (macOS, Linux aarch64) are welcome as contributions.
+too, so the oldest glibc the tag claims is tested. It packs an archive of the binary per platform, taken out of the
+tested wheel, and `SHA256SUMS`, and installs them as the CI `rotproof create` writes for rust and none does
+(`.github/project-ci.sh`), so a project's CI is known to find the archive before it is published: the releases are
+immutable. It then publishes the wheels to PyPI and makes the GitHub Release with the wheels, the archives and
+`SHA256SUMS`. Run by hand (`gh workflow run release.yml`), it does everything but publish. CI builds and tests the
+Windows wheel natively on Windows too. Other platforms (macOS, Linux aarch64) are welcome as contributions.
 
 ## License
 
