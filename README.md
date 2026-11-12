@@ -4,7 +4,8 @@ Rotproof keeps a project's structure from drifting while LLMs and people change 
 two structures:
 
 - **The layers:** which part of the code may import which, on the onion architecture (`composition`,
-  `infrastructure`, `application`, `protocol`, `domain`, and an optional `ui`). Code that cannot be split into these
+  `infrastructure`, `application`, `protocol`, `domain`, and `ui` and `presentation` for screens). Code that cannot
+  be split into these
   layers mixes responsibilities, so the layers
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
@@ -33,7 +34,8 @@ two structures:
   person, on a terminal) write the hashes in its `follows`: the review is the person's or the agent's, and pinning
   only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
   `rotproof check` fails on: it only takes away, so nothing passes that failed before. Code it never moves: when the
-  layer table changes (0.4.0), `rotproof init` says where each layer's code goes, and the person moves it.
+  layer table changes (0.4.0, 1.0.0-rc.3), `rotproof init` says where each layer's code goes, and the person moves
+  it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
 - **A check with nothing to check fails.** A check that passes on an empty tree protects nothing.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
@@ -91,7 +93,7 @@ cargo build --release   # the binary is target/release/rotproof (rotproof.exe on
 ## Usage
 
 ```sh
-rotproof --root <repository> init --stack python  # write .config/rotproof.toml, when there is none
+rotproof --root <repository> init --stack python --ui atomic  # write .config/rotproof.toml, when there is none
 rotproof --root <repository> init    # after upgrading Rotproof: update the project's files (see "Upgrading Rotproof")
 rotproof --root <repository> create  # list the layers it would make, writing nothing (makes docs/ when it makes no layer)
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
@@ -113,20 +115,22 @@ the order to start in and the exit codes, `rotproof <command> --help` what a com
 each command's output names the next step. A test follows that path from an empty directory to a passing check.
 
 Start a project with `rotproof init --stack <stack>` (`python`, `typescript`, `rust`, or `none` for a repository
-that keeps records only). It writes only the declaration, so you declare in `absent` the layers you do not want before
-anything is made. Then run `rotproof create`, which lists the layers it would make and writes nothing, and
-`rotproof create --yes` once `absent` lists every layer the project lacks. Run on a project that has a declaration,
-`rotproof init` upgrades the project's files instead (see "Upgrading Rotproof"), and never changes the declaration's
-values but `files`.
+that keeps records only), and `--ui` for the stacks that offer a UI: `--ui atomic` for a project with screens, `--ui
+none` for one without (a command-line tool, a library, a server). Python and TypeScript need it named, as a project
+with screens and one without start from the same command; Rust offers `none` alone. It writes only the declaration,
+so you declare in `absent` the layers you do not want before anything is made. Then run `rotproof create`, which
+lists the layers it would make and writes nothing, and `rotproof create --yes` once `absent` lists every layer the
+project lacks. Run on a project that has a declaration, `rotproof init` upgrades the project's files instead (see
+"Upgrading Rotproof"), and never changes the declaration's values but `files`.
 
 `rotproof create` makes layers only with `--yes`. Without it, a run that would make one lists the layers, writes
-nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer of the stack, `ui` and its
-five levels in a command-line tool too, and it never deletes them again. A run that makes no layer, as after an
-upgrade, needs no `--yes`.
+nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer the declaration names
+before anyone read the list, and it never deletes them again. A run that makes no layer, as after an upgrade, needs no
+`--yes`.
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
-pin Rotproof in it (`npm install -D -E rotproof@1.0.0-rc.2`), then run `rotproof init --stack typescript` and
-`rotproof create --yes` there (`npx --no -- rotproof ...`), which keep what Vite wrote. Vite's entry point,
+pin Rotproof in it (`npm install -D -E rotproof@1.0.0-rc.2`), then run `rotproof init --stack typescript --ui atomic`
+and `rotproof create --yes` there (`npx --no -- rotproof ...`), which keep what Vite wrote. Vite's entry point,
 `src/main.tsx`, is the entry file where it is (`index.html` loads it), and may import `composition` alone: what Vite
 has it import (`./App.tsx`, `./index.css`) moves into `src/composition/`, which `main.tsx` calls. `rotproof check`
 names the rest of the starter (`App.tsx`, the styles, `assets/`) as code outside the layers, with where each goes.
@@ -184,8 +188,13 @@ that has a declaration:
   names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
-  `rotproof check` names what is not moved yet. It never changes the declaration's other values, and once it has set
-  `files`, running it again changes nothing.
+  `rotproof check` names what is not moved yet. Crossing 1.0.0-rc.3, which splits the UI into the view (`ui`) and the
+  state of the screens (`presentation`) and declares the UI, the refresh adds `ui` to the declaration: `"atomic"` when
+  `ui/` is there, `"none"` otherwise. With `"atomic"`, it says, as the same lines, that `presentation` is to be made
+  (`rotproof create --yes`), and that the state of a page and its calls of the use cases move to
+  `presentation.models` and the domain values the parts show to `presentation.display`; with `"none"`, that `ui` is
+  to be taken out of `absent`, where `rotproof check` fails on it. It never changes the declaration's other values,
+  and once it has set `files`, running it again changes nothing.
 - **An update only adds, or takes out what Rotproof itself wrote and no longer keeps, matched exactly,** and does
   nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
   byte order mark it had. What it cannot do without a person (its file is not in a form Rotproof can read),
@@ -295,7 +304,8 @@ definitions are built into it, and the declaration is never shipped with it.
 ```toml
 stack = "python"         # python | typescript | rust | none
 areas = ["billing", "records"]  # the areas knowledge is grouped by, in this order (see The records)
-absent = ["ui"]          # layers this project does not have
+ui = "atomic"            # the layers of the screens: atomic | none (rust: none; none for a stack of none)
+absent = ["ui.templates"]  # layers or levels this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
 ```
 
@@ -304,14 +314,19 @@ What the layers are is written once, in `layers/table.toml`, on the onion archit
 | Layer | Its levels | May import |
 |---|---|---|
 | `composition` | | every layer: the one place that wires the program |
-| `ui` | `pages` > `templates` > `organisms` > `molecules` > `atoms` (a level imports the levels below it) | `application`, `protocol`, `domain`; only `pages` call `application` |
+| `ui` | `pages` > `templates` > `organisms` > `molecules` > `atoms` (a level imports the levels below it) | `pages`: `presentation.models`, `presentation.display`, `protocol.inbound`. `templates`, `organisms`: `presentation.display`. `molecules`, `atoms`: nothing. Never `application` or `domain` |
+| `presentation` | `models` (what a screen holds and decides) > `display` (the plain data handed to the view) | `models`: `protocol.inbound`. `display`: nothing |
 | `infrastructure` | `inbound` (entry points: the command line, HTTP, events, jobs), `outbound` (connections: databases, clients, files) | `inbound`: `protocol.inbound` alone. `outbound`: `protocol.outbound` and `domain` |
 | `application` | | `protocol`, `domain`: a use case implements an input port and calls output ports |
 | `protocol` | `inbound` (input ports, with plain data), `outbound` (output ports) | `inbound`: nothing. `outbound`: `domain` |
 | `domain` | | nothing |
 
-The levels of a layer other than `ui` never import each other. The entry file is no layer, and may import
-`composition` alone. No layer holds general-purpose parts: a part goes in the layer whose concept it speaks.
+The levels of a layer other than `ui` and `presentation` never import each other. `ui` is the view and
+`presentation` the state and behaviour of the screens apart from it, the Presentation Model (Fowler) held to the
+inward direction of the onion: a model calls the use cases through `protocol.inbound`, as an entry point does, and
+draws nothing. The two come with `ui = "atomic"`, and a project with `ui = "none"` has neither: `ui` is chosen as the
+stack is, not switched off in `absent`, since a screen needs both or neither. The entry file is no layer, and may
+import `composition` alone. No layer holds general-purpose parts: a part goes in the layer whose concept it speaks.
 
 Where they live is written once per stack:
 
@@ -319,7 +334,7 @@ Where they live is written once per stack:
 |---|---|---|---|---|
 | `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/` |
 | `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
-| `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no `ui` yet) | `src/main.rs` of the root package | every crate in `crates/`, and the root `Cargo.toml` |
+| `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no UI yet: `ui = "none"`) | `src/main.rs` of the root package | every crate in `crates/`, and the root `Cargo.toml` |
 
 `stack = "none"` declares a repository that keeps records only: `rotproof create` makes no layer, only `docs/`, the
 guide and the project's files, and `rotproof check` checks only the records and prints that it did not check the
@@ -425,20 +440,22 @@ changed is in the commits, what was measured and decided along the way in the ta
 
 ## What `rotproof check` checks
 
-- **The tree matches `.config/rotproof.toml`, either way:** the declaration names a known stack, and only layers that
-  stack has in `absent` (a misspelled field fails). Without a declaration nothing is checked, and `rotproof check`
+- **The tree matches `.config/rotproof.toml`, either way:** the declaration names a known stack and a UI it offers,
+  and only layers that stack and UI have in `absent` (a misspelled field fails; a layer the UI leaves out, as `ui`
+  with `ui = "none"`, fails until it is taken out). Without a declaration nothing is checked, and `rotproof check`
   exits 2, not 1: CI tells a project that has not adopted Rotproof from one that breaks a rule. Every layer of the stack is present or declared
   absent, and no layer declared absent is present. No code sits outside the layers, the stack's own paths (`tests/`)
   and `unchecked`. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.
   A layer with levels holds only its levels: code beside them fails, apart from the layer's own file
   (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
-  (a design value, one behaviour, a provider of a theme), is an atom. A directory of a layer of the table before
-  0.4.0 (`handler`, `utils`) is named with where its code goes now.
+  (a design value, one behaviour, a provider of a theme), is an atom, and what a screen holds and decides goes in
+  `presentation.models`. A directory of a layer of the table before 0.4.0 (`handler`, `utils`) is named with where
+  its code goes now.
 - **The layers import only what the table allows** (Python): every `import` and `from ... import` in the layers,
   relative ones and those inside functions or under `if TYPE_CHECKING:` included, and those of the entry file. A
   layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own
-  `imports` name, and in `ui` the levels below it. Only direct imports
+  `imports` name, and in `ui` and `presentation` the levels below it. Only direct imports
   are judged: what the table allows is closed under chaining, so a chain of allowed imports never reaches a forbidden
   layer. A module is placed where its parts, as a path, land as the operating system that runs the check resolves
   them: on Windows, `Infrastructure.db` lands in `infrastructure`, as Python imports it with `PYTHONCASEOK` set.

@@ -34,9 +34,14 @@ impl Commands for Rotproof<'_> {
         }
     }
 
-    fn init(&self, root: &Path, stack: Option<&str>) -> Result<Initialized, String> {
+    fn init(
+        &self,
+        root: &Path,
+        stack: Option<&str>,
+        ui: Option<&str>,
+    ) -> Result<Initialized, String> {
         let files = self.machine.files(root);
-        crate::init::init(&*files, &*files, stack, &files.name()?, VERSION)
+        crate::init::init(&*files, &*files, stack, ui, &files.name()?, VERSION)
     }
 
     fn create(&self, root: &Path, yes: bool) -> Result<Made, String> {

@@ -133,7 +133,7 @@ mod tests {
     use crate::layers::{layout, table};
 
     fn python_places() -> Vec<Place> {
-        layout("python").unwrap().places(&table())
+        layout("python", "atomic").unwrap().places(&table())
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let places = layout("python").unwrap().places(&table);
+        let places = layout("python", "atomic").unwrap().places(&table);
         let place = |name: &str| places.iter().find(|p| p.name == name).unwrap();
         let may = |from: &str, to: &str| allowed(place(from), place(to));
         assert_eq!(place("port.out").path, "port/out");
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(say("ui.atoms"), "ui.atoms imports no other layer");
         assert_eq!(
             say("ui.organisms"),
-            "ui.organisms may import the levels below it, and `domain`"
+            "ui.organisms may import the levels below it, and `presentation.display`"
         );
     }
 

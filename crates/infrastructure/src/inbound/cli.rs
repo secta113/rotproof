@@ -15,7 +15,8 @@ use protocol::inbound::{Commands, Initialized, Made, Names};
 /// the binary reads its way from here to a checked project.
 const START: &str = "\
 Start a project:
-  1. rotproof init --stack <stack>   write .config/rotproof.toml (python, typescript, rust, or none for records only)
+  1. rotproof init --stack <stack>   write .config/rotproof.toml (python, typescript, rust, or none for records only),
+     --ui <ui>                       with python and typescript: atomic for screens, none for no screens
   2. edit it: list in absent the layers the project does not have
   3. rotproof create                 list the layers it would make, writing nothing (with none, it makes docs/ and
                                      the project's files: go on to 5)
@@ -81,12 +82,20 @@ enum Command {
     /// without a person, it says, leaves files as it was, and exits 2. It never moves or rewrites a record. Crossing
     /// 0.4.0, which builds the layer table on the onion architecture, it says where the code of the layers that are
     /// gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left until it is
-    /// moved. Exits 2 too for an unknown stack, a stack other than the declared one, or a file that cannot be read or
-    /// written.
+    /// moved. Crossing 1.0.0-rc.3, which splits the UI into the view (ui) and the state of the screens
+    /// (presentation) and declares the UI, the refresh adds ui to the declaration ("atomic" when ui/ is there, "none"
+    /// otherwise), and it says to make presentation, what moves out of ui, and to take ui out of absent once ui is
+    /// "none", and moves no code either. Exits 2 too for an unknown stack or UI, a stack or UI other than the declared
+    /// one, or a file that cannot be read or written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
         #[arg(long)]
         stack: Option<String>,
+        /// The UI, which picks the layers of the screens: atomic (the view in ui, by atomic design, and the state of
+        /// the screens in presentation) or none (no screens). Needed with python and typescript when there is no
+        /// declaration yet; rust offers only none
+        #[arg(long)]
+        ui: Option<String>,
     },
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
     ///
@@ -259,7 +268,9 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
     }
     let root = cli.root.as_path();
     let result = match cli.command {
-        Command::Init { stack } => init(commands, &names, root, stack.as_deref()).map(|()| true),
+        Command::Init { stack, ui } => {
+            init(commands, &names, root, stack.as_deref(), ui.as_deref()).map(|()| true)
+        }
         Command::Create { yes } => create(commands, &names, root, yes).map(|()| true),
         Command::Check => check(commands, &names, root),
         Command::Guide { stack } => commands.guide(root, stack.as_deref()).map(|text| {
@@ -338,13 +349,14 @@ fn init(
     names: &Names,
     root: &Path,
     stack: Option<&str>,
+    ui: Option<&str>,
 ) -> Result<(), String> {
     let Names {
         declaration,
         version,
         ..
     } = names;
-    let upgraded = match commands.init(root, stack)? {
+    let upgraded = match commands.init(root, stack, ui)? {
         Initialized::Declared(path) => {
             println!("wrote {path}");
             if stack == Some(names.records_only) {

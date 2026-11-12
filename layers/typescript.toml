@@ -11,6 +11,8 @@ not_layers = []
 doc_prefix = " * "
 # Every source file in `src/` (`.ts`, `.tsx`, `.js` and the others), read with oxc; the other files there are not read
 language = "typescript"
+# The UIs a project may declare besides "none" (the layers of table.toml that name one in `ui`)
+uis = ["atomic"]
 # The entry file, where Vite's React starter (`npm create vite -- --template react-ts`) puts it and `index.html` loads
 # it: moving it would mean editing `index.html` too
 entry = "src/main.tsx"

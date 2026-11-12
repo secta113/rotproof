@@ -127,7 +127,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
   are kept outside this repository.
 - **In layers, and no `.config/rotproof.toml`.** Every layer of the Rust layout Rotproof keeps (README) is a crate of
   its own in `crates/`, with the levels of `infrastructure` and `protocol` as modules, the entry file is `src/main.rs`
-  of the root package, and `ui` is left out as that layout leaves it out. `cargo xtask ci` checks them as
+  of the root package, and it declares `ui = "none"`, the one UI that layout offers. `cargo xtask ci` checks them as
   `rotproof check` checks a project's (structure, direction, markers), with the declaration written in
   `xtask/src/layers.rs` in place of the file, and reads the comments of `xtask/` for markers too, which the layout
   leaves out; the records are kept outside, so they are not checked here.

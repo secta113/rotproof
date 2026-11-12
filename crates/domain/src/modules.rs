@@ -246,7 +246,7 @@ mod tests {
 
     /// What the Rust layout makes of `infrastructure`, and its two levels.
     fn infrastructure() -> (Place, Vec<Place>) {
-        let places = layout("rust").unwrap().places(&table());
+        let places = layout("rust", "none").unwrap().places(&table());
         let layer = places
             .iter()
             .find(|p| p.name == "infrastructure")
@@ -267,7 +267,7 @@ mod tests {
             .map(|(p, s)| (format!("crates/infrastructure/{p}"), s.to_string()))
             .collect();
         // The crate depends on the two layers it may, one of them under another name
-        let places = layout("rust").unwrap().places(&table());
+        let places = layout("rust", "none").unwrap().places(&table());
         let place = |name: &str| places.iter().find(|p| p.name == name).unwrap();
         let dependencies = [
             Dependency {

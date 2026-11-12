@@ -213,7 +213,7 @@ mod tests {
     fn a_file_in_a_path_listed_in_unchecked_is_skipped() {
         let declared = Declared::new(
             crate::layers::parse_declaration(
-                "stack = \"python\"\nareas = []\nunchecked = [\"scripts/\", \"gen\"]\n",
+                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"scripts/\", \"gen\"]\n",
             )
             .unwrap(),
         )
@@ -228,7 +228,7 @@ mod tests {
     fn a_path_in_unchecked_that_holds_or_sits_in_a_layer_skips_nothing() {
         let declared = Declared::new(
             crate::layers::parse_declaration(
-                "stack = \"python\"\nareas = []\nunchecked = [\"domain\", \"ui/atoms/gen/\"]\n",
+                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"domain\", \"ui/atoms/gen/\"]\n",
             )
             .unwrap(),
         )
@@ -240,7 +240,8 @@ mod tests {
     #[test]
     fn nothing_read_fails_by_the_floor() {
         let declared = Declared::new(
-            crate::layers::parse_declaration("stack = \"python\"\nareas = []\n").unwrap(),
+            crate::layers::parse_declaration("stack = \"python\"\nareas = []\nui = \"atomic\"\n")
+                .unwrap(),
         )
         .unwrap();
         let mut none = Markers::default();

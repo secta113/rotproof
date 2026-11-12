@@ -407,6 +407,8 @@ fn versions(files: &str, running: &str) -> Result<(Version, Version), String> {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Fields {
     pub stack: Option<String>,
+    pub ui: Option<String>,
+    pub absent: Vec<String>,
     /// `None` when the declaration has no `files`
     pub files: Option<String>,
     pub declined: Vec<String>,
@@ -426,22 +428,26 @@ pub fn fields(text: &str) -> Result<Fields, String> {
                 .ok_or_else(|| format!("{DECLARATION}: {name} is not a string")),
         }
     };
-    let declined = match document.get("declined") {
-        None => Vec::new(),
-        Some(item) => item
-            .as_array()
-            .and_then(|array| {
-                array
-                    .iter()
-                    .map(|v| v.as_str().map(str::to_string))
-                    .collect::<Option<Vec<_>>>()
-            })
-            .ok_or_else(|| format!("{DECLARATION}: declined is not a list of names"))?,
+    let names = |name: &str| -> Result<Vec<String>, String> {
+        match document.get(name) {
+            None => Ok(Vec::new()),
+            Some(item) => item
+                .as_array()
+                .and_then(|array| {
+                    array
+                        .iter()
+                        .map(|v| v.as_str().map(str::to_string))
+                        .collect::<Option<Vec<_>>>()
+                })
+                .ok_or_else(|| format!("{DECLARATION}: {name} is not a list of names")),
+        }
     };
     Ok(Fields {
         stack: string("stack")?,
+        ui: string("ui")?,
+        absent: names("absent")?,
         files: string("files")?,
-        declined,
+        declined: names("declined")?,
     })
 }
 

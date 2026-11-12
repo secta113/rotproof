@@ -84,7 +84,7 @@ mod tests {
         let tree = Fake::new(&[
             (
                 ".config/rotproof.toml",
-                "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"ui\", \"composition\", \"application\", \
+                "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"composition\", \"application\", \
                  \"protocol\"]\n",
             ),
             ("domain/__init__.py", ""),
