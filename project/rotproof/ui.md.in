@@ -1,6 +1,10 @@
-- **`ui` follows atomic design (`pages` > `templates` > `organisms` > `molecules` > `atoms`), and holds only its
-  levels.** Besides direction, the table limits what each level knows: `atoms` and `molecules` know neither `domain`
-  nor `application` and take plain values; `organisms` and `templates` do not call `application` and take actions as
-  callbacks; only `pages` call use cases; `ui` does not know `infrastructure`. What the whole UI shares goes in the
-  lowest level that may know what it knows: a part that renders nothing (a design value, a hook, a provider of a
-  theme) is an atom when it knows no project concept, and code beside the levels fails `rotproof check`.
+- **`ui` is the view, and `presentation` what the screens hold and decide (the Presentation Model).** `ui` follows
+  atomic design (`pages` > `templates` > `organisms` > `molecules` > `atoms`), `presentation` holds `models` and
+  `display`, and each holds only its levels. Besides direction, the table limits what each level knows: only `pages`
+  know the models, giving them the use cases `composition` passes in; `organisms` and `templates` know only the plain
+  values of `presentation.display` and take actions as callbacks; `atoms` and `molecules` know nothing of
+  `presentation` and take plain values; `ui` knows neither `application`, `domain` nor `infrastructure`. A model calls
+  the input ports of `protocol.inbound` and draws nothing: a provider that hands its state to the view is a part of
+  `ui`. What the whole UI shares goes in the lowest level that may know what it knows: a part that renders nothing (a
+  design value, a hook, a provider of a theme) is an atom when it knows no project concept, and code beside the levels
+  fails `rotproof check`.

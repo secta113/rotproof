@@ -860,11 +860,10 @@ mod tests {
                 .contains("\n * Imports no other layer.\n */\n")
         );
         let pages = typescript.iter().find(|p| p.name == "ui.pages").unwrap();
-        assert!(
-            pages.files[0]
-                .1
-                .contains("May import the levels below it, and `application`")
-        );
+        assert!(pages.files[0].1.contains(
+            "May import the levels below it, and `presentation.models`, `presentation.display` and \
+                     `protocol.inbound`"
+        ));
     }
 
     #[test]

@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(say("ui.atoms"), "ui.atoms imports no other layer");
         assert_eq!(
             say("ui.organisms"),
-            "ui.organisms may import the levels below it, and `domain`"
+            "ui.organisms may import the levels below it, and `presentation.display`"
         );
     }
 

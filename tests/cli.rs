@@ -1095,6 +1095,7 @@ fn each_difference_from_the_declaration_fails() {
             Box::new(|r| {
                 for layer in [
                     "composition",
+                    "presentation",
                     "infrastructure",
                     "application",
                     "protocol",
@@ -1104,8 +1105,8 @@ fn each_difference_from_the_declaration_fails() {
                 }
                 declare(
                     r,
-                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"composition\", \"ui\", \"infrastructure\", \
-                     \"application\", \"protocol\", \"domain\"]\n",
+                    "stack = \"python\"\nareas = [\"a\"]\nabsent = [\"composition\", \"ui\", \"presentation\", \
+                     \"infrastructure\", \"application\", \"protocol\", \"domain\"]\n",
                 );
             }),
         ),
@@ -1253,7 +1254,7 @@ fn ui_parts_in_a_level_pass() {
 }
 
 /// Every place of the Python layout, in the order of the grid below.
-const PLACES: [&str; 15] = [
+const PLACES: [&str; 18] = [
     "composition",
     "ui",
     "ui.pages",
@@ -1261,6 +1262,9 @@ const PLACES: [&str; 15] = [
     "ui.organisms",
     "ui.molecules",
     "ui.atoms",
+    "presentation",
+    "presentation.models",
+    "presentation.display",
     "infrastructure",
     "infrastructure.inbound",
     "infrastructure.outbound",
@@ -1272,26 +1276,29 @@ const PLACES: [&str; 15] = [
 ];
 
 /// Whether the place of a row may import the place of a column: the rule `layers/table.toml` states (each layer's
-/// `imports`, which may name one level of another layer, and a level of `ui` the levels below it), written out again
-/// by hand rather than computed by the check. A change to the table or to the check that moves any pair fails here,
-/// so moving one is a decision made twice.
-const MAY_IMPORT: [&str; 15] = [
-    // co ui pg tp or mo at if ii io ap pr pi po do
-    "Y Y Y Y Y Y Y Y Y Y Y Y Y Y Y", // composition
-    "N Y Y Y Y Y Y N N N Y Y Y Y Y", // ui
-    "N N Y Y Y Y Y N N N Y Y Y Y Y", // ui.pages
-    "N N N Y Y Y Y N N N N N N N Y", // ui.templates
-    "N N N N Y Y Y N N N N N N N Y", // ui.organisms
-    "N N N N N Y Y N N N N N N N N", // ui.molecules
-    "N N N N N N Y N N N N N N N N", // ui.atoms
-    "N N N N N N N Y Y Y N Y Y Y Y", // infrastructure
-    "N N N N N N N N Y N N N Y N N", // infrastructure.inbound
-    "N N N N N N N N N Y N N N Y Y", // infrastructure.outbound
-    "N N N N N N N N N N Y Y Y Y Y", // application
-    "N N N N N N N N N N N Y Y Y Y", // protocol
-    "N N N N N N N N N N N N Y N N", // protocol.inbound
-    "N N N N N N N N N N N N N Y Y", // protocol.outbound
-    "N N N N N N N N N N N N N N Y", // domain
+/// `imports`, which may name one level of another layer, and a level of an ordered layer, `ui` or `presentation`,
+/// the levels below it), written out again by hand rather than computed by the check. A change to the table or to the
+/// check that moves any pair fails here, so moving one is a decision made twice.
+const MAY_IMPORT: [&str; 18] = [
+    // co ui pg tp or mo at pe pm pd if ii io ap pr pi po do
+    "Y Y Y Y Y Y Y Y Y Y Y Y Y Y Y Y Y Y", // composition
+    "N Y Y Y Y Y Y N Y Y N N N N N Y N N", // ui
+    "N N Y Y Y Y Y N Y Y N N N N N Y N N", // ui.pages
+    "N N N Y Y Y Y N N Y N N N N N N N N", // ui.templates
+    "N N N N Y Y Y N N Y N N N N N N N N", // ui.organisms
+    "N N N N N Y Y N N N N N N N N N N N", // ui.molecules
+    "N N N N N N Y N N N N N N N N N N N", // ui.atoms
+    "N N N N N N N Y Y Y N N N N Y Y Y Y", // presentation
+    "N N N N N N N N Y Y N N N N N Y N N", // presentation.models
+    "N N N N N N N N N Y N N N N N N N N", // presentation.display
+    "N N N N N N N N N N Y Y Y N Y Y Y Y", // infrastructure
+    "N N N N N N N N N N N Y N N N Y N N", // infrastructure.inbound
+    "N N N N N N N N N N N N Y N N N Y Y", // infrastructure.outbound
+    "N N N N N N N N N N N N N Y Y Y Y Y", // application
+    "N N N N N N N N N N N N N N Y Y Y Y", // protocol
+    "N N N N N N N N N N N N N N N Y N N", // protocol.inbound
+    "N N N N N N N N N N N N N N N N Y Y", // protocol.outbound
+    "N N N N N N N N N N N N N N N N N Y", // domain
 ];
 
 #[test]
@@ -1315,7 +1322,7 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
             import: |to| format!("import {to}\n"),
             said_as: |to| format!("imports {to}"),
             verb: "imports",
-            forbidden: 152,
+            forbidden: 241,
         },
         Stack {
             name: "typescript",
@@ -1327,7 +1334,7 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
                 format!("imports /src/{path} (src/{path})")
             },
             verb: "imports",
-            forbidden: 152,
+            forbidden: 241,
         },
         Stack {
             // No ui, and a crate per layer: the levels inside a crate are judged by another test
@@ -1337,7 +1344,7 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
             import: |to| format!("{to} = {{ path = \"../{to}\" }}\n"),
             said_as: |to| format!("depends on {to} (crates/{to})"),
             verb: "depends on",
-            forbidden: 11,
+            forbidden: 18,
         },
     ];
     for stack in stacks {

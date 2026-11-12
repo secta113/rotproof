@@ -348,9 +348,14 @@ mod tests {
         let text = guide("python", Some(&layout));
         for row in [
             "| `ui` | `ui/` | Nothing: it holds only its levels |",
-            "| `ui.organisms` | `ui/organisms/` | The levels below it, and `domain` |",
+            "| `ui.pages` | `ui/pages/` | The levels below it, and `presentation.models`, `presentation.display` and \
+             `protocol.inbound` |",
+            "| `ui.organisms` | `ui/organisms/` | The levels below it, and `presentation.display` |",
             "| `ui.molecules` | `ui/molecules/` | The levels below it |",
             "| `ui.atoms` | `ui/atoms/` | No other layer |",
+            "| `presentation` | `presentation/` | Nothing: it holds only its levels |",
+            "| `presentation.models` | `presentation/models/` | The levels below it, and `protocol.inbound` |",
+            "| `presentation.display` | `presentation/display/` | No other layer |",
             "| `infrastructure` | `infrastructure/` | Nothing: it holds only its levels |",
             "| `infrastructure.inbound` | `infrastructure/inbound/` | `protocol.inbound` |",
             "| `protocol.outbound` | `protocol/outbound/` | `domain` |",

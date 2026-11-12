@@ -4,7 +4,8 @@ Rotproof keeps a project's structure from drifting while LLMs and people change 
 two structures:
 
 - **The layers:** which part of the code may import which, on the onion architecture (`composition`,
-  `infrastructure`, `application`, `protocol`, `domain`, and an optional `ui`). Code that cannot be split into these
+  `infrastructure`, `application`, `protocol`, `domain`, and an optional `ui` and `presentation`). Code that cannot
+  be split into these
   layers mixes responsibilities, so the layers
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
@@ -120,9 +121,9 @@ anything is made. Then run `rotproof create`, which lists the layers it would ma
 values but `files`.
 
 `rotproof create` makes layers only with `--yes`. Without it, a run that would make one lists the layers, writes
-nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer of the stack, `ui` and its
-five levels in a command-line tool too, and it never deletes them again. A run that makes no layer, as after an
-upgrade, needs no `--yes`.
+nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer of the stack, `ui` and
+`presentation` with their levels in a command-line tool too, and it never deletes them again. A run that makes no
+layer, as after an upgrade, needs no `--yes`.
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
 pin Rotproof in it (`npm install -D -E rotproof@1.0.0-rc.2`), then run `rotproof init --stack typescript` and
@@ -304,14 +305,18 @@ What the layers are is written once, in `layers/table.toml`, on the onion archit
 | Layer | Its levels | May import |
 |---|---|---|
 | `composition` | | every layer: the one place that wires the program |
-| `ui` | `pages` > `templates` > `organisms` > `molecules` > `atoms` (a level imports the levels below it) | `application`, `protocol`, `domain`; only `pages` call `application` |
+| `ui` | `pages` > `templates` > `organisms` > `molecules` > `atoms` (a level imports the levels below it) | `pages`: `presentation.models`, `presentation.display`, `protocol.inbound`. `templates`, `organisms`: `presentation.display`. `molecules`, `atoms`: nothing. Never `application` or `domain` |
+| `presentation` | `models` (what a screen holds and decides) > `display` (the plain data handed to the view) | `models`: `protocol.inbound`. `display`: nothing |
 | `infrastructure` | `inbound` (entry points: the command line, HTTP, events, jobs), `outbound` (connections: databases, clients, files) | `inbound`: `protocol.inbound` alone. `outbound`: `protocol.outbound` and `domain` |
 | `application` | | `protocol`, `domain`: a use case implements an input port and calls output ports |
 | `protocol` | `inbound` (input ports, with plain data), `outbound` (output ports) | `inbound`: nothing. `outbound`: `domain` |
 | `domain` | | nothing |
 
-The levels of a layer other than `ui` never import each other. The entry file is no layer, and may import
-`composition` alone. No layer holds general-purpose parts: a part goes in the layer whose concept it speaks.
+The levels of a layer other than `ui` and `presentation` never import each other. `ui` is the view and
+`presentation` the state and behaviour of the screens apart from it, the Presentation Model (Fowler) held to the
+inward direction of the onion: a model calls the use cases through `protocol.inbound`, as an entry point does, and
+draws nothing. The entry file is no layer, and may import `composition` alone. No layer holds general-purpose parts:
+a part goes in the layer whose concept it speaks.
 
 Where they live is written once per stack:
 
@@ -433,12 +438,13 @@ changed is in the commits, what was measured and decided along the way in the ta
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.
   A layer with levels holds only its levels: code beside them fails, apart from the layer's own file
   (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
-  (a design value, one behaviour, a provider of a theme), is an atom. A directory of a layer of the table before
-  0.4.0 (`handler`, `utils`) is named with where its code goes now.
+  (a design value, one behaviour, a provider of a theme), is an atom, and what a screen holds and decides goes in
+  `presentation.models`. A directory of a layer of the table before 0.4.0 (`handler`, `utils`) is named with where
+  its code goes now.
 - **The layers import only what the table allows** (Python): every `import` and `from ... import` in the layers,
   relative ones and those inside functions or under `if TYPE_CHECKING:` included, and those of the entry file. A
   layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own
-  `imports` name, and in `ui` the levels below it. Only direct imports
+  `imports` name, and in `ui` and `presentation` the levels below it. Only direct imports
   are judged: what the table allows is closed under chaining, so a chain of allowed imports never reaches a forbidden
   layer. A module is placed where its parts, as a path, land as the operating system that runs the check resolves
   them: on Windows, `Infrastructure.db` lands in `infrastructure`, as Python imports it with `PYTHONCASEOK` set.

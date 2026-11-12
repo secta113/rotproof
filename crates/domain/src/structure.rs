@@ -246,12 +246,15 @@ fn where_ui_parts_go(places: &[Place]) -> String {
     };
     format!(
         "a part that knows no project concept, visible or not (a design value, one behaviour, a provider of a theme), \
-         goes in {}/; one that knows domain types, such as a provider of the signed-in user, in {}/ or above; one \
-         that calls a use case in {}/; one that knows no UI framework in the layer whose concept it speaks, or it \
-         comes from a library",
+         goes in {}/; one that shows the values of a screen, such as a provider of the signed-in user, in {}/ or \
+         above; one that uses a model in {}/; what a screen holds and decides, which draws nothing, in {}/, and the \
+         plain data it hands the view in {}/; anything else in the layer whose concept it speaks, or it comes from a \
+         library",
         path("ui.atoms"),
         path("ui.organisms"),
         path("ui.pages"),
+        path("presentation.models"),
+        path("presentation.display"),
     )
 }
 
@@ -276,12 +279,12 @@ mod tests {
         }
         assert_eq!(
             listed(&with_ui, layout, &seen),
-            ["", "ui", "infrastructure", "protocol"]
+            ["", "ui", "presentation", "infrastructure", "protocol"]
         );
         seen.named.insert("ui".into(), Err("missing: ui".into()));
         assert_eq!(
             listed(&with_ui, layout, &seen),
-            ["", "infrastructure", "protocol"]
+            ["", "presentation", "infrastructure", "protocol"]
         );
         let without_ui = declared("stack = \"python\"\nareas = []\nabsent = [\"ui\"]\n");
         let mut seen = Seen::default();
@@ -290,7 +293,7 @@ mod tests {
         }
         assert_eq!(
             listed(&without_ui, without_ui.layout.as_ref().unwrap(), &seen),
-            ["", "infrastructure", "protocol"]
+            ["", "presentation", "infrastructure", "protocol"]
         );
     }
 
@@ -326,6 +329,7 @@ mod tests {
             .into(),
         );
         seen.code.insert("protocol".into(), Vec::new());
+        seen.code.insert("presentation".into(), Vec::new());
         let found = problems(&python, layout, &seen);
         assert_eq!(found.len(), 3, "{found:#?}");
         assert!(found[0].starts_with("code in ui outside its levels: ui/helpers (move it"));

@@ -98,3 +98,20 @@ pub mod inbound;
 pub mod outbound;
 ''' },
 ]
+
+[layers.presentation]
+files = [
+    { path = "Cargo.toml", text = '''
+[package]
+name = "presentation"
+version = "0.1.0"
+edition = "2024"
+publish = false
+''' },
+    { path = "src/lib.rs", text = '''
+{doc}
+
+pub mod models;
+pub mod display;
+''' },
+]

@@ -21,24 +21,29 @@ The file the program starts from. It calls `composition` to build the program, a
 
 [[layer]]
 name = "composition"
-imports = ["ui", "infrastructure", "application", "protocol", "domain"]
+imports = ["ui", "presentation", "infrastructure", "application", "protocol", "domain"]
 role = """
 The composition root: the one place that wires the program. It builds the implementations in
 `infrastructure.outbound`, passes them to the use cases in `application`, and passes the use cases to the entry
-points in `infrastructure.inbound` and to the UI.
+points in `infrastructure.inbound` and to the UI, whose screens hand them to their models in
+`presentation.models`.
 
 What the entry points and the connections both need at run time (configuration, a database connection, a logger,
 a clock) is built here and passed to each."""
 
+# `ui` names the levels of `presentation` and of `protocol` it reaches, not the layers: the rows of those layers hold
+# `domain`, and the table is closed under chaining, so naming a layer would let `ui` import `domain`
 [[layer]]
 name = "ui"
-imports = ["application", "protocol", "domain"]
+imports = ["presentation.models", "presentation.display", "protocol.inbound"]
 role = """
-Framework-specific presentation and interaction: buttons, views, screen parts. `composition` registers them.
+The view: what the user sees and touches, written with the UI framework (components, widgets). `composition`
+registers it.
 
-Does not import `infrastructure`. Organized by atomic design: `pages` > `templates` > `organisms` >
-`molecules` > `atoms`; a level may import the levels below it, and only `pages` import `application`. The UI
-is responsible for presentation, not for features: split by level first, and by feature only inside a level.
+It shows what `presentation` hands it and passes the user's actions back; what a screen holds and decides is in
+`presentation.models`. Does not import `application`, `domain` or `infrastructure`. Organized by atomic design:
+`pages` > `templates` > `organisms` > `molecules` > `atoms`; a level may import the levels below it, and only
+`pages` know the models. Split by level first, and by feature only inside a level.
 
 Every part of the UI sits in a level, and nothing sits beside them: what the whole UI shares goes in the lowest
 level that may know what it knows."""
@@ -47,34 +52,38 @@ ordered = true
 
 [[layer.level]]
 name = "pages"
-imports = ["application", "protocol", "domain"]
+imports = ["presentation.models", "presentation.display", "protocol.inbound"]
 role = """
-One screen each. The only part of `ui` that calls `application`; `composition` builds the use cases and passes
-them in."""
+One screen each. The only part of `ui` that knows `presentation.models`: it takes the use cases `composition`
+passes in, as the input ports of `protocol.inbound`, gives them to its model, and shows the model's state through
+the levels below.
+
+A provider that hands a model's state to the parts of one screen sits here; one for the whole program, in
+`composition`."""
 
 [[layer.level]]
 name = "templates"
-imports = ["domain"]
+imports = ["presentation.display"]
 role = """
-Layout: how organisms are arranged. Does not call `application`; actions come in as callbacks."""
+Layout: how organisms are arranged. Knows only the plain values of `presentation.display`; actions come in as
+callbacks."""
 
 [[layer.level]]
 name = "organisms"
-imports = ["domain"]
+imports = ["presentation.display"]
 role = """
-Meaningful groups, such as a list or a control panel. They may know `domain` types but do not call
-`application`; actions come in as callbacks.
+Meaningful groups, such as a list or a control panel. They know only the plain values of `presentation.display`,
+neither the models nor `domain`; actions come in as callbacks.
 
-A provider that hands `domain` values to its children, such as the signed-in user, sits here too, with the hook
-that reads it. It takes the function that loads the values as a callback, and `composition` passes the use case
-in."""
+A provider that hands display values to its children, such as the signed-in user, sits here too, with the hook
+that reads it. It takes the function that loads the values as a callback from the page above."""
 
 [[layer.level]]
 name = "molecules"
 imports = []
 role = """
 Combinations of atoms, such as an input with a button. Like atoms, they know no project concept: they import
-neither `domain` nor `application`."""
+nothing from `presentation`."""
 
 [[layer.level]]
 name = "atoms"
@@ -82,10 +91,44 @@ imports = []
 role = """
 The smallest parts, visible or not: one button, one label, a design value (a colour, a spacing, a font, an
 animation), one behaviour (following the width of the screen, detecting a click outside), a provider that hands
-a theme to its children. They know no project concept: they import neither `domain` nor `application`, and take
-only plain values.
+a theme to its children. They know no project concept: they import nothing from `presentation`, and take only
+plain values.
 
 If a part cannot be named without referring to where it is used, it is not an atom."""
+
+# The Presentation Model (Fowler), held to the inward direction of the onion: `ui` knows it, and it knows no view.
+# The row holds `protocol` and `domain` for what reads a layer whole, as the manifest of a Rust crate does, and for
+# the closure; its levels import less
+[[layer]]
+name = "presentation"
+imports = ["protocol", "domain"]
+role = """
+The state and behaviour of the screens, apart from the views that draw them: what a screen holds and decides, so
+it can be tested without drawing anything. The screens of the UI use it, and `composition` passes it the use
+cases.
+
+Knows no view, and does not import `application`, `domain` or `infrastructure`: it calls the use cases through the
+input ports of `protocol.inbound`, as an entry point does. It may use the state of the UI framework (React's
+hooks), but draws nothing. A decision another entry point (the command line, another UI) would need too belongs in
+`application`; one only this screen has belongs here."""
+# The models over the data they hand out
+ordered = true
+
+[[layer.level]]
+name = "models"
+imports = ["protocol.inbound"]
+role = """
+One model per screen, or per part of a screen that holds state: the values being typed, what is shown as invalid,
+whether a request is under way, the error to show, where to go next. Each calls the input ports of
+`protocol.inbound` it is given, and turns what they return into the values of `display`."""
+
+[[layer.level]]
+name = "display"
+imports = []
+role = """
+The plain data the models hand to the view: the shape of a screen's state and of the actions it takes, and values
+formatted for showing. No behaviour, and nothing else of the project: it is all the parts of the UI below the
+screens know."""
 
 [[layer]]
 name = "infrastructure"
