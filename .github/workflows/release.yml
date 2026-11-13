@@ -255,15 +255,19 @@ jobs:
         with:
           name: release
           path: release
+      # A version PyPI has already is passed over, so a run that failed after PyPI took the wheels (the npm job, at
+      # 1.0.0-rc.3) can be made again on the same tag and reach the registries and the release it did not
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: release/dist
+          skip-existing: true
 
   # Trusted Publishing, as for PyPI: each of the three packages on npm trusts this repository, this workflow and the
   # environment, and npm adds the provenance, which needs the repository.url of each package.json to be this
-  # repository's. The platform packages go first, so the package rotproof never names a version npm lacks
+  # repository's. The platform packages go first, so the package rotproof never names a version npm lacks. Without a
+  # tag it runs with --dry-run, so a publish npm would refuse fails before the tag: at 1.0.0-rc.3 it read a path as a
+  # GitHub repository, found only once the tag ran
   npm:
-    if: github.ref_type == 'tag'
     needs: [package, npm-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -284,18 +288,21 @@ jobs:
       - name: Publish
         # A version with a pre-release part (1.0.0-rc.1) goes under the dist-tag next, so latest stays a release. A
         # package npm has at this version already is passed over, so a run that failed after publishing some of them
-        # (one package's Trusted Publishing set wrongly) can be run again once the setting is fixed
+        # (one package's Trusted Publishing set wrongly) can be run again once the setting is fixed. Each path starts
+        # with ./, as npm reads npm/<name>.tgz as the GitHub repository npm/<name>.tgz
         run: |
           shopt -s extglob
           tag=latest
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then tag=next; fi
-          for package in npm/rotproof-!([0-9]*).tgz npm/rotproof-[0-9]*.tgz; do
+          dry=()
+          if [ "$GITHUB_REF_TYPE" != tag ]; then dry=(--dry-run); fi
+          for package in ./npm/rotproof-!([0-9]*).tgz ./npm/rotproof-[0-9]*.tgz; do
             spec=$(tar -xOzf "$package" package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); `${p.name}@${p.version}`')
             if [ -n "$(npm view "$spec" version 2>/dev/null)" ]; then
               echo "$spec is on npm already"
               continue
             fi
-            npm publish "$package" --access public --tag "$tag"
+            npm publish "$package" --access public --tag "$tag" "${dry[@]}"
           done
 
   # Made last, once both registries took the version: a release cannot be changed once published, and the CI of a
