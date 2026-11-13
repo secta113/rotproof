@@ -45,7 +45,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/infrastructure/src/inbound/` | Content |
 |---|---|
 | `mod.rs` | The level's role |
-| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof time-hook`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here. `rotproof before` and `rotproof stop-hook`, hidden, only say that they do nothing since 1.0 |
+| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here. `rotproof before`, `rotproof stop-hook` and `rotproof time-hook`, hidden, only say that they do nothing since 1.0 |
 
 | Module of `crates/infrastructure/src/outbound/` | Content |
 |---|---|
@@ -86,8 +86,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `layers.rs` | The layer definitions in `layers/`, what a project's `.config/rotproof.toml` says, and the fields `rotproof create` adds to it |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust), judged once the comments of a file are read |
-| `hook.rs` | The settings file that `rotproof create` writes for Claude Code (the time hook, and the rule that denies editing the approvals file), and the commands of the stop hook Rotproof wrote before 1.0, which `rotproof init` takes out |
-| `time_hook.rs` | What `rotproof time-hook` answers when a session starts or the person sends a prompt: the time now, for the agent to write days and times into the records from |
+| `hook.rs` | The settings file that `rotproof create` writes for Claude Code (the rule that denies editing the approvals file), and the commands of the stop hook and the time hook Rotproof wrote before, which `rotproof init` takes out |
 | `project.rs` | The files Rotproof writes outside `docs/`: the guide `.rotproof/AGENTS.md`, and the project's files, once |
 | `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way, judged from the paths it names and the code files of the directories it lists |
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |

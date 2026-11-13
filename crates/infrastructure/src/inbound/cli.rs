@@ -1,7 +1,7 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index`, `rotproof follows` and `rotproof time-hook`, and the
-//! help that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it
-//! prints and how it exits are decided here. `rotproof before` and `rotproof stop-hook`, hidden, only say that they do
+//! person on the terminal), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from
+//! one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and how it exits are
+//! decided here. `rotproof before`, `rotproof stop-hook` and `rotproof time-hook`, hidden, only say that they do
 //! nothing since 1.0, and call no port.
 
 use std::io::{IsTerminal, Read, Write};
@@ -30,8 +30,7 @@ Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it
 The rules Rotproof keeps are in .rotproof/AGENTS.md once `rotproof create` has run; `rotproof guide --stack <stack>`
 prints them before. `rotproof <command> --help` says what a command reads, writes and never does.
 
-Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken, or
-`rotproof time-hook` fails (it reads no --root; a wrong command line that names a hook fails with 1 too); 2 when there is no
+Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2 when there is no
 .config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
 its --root is not a directory, `rotproof create` would make layers
 without --yes, `rotproof init` leaves an update of the project's files to a person,
@@ -101,8 +100,8 @@ enum Command {
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, docs/knowledge/, docs/log.md, and
     /// the project's files
-    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the time hook and
-    /// the rule that denies editing the approvals file,
+    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the rule that denies
+    /// editing the approvals file,
     /// a CI workflow that installs the pinned Rotproof (from PyPI with requirements-dev.txt for python, from npm with
     /// the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
@@ -220,14 +219,14 @@ enum Command {
     /// A command line that is wrong exits 1, never 2, as Claude Code takes 2 for "do not stop".
     #[command(hide = true)]
     StopHook,
-    /// Run as Claude Code's SessionStart and UserPromptSubmit hook: tell the agent the time now. Reads the hook input
-    /// on stdin
+    /// Does nothing since 1.0.0-rc.4: says so to the person when Claude Code runs it as the time hook Rotproof wrote
     ///
-    /// Not run by hand: `rotproof create` writes the .claude/settings.json that runs it. An agent has no clock, and a
-    /// day it writes into docs/ from a guess runs ahead of the clock, which `rotproof check` fails on; this
-    /// gives it the time on every prompt and at the start of every session, to write from. It reads no --root, so one
-    /// that is not a directory changes nothing. Exits 1, never 2, when it fails (a command line that is wrong among the
-    /// failures), so a broken hook never blocks the prompt.
+    /// Until 1.0.0-rc.3 it told the agent the time on every prompt and at the start of every session. Records hold a
+    /// day now, and Claude Code gives the agent the day itself. `rotproof init` takes it out of the project's
+    /// .claude/settings.json (the update claude-remove-time-hook). Until then it reads the hook input on stdin, prints
+    /// a systemMessage at the start of a session and nothing on a prompt, and exits 0 on any input. A command line
+    /// that is wrong exits 1, never 2, as Claude Code takes 2 for "block the prompt".
+    #[command(hide = true)]
     TimeHook,
 }
 
@@ -254,7 +253,7 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         return stop_hook();
     }
     if let Command::TimeHook = cli.command {
-        return time_hook(commands);
+        return time_hook();
     }
     // Whatever its root: it reads none
     if let Command::Before { .. } = cli.command {
@@ -494,25 +493,27 @@ fn stop_hook() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Answer the agent's time hook. An error exits 1, never 2: Claude Code takes exit code 2 from it for "block the
-/// prompt", and a broken hook would keep the person's prompt from the agent instead of being shown. It reads no root,
-/// so --root, whatever it names, changes nothing here.
-fn time_hook(commands: &dyn Commands) -> ExitCode {
+/// What `rotproof time-hook` says at the start of a session, as the JSON Claude Code reads from a hook: a
+/// `systemMessage`, shown to the person. Its text holds no `"` or `\`, so it is JSON as written.
+const TIME_HOOK_REMOVED: &str = "{\"systemMessage\": \"rotproof time-hook does nothing since Rotproof 1.0: records \
+    hold a day now, and Claude Code gives the agent the day itself. In a project, run `rotproof init`, which takes \
+    this hook out of .claude/settings.json; elsewhere, remove the SessionStart and UserPromptSubmit hooks that run \
+    rotproof time-hook from your Claude Code settings.\"}";
+
+/// Answer a time hook Rotproof wrote before 1.0.0-rc.4, which a project's settings still run: at the start of a
+/// session, say that it does nothing now; on a prompt, and on any other input, say nothing, as the notice would come
+/// back on every prompt. Exit 0 whatever the input, so a hook never blocks the prompt (Claude Code takes 2 for that) or
+/// is shown as failed. The input is read for its event and nothing else, and --root is not read.
+fn time_hook() -> ExitCode {
     let mut input = String::new();
-    let answer = std::io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|e| format!("the hook input could not be read: {e}"))
-        .and_then(|_| commands.time_hook(&input));
-    match answer {
-        Ok(out) => {
-            println!("{out}");
-            ExitCode::SUCCESS
-        }
-        Err(why) => {
-            eprintln!("rotproof time-hook: {why}");
-            ExitCode::FAILURE
-        }
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let event = serde_json::from_str::<serde_json::Value>(&input)
+        .ok()
+        .and_then(|input| input["hook_event_name"].as_str().map(str::to_string));
+    if event.as_deref() == Some("SessionStart") {
+        println!("{TIME_HOOK_REMOVED}");
     }
+    ExitCode::SUCCESS
 }
 
 /// Ask a person on the terminal to approve the forbidden import of `import` by `file`, and add the entry. Every answer

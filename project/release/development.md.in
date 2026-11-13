@@ -11,5 +11,3 @@ gh release download v{version} --repo secta113/rotproof --pattern '*-x86_64-unkn
 sha256sum --check --ignore-missing SHA256SUMS
 rotproof check
 ```
-
-Your agent's hooks run `rotproof time-hook`, which has to be on the `PATH` they run with.
