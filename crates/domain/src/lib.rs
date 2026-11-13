@@ -24,6 +24,7 @@ pub mod rust;
 pub mod schema;
 pub mod sentence;
 pub mod structure;
+pub mod suppressions;
 pub mod text;
 pub mod tree;
 pub mod upgrade;

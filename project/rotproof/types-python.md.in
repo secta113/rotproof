@@ -1,0 +1,5 @@
+- **Never switch the type checker off in a comment.** `rotproof check` fails on `# type: ignore`, on
+  `# mypy: ignore`, `# pyright: ignore`, `# pyrefly: ignore` and `# ty: ignore`, and on `ignore-errors`, with or
+  without codes, in any code file outside `unchecked`. It warns of any other comment of those checkers that may make
+  one check less (`# pyright: basic`, `# mypy: allow-untyped-defs`), and fails nothing for it. Fix the type instead:
+  data from outside becomes a validated type where it comes in.

@@ -41,6 +41,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
         .collect();
     let mut layers_checked = false;
     let mut approved = Vec::new();
+    let mut weakened = Vec::new();
     if let Some(declared) = &structure.declared {
         layers_checked = declared.layout.is_some();
         let direction = crate::direction::problems(tree, parsers, declared)?;
@@ -73,7 +74,8 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
             .collect();
         approved.sort();
         approved.dedup();
-        let markers = crate::markers::problems(tree, parsers, declared)?;
+        let comments = crate::markers::problems(tree, parsers, declared)?;
+        let markers = comments.markers;
         let heading = markers.heading();
         findings.extend(markers.found.into_iter().map(|detail| Finding {
             check: heading.clone().into(),
@@ -83,6 +85,11 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
             check: domain::markers::KNOWLEDGE_HEADING.into(),
             detail,
         }));
+        findings.extend(comments.silenced.into_iter().map(|detail| Finding {
+            check: domain::suppressions::HEADING.into(),
+            detail,
+        }));
+        weakened = comments.weakened;
         findings.extend(
             domain::upgrade::problems(
                 declared.declaration.files.as_deref(),
@@ -121,6 +128,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
         layers_checked,
         approved,
         due,
+        weakened,
     })
 }
 

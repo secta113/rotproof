@@ -25,6 +25,8 @@ pub const GUIDE: &str = ".rotproof/AGENTS.md";
 const GUIDE_TEXT: &str = include_str!("../../../project/rotproof/AGENTS.md.in");
 const LAYERS_TEXT: &str = include_str!("../../../project/rotproof/layers.md.in");
 const UI_TEXT: &str = include_str!("../../../project/rotproof/ui.md.in");
+const TYPES_PYTHON: &str = include_str!("../../../project/rotproof/types-python.md.in");
+const TYPES_TYPESCRIPT: &str = include_str!("../../../project/rotproof/types-typescript.md.in");
 /// How the direction is read: the imports of a source file, or the dependencies of a crate
 const DIRECTION_IMPORTS: &str = include_str!("../../../project/rotproof/direction-imports.md.in");
 const DIRECTION_CARGO: &str = include_str!("../../../project/rotproof/direction-cargo.md.in");
@@ -301,8 +303,15 @@ fn layers_section(layout: &Layout) -> String {
         Language::Python | Language::TypeScript => DIRECTION_IMPORTS,
         Language::Rust => DIRECTION_CARGO,
     };
+    // Rust's compiler has no comment that switches it off
+    let types = match layout.language {
+        Language::Python => TYPES_PYTHON,
+        Language::TypeScript => TYPES_TYPESCRIPT,
+        Language::Rust => "",
+    };
     LAYERS_TEXT
         .replace("{direction}\n", direction)
+        .replace("{types}", types)
         .replace("{not_layers}", &not_layers)
         .replace("{table}", &format!("{}\n", rows.join("\n")))
         .replace("{ui}", &ui)

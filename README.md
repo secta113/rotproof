@@ -515,6 +515,17 @@ changed is in the commits, what was measured and decided along the way in the ta
   to `docs/knowledge/`, tied to the code by `follows`. A line that holds both is named under the first heading alone,
   as taking the comment out settles both. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
   strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
+- **No comment switches the type checker off**, in the comments the marker check reads: in Python, `# type: ignore`
+  and `# mypy: ignore`, `# pyright: ignore`, `# pyrefly: ignore` or `# ty: ignore`, with or without codes, and the
+  file-level `ignore-errors` of mypy and Pyrefly, also after another comment (`# noqa  # type: ignore`); in
+  TypeScript, `@ts-ignore` and `@ts-expect-error` where the compiler reads them, at the start of a `//` comment or of
+  the last line of a `/* */` comment, and `@ts-nocheck` at the start of a `//` comment; as the compiler does, the start
+  of the name counts (`@ts-ignored` silences it too). Data from outside becomes a validated type where it comes in, and a comment that hides the
+  checker's error hides where that is missing. Lint suppressions (`eslint-disable`, `# noqa`) are not read. Any other
+  comment of those four checkers is a warning, which fails nothing, unless every option in it only makes the checker
+  stricter: `strict` and `report<Rule>=error` for Pyright, and an option that starts with `disallow-`, `warn-`,
+  `strict-` or `enable-error-code` for mypy (`# pyright: basic` and `# mypy: allow-untyped-defs` warn). Rust has no
+  such comment.
 
 - **The bundle is there:** `docs/knowledge/`, `docs/index.md` and `docs/knowledge/rules.md` exist, and the declaration
   with its `areas` can be read. Without them every other check would pass with nothing checked.

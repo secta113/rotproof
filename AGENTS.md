@@ -86,6 +86,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `layers.rs` | The layer definitions in `layers/`, what a project's `.config/rotproof.toml` says, and the fields `rotproof create` adds to it |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust), judged once the comments of a file are read |
+| `suppressions.rs` | The suppression check: no comment switches the type checker off (`# type: ignore`, `# <checker>: ignore` and `ignore-errors` in Python, `@ts-ignore`, `@ts-expect-error` and `@ts-nocheck` in TypeScript), and a warning for a comment that may make a Python checker check less, judged once the comments of a file are read |
 | `hook.rs` | The settings file that `rotproof create` writes for Claude Code (the rule that denies editing the approvals file), and the commands of the stop hook and the time hook Rotproof wrote before, which `rotproof init` takes out |
 | `project.rs` | The files Rotproof writes outside `docs/`: the guide `.rotproof/AGENTS.md`, and the project's files, once |
 | `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way, judged from the paths it names and the code files of the directories it lists |
@@ -114,7 +115,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
 | `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, the re-pin of `rotproof approve --reviewed`, and the pin of `rotproof follows` |
-| `markers.rs` | The marker check, read from the tree: every code file walked, and its comments read by the reader of its language |
+| `markers.rs` | The checks of the comments, read from the tree: every code file walked, and its comments read by the reader of its language, for the marker check and the suppression check |
 | `index.rs` | `rotproof index`: every index file written from the frontmatter |
 | `init.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |

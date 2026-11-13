@@ -80,6 +80,9 @@ pub struct Report {
     /// Every knowledge document whose `stale_after` has come, with what to do: a warning on every run, which fails
     /// nothing
     pub due: Vec<String>,
+    /// Every comment that may make the type checker check less (`# pyright: basic`), as `path:line` and the line
+    /// under it: a warning on every run, which fails nothing
+    pub weakened: Vec<String>,
 }
 
 /// What `rotproof index` did.

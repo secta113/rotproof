@@ -1,0 +1,3 @@
+- **Never switch the type checker off in a comment.** `rotproof check` fails on `@ts-ignore`, `@ts-expect-error`
+  and `@ts-nocheck` in any source file in `src/` outside `unchecked`, tests included. Fix the type instead: data from
+  outside becomes a validated type where it comes in.
