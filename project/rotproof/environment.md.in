@@ -1,0 +1,4 @@
+- **Only `infrastructure` reads or writes the environment variables.** The environment is input from outside, as
+  unchecked as a request: read it in `infrastructure` into a settings type that validates it, and let `composition`
+  pass that on. `rotproof check` fails on {reads} in the code of every other layer and in the entry file, through an
+  alias too.

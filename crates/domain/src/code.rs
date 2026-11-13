@@ -25,6 +25,9 @@ pub struct Source<I> {
     /// Every comment: its byte offset in the source, and its text with its delimiters. A reader reads comments past a
     /// syntax error too
     pub comments: Vec<(usize, String)>,
+    /// Every read or write of the environment variables the reader sees (`environment.rs`): the line (from 1), and
+    /// what it names (`os.environ`, `process.env`)
+    pub environment: Vec<(usize, String)>,
     /// The first syntax error, if any: its line and what the parser says. The parser recovers, but what follows may be
     /// misread
     pub error: Option<(usize, String)>,
@@ -35,6 +38,7 @@ impl<I> Default for Source<I> {
         Source {
             imports: Vec::new(),
             comments: Vec::new(),
+            environment: Vec::new(),
             error: None,
         }
     }

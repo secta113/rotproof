@@ -11,6 +11,7 @@ pub mod code;
 pub mod commands;
 pub mod create;
 pub mod direction;
+pub mod environment;
 pub mod follows;
 pub mod index;
 pub mod init;

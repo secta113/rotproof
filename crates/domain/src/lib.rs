@@ -9,6 +9,7 @@ pub mod bundle;
 pub mod code;
 pub mod definitions;
 pub mod direction;
+pub mod environment;
 pub mod follows;
 pub mod frontmatter;
 pub mod hook;

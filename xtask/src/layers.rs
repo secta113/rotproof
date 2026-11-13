@@ -110,6 +110,12 @@ pub fn problems(root: &Path) -> Result<Vec<String>, String> {
             .chain(direction.forbidden.into_iter().map(|f| f.detail))
             .map(|why| format!("direction: {why}")),
     );
+    found.extend(
+        application::environment::problems(&tree, &Readers, &declared)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|why| format!("environment: {}", why.replace('\n', "\n    "))),
+    );
     // Rust has no comment that switches the type checker off, so the markers alone are read here
     let mut markers = application::markers::problems(&tree, &Readers, &declared)
         .map_err(|e| e.to_string())?

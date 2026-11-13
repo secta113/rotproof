@@ -159,6 +159,48 @@ fn path_tree(
     }
 }
 
+/// Every item of the module at `module` (`["std", "env"]`) the code alone ([`code`]) names, with the offset where the
+/// path starts, in order: by its whole path (`std::env::var`), in a `use` (`use std::env::var`, `use std::env::{self,
+/// var}`), and through the module's last name once a `use` binds it (`use std::env;` or `use std::{env, fs}`, then
+/// `env::var`). A rename (`use std::env as e`) and a path from `::` are not followed, as [`paths`] drops them.
+pub fn items(code: &str, module: &[&str]) -> Vec<(usize, String)> {
+    let (Some(first), Some(last)) = (module.first(), module.last()) else {
+        return Vec::new();
+    };
+    let item = |segments: &[String], prefix: &[&str]| match segments.split_last() {
+        Some((name, rest)) if rest.iter().map(String::as_str).eq(prefix.iter().copied()) => {
+            Some(name.clone())
+        }
+        _ => None,
+    };
+    let mut found = Vec::new();
+    let mut binds = false;
+    for (at, segments) in paths(code, &[first]) {
+        if segments
+            .iter()
+            .map(String::as_str)
+            .eq(module.iter().copied())
+        {
+            binds = true;
+        } else if let Some(name) = item(&segments, module) {
+            if name == "self" {
+                binds = true;
+            } else {
+                found.push((at, name));
+            }
+        }
+    }
+    if binds {
+        found.extend(
+            paths(code, &[last])
+                .into_iter()
+                .filter_map(|(at, segments)| item(&segments, &[last]).map(|name| (at, name))),
+        );
+    }
+    found.sort();
+    found
+}
+
 /// Every module the code alone ([`code`]) declares with a body (`mod tests { ... }`): its name, and the offsets of its
 /// opening and closing braces. One left open runs to the end.
 pub fn inline_modules(code: &str) -> Vec<(String, usize, usize)> {
@@ -379,6 +421,33 @@ fn raw_string_end(b: &[u8], mut i: usize, hashes: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_items_of_a_module_are_named_by_path_and_through_use() {
+        let named = code(
+            "\
+fn a() { std::env::var(\"A\"); }
+use std::env;
+fn b() { env::args(); }
+use std::env::{self as _, vars};
+mod m { pub fn x() {} }
+fn c() { m::x(); std::fs::read(\"f\"); }
+",
+        );
+        let names: Vec<String> = items(&named, &["std", "env"])
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect();
+        assert_eq!(names, ["var", "args", "vars"]);
+        // Without a `use` of the module, its last name is the file's own
+        assert!(
+            items(
+                &code("mod env { pub fn var() {} }\nfn a() { env::var(); }\n"),
+                &["std", "env"]
+            )
+            .is_empty()
+        );
+    }
 
     fn texts(source: &str) -> Vec<String> {
         comments(source).into_iter().map(|(_, text)| text).collect()

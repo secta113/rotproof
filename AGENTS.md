@@ -50,8 +50,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/infrastructure/src/outbound/` | Content |
 |---|---|
 | `mod.rs` | The level's role, and `Local`: the `Machine` Rotproof runs on, from the modules below and the local clock |
-| `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, the functions and classes a file defines, and the outline of a file (every function and class with its names and range) |
-| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, the outline of a file (a function, class, interface, type, enum or namespace, a variable, and their members, each with its names and range), and the aliases of the `tsconfig*.json` files |
+| `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, the reads of the environment, the functions and classes a file defines, and the outline of a file (every function and class with its names and range) |
+| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, the reads of the environment, the outline of a file (a function, class, interface, type, enum or namespace, a variable, and their members, each with its names and range), and the aliases of the `tsconfig*.json` files |
 | `cargo.rs` | Reading a crate's `Cargo.toml` with toml_edit: the dependencies it declares on a path or its workspace, and its workspace |
 | `readers.rs` | `Parsers` with the readers above |
 | `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, the project's name, and the project a directory sits in |
@@ -86,6 +86,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `layers.rs` | The layer definitions in `layers/`, what a project's `.config/rotproof.toml` says, and the fields `rotproof create` adds to it |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust), judged once the comments of a file are read |
+| `environment.rs` | The environment check: only `infrastructure` reads or writes the environment variables (the names of Python's `os`, TypeScript's `process.env` and `import.meta.env`, the functions of Rust's `std::env`), the code of every other layer and the entry file judged, and the reads of a Rust file found by the scanner |
 | `suppressions.rs` | The suppression check: no comment switches the type checker off (`# type: ignore`, `# <checker>: ignore` and `ignore-errors` in Python, `@ts-ignore`, `@ts-expect-error` and `@ts-nocheck` in TypeScript), and a warning for a comment that may make a Python checker check less, judged once the comments of a file are read |
 | `hook.rs` | The settings file that `rotproof create` writes for Claude Code (the rule that denies editing the approvals file), and the commands of the stop hook and the time hook Rotproof wrote before, which `rotproof init` takes out |
 | `project.rs` | The files Rotproof writes outside `docs/`: the guide `.rotproof/AGENTS.md`, and the project's files, once |
@@ -93,7 +94,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
 | `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
 | `sentence.rs` | The first sentence of a paragraph, as the index shows it: the paragraph read as markdown reads it, in any language, with no sentence ending inside parentheses or inline code |
-| `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals, the code alone with both blanked, and its tokens, the paths it names, its modules with a body and its attributes, and, in `rust/`, its outline |
+| `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals, the code alone with both blanked, and its tokens, the paths it names, the items of a module it names through its `use`, its modules with a body and its attributes, and, in `rust/`, its outline |
 | `paths.rs` | Paths from the root with `/`: the parent, the name, a join, without `.` and `..`, whether one sits in another, and the paths in messages |
 | `text.rs` | The line at a position in a text, for messages |
 
@@ -115,6 +116,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
 | `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, the re-pin of `rotproof approve --reviewed`, and the pin of `rotproof follows` |
+| `environment.rs` | The environment check, read from the tree: the code of every layer but `infrastructure`, and the entry file, read by the reader of its language |
 | `markers.rs` | The checks of the comments, read from the tree: every code file walked, and its comments read by the reader of its language, for the marker check and the suppression check |
 | `index.rs` | `rotproof index`: every index file written from the frontmatter |
 | `init.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version |

@@ -85,6 +85,14 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
             check: domain::markers::KNOWLEDGE_HEADING.into(),
             detail,
         }));
+        findings.extend(
+            crate::environment::problems(tree, parsers, declared)?
+                .into_iter()
+                .map(|detail| Finding {
+                    check: domain::environment::HEADING.into(),
+                    detail,
+                }),
+        );
         findings.extend(comments.silenced.into_iter().map(|detail| Finding {
             check: domain::suppressions::HEADING.into(),
             detail,
