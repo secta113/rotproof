@@ -5,6 +5,7 @@
 //!
 //! Each check has a floor: when the scan finds nothing at all, it fails instead of passing with nothing checked.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io;
 
@@ -14,8 +15,9 @@ use crate::links::broken;
 use crate::tree::{exactly, read_text};
 use domain::approvals::{shown, sort, stale};
 use domain::bundle::{DOCS, Docs, in_docs, is_document};
-use domain::layers::{DECLARATION, INIT_OR_CREATE, area_problems};
+use domain::layers::{DECLARATION, Declared, INIT_OR_CREATE, area_problems};
 use domain::markdown::links;
+use domain::markers::KNOWLEDGE_HEADING;
 use domain::paths::join;
 use domain::project::GUIDE;
 use domain::records::{KNOWLEDGE, floor, log_days_to_come, log_problems, unread_paths};
@@ -31,113 +33,116 @@ const NOT_COME: &str = "no day in the log is later than today";
 /// Every broken rule in the repository `tree` holds, at `now`. An error is a file that could not be read at all.
 pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Report> {
     let structure = crate::structure::problems(tree)?;
-    let mut findings: Vec<Finding> = structure
-        .found
-        .into_iter()
-        .map(|detail| Finding {
-            check: "the tree matches .config/rotproof.toml".into(),
-            detail,
-        })
-        .collect();
-    let mut layers_checked = false;
-    let mut approved = Vec::new();
-    let mut weakened = Vec::new();
-    if let Some(declared) = &structure.declared {
-        layers_checked = declared.layout.is_some();
-        let direction = crate::direction::problems(tree, parsers, declared)?;
-        let approvals = crate::approvals::read(tree)?;
-        let sorted = sort(&direction.forbidden, &approvals.entries);
-        findings.extend(
-            direction
-                .problems
-                .into_iter()
-                .chain(sorted.forbidden.iter().map(|f| f.detail.clone()))
-                .map(|detail| Finding {
-                    check: "the layers import only what layers/table.toml allows".into(),
-                    detail,
-                }),
-        );
-        findings.extend(
-            approvals
-                .problems
-                .into_iter()
-                .chain(sorted.stale.iter().map(|entry| stale(entry)))
-                .map(|detail| Finding {
-                    check: "every approval matches a forbidden import".into(),
-                    detail,
-                }),
-        );
-        approved = sorted
-            .approved
-            .iter()
-            .map(|(_, entry)| shown(entry))
-            .collect();
-        approved.sort();
-        approved.dedup();
-        let comments = crate::markers::problems(tree, parsers, declared)?;
-        let markers = comments.markers;
-        let heading = markers.heading();
-        findings.extend(markers.found.into_iter().map(|detail| Finding {
-            check: heading.clone().into(),
-            detail,
-        }));
-        findings.extend(markers.knowledge.into_iter().map(|detail| Finding {
-            check: domain::markers::KNOWLEDGE_HEADING.into(),
-            detail,
-        }));
-        findings.extend(
-            crate::environment::problems(tree, parsers, declared)?
-                .into_iter()
-                .map(|detail| Finding {
-                    check: domain::environment::HEADING.into(),
-                    detail,
-                }),
-        );
-        findings.extend(comments.silenced.into_iter().map(|detail| Finding {
-            check: domain::suppressions::HEADING.into(),
-            detail,
-        }));
-        weakened = comments.weakened;
-        findings.extend(
-            domain::upgrade::problems(
-                declared.declaration.files.as_deref(),
-                &declared.declaration.declined,
-                VERSION,
-            )
-            .into_iter()
-            .map(|detail| Finding {
-                check: "the project's files are up to this version of Rotproof".into(),
-                detail,
-            }),
-        );
-        let guide = domain::project::guide(&declared.declaration.stack, declared.layout.as_ref());
-        let found = exactly(tree, GUIDE)
-            .ok()
-            .and_then(|(path, _)| read_text(tree, &path).ok());
-        if found.as_ref() != Some(&guide) {
-            findings.push(Finding {
-                check: "Rotproof's guide is up to date".into(),
-                detail: format!(
-                    "{}, {INIT_OR_CREATE}: {GUIDE}",
-                    if found.is_some() {
-                        "out of date"
-                    } else {
-                        "missing"
-                    }
-                ),
-            });
-        }
-    }
-    let mut due = Vec::new();
-    findings.extend(records(tree, parsers, structure.areas, now, &mut due)?);
-    Ok(Report {
-        findings,
+    let mut report = Report {
         skipped: structure.skipped,
-        layers_checked,
-        approved,
-        due,
-        weakened,
+        ..Report::default()
+    };
+    report.findings.extend(under(
+        "the tree matches .config/rotproof.toml",
+        structure.found,
+    ));
+    if let Some(declared) = &structure.declared {
+        report.layers_checked = declared.layout.is_some();
+        code(tree, parsers, declared, &mut report)?;
+        report.findings.extend(rotproof_files(tree, declared));
+    }
+    let records = records(tree, parsers, structure.areas, now, &mut report.due)?;
+    report.findings.extend(records);
+    Ok(report)
+}
+
+/// Each of `details` as a finding printed under `check`.
+fn under(
+    check: impl Into<Cow<'static, str>>,
+    details: impl IntoIterator<Item = String>,
+) -> impl Iterator<Item = Finding> {
+    let check = check.into();
+    details.into_iter().map(move |detail| Finding {
+        check: check.clone(),
+        detail,
     })
+}
+
+/// Every broken rule of the code of `declared`, into `report`: the direction with its approvals, the markers, who
+/// reads the environment, and the comments that switch the type checker off. The approvals and the comments that may
+/// make the checker check less go in `report` too, as they are printed apart from what fails.
+fn code(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    declared: &Declared,
+    report: &mut Report,
+) -> io::Result<()> {
+    let direction = crate::direction::problems(tree, parsers, declared)?;
+    let approvals = crate::approvals::read(tree)?;
+    let sorted = sort(&direction.forbidden, &approvals.entries);
+    report.findings.extend(under(
+        "the layers import only what layers/table.toml allows",
+        direction
+            .problems
+            .into_iter()
+            .chain(sorted.forbidden.iter().map(|f| f.detail.clone())),
+    ));
+    report.findings.extend(under(
+        "every approval matches a forbidden import",
+        approvals
+            .problems
+            .into_iter()
+            .chain(sorted.stale.iter().map(|entry| stale(entry))),
+    ));
+    report.approved = sorted
+        .approved
+        .iter()
+        .map(|(_, entry)| shown(entry))
+        .collect();
+    report.approved.sort();
+    report.approved.dedup();
+    let comments = crate::markers::problems(tree, parsers, declared)?;
+    let markers = comments.markers;
+    report
+        .findings
+        .extend(under(markers.heading(), markers.found));
+    report
+        .findings
+        .extend(under(KNOWLEDGE_HEADING, markers.knowledge));
+    report.findings.extend(under(
+        domain::environment::HEADING,
+        crate::environment::problems(tree, parsers, declared)?,
+    ));
+    report
+        .findings
+        .extend(under(domain::suppressions::HEADING, comments.silenced));
+    report.weakened = comments.weakened;
+    Ok(())
+}
+
+/// Every broken rule of the files Rotproof writes into the project of `declared`: they are up to this version
+/// (`files` in the declaration), and the guide is the one this version writes.
+fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
+    let mut found: Vec<Finding> = under(
+        "the project's files are up to this version of Rotproof",
+        domain::upgrade::problems(
+            declared.declaration.files.as_deref(),
+            &declared.declaration.declined,
+            VERSION,
+        ),
+    )
+    .collect();
+    let guide = domain::project::guide(&declared.declaration.stack, declared.layout.as_ref());
+    let written = exactly(tree, GUIDE)
+        .ok()
+        .and_then(|(path, _)| read_text(tree, &path).ok());
+    if written.as_ref() != Some(&guide) {
+        let state = if written.is_some() {
+            "out of date"
+        } else {
+            "missing"
+        };
+        found.extend(under(
+            "Rotproof's guide is up to date",
+            [format!("{state}, {INIT_OR_CREATE}: {GUIDE}")],
+        ));
+    }
+    found
 }
 
 /// Every broken rule of the records at `now`, grouped by `areas`: `None` when the declaration cannot be read. The
@@ -150,12 +155,7 @@ fn records(
     due: &mut Vec<String>,
 ) -> io::Result<Vec<Finding>> {
     let mut found = Vec::new();
-    let mut add = |check: &'static str, details: Vec<String>| {
-        found.extend(details.into_iter().map(|detail| Finding {
-            check: check.into(),
-            detail,
-        }));
-    };
+    let mut add = |check: &'static str, details: Vec<String>| found.extend(under(check, details));
     // Every record names an area, so nothing below can be judged without them. The structure check names what is
     // wrong with the declaration; this says that the records were not checked because of it
     let areas = match areas {
