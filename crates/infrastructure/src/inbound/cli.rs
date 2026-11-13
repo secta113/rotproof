@@ -43,8 +43,8 @@ const CHECK_HELP: &str = "\
 Check the layers and the records, and exit non-zero when one breaks the rules
 
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
-layers), that each layer imports only what the layer table allows or a person approved in \
-.config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
+layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view), that each layer imports only \
+what the layer table allows or a person approved in .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
 comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that .rotproof/AGENTS.md is up to date, that every knowledge document in docs/knowledge/ keeps its \
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \

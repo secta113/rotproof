@@ -175,6 +175,18 @@ pub struct Override {
     pub files: Vec<File>,
 }
 
+/// The layers of a stack that hold no view, and what a view is written in there.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoView {
+    /// Layers of the table. One this project does not have (its UI is "none") is not judged
+    pub layers: Vec<String>,
+    /// The extensions of a file that holds a view (`tsx`), in any case
+    pub extensions: Vec<String>,
+    /// Where the view goes instead, said in the finding
+    pub goes: String,
+}
+
 /// Where the layers live in one stack.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -211,6 +223,10 @@ pub struct Layout {
     /// Where code outside the layers goes in this stack, said in the finding for it
     #[serde(default)]
     pub where_code_goes: Option<String>,
+    /// The layers where a file of a view fails, by its extension. `None` while this stack tells a view by no
+    /// extension
+    #[serde(default)]
+    pub no_view: Option<NoView>,
     /// The language Rotproof reads the code as
     pub language: Language,
     /// Files the stack's toolchain needs at the root, written once with the project's files (`project.rs`)
@@ -403,6 +419,16 @@ impl Layout {
             Some(suffix) => name.ends_with(&suffix.to_ascii_lowercase()),
             None => name == self.code.to_ascii_lowercase(),
         }
+    }
+}
+
+impl NoView {
+    /// Whether the file `path` is a view by its extension.
+    pub fn holds(&self, path: &str) -> bool {
+        let name = path.to_ascii_lowercase();
+        self.extensions
+            .iter()
+            .any(|e| name.ends_with(&format!(".{}", e.to_ascii_lowercase())))
     }
 }
 
@@ -869,7 +895,13 @@ mod tests {
         });
         for (stack, layout) in every {
             let stack = &format!("{stack} with ui {}", layout.ui);
-            for name in layout.without.iter().chain(layout.layers.keys()) {
+            let no_view = layout.no_view.iter().flat_map(|n| &n.layers);
+            for name in layout
+                .without
+                .iter()
+                .chain(layout.layers.keys())
+                .chain(no_view)
+            {
                 assert!(
                     table.layers.iter().any(|l| &l.name == name),
                     "{stack}: no layer {name}"

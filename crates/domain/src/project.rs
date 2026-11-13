@@ -279,7 +279,24 @@ fn layers_section(layout: &Layout) -> String {
             }
         )
     };
-    let ui = if has(&"ui".to_string()) { UI_TEXT } else { "" };
+    let mut ui = if has(&"ui".to_string()) { UI_TEXT } else { "" }.to_string();
+    let no_view = layout.no_view.as_ref().filter(|n| n.layers.iter().any(has));
+    if let Some(no_view) = no_view {
+        let names: Vec<String> = no_view.layers.iter().filter(|n| has(n)).cloned().collect();
+        let files: Vec<String> = no_view
+            .extensions
+            .iter()
+            .map(|e| format!("`.{e}`"))
+            .collect();
+        ui.push_str(&format!(
+            "- **{} holds no view, and `rotproof check` fails on a {} file there.** Rotproof tells a view by the \
+             extension alone, so a view written without JSX (`createElement` in a `.ts` file) passes: do not write \
+             one. To fix a finding, {}.\n",
+            listed(&names),
+            files.join(" or "),
+            no_view.goes
+        ));
+    }
     let direction = match layout.language {
         Language::Python | Language::TypeScript => DIRECTION_IMPORTS,
         Language::Rust => DIRECTION_CARGO,
@@ -288,7 +305,7 @@ fn layers_section(layout: &Layout) -> String {
         .replace("{direction}\n", direction)
         .replace("{not_layers}", &not_layers)
         .replace("{table}", &format!("{}\n", rows.join("\n")))
-        .replace("{ui}", ui)
+        .replace("{ui}", &ui)
 }
 
 #[cfg(test)]
@@ -327,6 +344,17 @@ mod tests {
             }
             assert!(text.contains(env!("CARGO_PKG_VERSION")));
         }
+    }
+
+    #[test]
+    fn the_guide_says_where_a_view_is_not_allowed_only_in_the_stack_that_checks_it() {
+        let said = "`presentation` holds no view, and `rotproof check` fails on a `.tsx` or `.jsx` file there";
+        let ts = |ui: &str| guide("typescript", layout("typescript", ui).as_ref());
+        assert!(ts("atomic").contains(said));
+        assert!(ts("atomic").contains("move the component into src/ui"));
+        assert!(!ts(NO_UI).contains("holds no view"));
+        assert!(!guide("python", layout("python", "atomic").as_ref()).contains("holds no view"));
+        assert!(!guide("rust", layout("rust", NO_UI).as_ref()).contains("holds no view"));
     }
 
     #[test]

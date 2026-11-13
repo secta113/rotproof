@@ -1339,6 +1339,62 @@ fn ui_parts_in_a_level_pass() {
     assert!(!said.contains("outside its levels"), "{said}");
 }
 
+#[test]
+fn presentation_holds_no_view_in_typescript() {
+    for planted in [
+        "src/presentation/models/Form.tsx",
+        "src/presentation/display/row.jsx",
+        // A test with a wrapper in JSX is a view all the same, and so is any case
+        "src/presentation/models/useForm.test.tsx",
+        "src/presentation/models/Form.TSX",
+    ] {
+        let root = repo_with_ui("typescript", "");
+        plant_file(root.path(), planted);
+        let out = run(&["--root", &root_arg(root.path()), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{planted}: {said}");
+        assert!(
+            said.contains(&format!(
+                "a view in presentation: {planted} (presentation holds no view, so no .tsx or .jsx file sits there: \
+                 keep what the screen holds and decides in .ts files, and move the component into src/ui ("
+            )),
+            "{planted}: {said}"
+        );
+        assert_eq!(said.matches("a view in").count(), 1, "{planted}: {said}");
+        // Removed, it passes: nothing else was wrong
+        fs::remove_file(root.path().join(planted)).unwrap();
+        let out = run(&["--root", &root_arg(root.path()), "check"]);
+        assert!(out.status.success(), "{planted} removed: {}", stdout(&out));
+    }
+
+    // What holds no view in presentation, and views elsewhere, pass; so does a project with no UI at all
+    let root = repo_with_ui("typescript", "");
+    for path in [
+        "src/presentation/models/useForm.ts",
+        "src/presentation/models/formContext.ts",
+        "src/presentation/display/row.ts",
+        "src/ui/pages/Home.tsx",
+        "src/ui/atoms/Button.jsx",
+        "src/composition/Providers.tsx",
+    ] {
+        plant_file(root.path(), path);
+    }
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // Python has no such file in its code, and a project with ui = "none" has no presentation to judge
+    let root = repo_with_ui("python", "");
+    plant_file(root.path(), "presentation/models/view.tsx");
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let root = declared("stack = \"typescript\"\nareas = [\"a\"]\nui = \"none\"\n");
+    let out = create(&["--root", &root_arg(root.path()), "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    plant_file(root.path(), "src/presentation/Form.tsx");
+    let said = stdout(&run(&["--root", &root_arg(root.path()), "check"]));
+    assert!(!said.contains("a view in"), "{said}");
+}
+
 /// Every place of the Python layout, in the order of the grid below.
 const PLACES: [&str; 18] = [
     "composition",
