@@ -7,7 +7,4 @@ npm install -D -E rotproof@{version}
 npx --no -- rotproof check
 ```
 
-npm installs the binary for your platform with it (Windows x64 or Linux x64). Your agent's hooks run
-`rotproof time-hook`, which has to be on the `PATH` they run with: `node_modules/.bin` is not, so install the same
-version there too (`npm install -g rotproof@{version}`), or put `node_modules/.bin` on the `PATH` your agent starts
-with.
+npm installs the binary for your platform with it (Windows x64 or Linux x64).

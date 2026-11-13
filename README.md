@@ -25,8 +25,8 @@ two structures:
   (see "Upgrading Rotproof"), and the files Rotproof generates, which nobody writes by hand. A field the declaration
   lacks takes its first value from the tree, once (`areas` gets the tags the knowledge documents use, so the documents
   that kept the rules keep them); from then on a document with a tag the declaration does not list fails. An update of
-  `.claude/settings.json` keeps its keys, their order and their values (it takes out only the stop hook Rotproof wrote
-  before 1.0, matched exactly), but writes the whole file again in Rotproof's layout (two spaces of indentation),
+  `.claude/settings.json` keeps its keys, their order and their values (it takes out only the stop hook and the time hook
+  Rotproof wrote, matched exactly), but writes the whole file again in Rotproof's layout (two spaces of indentation),
   keeping its line endings and byte order mark. These change what a person wrote, each in a command run for that.
   Rotproof never moves or rewrites a record: from 1.0 it reads no records of work, and those of an older project stay
   where they are, as they are. Once a knowledge
@@ -104,7 +104,6 @@ rotproof --root <repository> approve --prune  # remove the approvals that match 
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
-rotproof time-hook                   # run by Claude Code on each prompt, to tell the agent the time (see "The time hook")
 ```
 
 `--root` defaults to the current directory. The declaration is read from `<repository>/.config/rotproof.toml`, and the
@@ -151,7 +150,7 @@ The project's files are written once, as a starting point, and are the project's
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
-| `.claude/settings.json` | The time hook (see "The time hook"), and the rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
+| `.claude/settings.json` | The rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit. `typescript`: installs what `package.json` and its lockfile pin (`npm ci`) and runs `npx --no -- rotproof check`, which never downloads another Rotproof, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
@@ -206,8 +205,9 @@ that has a declaration:
 |---|---|---|---|
 | `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
 | `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above. Not applied in an upgrade that also crosses `claude-remove-stop-hook`, which would take it out again |
-| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit` (see "The time hook"), each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above |
-| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, and `Stop` when no group is left (see "The time hook"). Written again as above: an untouched file ends as `rotproof create` writes it now |
+| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit`, each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above. Not applied in an upgrade that also crosses `claude-remove-time-hook`, which would take it out again |
+| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above: an untouched file ends as `rotproof create` writes it now |
+| `claude-remove-time-hook` | 1.0.0-rc.4 | `.claude/settings.json` | Takes out each hook on `SessionStart` and `UserPromptSubmit` whose command is exactly `rotproof time-hook`, a group left with no hook, an event left with no group, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). A hook with another command that runs it, such as a path to the binary, stays. Written again as above: an untouched file ends as `rotproof create` writes it now |
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
@@ -225,34 +225,26 @@ in `CLAUDE.md` for Claude Code:
 @.rotproof/AGENTS.md
 ```
 
-## The time hook
+## The hooks Rotproof no longer writes
 
-An agent has no clock of its own. It writes the days in the records from what it was last told, and a guess runs ahead
-of the clock: `rotproof check` fails on a day that has not come (see "What `rotproof check` checks").
-`rotproof time-hook` is [Claude Code's](https://code.claude.com/docs/en/hooks) `SessionStart` and `UserPromptSubmit`
-hook: at the start of every session (a resumed or a compacted one too) and on every prompt, it gives the agent the
-time now, as `additionalContext`, to write from. Within a long turn the time goes on, so it says to read the clock for
-a later one. `rotproof create` writes it into `.claude/settings.json`; a project made before 0.4.0 gets it from
-`rotproof init` (the update `claude-time-hook`). A project that has its own settings adds it:
+Until 1.0.0-rc.3, Rotproof wrote two hooks into `.claude/settings.json`, for Claude Code. Neither is written now, and
+`rotproof init` takes each out of a project's settings. Each command stays, hidden, for a project whose settings still
+run it: it reads the hook input on stdin, says that it does nothing now, and exits 0, which keeps no agent from stopping
+and no prompt from going on (Claude Code takes exit code 2 from a hook for "do not stop" and for "block the prompt").
+A command line that is wrong exits 1, never 2, for the same reason.
 
-```json
-{
-  "hooks": {
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "rotproof time-hook" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "rotproof time-hook" }] }]
-  }
-}
-```
-
-`rotproof` has to be on the `PATH` the agent runs hooks with (for a venv, start the agent with the venv active). The
-hook fails (an input from another hook, a command line that is wrong) with exit 1, which Claude Code shows while the
-prompt goes on; exit code 2 would block the prompt. It reads no `--root`, so one that is not a directory changes
-nothing.
-
-Before 1.0, Rotproof also wrote a `Stop` hook, `rotproof stop-hook`, which sent the agent back when its last message
-left something open and nothing in `docs/` changed. It went with the records of work it asked for. `rotproof init`
-takes it out of `.claude/settings.json` (the update `claude-remove-stop-hook`); until then, the command reads the hook
-input, says in a `systemMessage` that it does nothing now, which keeps no agent from stopping, and exits 0.
+- **The `Stop` hook, `rotproof stop-hook`,** sent the agent back when its last message left something open and nothing
+  in `docs/` changed. It went with the records of work it asked for. `rotproof init` takes it out (the update
+  `claude-remove-stop-hook`); until then the command says in a `systemMessage`, every time it runs, that it does
+  nothing.
+- **The `SessionStart` and `UserPromptSubmit` hook, `rotproof time-hook`,** told the agent the time now (0.4.0 to
+  1.0.0-rc.3). It was written when `rotproof check` failed on a time that had not come, and an agent wrote a guess a
+  few minutes ahead of the clock. The records hold a day now, and Claude Code gives the agent the day itself.
+  `rotproof init` takes it out (the update `claude-remove-time-hook`), matched exactly: a hook whose command is another
+  text (a path to the binary) stays. Until then the command says in a `systemMessage`, at the start of a session, that
+  it does nothing, and says nothing on a prompt. The rule it repeated, to read a day from the clock and never from
+  memory, is in the `.rotproof/AGENTS.md` that `rotproof create` writes; `rotproof check` still fails on a day that has
+  not come.
 
 ## Approving a forbidden import
 
@@ -570,8 +562,7 @@ changed is in the commits, what was measured and decided along the way in the ta
   before 1.0 keeps the fields it had.
 - **No day in the log is later than today:** its date headings are read from the clock when written, and one that
   has not come was guessed. Each is compared with the latest day anywhere (the day in UTC+14), so CI in UTC passes a
-  day written in Tokyo before 09:00. Time alone only makes one pass, so this never turns CI red with no change. Claude
-  Code is given the time by the time hook (see "The time hook").
+  day written in Tokyo before 09:00. Time alone only makes one pass, so this never turns CI red with no change.
 - **Every markdown file under `docs/knowledge/` is a document Rotproof reads:** it sits in `docs/knowledge/` itself (a
   markdown file in a directory under it fails, as Rotproof would not read it; a picture there passes), is named `.md`
   in lowercase (GitHub shows a `.MD` file, but Rotproof would not read it), is not `log.md`, a name OKF reserves for

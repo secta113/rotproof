@@ -37,6 +37,9 @@ Open work is no record here: it is kept in issues. The rest of `docs/` is the pr
   work.** Its alarms, under `# When something happens`, are watched only by someone reading it. When something that
   used to work has stopped, search `docs/` for the message as it is first. Read `docs/log.md` when you need to know
   what went wrong before and what was learned.
+- **Read a day from the clock, never from memory.** An agent has no clock of its own: a day it writes into `docs/`
+  (the log's date headings, `verified`, `stale_after`) from a guess runs ahead of the clock or stays behind it.
+  `rotproof check` fails on a day that has not come; a day that is behind passes unseen.
 - **Keep a piece of work that can stop in the middle in an issue of its own.** Its body is the state as it is now:
   the day, how far the work came, what comes next, what has not been checked, the open questions, and links to the
   branch and the pull request. Overwrite it whenever you stop, so that whoever resumes reads one page; continue from

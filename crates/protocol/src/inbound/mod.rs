@@ -162,6 +162,4 @@ pub trait Commands {
     fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<String>, String>;
     /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
-    /// The answer to the agent's time hook, whose input is `input`: the time now, for the agent to read.
-    fn time_hook(&self, input: &str) -> Result<String, String>;
 }

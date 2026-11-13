@@ -25,6 +25,5 @@ pub mod schema;
 pub mod sentence;
 pub mod structure;
 pub mod text;
-pub mod time_hook;
 pub mod tree;
 pub mod upgrade;
