@@ -897,7 +897,10 @@ fn create_adds_the_fields_the_declaration_lacks() {
     let check = run(&["--root", &arg, "check"]);
     assert_eq!(check.status.code(), Some(1));
     assert!(
-        stdout(&check).contains("missing field `areas`: run `rotproof create`, which adds it"),
+        stdout(&check).contains(
+            "missing field `areas`: run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise; \
+             either adds it"
+        ),
         "{}",
         stdout(&check)
     );
@@ -935,6 +938,38 @@ fn create_adds_the_fields_the_declaration_lacks() {
     assert_eq!(
         fs::read_to_string(r.join(".config/rotproof.toml")).unwrap(),
         edited
+    );
+}
+
+#[test]
+fn a_declaration_without_ui_names_init_for_the_upgrade_and_create_otherwise() {
+    // As a project made before ui existed has it: an older version in files, and no ui
+    for files in ["1.0.0-rc.2", env!("CARGO_PKG_VERSION")] {
+        let root = declared(&format!(
+            "stack = \"python\"\nareas = []\nfiles = \"{files}\"\n"
+        ));
+        let arg = root_arg(root.path());
+        let check = run(&["--root", &arg, "check"]);
+        assert_eq!(check.status.code(), Some(1), "{}", stdout(&check));
+        assert!(
+            stdout(&check).contains(
+                "missing field `ui`: run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise; \
+                 either adds it"
+            ),
+            "{files}: {}",
+            stdout(&check)
+        );
+    }
+    // The command it names does the upgrade: ui added and files raised, which create alone would not do
+    let root = declared("stack = \"python\"\nareas = []\nfiles = \"1.0.0-rc.2\"\n");
+    let arg = root_arg(root.path());
+    let out = create(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let now = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
+    assert!(
+        now.contains("ui = ")
+            && now.contains(&format!("files = \"{}\"", env!("CARGO_PKG_VERSION"))),
+        "{now}"
     );
 }
 

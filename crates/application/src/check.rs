@@ -14,7 +14,7 @@ use crate::links::broken;
 use crate::tree::{exactly, read_text};
 use domain::approvals::{shown, sort, stale};
 use domain::bundle::{DOCS, Docs, in_docs, is_document};
-use domain::layers::{DECLARATION, area_problems};
+use domain::layers::{DECLARATION, INIT_OR_CREATE, area_problems};
 use domain::markdown::links;
 use domain::paths::join;
 use domain::project::GUIDE;
@@ -103,7 +103,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
             findings.push(Finding {
                 check: "Rotproof's guide is up to date".into(),
                 detail: format!(
-                    "{}, run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise: {GUIDE}",
+                    "{}, {INIT_OR_CREATE}: {GUIDE}",
                     if found.is_some() {
                         "out of date"
                     } else {

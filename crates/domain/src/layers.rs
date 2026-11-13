@@ -18,6 +18,11 @@ pub const DECLARATION: &str = ".config/rotproof.toml";
 pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotproof init --stack <stack>` (python, \
                            typescript, rust, or none for records only) and `--ui atomic` or `--ui none` for python \
                            and typescript";
+/// Which command brings a project's files into line, said the same way wherever a file or a field is missing: after an
+/// upgrade of Rotproof it is `rotproof init`, which also sets `files` and says what to do by hand, and `rotproof
+/// create` only otherwise
+pub const INIT_OR_CREATE: &str =
+    "run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise";
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
 /// The UI of a project with no screens: none of the layers that name a UI in the table
@@ -517,15 +522,23 @@ pub fn area_problems(areas: &[String]) -> Vec<String> {
 pub fn parse_declaration(text: &str) -> Result<Declaration, String> {
     toml::from_str(text).map_err(|e| {
         let why = e.message().to_string();
-        // A field a newer Rotproof requires: the upgrade is to run `rotproof create`, not to look the field up
+        // A field a newer Rotproof requires: the upgrade is not to look the field up
         match ADDED
             .iter()
             .find(|f| why == format!("missing field `{}`", f.name))
         {
-            Some(_) => format!("{why}: run `rotproof create`, which adds it"),
+            Some(_) => missing_field(&why),
             None => why,
         }
     })
+}
+
+/// What a declaration that lacks a field of [`ADDED`] says: which command adds it. A declaration written by an older
+/// Rotproof lacks one, and `rotproof create` adds it but does not set `files` nor say what the upgrade asks of the
+/// project by hand, so the upgrade is `rotproof init`. The declaration cannot tell the two cases apart when it cannot
+/// be read, so the words are those of every other file that is missing.
+fn missing_field(why: &str) -> String {
+    format!("{why}: {INIT_OR_CREATE}; either adds it")
 }
 
 /// What `areas` is, as the declaration says it above the field.
@@ -537,7 +550,7 @@ const UI_COMMENT: &str = "# The UI of this project, which picks the layers of it
                           # (a command-line tool, a library, a server), so none is made or checked\n";
 
 /// A field the declaration requires that `rotproof create` adds when it is missing, so a declaration written by an
-/// older Rotproof fails only until the upgrade runs `rotproof create`, never on its shape.
+/// older Rotproof fails only until the upgrade runs `rotproof init` (or `rotproof create`), never on its shape.
 pub struct Added {
     pub name: &'static str,
     /// What it is, as `rotproof init` writes it above the field
@@ -712,9 +725,7 @@ impl Declared {
             )]);
         };
         let Some(ui) = &declaration.ui else {
-            return Err(vec![format!(
-                "{DECLARATION}: missing field `ui`: run `rotproof create`, which adds it"
-            )]);
+            return Err(vec![unreadable(&missing_field("missing field `ui`"))]);
         };
         let Some(layout) = layout(&declaration.stack, ui) else {
             return Err(vec![format!(
@@ -1057,7 +1068,9 @@ mod tests {
         assert_eq!(left.left_out, ["ui", "presentation.display"]);
         assert_eq!(
             declared("stack = \"python\"\nareas = []\n").unwrap_err(),
-            [".config/rotproof.toml: missing field `ui`: run `rotproof create`, which adds it"]
+            [
+                ".config/rotproof.toml: missing field `ui`: run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise; either adds it"
+            ]
         );
         assert_eq!(
             declared("stack = \"rust\"\nareas = []\nui = \"atomic\"\n").unwrap_err(),
@@ -1070,10 +1083,13 @@ mod tests {
     }
 
     #[test]
-    fn a_field_create_adds_is_named_with_the_command_that_adds_it() {
+    fn a_field_create_adds_is_named_with_the_commands_that_add_it() {
+        // After an upgrade the command is init, which sets `files`, and create otherwise: the declaration, which
+        // cannot be read without the field, says both
         assert_eq!(
             parse_declaration("stack = \"none\"\n").unwrap_err(),
-            "missing field `areas`: run `rotproof create`, which adds it"
+            "missing field `areas`: run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise; \
+             either adds it"
         );
         assert_eq!(
             parse_declaration("areas = []\n").unwrap_err(),
