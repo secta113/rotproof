@@ -13,6 +13,11 @@ doc_prefix = " * "
 language = "typescript"
 # The UIs a project may declare besides "none" (the layers of table.toml that name one in `ui`)
 uis = ["atomic"]
+# A view is JSX, and a file with JSX is `.tsx` (or `.jsx`): `presentation` holds none, whatever the file is called, so
+# a test of a hook that needs a wrapper written in JSX goes outside `src/` (nothing there is looked at) or writes the
+# wrapper with `createElement`. The extension is all Rotproof goes by: it reads the imports of a file, not what it
+# draws, so a view written with `createElement` in a `.ts` file is not caught
+no_view = { layers = ["presentation"], extensions = ["tsx", "jsx"], goes = "keep what the screen holds and decides in .ts files, and move the component into src/ui (a provider that hands a model's state to the parts of one screen into src/ui/pages, one of the whole program into src/composition), leaving its context and its state hooks here" }
 # The entry file, where Vite's React starter (`npm create vite -- --template react-ts`) puts it and `index.html` loads
 # it: moving it would mean editing `index.html` too
 entry = "src/main.tsx"

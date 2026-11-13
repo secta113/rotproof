@@ -325,7 +325,10 @@ The levels of a layer other than `ui` and `presentation` never import each other
 `presentation` the state and behaviour of the screens apart from it, the Presentation Model (Fowler) held to the
 inward direction of the onion: a model calls the use cases through `protocol.inbound`, as an entry point does, and
 draws nothing. The two come with `ui = "atomic"`, and a project with `ui = "none"` has neither: `ui` is chosen as the
-stack is, not switched off in `absent`, since a screen needs both or neither. The entry file is no layer, and may
+stack is, not switched off in `absent`, since a screen needs both or neither. In TypeScript, `presentation` also holds
+no view: a `.tsx` or `.jsx` file there fails `rotproof check`, so the state and the hooks of a screen are `.ts` files
+and a component goes in `ui` or `composition` (a provider keeps its context and state hook in `presentation` and its
+thin component in `ui.pages`, or in `composition` for the whole program). The entry file is no layer, and may
 import `composition` alone. No layer holds general-purpose parts: a part goes in the layer whose concept it speaks.
 
 Where they live is written once per stack:
@@ -451,7 +454,10 @@ changed is in the commits, what was measured and decided along the way in the ta
   (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
   (a design value, one behaviour, a provider of a theme), is an atom, and what a screen holds and decides goes in
   `presentation.models`. A directory of a layer of the table before 0.4.0 (`handler`, `utils`) is named with where
-  its code goes now.
+  its code goes now. In TypeScript, a `.tsx` or `.jsx` file in `presentation` fails, by its extension alone (case
+  does not count): a view written with `createElement` in a `.ts` file passes, and so does a test outside `src/`,
+  which Rotproof does not read; a test in `presentation` that needs a JSX `wrapper` writes it with `createElement`,
+  or sits outside `src/`.
 - **The layers import only what the table allows** (Python): every `import` and `from ... import` in the layers,
   relative ones and those inside functions or under `if TYPE_CHECKING:` included, and those of the entry file. A
   layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own

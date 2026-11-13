@@ -8,6 +8,9 @@
 //! - A layer with levels (`ui`) holds only its levels: code in it beside them fails, except the files the layout
 //!   makes for the layer itself. A part there would have no place among the levels, and an import through it
 //!   (`atoms → ui/helpers.py → domain`) would pass every direct check of the direction.
+//! - A layer the layout says holds no view (`presentation` in TypeScript) holds no file with the extension of a view
+//!   (`.tsx`, `.jsx`), whatever its level: the extension is all that tells one, as the check reads imports, not what
+//!   a file draws.
 //!
 //! The floor: at least one layer is present. A project with every layer declared absent would check nothing. A
 //! repository that keeps records only declares `stack = "none"`, and the check says that it skipped the layers.
@@ -192,6 +195,7 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
             "code outside the layers: {outside} (move it into a layer{goes} or list it in unchecked in {DECLARATION})"
         ));
     }
+    found.extend(views(declared, layout, seen));
     for (layer, levels) in with_levels(declared, seen) {
         // Where a part of the UI goes needs saying; elsewhere the levels say it by their names
         let goes = if layer.name == "ui" {
@@ -204,6 +208,37 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
             found.push(format!(
                 "code in {} outside its levels: {beside} (move it into a level or a layer: {goes})",
                 layer.name,
+            ));
+        }
+    }
+    found
+}
+
+/// The files of a view in a layer that holds none, one finding each. A layer the project does not have, or declares
+/// absent, is not judged: its own finding says it all.
+fn views(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> {
+    let Some(no_view) = &layout.no_view else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for name in &no_view.layers {
+        let Some(layer) = declared.places.iter().find(|p| &p.name == name) else {
+            continue;
+        };
+        if declared.is_absent(layer) {
+            continue;
+        }
+        let mut files: Vec<&String> = seen
+            .code(&layout.scope)
+            .iter()
+            .filter(|path| within(path, &layer.path) && no_view.holds(path))
+            .collect();
+        files.sort();
+        for path in files {
+            found.push(format!(
+                "a view in {name}: {path} ({name} holds no view, so no .{} file sits there: {})",
+                no_view.extensions.join(" or ."),
+                no_view.goes
             ));
         }
     }
@@ -334,6 +369,50 @@ mod tests {
             "absent names \"ui\", which ui = \"none\" leaves out already: take it out of absent in \
              .config/rotproof.toml"
         );
+    }
+
+    #[test]
+    fn a_view_in_a_layer_that_holds_none_is_named_file_by_file() {
+        let seen_with = |declared: &Declared, files: &[&str]| {
+            let mut seen = Seen::default();
+            for path in named(declared) {
+                seen.named.insert(path, Ok(()));
+            }
+            seen.code
+                .insert("src".into(), files.iter().map(|f| f.to_string()).collect());
+            seen
+        };
+        let files = [
+            "src/presentation/models/b.tsx",
+            "src/presentation/models/a.JSX",
+            "src/presentation/models/a.ts",
+            "src/presentation/index.ts",
+            "src/ui/pages/home.tsx",
+            "src/presentationx/y.tsx",
+        ];
+        let ts = declared("stack = \"typescript\"\nareas = []\nui = \"atomic\"\n");
+        let layout = ts.layout.as_ref().unwrap();
+        let found = views(&ts, layout, &seen_with(&ts, &files));
+        assert_eq!(found.len(), 2, "{found:#?}");
+        assert!(found[0].starts_with(
+            "a view in presentation: src/presentation/models/a.JSX (presentation holds no view, so no .tsx or .jsx \
+             file sits there: "
+        ));
+        assert!(found[1].contains("src/presentation/models/b.tsx"));
+        // Declared absent, the layer's own finding says it all; with no UI it is not a layer
+        let absent = declared(
+            "stack = \"typescript\"\nareas = []\nui = \"atomic\"\nabsent = [\"presentation\"]\n",
+        );
+        let layout = absent.layout.as_ref().unwrap();
+        assert!(views(&absent, layout, &seen_with(&absent, &files)).is_empty());
+        let none = declared("stack = \"typescript\"\nareas = []\nui = \"none\"\n");
+        let layout = none.layout.as_ref().unwrap();
+        assert!(views(&none, layout, &seen_with(&none, &files)).is_empty());
+        // A stack that tells a view by no extension judges nothing
+        let python = declared("stack = \"python\"\nareas = []\nui = \"atomic\"\n");
+        let layout = python.layout.as_ref().unwrap();
+        assert!(layout.no_view.is_none());
+        assert!(views(&python, layout, &seen_with(&python, &files)).is_empty());
     }
 
     #[test]
