@@ -14,8 +14,8 @@ use serde_json::{Map, Value, json};
 use toml_edit::DocumentMut;
 
 use crate::approvals::APPROVALS;
+use crate::hook;
 use crate::layers::{DECLARATION, DECLINED_COMMENT, FILES_COMMENT};
-use crate::{hook, time_hook};
 
 /// The version of Rotproof that runs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -110,14 +110,17 @@ pub enum Update {
     TimeHook,
     /// The stop hook taken out, with the hook beside it, from `.claude/settings.json`: 1.0 no longer has one
     RemoveStopHook,
+    /// The time hook taken out of `.claude/settings.json`: 1.0 no longer has one
+    RemoveTimeHook,
 }
 
 /// Every update, oldest first.
-pub const UPDATES: [Update; 4] = [
+pub const UPDATES: [Update; 5] = [
     Update::DenyApprovals,
     Update::StopHookOnPath,
     Update::TimeHook,
     Update::RemoveStopHook,
+    Update::RemoveTimeHook,
 ];
 
 /// What an update does to its file.
@@ -144,6 +147,7 @@ impl Update {
             Update::StopHookOnPath => "claude-stop-hook-on-path",
             Update::TimeHook => "claude-time-hook",
             Update::RemoveStopHook => "claude-remove-stop-hook",
+            Update::RemoveTimeHook => "claude-remove-time-hook",
         }
     }
 
@@ -153,6 +157,7 @@ impl Update {
             Update::DenyApprovals => "0.2.0",
             Update::StopHookOnPath | Update::TimeHook => "0.4.0",
             Update::RemoveStopHook => "1.0.0-rc.1",
+            Update::RemoveTimeHook => "1.0.0-rc.4",
         }
     }
 
@@ -162,7 +167,8 @@ impl Update {
             Update::DenyApprovals
             | Update::StopHookOnPath
             | Update::TimeHook
-            | Update::RemoveStopHook => ".claude/settings.json",
+            | Update::RemoveStopHook
+            | Update::RemoveTimeHook => ".claude/settings.json",
         }
     }
 
@@ -173,6 +179,7 @@ impl Update {
             Update::StopHookOnPath => stop_hook_on_path(text),
             Update::TimeHook => time_hook(text),
             Update::RemoveStopHook => remove_stop_hook(text),
+            Update::RemoveTimeHook => remove_time_hook(text),
         }
     }
 
@@ -251,7 +258,7 @@ fn stop_hook_on_path(text: Option<&str>) -> Outcome {
     Outcome::Changed(written(settings))
 }
 
-/// Add the time hook ([`time_hook::COMMAND`]) to Claude Code's settings, `text`, as a group of its own on each of its
+/// Add the time hook ([`hook::TIME_COMMAND`]) to Claude Code's settings, `text`, as a group of its own on each of its
 /// events whose hooks do not run it yet, after them. Needed only while a `Stop` hook runs the stop hook
 /// ([`hook::COMMAND`]): a project that has no settings, or took Rotproof's hooks out, did not take them.
 fn time_hook(text: Option<&str>) -> Outcome {
@@ -260,8 +267,8 @@ fn time_hook(text: Option<&str>) -> Outcome {
         Outcome::ByHand(format!(
             "{}: {why}. Add a {} hook that runs {:?}, {}",
             update.file(),
-            time_hook::EVENTS.join(" and a "),
-            time_hook::COMMAND,
+            hook::TIME_EVENTS.join(" and a "),
+            hook::TIME_COMMAND,
             update.declining()
         ))
     };
@@ -278,15 +285,15 @@ fn time_hook(text: Option<&str>) -> Outcome {
         return Outcome::Done;
     }
     let mut changed = false;
-    for event in time_hook::EVENTS {
+    for event in hook::TIME_EVENTS {
         let groups = hooks
             .entry(event)
             .or_insert_with(|| Value::Array(Vec::new()));
         let Value::Array(groups) = groups else {
             return by_hand(&format!("hooks.{event} is not a list"));
         };
-        if !runs(groups, time_hook::COMMAND) {
-            groups.push(group(time_hook::COMMAND));
+        if !runs(groups, hook::TIME_COMMAND) {
+            groups.push(group(hook::TIME_COMMAND));
             changed = true;
         }
     }
@@ -298,9 +305,9 @@ fn time_hook(text: Option<&str>) -> Outcome {
 }
 
 /// Take the stop hook ([`hook::COMMAND`]) and the hook beside it ([`hook::ON_PATH`]) out of Claude Code's settings,
-/// `text`: each hook that runs one of them exactly, a group left with no hook, and `Stop` when no group is left. A
-/// hook the project changed (another command that runs `rotproof stop-hook`) is not Rotproof's text, and stays: the
-/// command says, on every stop, that it does nothing now.
+/// `text`: each hook that runs one of them exactly, a group left with no hook, `Stop` when no group is left, and
+/// `hooks` when no event is left. A hook the project changed (another command that runs `rotproof stop-hook`) is not
+/// Rotproof's text, and stays: the command says, on every stop, that it does nothing now.
 fn remove_stop_hook(text: Option<&str>) -> Outcome {
     let update = Update::RemoveStopHook;
     let Some(text) = text else {
@@ -341,6 +348,62 @@ fn remove_stop_hook(text: Option<&str>) -> Outcome {
         // Shifted out, so the events after it keep their order
         hooks.shift_remove("Stop");
     }
+    // The settings of a project that ran no other hook end as `rotproof create` writes them now: with no `hooks`
+    if hooks.is_empty() {
+        settings.shift_remove("hooks");
+    }
+    Outcome::Changed(written(settings))
+}
+
+/// Take the time hook ([`hook::TIME_COMMAND`]) out of Claude Code's settings, `text`: each hook that runs it exactly
+/// on `SessionStart` and `UserPromptSubmit`, a group left with no hook, an event left with no group, and `hooks` when
+/// no event is left. A hook the project changed (another command that runs `rotproof time-hook`, such as a path to
+/// the binary) is not Rotproof's text, and stays: the command says, at the start of every session, that it does
+/// nothing now.
+fn remove_time_hook(text: Option<&str>) -> Outcome {
+    let update = Update::RemoveTimeHook;
+    let Some(text) = text else {
+        return Outcome::Done;
+    };
+    let Ok(Value::Object(mut settings)) = serde_json::from_str::<Value>(text) else {
+        return Outcome::ByHand(format!(
+            "{}: it is not a JSON object Rotproof can read. Remove the {} hooks that run {:?}, {}",
+            update.file(),
+            hook::TIME_EVENTS.join(" and "),
+            hook::TIME_COMMAND,
+            update.declining()
+        ));
+    };
+    let Some(Value::Object(hooks)) = settings.get_mut("hooks") else {
+        return Outcome::Done;
+    };
+    let mut changed = false;
+    for event in hook::TIME_EVENTS {
+        let Some(Value::Array(groups)) = hooks.get_mut(event) else {
+            continue;
+        };
+        if !runs(groups, hook::TIME_COMMAND) {
+            continue;
+        }
+        changed = true;
+        groups.retain_mut(|group| match group.get_mut("hooks") {
+            Some(Value::Array(hooks)) => {
+                hooks.retain(|hook| hook["command"] != hook::TIME_COMMAND);
+                !hooks.is_empty()
+            }
+            _ => true,
+        });
+        if groups.is_empty() {
+            // Shifted out, so the events after it keep their order
+            hooks.shift_remove(event);
+        }
+    }
+    if !changed {
+        return Outcome::Done;
+    }
+    if hooks.is_empty() {
+        settings.shift_remove("hooks");
+    }
     Outcome::Changed(written(settings))
 }
 
@@ -369,8 +432,9 @@ fn written(settings: Map<String, Value>) -> String {
 /// The updates a project whose files are up to `files` takes to reach `running`, without the `declined` ones, oldest
 /// first. `Err` when a version cannot be read, or `files` is newer than `running`.
 ///
-/// The hook beside the stop hook is not added when the stop hook is taken out in the same upgrade: it would be taken
-/// out with it, and a file Rotproof cannot read would ask a person to add it and to remove it at once.
+/// The hook beside the stop hook is not added when the stop hook is taken out in the same upgrade, and the time hook is
+/// not added when it is taken out: each would be taken out with it, and a file Rotproof cannot read would ask a person
+/// to add it and to remove it at once.
 pub fn pending(files: &str, running: &str, declined: &[String]) -> Result<Vec<Update>, String> {
     let (from, to) = versions(files, running)?;
     let found: Vec<Update> = UPDATES
@@ -381,10 +445,12 @@ pub fn pending(files: &str, running: &str, declined: &[String]) -> Result<Vec<Up
             from < at && at <= to && !declined.iter().any(|d| d == update.name())
         })
         .collect();
-    let removed = found.contains(&Update::RemoveStopHook);
+    let stop_removed = found.contains(&Update::RemoveStopHook);
+    let time_removed = found.contains(&Update::RemoveTimeHook);
     Ok(found
         .into_iter()
-        .filter(|update| !(removed && *update == Update::StopHookOnPath))
+        .filter(|update| !(stop_removed && *update == Update::StopHookOnPath))
+        .filter(|update| !(time_removed && *update == Update::TimeHook))
         .collect())
 }
 
@@ -632,6 +698,33 @@ mod tests {
             pending("0.3.0", "1.0.0-rc.1", &["claude-remove-stop-hook".into()]),
             Ok(vec![Update::StopHookOnPath, Update::TimeHook])
         );
+        // The time hook is not added on the way to the version that takes it out, unless that update is declined
+        assert_eq!(
+            pending("0.3.0", "1.0.0-rc.4", &[]),
+            Ok(vec![Update::RemoveStopHook, Update::RemoveTimeHook])
+        );
+        assert_eq!(
+            pending("0.3.0", "1.0.0-rc.4", &["claude-remove-time-hook".into()]),
+            Ok(vec![Update::TimeHook, Update::RemoveStopHook])
+        );
+        // A project that declined the update that added it still has a known name to decline
+        assert_eq!(
+            pending("0.3.0", "1.0.0-rc.4", &["claude-time-hook".into()]),
+            Ok(vec![Update::RemoveStopHook, Update::RemoveTimeHook])
+        );
+        assert_eq!(
+            pending("1.0.0-rc.3", "1.0.0-rc.4", &[]),
+            Ok(vec![Update::RemoveTimeHook])
+        );
+        assert_eq!(pending("1.0.0-rc.4", "1.0.0", &[]), Ok(vec![]));
+        assert!(
+            problems(
+                Some("1.0.0-rc.4"),
+                &["claude-time-hook".into()],
+                "1.0.0-rc.4"
+            )
+            .is_empty()
+        );
         assert!(
             pending("0.3.0", "0.2.0", &[])
                 .unwrap_err()
@@ -731,6 +824,7 @@ mod tests {
             Update::StopHookOnPath,
             Update::TimeHook,
             Update::RemoveStopHook,
+            Update::RemoveTimeHook,
         ] {
             let Outcome::Changed(changed) = update.apply(Some(&text)) else {
                 panic!("{} changes them", update.name());
@@ -756,10 +850,10 @@ mod tests {
             panic!("the hook is added");
         };
         let read: Value = serde_json::from_str(&added).unwrap();
-        for event in time_hook::EVENTS {
+        for event in hook::TIME_EVENTS {
             assert_eq!(
                 read["hooks"][event],
-                json!([group(time_hook::COMMAND)]),
+                json!([group(hook::TIME_COMMAND)]),
                 "{event}"
             );
         }
@@ -775,7 +869,7 @@ mod tests {
         let read: Value = serde_json::from_str(&kept).unwrap();
         assert_eq!(
             read["hooks"]["UserPromptSubmit"],
-            json!([group("x"), group(time_hook::COMMAND)])
+            json!([group("x"), group(hook::TIME_COMMAND)])
         );
         // Nothing to add to: no settings, no hooks, or a stop hook that is not Rotproof's
         for text in [
@@ -883,6 +977,15 @@ mod tests {
             .cloned()
             .collect();
         assert_eq!(keys, ["A", "B", "C"]);
+        // No event left: `hooks` goes too, and what else the project wrote stays
+        let Outcome::Changed(bare) = Update::RemoveStopHook.apply(Some(
+            r#"{"hooks": {"Stop": [{"hooks": [{"command": "rotproof stop-hook"}]}]}, "env": {"A": "1"}}"#,
+        )) else {
+            panic!("the hook is taken out");
+        };
+        let read: Value = serde_json::from_str(&bare).unwrap();
+        assert!(read.get("hooks").is_none(), "{bare}");
+        assert_eq!(read["env"]["A"], "1");
         // Nothing to take out
         for text in [None, Some("{}"), Some("{\"hooks\": {\"Stop\": []}}")] {
             assert_eq!(
@@ -896,6 +999,102 @@ mod tests {
         };
         assert!(
             why.contains("declined = [\"claude-remove-stop-hook\"]"),
+            "{why}"
+        );
+    }
+
+    /// What Rotproof wrote goes, matched exactly; what the project runs on the same events stays, in its order.
+    #[test]
+    fn the_time_hook_is_taken_out_and_only_it() {
+        // What `rotproof create` wrote from 0.4.0 to 1.0.0-rc.3
+        let written = r#"{
+  "permissions": {
+    "deny": [
+      "Edit(/.config/rotproof-approved.toml)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rotproof time-hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rotproof time-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+"#;
+        let Outcome::Changed(removed) = Update::RemoveTimeHook.apply(Some(written)) else {
+            panic!("the hooks are taken out");
+        };
+        // The file ends as a new project's: no hooks left, and the deny rule where it was
+        assert_eq!(removed, hook::SETTINGS[0].1);
+        assert_eq!(Update::RemoveTimeHook.apply(Some(&removed)), Outcome::Done);
+        // The project's own hooks stay: a group of its own, one beside Rotproof's in a group, and a command that runs
+        // rotproof time-hook otherwise (a path to the binary, as a project that builds Rotproof itself runs it)
+        let theirs = r#"{"hooks": {"SessionStart": [
+            {"hooks": [{"type": "command", "command": "x"}]},
+            {"hooks": [{"type": "command", "command": "rotproof time-hook"}, {"type": "command", "command": "y"}]},
+            {"hooks": [{"type": "command", "command": "\"$CLAUDE_PROJECT_DIR/rotproof/target/debug/rotproof\" time-hook"}]}
+        ], "Stop": [{"hooks": [{"type": "command", "command": "z"}]}]}}"#;
+        let Outcome::Changed(kept) = Update::RemoveTimeHook.apply(Some(theirs)) else {
+            panic!("the hook is taken out");
+        };
+        let read: Value = serde_json::from_str(&kept).unwrap();
+        assert_eq!(
+            read["hooks"]["SessionStart"],
+            json!([
+                group("x"),
+                group("y"),
+                group("\"$CLAUDE_PROJECT_DIR/rotproof/target/debug/rotproof\" time-hook")
+            ])
+        );
+        assert_eq!(read["hooks"]["Stop"], json!([group("z")]));
+        // An event taken out leaves the events around it in their order, and `hooks` stays while one is left
+        let Outcome::Changed(alone) = Update::RemoveTimeHook.apply(Some(
+            r#"{"hooks": {"A": [], "SessionStart": [{"hooks": [{"command": "rotproof time-hook"}]}], "B": [], "UserPromptSubmit": [{"hooks": [{"command": "rotproof time-hook"}]}]}}"#,
+        )) else {
+            panic!("the hooks are taken out");
+        };
+        let keys: Vec<String> = serde_json::from_str::<Value>(&alone).unwrap()["hooks"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(keys, ["A", "B"]);
+        // Nothing to take out, and `hooks` the project left empty is not touched
+        for text in [
+            None,
+            Some("{}"),
+            Some("{\"hooks\": {}}"),
+            Some("{\"hooks\": {\"SessionStart\": []}}"),
+            Some("{\"hooks\": {\"SessionStart\": {}}}"),
+        ] {
+            assert_eq!(
+                Update::RemoveTimeHook.apply(text),
+                Outcome::Done,
+                "{text:?}"
+            );
+        }
+        let Outcome::ByHand(why) = Update::RemoveTimeHook.apply(Some("not json")) else {
+            panic!("needs a person");
+        };
+        assert!(
+            why.contains("declined = [\"claude-remove-time-hook\"]"),
             "{why}"
         );
     }

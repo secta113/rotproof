@@ -481,11 +481,113 @@ mod tests {
         }
     }
 
+    /// The settings `rotproof create` wrote from 0.4.0 to 1.0.0-rc.3, which run the time hook on both events.
+    const SETTINGS_RC3: &str = r#"{
+  "permissions": {
+    "deny": [
+      "Edit(/.config/rotproof-approved.toml)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rotproof time-hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rotproof time-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+"#;
+
+    /// Upgraded to 1.0.0-rc.4, the settings of rc.3 lose the time hook and end as a new project's, in their line
+    /// endings, and the update that took them out is named.
+    #[test]
+    fn the_time_hook_is_taken_out_on_the_way_to_rc_4() {
+        let tree = Fake::default();
+        tree.write(DECLARATION, "stack = \"none\"\nfiles = \"1.0.0-rc.3\"\n")
+            .unwrap();
+        tree.write(SETTINGS, &SETTINGS_RC3.replace('\n', "\r\n"))
+            .unwrap();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "1.0.0-rc.4")
+        else {
+            panic!("upgraded");
+        };
+        assert_eq!(
+            upgraded.applied,
+            [("claude-remove-time-hook", SETTINGS)],
+            "{:?}",
+            upgraded.applied
+        );
+        assert!(upgraded.by_hand.is_empty(), "{:?}", upgraded.by_hand);
+        let new = domain::hook::SETTINGS[0].1;
+        assert_eq!(tree.text(SETTINGS), Some(new.replace('\n', "\r\n")));
+        // Said once: the next run finds nothing to take out
+        let Ok(Initialized::Upgraded(again)) = init(&tree, &tree, None, None, "x", "1.0.0-rc.4")
+        else {
+            panic!("upgraded");
+        };
+        assert!(again.applied.is_empty(), "{:?}", again.applied);
+        // A project that declined it keeps the hook
+        let tree = Fake::default();
+        tree.write(
+            DECLARATION,
+            "stack = \"none\"\nfiles = \"1.0.0-rc.3\"\ndeclined = [\"claude-remove-time-hook\"]\n",
+        )
+        .unwrap();
+        tree.write(SETTINGS, SETTINGS_RC3).unwrap();
+        let Ok(Initialized::Upgraded(kept)) = init(&tree, &tree, None, None, "x", "1.0.0-rc.4")
+        else {
+            panic!("upgraded");
+        };
+        assert!(kept.applied.is_empty(), "{:?}", kept.applied);
+        assert_eq!(tree.text(SETTINGS).as_deref(), Some(SETTINGS_RC3));
+    }
+
+    /// From 0.3.0 the time hook is not added to be taken out in the same run: the settings end as a new project's.
+    #[test]
+    fn the_time_hook_is_not_added_on_the_way_from_0_3_to_rc_4() {
+        let tree = made_by_first();
+        let old = "{\n  \"permissions\": {\n    \"deny\": [\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]\n  \
+                   },\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \
+                   \"type\": \"command\",\n            \"command\": \"rotproof stop-hook\"\n          }\n        ]\n      \
+                   }\n    ]\n  }\n}\n";
+        tree.write(SETTINGS, old).unwrap();
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "1.0.0-rc.4")
+        else {
+            panic!("upgraded");
+        };
+        // Neither `claude-time-hook` nor `claude-remove-time-hook` has anything to do
+        assert_eq!(
+            upgraded.applied,
+            [("claude-remove-stop-hook", SETTINGS)],
+            "{:?}",
+            upgraded.applied
+        );
+        assert_eq!(
+            tree.text(SETTINGS).as_deref(),
+            Some(domain::hook::SETTINGS[0].1)
+        );
+    }
+
     /// Upgraded to 1.0, the settings 0.4.0 wrote lose the stop hook and end as a new project's, in their line endings.
     #[test]
     fn the_stop_hook_is_taken_out_on_the_way_to_1_0() {
         let tree = made_by_first();
-        let new = domain::hook::SETTINGS[0].1;
+        let new = SETTINGS_RC3;
         let stop = "\"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \
                     \"type\": \"command\",\n            \"command\": \"rotproof stop-hook\"\n          }\n        ]\n      \
                     }\n    ],\n";

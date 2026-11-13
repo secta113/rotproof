@@ -131,8 +131,4 @@ impl Commands for Rotproof<'_> {
         let files = self.machine.files(root);
         crate::follows::pin(&*files, &*files, self.machine.parsers(), document, keys)
     }
-
-    fn time_hook(&self, input: &str) -> Result<String, String> {
-        domain::time_hook::answer(input, self.machine.now())
-    }
 }
