@@ -11,7 +11,8 @@
 //!   the hook has nothing left to tell.
 //!
 //! Rotproof no longer writes either, and `rotproof init` takes them out of a project's settings (`upgrade.rs`). The
-//! commands stay, hidden, to say so to a project whose settings still run them.
+//! commands are gone: a command line that names one says so and exits 1 (`infrastructure::inbound::cli`), for a
+//! project whose settings still run it.
 
 /// The command of the stop hook Rotproof wrote before 1.0.
 pub const COMMAND: &str = "rotproof stop-hook";

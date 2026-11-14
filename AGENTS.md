@@ -45,7 +45,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/infrastructure/src/inbound/` | Content |
 |---|---|
 | `mod.rs` | The level's role |
-| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here. `rotproof before`, `rotproof stop-hook` and `rotproof time-hook`, hidden, only say that they do nothing since 1.0 |
+| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0, says in one line that they were removed and exits 1, never 2 (no command of that name is left) |
 
 | Module of `crates/infrastructure/src/outbound/` | Content |
 |---|---|
@@ -87,7 +87,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `tree.rs` | How Rotproof reads a file's text, how it writes the text back as the file was written (its line endings and byte order mark), and how Windows reads a name |
 | `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, the alias an entry of `paths` makes, and where a TypeScript import lands |
 | `upgrade.rs` | Upgrading a project's files: the named updates a later version brings to the files `rotproof create` writes once, which of them a project takes between the version its files are up to and the running one, what each does to its file and what a person is told when it cannot, and what `rotproof check` finds in `files` and `declined` |
-| `settings.rs` | The edits those updates make to Claude Code's settings, `.claude/settings.json`, as JSON: the deny rule and the hooks added, and the hooks taken out, each matched exactly, with the other keys and their order kept |
+| `settings.rs` | The edits those updates make to Claude Code's settings, `.claude/settings.json`, as JSON: the deny rule added and the hooks taken out, each matched exactly, with the other keys and their order kept |
 | `version.rs` | A version as SemVer writes and orders it (pre-releases included), and the version of Rotproof that runs |
 | `crossing.rs` | What `rotproof init` says when an upgrade crosses a version that changed what the layers are (the onion table, the split of the screens into `ui` and `presentation`): the versions, what each moved and where each retired layer's code goes, and whether an upgrade crosses one. Nothing moves; a project does it by hand |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; and where Cargo looks for a workspace |
@@ -132,7 +132,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `index.rs` | `rotproof index`: every index file written from the frontmatter |
 | `init.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
-| `finding.rs` | A finding of `rotproof check`, made from what a check found and the heading it is printed under |
+| `finding.rs` | A finding or a warning of `rotproof check`, made from what a check found and the heading it is printed under |
 | `records.rs` | The checks of the records, read from the tree: the areas, the floor, the links of `docs/knowledge/` and the log, the log, the knowledge documents and the generated files |
 | `structure.rs` | The structure check, read from the tree |
 

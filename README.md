@@ -69,14 +69,14 @@ Rotproof is released for Windows x86_64 and Linux x86_64 (glibc 2.17 or newer). 
 upgrade, which can bring new rules, is a commit of its own:
 
 ```sh
-pip install rotproof==1.0.0-rc.4
+pip install rotproof==1.0.0-rc.5
 ```
 
 In a Node project, pin it with npm, which installs the binary for your platform with it (the package `rotproof` and
 one of `@rotproof/linux-x64` and `@rotproof/win32-x64`):
 
 ```sh
-npm install -D -E rotproof@1.0.0-rc.4
+npm install -D -E rotproof@1.0.0-rc.5
 ```
 
 The wheel carries only the binary; no Python code runs. Without Python or Node, take the archive for your platform from
@@ -130,7 +130,7 @@ before anyone read the list, and it never deletes them again. A run that makes n
 `--yes`.
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
-pin Rotproof in it (`npm install -D -E rotproof@1.0.0-rc.4`), then run `rotproof init --stack typescript --ui atomic`
+pin Rotproof in it (`npm install -D -E rotproof@1.0.0-rc.5`), then run `rotproof init --stack typescript --ui atomic`
 and `rotproof create --yes` there (`npx --no -- rotproof ...`), which keep what Vite wrote. Vite's entry point,
 `src/main.tsx`, is the entry file where it is (`index.html` loads it), and may import `composition` alone: what Vite
 has it import (`./App.tsx`, `./index.css`) moves into `src/composition/`, which `main.tsx` calls. `rotproof check`
@@ -206,10 +206,12 @@ that has a declaration:
 | Update | Version | File | What it does |
 |---|---|---|---|
 | `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
-| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above. Not applied in an upgrade that also crosses `claude-remove-stop-hook`, which would take it out again |
-| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit`, each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above. Not applied in an upgrade that also crosses `claude-remove-time-hook`, which would take it out again |
-| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above: an untouched file ends as `rotproof create` writes it now |
+| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook`, or the hook beside it that 0.4.0 added (it said when `rotproof` was not on the `PATH`), a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above: an untouched file ends as `rotproof create` writes it now |
 | `claude-remove-time-hook` | 1.0.0-rc.4 | `.claude/settings.json` | Takes out each hook on `SessionStart` and `UserPromptSubmit` whose command is exactly `rotproof time-hook`, a group left with no hook, an event left with no group, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). A hook with another command that runs it, such as a path to the binary, stays. Written again as above: an untouched file ends as `rotproof create` writes it now |
+
+The two updates 0.4.0 brought, `claude-stop-hook-on-path` and `claude-time-hook`, which added the hooks the two updates
+above take out again, are gone, as nothing adds those hooks now. A declaration that still names either in `declined` is
+reported by `rotproof check` as naming no update: take the name out.
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
@@ -230,23 +232,23 @@ in `CLAUDE.md` for Claude Code:
 ## The hooks Rotproof no longer writes
 
 Until 1.0.0-rc.3, Rotproof wrote two hooks into `.claude/settings.json`, for Claude Code. Neither is written now, and
-`rotproof init` takes each out of a project's settings. Each command stays, hidden, for a project whose settings still
-run it: it reads the hook input on stdin, says that it does nothing now, and exits 0, which keeps no agent from stopping
-and no prompt from going on (Claude Code takes exit code 2 from a hook for "do not stop" and for "block the prompt").
-A command line that is wrong exits 1, never 2, for the same reason.
+`rotproof init` takes each out of a project's settings. Neither command exists any more, but a settings file that runs
+the binary by path (the update matches only the commands Rotproof wrote, exactly) keeps its hook through any upgrade, so
+a command line that names `stop-hook` or `time-hook` says in one line that the hook was removed and what to do about
+it, and exits 1, whatever else is wrong with it. It never exits 2: Claude Code takes exit code 2 from a `Stop` hook as
+"send Claude back to work" (up to 8 times in a row) and from a `UserPromptSubmit` hook as "block the prompt", where exit
+code 1 is an error that is only shown. The hook input on stdin is not read.
 
 - **The `Stop` hook, `rotproof stop-hook`,** sent the agent back when its last message left something open and nothing
   in `docs/` changed. It went with the records of work it asked for. `rotproof init` takes it out (the update
-  `claude-remove-stop-hook`); until then the command says in a `systemMessage`, every time it runs, that it does
-  nothing.
+  `claude-remove-stop-hook`).
 - **The `SessionStart` and `UserPromptSubmit` hook, `rotproof time-hook`,** told the agent the time now (0.4.0 to
   1.0.0-rc.3). It was written when `rotproof check` failed on a time that had not come, and an agent wrote a guess a
   few minutes ahead of the clock. The records hold a day now, and Claude Code gives the agent the day itself.
   `rotproof init` takes it out (the update `claude-remove-time-hook`), matched exactly: a hook whose command is another
-  text (a path to the binary) stays. Until then the command says in a `systemMessage`, at the start of a session, that
-  it does nothing, and says nothing on a prompt. The rule it repeated, to read a day from the clock and never from
-  memory, is in the `.rotproof/AGENTS.md` that `rotproof create` writes; `rotproof check` still fails on a day that has
-  not come.
+  text (a path to the binary) stays, and fails with the line above at the start of every session and on every prompt
+  until it is removed by hand. The rule it repeated, to read a day from the clock and never from memory, is in the
+  `.rotproof/AGENTS.md` that `rotproof create` writes; `rotproof check` still fails on a day that has not come.
 
 ## Approving a forbidden import
 

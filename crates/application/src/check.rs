@@ -7,15 +7,16 @@
 
 use std::io;
 
-use crate::finding::under;
+use crate::finding::{under, warn};
 use crate::tree::{exactly, read_text};
 use domain::approvals::{shown, sort, stale};
 use domain::declaration::{Declared, INIT_OR_CREATE};
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
 use domain::schema::Time;
+use domain::suppressions::WEAKENS_HEADING;
 use domain::version::VERSION;
-use protocol::inbound::{Finding, Report};
+use protocol::inbound::{Finding, Report, Warning};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -30,26 +31,29 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
         "the tree matches .config/rotproof.toml",
         structure.found,
     ));
+    let mut weakened = Vec::new();
     if let Some(declared) = &structure.declared {
         report.layers_checked = declared.layout.is_some();
-        code(tree, parsers, declared, &mut report)?;
+        weakened = code(tree, parsers, declared, &mut report)?;
         report.findings.extend(rotproof_files(tree, declared));
     }
     let records = crate::records::problems(tree, parsers, structure.areas, now)?;
     report.findings.extend(records.found);
-    report.due = records.due;
+    // The warnings are printed in this order: the documents that are due, then the comments of the code
+    report.warnings.extend(records.warnings);
+    report.warnings.extend(weakened);
     Ok(report)
 }
 
 /// Every broken rule of the code of `declared`, into `report`: the direction with its approvals, the markers, who
-/// reads the environment, and the comments that switch the type checker off. The approvals and the comments that may
-/// make the checker check less go in `report` too, as they are printed apart from what fails.
+/// reads the environment, and the comments that switch the type checker off. The approvals go in `report` too, as they
+/// are printed apart from what fails; the comments that may make the checker check less are returned, as warnings.
 fn code(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     declared: &Declared,
     report: &mut Report,
-) -> io::Result<()> {
+) -> io::Result<Vec<Warning>> {
     let direction = crate::direction::problems(tree, parsers, declared)?;
     let approvals = crate::approvals::read(tree)?;
     let sorted = sort(&direction.forbidden, &approvals.entries);
@@ -89,8 +93,7 @@ fn code(
     report
         .findings
         .extend(under(domain::suppressions::HEADING, comments.silenced));
-    report.weakened = comments.weakened;
-    Ok(())
+    Ok(warn(WEAKENS_HEADING, comments.weakened).collect())
 }
 
 /// Every broken rule of the files Rotproof writes into the project of `declared`: they are up to this version

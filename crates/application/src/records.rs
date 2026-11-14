@@ -5,16 +5,18 @@ use std::collections::BTreeMap;
 use std::io;
 
 use crate::bundle::Bundle;
-use crate::finding::under;
+use crate::finding::{under, warn};
 use crate::links::broken;
 use crate::tree::{exactly, read_text};
-use domain::bundle::{DOCS, Docs, in_docs, is_document};
+use domain::bundle::{DOCS, Docs, in_docs};
 use domain::declaration::{DECLARATION, area_problems};
 use domain::markdown;
 use domain::paths::join;
-use domain::records::{KNOWLEDGE, floor, log_days_to_come, log_problems, unread_paths};
+use domain::records::{
+    DUE_HEADING, KNOWLEDGE, floor, log_days_to_come, log_problems, unread_paths,
+};
 use domain::schema::Time;
-use protocol::inbound::Finding;
+use protocol::inbound::{Finding, Warning};
 use protocol::outbound::{Parsers, Tree};
 
 /// The check that says the records could not be checked at all
@@ -31,7 +33,7 @@ pub struct Records {
     /// Every broken rule, under its check, in the order it is printed
     pub found: Vec<Finding>,
     /// Every knowledge document whose `stale_after` has come, as a warning
-    pub due: Vec<String>,
+    pub warnings: Vec<Warning>,
 }
 
 /// Every broken rule of the records at `now`, grouped by `areas`: `None` when the declaration cannot be read.
@@ -71,15 +73,17 @@ pub fn problems(
     }
 
     let written = read_log(tree)?;
-    found.extend(links(tree, parsers, written.as_ref().ok())?);
-    found.extend(log(&written, now));
     let bundle = Bundle::new(tree, areas);
-    let knowledge = knowledge(tree, parsers, &bundle, now)?;
+    // Read once, and judged three ways below. An error names the file, as `rotproof index` and `rotproof create` say it
+    let docs = bundle.read_folder("knowledge")?;
+    found.extend(links(tree, parsers, &docs, written.as_ref().ok()));
+    found.extend(log(&written, now));
+    let knowledge = knowledge(tree, parsers, &bundle, &docs, now)?;
     found.extend(knowledge.found);
-    found.extend(generated(tree, &bundle)?);
+    found.extend(generated(tree, &bundle, &docs));
     Ok(Records {
         found,
-        due: knowledge.due,
+        warnings: knowledge.warnings,
     })
 }
 
@@ -92,18 +96,23 @@ fn read_log(tree: &dyn Tree) -> io::Result<Result<String, String>> {
     })
 }
 
-/// Every link a reader may follow in what Rotproof keeps that does not resolve: the knowledge documents, and the
+/// Every link a reader may follow in what Rotproof keeps that does not resolve: the knowledge documents `docs`, and the
 /// `log` when it could be read.
-fn links(tree: &dyn Tree, parsers: &dyn Parsers, log: Option<&String>) -> io::Result<Vec<Finding>> {
-    let mut documents = concepts(tree, DOCS)?;
+fn links(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    docs: &Docs,
+    log: Option<&String>,
+) -> Vec<Finding> {
+    let mut documents = concepts(docs);
     if let Some(log) = log {
         documents.insert("log.md".into(), log.clone());
     }
-    Ok(under(
+    under(
         "every link in docs/knowledge/ and the log resolves",
         pairs(&unresolved(&documents, tree, parsers)),
     )
-    .collect())
+    .collect()
 }
 
 /// Every broken rule of the `log` at `now`, or why it could not be read.
@@ -116,20 +125,22 @@ fn log(log: &Result<String, String>, now: Time) -> Vec<Finding> {
     }
 }
 
-/// Every broken rule of the knowledge documents `bundle` reads, and those whose `stale_after` has come at `now`.
+/// Every broken rule of the knowledge documents `docs`, which `bundle` sorts out, and those whose `stale_after` has
+/// come at `now`.
 fn knowledge(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     bundle: &Bundle,
+    docs: &Docs,
     now: Time,
 ) -> io::Result<Records> {
-    let read = bundle.read_knowledge()?;
+    let read = bundle.knowledge_of(docs);
     let held = read
         .documents
         .into_iter()
         .map(|(name, (doc, _))| (name, doc))
         .collect();
-    let due = domain::records::due(&held, now);
+    let warnings = warn(DUE_HEADING, domain::records::due(&held, now)).collect();
     let found = under(
         "every knowledge document matches the code it follows",
         crate::follows::drift(tree, parsers, &held),
@@ -143,12 +154,12 @@ fn knowledge(
         pairs(&read.problems),
     ))
     .collect();
-    Ok(Records { found, due })
+    Ok(Records { found, warnings })
 }
 
 /// The files `rotproof index` writes that are not as it would write them now.
-fn generated(tree: &dyn Tree, bundle: &Bundle) -> io::Result<Vec<Finding>> {
-    let (files, _) = bundle.expected()?;
+fn generated(tree: &dyn Tree, bundle: &Bundle, docs: &Docs) -> Vec<Finding> {
+    let (files, _) = bundle.expected_of(docs);
     let stale: Vec<String> = files
         .into_iter()
         // Compared by the exact name, as the floor is: a `Rules.md` holding the rules is not `rules.md`
@@ -161,7 +172,7 @@ fn generated(tree: &dyn Tree, bundle: &Bundle) -> io::Result<Vec<Finding>> {
         })
         .map(|(path, _)| format!("out of date, run `rotproof index`: {path}"))
         .collect();
-    Ok(under("every generated file is up to date", stale).collect())
+    under("every generated file is up to date", stale).collect()
 }
 
 fn pairs(problems: &BTreeMap<String, String>) -> Vec<String> {
@@ -200,20 +211,12 @@ fn unresolved(
     bad
 }
 
-/// Every knowledge document, directly in `knowledge/` of the bundle directory `docs`: its path relative to `docs` (with
-/// `/`) -> text. The rest of `docs` is the project's, and is not read.
-fn concepts(tree: &dyn Tree, docs: &str) -> io::Result<Docs> {
-    let dir = join(docs, KNOWLEDGE);
-    let mut out = Docs::new();
-    for (name, is_dir) in tree.entries(&dir)? {
-        if is_document(&name, is_dir) {
-            out.insert(
-                format!("{KNOWLEDGE}/{name}"),
-                read_text(tree, &join(&dir, &name))?,
-            );
-        }
-    }
-    Ok(out)
+/// Every knowledge document of `docs`, those directly in `knowledge/`: its path relative to the bundle directory
+/// (with `/`) -> text. The rest of the bundle is the project's, and is not read.
+fn concepts(docs: &Docs) -> Docs {
+    docs.iter()
+        .map(|(name, text)| (format!("{KNOWLEDGE}/{name}"), text.clone()))
+        .collect()
 }
 
 /// Path -> why, for the files under `knowledge/` of the bundle directory `docs` that Rotproof would not read (see
@@ -384,5 +387,22 @@ mod tests {
             sorted.sort();
             sorted
         });
+    }
+
+    #[test]
+    fn the_knowledge_documents_are_read_once_for_every_check_that_judges_them() {
+        let doc = "---\ntype: Knowledge\ntitle: A\ndescription: B.\ntags: [a]\nstatus: stable\n---\n\n# Why\n\nZ.\n";
+        let tree = crate::tree::fake::Fake::new(&[
+            ("docs/index.md", ""),
+            ("docs/log.md", "# Log\n"),
+            ("docs/knowledge/rules.md", ""),
+            ("docs/knowledge/a.md", doc),
+            ("docs/knowledge/b.md", doc),
+        ]);
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-28T09:00:00+09:00").unwrap();
+        problems(&tree, &Readers, Some(vec!["a".into()]), now).unwrap();
+        for path in ["docs/knowledge/a.md", "docs/knowledge/b.md"] {
+            assert_eq!(tree.reads_of(path), 1, "{path}");
+        }
     }
 }

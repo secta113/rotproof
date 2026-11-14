@@ -9,8 +9,8 @@
 //! It never runs by itself, so a layer removed by mistake fails the check instead of coming back.
 
 use crate::bundle::Bundle;
-use crate::layers::declaration;
-use crate::tree::{exactly, read_text, read_written};
+use crate::layers::{Source, source};
+use crate::tree::read_text;
 use domain::bundle::{LOG, in_docs, record_tags as tags_in};
 use domain::declaration::{
     DECLARATION, Declared, First, MISSING, completed, fields, lacking, parse_declaration,
@@ -20,6 +20,7 @@ use domain::guide::{GUIDE, guide};
 use domain::hook::SETTINGS;
 use domain::layers::{NO_UI, Place, layout, table, uis};
 use domain::project::project_files;
+use domain::tree::{Written, with_lf};
 use protocol::inbound::Made;
 use protocol::outbound::{Tree, Writer};
 
@@ -76,12 +77,14 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
 }
 
 /// The declaration as `rotproof create` goes on from it, and the completed text with the fields added when it lacked
-/// any (`complete`): not written yet.
+/// any (`complete`): not written yet. The file is read once; what it holds is parsed as it is, and completed as
+/// [`with_lf`] reads it.
 fn read_declared(tree: &dyn Tree) -> Result<(Declared, Option<Completed>), String> {
-    match declaration(tree).map_err(|e| e.to_string())? {
-        None => Err(MISSING.into()),
+    match source(tree).map_err(|e| e.to_string())? {
+        Source::Missing => Err(MISSING.into()),
+        Source::Spelled(why) => Err(unreadable(&why)),
         // A declaration that lacks `ui` reads, and fails only once the stack is known: it is completed all the same
-        Some(read) => match complete(tree)? {
+        Source::Text(raw) => match complete(tree, &raw)? {
             // Written only once the completed declaration reads and fits its stack, so a declaration that fails for
             // another reason is left as it was
             Some((text, added)) => {
@@ -90,7 +93,7 @@ fn read_declared(tree: &dyn Tree) -> Result<(Declared, Option<Completed>), Strin
                 Ok((declared, Some((text, added))))
             }
             None => Ok((
-                Declared::new(read.map_err(|why| unreadable(&why))?)
+                Declared::new(parse_declaration(&raw).map_err(|why| unreadable(&why))?)
                     .map_err(|found| found.join("\n"))?,
                 None,
             )),
@@ -197,12 +200,11 @@ fn write_indexes(
 }
 
 /// The declaration with every field of [`ADDED`](domain::declaration::ADDED) it lacks, each under its comment, and
-/// the fields added as `name = value`. `None` when it lacks none, or is not TOML: then its own error stands.
-fn complete(tree: &dyn Tree) -> Result<Option<Completed>, String> {
-    let Ok((path, _)) = exactly(tree, DECLARATION) else {
-        return Ok(None);
-    };
-    let (text, was) = read_written(tree, &path).map_err(|e| unreadable(&e.to_string()))?;
+/// the fields added as `name = value`. `raw` is the text of the file as it is, which also gives how it was written.
+/// `None` when it lacks none, or is not TOML: then its own error stands.
+fn complete(tree: &dyn Tree, raw: &str) -> Result<Option<Completed>, String> {
+    let text = with_lf(raw);
+    let was = Written::of(raw);
     let Some(lacking) = lacking(&text) else {
         return Ok(None);
     };
@@ -279,4 +281,24 @@ fn write(out: &dyn Writer, path: &str, text: &str, made: &mut Made) -> Result<()
     out.write(path, text).map_err(|e| format!("{path}: {e}"))?;
     made.written.push(path.to_string());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::fake::Fake;
+
+    #[test]
+    fn the_declaration_is_read_once_whether_or_not_it_lacks_a_field() {
+        for (declaration, added) in [
+            ("stack = \"none\"\nareas = [\"a\"]\n", 0),
+            ("stack = \"python\"\nareas = [\"a\"]\n", 1),
+            ("stack = \"python\"\n", 2),
+        ] {
+            let tree = Fake::new(&[(DECLARATION, declaration)]);
+            let made = create(&tree, &tree, "project", true).unwrap();
+            assert_eq!(made.added.len(), added, "{declaration}");
+            assert_eq!(tree.reads_of(DECLARATION), 1, "{declaration}");
+        }
+    }
 }

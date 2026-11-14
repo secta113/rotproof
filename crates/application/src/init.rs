@@ -571,7 +571,7 @@ mod tests {
         else {
             panic!("upgraded");
         };
-        // Neither `claude-time-hook` nor `claude-remove-time-hook` has anything to do
+        // The time hook is neither added nor taken out: the stop hook alone is there to go
         assert_eq!(
             upgraded.applied,
             [("claude-remove-stop-hook", SETTINGS)],

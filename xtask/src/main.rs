@@ -194,15 +194,15 @@ fn install_version(root: &Path) -> Result<Vec<String>, String> {
     ))
 }
 
-/// Where a member of the workspace names a dependency's source itself. The floor: at least one member is read
+/// Where the root package or a member of the workspace names a dependency's source itself. The floor: at least one
+/// member is read
 fn dependencies(root: &Path) -> Result<Vec<String>, String> {
     let members = manifests::members(&read(root, "Cargo.toml")?)?;
     if members.is_empty() {
         return Err("Cargo.toml lists no member, so no crate's dependencies were read".into());
     }
     let mut found = Vec::new();
-    for member in members {
-        let path = format!("{member}/Cargo.toml");
+    for path in manifests::manifests(&members) {
         found.extend(manifests::problems(&path, &read(root, &path)?)?);
     }
     Ok(found)
@@ -216,21 +216,33 @@ fn domain_pure(root: &Path) -> Result<Vec<String>, String> {
     ))
 }
 
-/// The `.rs` files directly in `dir` (from the root), each with its text, by name.
+/// The `.rs` files in `dir` (from the root) and in every directory below it, each with its text, by path. A module in
+/// a subdirectory (`rust/outline.rs`) is as much `domain` as one beside `lib.rs`
 fn sources(root: &Path, dir: &str) -> Result<Vec<(String, String)>, String> {
-    let mut names: Vec<String> = fs::read_dir(root.join(dir))
-        .map_err(|e| format!("cannot read {dir}: {e}"))?
-        .map(|entry| entry.map(|e| e.file_name().to_string_lossy().into_owned()))
-        .collect::<Result<_, _>>()
-        .map_err(|e| format!("cannot read {dir}: {e}"))?;
-    names.retain(|name| domain::rust::is_source(name));
-    names.sort();
+    let mut paths = Vec::new();
+    source_paths(root, dir, &mut paths)?;
+    paths.sort();
     let mut files = Vec::new();
-    for name in names {
-        let path = format!("{dir}/{name}");
-        files.push((path.clone(), read(root, &path)?));
+    for path in paths {
+        let text = read(root, &path)?;
+        files.push((path, text));
     }
     Ok(files)
+}
+
+/// Add the paths of the `.rs` files in `dir` and below it to `paths`
+fn source_paths(root: &Path, dir: &str, paths: &mut Vec<String>) -> Result<(), String> {
+    let cannot = |e: std::io::Error| format!("cannot read {dir}: {e}");
+    for entry in fs::read_dir(root.join(dir)).map_err(cannot)? {
+        let entry = entry.map_err(cannot)?;
+        let path = format!("{dir}/{}", entry.file_name().to_string_lossy());
+        if entry.file_type().map_err(cannot)?.is_dir() {
+            source_paths(root, &path, paths)?;
+        } else if domain::rust::is_source(&path) {
+            paths.push(path);
+        }
+    }
+    Ok(())
 }
 
 /// The lines with a comment over the width, in every tracked `.rs` file
@@ -411,5 +423,102 @@ fn main() -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(root: &Path, file: &str, text: &str) {
+        let path = root.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn a_dependency_in_the_root_manifest_fails_the_check_beside_the_members() {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = "[package]\nname = \"a\"\n\n[dependencies]\nregex.workspace = true\n";
+        let workspace = "\n[workspace]\nmembers = [\"xtask\"]\n";
+        write(root.path(), "xtask/Cargo.toml", manifest);
+        write(root.path(), "Cargo.toml", &format!("{manifest}{workspace}"));
+        assert!(dependencies(root.path()).unwrap().is_empty());
+        let planted = format!("{manifest}\n[dev-dependencies]\ntempfile = \"3\"\n{workspace}");
+        write(root.path(), "Cargo.toml", &planted);
+        let found = dependencies(root.path()).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].starts_with("Cargo.toml: [dev-dependencies] tempfile"));
+    }
+
+    #[test]
+    fn the_sources_are_read_in_every_directory_below_by_path() {
+        let root = tempfile::tempdir().unwrap();
+        for file in [
+            "src/lib.rs",
+            "src/a/deep.rs",
+            "src/a/b/deeper.RS",
+            "src/z.rs",
+            "src/a/notes.txt",
+            "other/skipped.rs",
+        ] {
+            write(root.path(), file, file);
+        }
+        let files = sources(root.path(), "src").unwrap();
+        let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "src/a/b/deeper.RS",
+                "src/a/deep.rs",
+                "src/lib.rs",
+                "src/z.rs"
+            ]
+        );
+        assert!(files.iter().all(|(path, text)| path == text));
+        assert!(sources(root.path(), "missing").is_err());
+    }
+
+    #[test]
+    fn a_port_or_io_in_a_subdirectory_of_domain_fails_the_check() {
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), &format!("{}/lib.rs", pure::DOMAIN), "");
+        write(
+            root.path(),
+            &format!("{}/rust/outline.rs", pure::DOMAIN),
+            "pub fn planted_io() -> std::io::Result<()> { Ok(()) }\n",
+        );
+        write(
+            root.path(),
+            &format!("{}/mod.rs", pure::PORTS),
+            "pub trait Tree {}\npub trait Writer {}\npub trait Parsers {}\n",
+        );
+        let found = domain_pure(root.path()).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].starts_with("crates/domain/src/rust/outline.rs:1: does I/O"));
+    }
+
+    #[test]
+    fn a_trait_in_a_subdirectory_of_the_ports_is_a_port() {
+        let root = tempfile::tempdir().unwrap();
+        write(
+            root.path(),
+            &format!("{}/lib.rs", pure::DOMAIN),
+            "pub fn a(p: &dyn Planted) {}\n",
+        );
+        write(
+            root.path(),
+            &format!("{}/mod.rs", pure::PORTS),
+            "pub trait Tree {}\npub trait Writer {}\npub trait Parsers {}\n",
+        );
+        assert!(domain_pure(root.path()).unwrap().is_empty());
+        write(
+            root.path(),
+            &format!("{}/sub/planted.rs", pure::PORTS),
+            "pub trait Planted {}\n",
+        );
+        let found = domain_pure(root.path()).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("takes a port"));
     }
 }

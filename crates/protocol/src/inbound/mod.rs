@@ -67,6 +67,15 @@ pub struct Finding {
     pub detail: String,
 }
 
+/// One warning: which check raised it, and what it says. A warning is printed on every run and fails nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Warning {
+    /// The heading the warning is printed under, without the count and the words that say it fails nothing, which
+    /// the entry point adds
+    pub check: Cow<'static, str>,
+    pub detail: String,
+}
+
 /// What `rotproof check` found.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -77,12 +86,10 @@ pub struct Report {
     pub layers_checked: bool,
     /// Every forbidden import a person approved, as printed on every run: one line per entry that approves something
     pub approved: Vec<String>,
-    /// Every knowledge document whose `stale_after` has come, with what to do: a warning on every run, which fails
-    /// nothing
-    pub due: Vec<String>,
-    /// Every comment that may make the type checker check less (`# pyright: basic`), as `path:line` and the line
-    /// under it: a warning on every run, which fails nothing
-    pub weakened: Vec<String>,
+    /// Every warning, in the order it is printed, each kind under its own heading: a knowledge document whose
+    /// `stale_after` has come, with what to do, and a comment that may make the type checker check less
+    /// (`# pyright: basic`), as `path:line` and the line under it
+    pub warnings: Vec<Warning>,
 }
 
 /// What `rotproof index` did.

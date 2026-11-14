@@ -20,7 +20,8 @@ impl<'a> Bundle<'a> {
         Bundle { tree, areas }
     }
 
-    /// The documents directly in `docs/<folder>/`, except reserved names: file name -> text.
+    /// The documents directly in `docs/<folder>/`, except reserved names: file name -> text. An error names the path
+    /// it could not read.
     pub fn read_folder(&self, folder: &str) -> io::Result<Docs> {
         let dir = in_docs(folder);
         let mut docs = Docs::new();
@@ -37,16 +38,23 @@ impl<'a> Bundle<'a> {
     /// Every file Rotproof generates in the bundle (the index files and the rules) -> what it should contain now, and
     /// the documents left out of the index files.
     pub fn expected(&self) -> io::Result<(Vec<(String, String)>, Problems)> {
-        let knowledge = self.read_folder("knowledge")?;
-        Ok(expected(&knowledge, &self.areas))
+        Ok(self.expected_of(&self.read_folder("knowledge")?))
+    }
+
+    /// What [`expected`](Self::expected) gives for `docs`, the documents of `docs/knowledge/` already read.
+    pub fn expected_of(&self, docs: &Docs) -> (Vec<(String, String)>, Problems) {
+        expected(docs, &self.areas)
     }
 
     /// The documents of `docs/knowledge/`.
     pub fn read_knowledge(&self) -> io::Result<KnowledgeFolder> {
-        Ok(knowledge_with_rules(
-            &self.read_folder("knowledge")?,
-            &self.areas,
-        ))
+        Ok(self.knowledge_of(&self.read_folder("knowledge")?))
+    }
+
+    /// What [`read_knowledge`](Self::read_knowledge) gives for `docs`, the documents of `docs/knowledge/` already
+    /// read.
+    pub fn knowledge_of(&self, docs: &Docs) -> KnowledgeFolder {
+        knowledge_with_rules(docs, &self.areas)
     }
 }
 
