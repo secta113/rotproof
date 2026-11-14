@@ -1991,6 +1991,25 @@ fn a_tsconfig_rotproof_cannot_read_fails() {
 }
 
 #[test]
+fn a_tsconfig_that_extends_itself_is_a_finding_and_not_a_crash() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    // `./tsconfig.json` and `tsconfig.json` name one file, so the cycle is there however it is spelled
+    fs::write(
+        r.join("tsconfig.json"),
+        "{ \"extends\": \"./tsconfig.json\" }",
+    )
+    .unwrap();
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("tsconfig.json: extends itself through tsconfig.json"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
 fn every_form_of_import_is_judged() {
     let root = repo_with_ui("python", "");
     let r = root.path();
