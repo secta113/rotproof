@@ -303,7 +303,16 @@ areas = ["billing", "records"]  # the areas knowledge is grouped by, in this ord
 ui = "atomic"            # the layers of the screens: atomic | none (rust: none; none for a stack of none)
 absent = ["ui.templates"]  # layers or levels this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
+todo_link = "number"     # optional, number | key: a TODO may stay when it names its issue (see below)
 ```
+
+`todo_link` is the one key of the declaration that `rotproof init` and `rotproof create` never write: a project that
+wants it adds it by hand, and everything else is as without it (the marker check below fails on every `TODO`). It is
+`"number"` for `TODO(#123): what is left`, or `"key"` for `TODO(ABC-123): what is left`; any other value fails, naming
+the two, and so does the key with `stack = "none"`, which has no code to read. The declaration is read strictly, with
+a field Rotproof does not know failing it, so a Rotproof older than the one that brought `todo_link` cannot read a
+declaration that holds it: a project pins an exact version of Rotproof, and moves it before it adds the key. Whether a
+project declares it is a person's decision, which an agent never makes to pass the check, and the guide says so.
 
 What the layers are is written once, in `layers/table.toml`, on the onion architecture:
 
@@ -528,7 +537,8 @@ changed is in the commits, what was measured and decided along the way in the ta
   without the word, and what spans files, says how to run or operate something, or lies outside the repository moves
   to `docs/knowledge/`, tied to the code by `follows`. A line that holds both is named under the first heading alone,
   as taking the comment out settles both. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
-  strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
+  strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read. A project that declares `todo_link`
+  may keep a `TODO` that names the issue tracking its work: see "Work put off that an issue tracks".
 - **No comment switches the type checker off**, in the comments the marker check reads: in Python, `# type: ignore`
   and `# mypy: ignore`, `# pyright: ignore`, `# pyrefly: ignore` or `# ty: ignore`, with or without codes, and the
   file-level `ignore-errors` of mypy and Pyrefly, also after another comment (`# noqa  # type: ignore`); in
@@ -610,6 +620,63 @@ be the title `PR`; quote a value that holds one. Its closing `---` may end the f
 renders it: an HTML comment or a fenced code block (``` or ~~~, indented by up to 3 spaces, running to the end when
 it is not closed) is not text, so a heading, a link or the only text of a section inside one counts for nothing. A
 heading may be indented by up to 3 spaces, and a closing run of `#` (`## Notes ##`) is not part of it.
+
+### Work put off that an issue tracks
+
+The marker check exists so that put-off work does not rot where nothing asks when it is done. A project may let a
+`TODO` stay when an issue already tracks the work, by declaring `todo_link` (see "The layers"). Then a `TODO` passes
+into a list, printed on every run, when it has exactly this form, on one line:
+
+| `todo_link` | The form | Reference listed |
+|---|---|---|
+| `"number"` | `TODO(#123): what is left` | `#123` |
+| `"key"` | `TODO(ABC-123): what is left` | `ABC-123` |
+
+The number has no leading zero. The key is an upper-case letter, one or more upper-case letters or digits, `-` and
+digits. The reference is followed by `): ` and a description with a character in it. One issue goes with one `TODO`:
+`TODO(#1, #2): x` fails. Everything else still fails, a `key` where `number` is declared and the reverse included
+(`TODO later`, `TODO #123`, `TODO(#123)`, `TODO(#123) x`, `TODO(me): x`), and so does `FIXME`, `XXX`, `HACK` or `NOTE`
+in the same form. The reference between the parentheses is not read for markers (`TODO(XXX-12): x` is no `XXX`); the
+description is read as any comment. A line that holds a linked `TODO` and another marker, or a `TODO` not in the form,
+fails as it does without the key, and is not listed. A line that also holds `NOTE` is listed, and its `NOTE` is a
+finding of its own kind, as when it stands alone. Without `todo_link`, none of this applies and the output has nothing
+new. When a `TODO` fails and `todo_link` is declared, the heading names the form, after the three ways out.
+
+```text
+linked TODO (2)
+  src/app/handler/upload.py:42  #123
+  src/app/domain/price.py:10    #130
+```
+
+The list is no finding and no warning: it never changes the exit code, and it is printed apart from both (after the
+approvals, before the warnings), nothing at all when it is empty. The form of its lines is kept, so that a CI step can
+read it: a line is two spaces, `path:line`, padding, and the reference, sorted by path and then by line; the
+first field is the place, the last the reference (a path that holds a space is the one case where the place is every
+field but the last).
+
+`rotproof check` does not look at whether the issue exists or is open: it reads files alone and runs offline, so it
+gives the same answer every time, and an invented number passes. Without a step that asks the tracker, nothing but the
+guide in `.rotproof/AGENTS.md` stops one. In GitHub Actions, with `todo_link = "number"`, a step that fails on a linked
+`TODO` whose number is closed, missing, or a pull request's (the job needs `issues: read`, and a `key` needs the
+tracker's own lookup in place of `gh`):
+
+```yaml
+      - name: Every linked TODO names an open issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          list=$(rotproof check || true)
+          failed=0
+          while read -r place ref; do
+            state=$(gh api "repos/{owner}/{repo}/issues/${ref#\#}" \
+              --jq 'if .pull_request then "a pull request" else .state end' 2>/dev/null) || state=missing
+            if [ "$state" != open ]; then
+              echo "::error::$place: issue $ref is $state"
+              failed=1
+            fi
+          done < <(printf '%s\n' "$list" | awk '/^linked TODO/ {on=1; next} on && /^  / {print $1, $NF; next} {on=0}')
+          exit $failed
+```
 
 ## Development
 

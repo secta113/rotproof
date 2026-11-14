@@ -45,8 +45,8 @@ pub fn problems(
         };
         read += 1;
         let comments = comments(parsers, layout.language, &source, &path);
-        for (finding, words) in in_file(&path, &source, &comments) {
-            found.markers.add(finding, &words);
+        for line in in_file(&path, &source, &comments, declared.todo_link) {
+            found.markers.add(line);
         }
         for (finding, effect) in
             domain::suppressions::in_file(layout.language, &path, &source, &comments)
@@ -78,24 +78,23 @@ fn comments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::markers::MARKERS;
+    use domain::markers::{MARKERS, TodoLink};
     use domain::suppressions::Effect;
     use infrastructure::outbound::readers::Readers;
 
     /// The lines of a source with a marker in a comment, as the reader of `language` finds its comments, and the
     /// markers on them in order
     fn words(language: Language, source: &str, path: &str) -> (Vec<usize>, Vec<&'static str>) {
-        let found = in_file(path, source, &comments(&Readers, language, source, path));
-        let lines = found
-            .iter()
-            .map(|(finding, _)| {
-                let at = finding.split_once('\n').unwrap().0;
-                at.rsplit(':').next().unwrap().parse().unwrap()
-            })
-            .collect();
+        let found = in_file(
+            path,
+            source,
+            &comments(&Readers, language, source, path),
+            None,
+        );
+        let lines = found.iter().map(|line| line.number).collect();
         let markers = found
             .into_iter()
-            .flat_map(|(_, positions)| positions)
+            .flat_map(|line| line.positions)
             .map(|i| MARKERS[i])
             .collect();
         (lines, markers)
@@ -118,6 +117,95 @@ mod tests {
         assert_eq!(
             words(Language::Python, "x = 1  # TODO(me) and NOTE\n", "x.py"),
             (vec![1], vec!["TODO", "NOTE"])
+        );
+    }
+
+    /// The lines of a source, as the reader of `language` finds its comments, with what they hold under `link`:
+    /// the line, the references, and the markers that are none, in order
+    fn linked(
+        language: Language,
+        source: &str,
+        path: &str,
+        link: TodoLink,
+    ) -> Vec<(usize, Vec<String>, Vec<&'static str>)> {
+        let comments = comments(&Readers, language, source, path);
+        in_file(path, source, &comments, Some(link))
+            .into_iter()
+            .map(|line| {
+                let words = line.positions.iter().map(|&at| MARKERS[at]).collect();
+                (line.number, line.linked, words)
+            })
+            .collect()
+    }
+
+    fn refs(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
+    #[test]
+    fn a_python_comment_with_an_issue_is_linked_and_a_string_is_not_read() {
+        let source = "\
+x = 1  # TODO(#12): split this
+s = \"TODO(#13): in a string\"
+\"\"\"TODO(#14): in a docstring\"\"\"
+# TODO(#15) no colon
+# TODO(#16): and FIXME
+# TODO(XXX-1): a key where a number is declared
+";
+        assert_eq!(
+            linked(Language::Python, source, "x.py", TodoLink::Number),
+            [
+                (1, refs(&["#12"]), vec![]),
+                (4, refs(&[]), vec!["TODO"]),
+                (5, refs(&["#16"]), vec!["FIXME"]),
+                (6, refs(&[]), vec!["TODO", "XXX"]),
+            ]
+        );
+        let source = "# TODO(XXX-1): a key\n# TODO(#2): a number where a key is declared\n";
+        assert_eq!(
+            linked(Language::Python, source, "x.py", TodoLink::Key),
+            [(1, refs(&["XXX-1"]), vec![]), (2, refs(&[]), vec!["TODO"])]
+        );
+    }
+
+    #[test]
+    fn a_typescript_comment_with_an_issue_is_linked_and_jsx_text_is_not_read() {
+        let source = "\
+const a = 1; // TODO(ABC-12): split this
+const view = <p>TODO(ABC-13): in text</p>;
+/* TODO(ABC-14): a block
+   TODO(ABC-15):
+   NOTE(ABC-16): not a form */
+";
+        assert_eq!(
+            linked(Language::TypeScript, source, "src/a.tsx", TodoLink::Key),
+            [
+                (1, refs(&["ABC-12"]), vec![]),
+                (3, refs(&["ABC-14"]), vec![]),
+                (4, refs(&[]), vec!["TODO"]),
+                (5, refs(&[]), vec!["NOTE"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_rust_comment_with_an_issue_is_linked_and_a_string_is_not_read() {
+        let source = "\
+pub const S: &str = \"// TODO(#1): in a string\";
+/// TODO(#2): in a doc comment
+fn f() {} // TODO(#3): after code
+/* TODO(#4):
+ */
+// TODO(#5): and HACK
+";
+        assert_eq!(
+            linked(Language::Rust, source, "src/lib.rs", TodoLink::Number),
+            [
+                (2, refs(&["#2"]), vec![]),
+                (3, refs(&["#3"]), vec![]),
+                (4, refs(&[]), vec!["TODO"]),
+                (6, refs(&["#5"]), vec!["HACK"]),
+            ]
         );
     }
 

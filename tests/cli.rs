@@ -2867,7 +2867,307 @@ fn the_help_of_check_names_the_markers_of_the_check() {
             said.contains(&format!("that no comment holds {sentence}, that")),
             "{args:?}: {said}"
         );
+        // The way out for work an issue tracks, in the forms the check accepts, and what it never looks at
+        let said = said.replace("\n ", " ").replace('\n', " ");
+        for link in [
+            domain::markers::TodoLink::Number,
+            domain::markers::TodoLink::Key,
+        ] {
+            assert!(said.contains(link.example()), "{args:?}: {said}");
+        }
+        assert!(
+            said.contains("todo_link in the declaration")
+                && said.contains("under `linked TODO`")
+                && said.contains("Whether the issue exists or is open is not checked"),
+            "{args:?}: {said}"
+        );
     }
+}
+
+/// The declaration of a Python project with no screens that declares `todo_link` as `link`, over `clean_repo`'s.
+fn declare_todo_link(root: &Path, link: &str) {
+    declare(
+        root,
+        &format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\ntodo_link = \"{link}\"\n"),
+    );
+}
+
+fn write_file(root: &Path, path: &str, text: &str) {
+    let full = root.join(path);
+    fs::create_dir_all(full.parent().unwrap()).unwrap();
+    fs::write(full, text).unwrap();
+}
+
+#[test]
+fn a_comment_tied_to_an_issue_is_listed_on_every_run_and_fails_nothing() {
+    let root = clean_repo();
+    let r = root.path();
+    declare_todo_link(r, "number");
+    write_file(
+        r,
+        "domain/model.py",
+        "X = 1\n# TODO(#123): split this when the second price arrives\n",
+    );
+    write_file(
+        r,
+        "tests/test_price.py",
+        "y = 2  # TODO(#9): cover the rounding\n",
+    );
+    let arg = root_arg(r);
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{said}");
+    // Apart from the findings, and each line with its place and its reference, sorted by path
+    assert_eq!(
+        said,
+        "linked TODO (2)\n  domain/model.py:2      #123\n  tests/test_price.py:1  #9\n\
+         the layers and every record keep the rules\n"
+    );
+    assert!(out.stderr.is_empty());
+    // On every run, and the same each time
+    let again = run(&["--root", &arg, "check"]);
+    assert_eq!(stdout(&again), said);
+    // What a CI step reads: the place is the first field of a line, the reference the last
+    let read: Vec<(String, String)> = said
+        .lines()
+        .filter(|line| line.starts_with("  "))
+        .map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            (fields[0].to_string(), fields[fields.len() - 1].to_string())
+        })
+        .collect();
+    assert_eq!(
+        read,
+        [
+            ("domain/model.py:2".to_string(), "#123".to_string()),
+            ("tests/test_price.py:1".to_string(), "#9".to_string())
+        ]
+    );
+    // Taking the comment out empties the list, and nothing is printed for it
+    write_file(r, "domain/model.py", "X = 1\n");
+    write_file(r, "tests/test_price.py", "y = 2\n");
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(stdout(&out), "the layers and every record keep the rules\n");
+}
+
+#[test]
+fn a_key_is_listed_where_the_declaration_says_key() {
+    let root = clean_repo();
+    let r = root.path();
+    declare_todo_link(r, "key");
+    write_file(r, "domain/model.py", "# TODO(ABC-12): split this\n");
+    // A number where a key is declared fails, and the key is no marker of its own kind
+    write_file(r, "domain/song.py", "# TODO(#12): split this\n");
+    write_file(
+        r,
+        "domain/price.py",
+        "# TODO(XXX-3): one\n# TODO(NOTE-4): two\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.starts_with(
+            "linked TODO (3)\n  domain/model.py:1  ABC-12\n  domain/price.py:1  XXX-3\n  domain/price.py:2  NOTE-4\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains("  domain/song.py:1\n    # TODO(#12): split this\n"),
+        "{said}"
+    );
+    assert_eq!(said.matches("\n  domain/").count(), 4, "{said}");
+    // The heading shows the form for the declared value, after the three ways out
+    assert!(
+        said.contains(
+            "no comment holds TODO (fix the finding now, write it as one line in the task's issue, or let it go; \
+             then take the comment out. Why the code is written so stays, without the word. Work that an existing \
+             issue already tracks may stay as TODO(ABC-123): what is left, with that issue's key)"
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("XXX-3\n    "), "{said}");
+}
+
+#[test]
+fn a_comment_not_in_the_form_fails_and_the_heading_offers_the_form_after_the_ways_out() {
+    let root = clean_repo();
+    let r = root.path();
+    declare_todo_link(r, "number");
+    let heading = "no comment holds TODO (fix the finding now, write it as one line in the task's issue, or let it go; \
+                   then take the comment out. Why the code is written so stays, without the word. Work that an \
+                   existing issue already tracks may stay as TODO(#123): what is left, with that issue's number)";
+    for bad in [
+        "# TODO later",
+        "# TODO #123",
+        "# TODO(): x",
+        "# TODO(#123)",
+        "# TODO(#123) x",
+        "# TODO(me): x",
+        "# TODO(#1, #2): x",
+        "# TODO(ABC-123): x",
+        "# TODO(#0123): x",
+    ] {
+        write_file(r, "domain/model.py", &format!("X = 1\n{bad}\n"));
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{bad}: {said}");
+        assert!(said.contains(heading), "{bad}: {said}");
+        assert!(
+            said.contains(&format!("  domain/model.py:2\n    {bad}\n")),
+            "{bad}: {said}"
+        );
+        assert!(!said.contains("linked TODO"), "{bad}: {said}");
+    }
+    // The other markers fail as they do without the declaration, and the form is no way out for them
+    for other in ["FIXME", "XXX", "HACK", "NOTE"] {
+        write_file(r, "domain/model.py", &format!("# {other}(#12): x\n"));
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{other}: {said}");
+        assert!(!said.contains("linked TODO"), "{other}: {said}");
+        assert!(!said.contains("TODO(#123)"), "{other}: {said}");
+    }
+    // A line that holds a linked comment and another marker fails, and is not listed
+    write_file(r, "domain/model.py", "# TODO(#12): x, and HACK\n");
+    write_file(r, "domain/song.py", "# TODO(#13): y, TODO later\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(!said.contains("linked TODO"), "{said}");
+    assert!(said.contains("no comment holds TODO or HACK ("), "{said}");
+    // With the marker that keeps knowledge, the line is listed and that marker fails as when alone
+    write_file(r, "domain/model.py", "# TODO(#12): x, see NOTE\n");
+    write_file(r, "domain/song.py", "Y = 1\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.starts_with("linked TODO (1)\n  domain/model.py:1  #12\n"),
+        "{said}"
+    );
+    assert!(
+        said.contains(domain::markers::KNOWLEDGE_HEADING)
+            && said.contains("  domain/model.py:1\n    # TODO(#12): x, see NOTE\n"),
+        "{said}"
+    );
+    assert!(!said.contains("no comment holds TODO"), "{said}");
+}
+
+#[test]
+fn the_linked_list_comes_before_the_warnings_and_the_findings() {
+    let root = clean_repo();
+    let r = root.path();
+    declare_todo_link(r, "number");
+    write_file(r, "domain/model.py", "# TODO(#12): x\n");
+    write_file(r, "domain/song.py", "X = 1  # pyright: basic\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{said}");
+    let linked = said.find("linked TODO (1)").unwrap();
+    let warned = said.find("(a warning, which fails nothing)").unwrap();
+    assert!(linked < warned, "{said}");
+    write_file(r, "domain/price.py", "# FIXME y\n");
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    let found = said.find("no comment holds FIXME").unwrap();
+    assert!(
+        said.find("linked TODO (1)").unwrap() < said.find("(a warning").unwrap()
+            && said.find("(a warning").unwrap() < found,
+        "{said}"
+    );
+}
+
+#[test]
+fn without_todo_link_the_form_is_a_marker_and_the_output_has_nothing_new() {
+    let root = clean_repo();
+    let r = root.path();
+    write_file(r, "domain/model.py", "# TODO(#123): split this\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "no comment holds TODO (fix the finding now, write it as one line in the task's issue, or let it go; \
+             then take the comment out. Why the code is written so stays, without the word):\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        !said.contains("linked") && !said.contains("TODO(#123): what"),
+        "{said}"
+    );
+    assert!(
+        said.contains("  domain/model.py:1\n    # TODO(#123): split this\n"),
+        "{said}"
+    );
+}
+
+#[test]
+fn an_unknown_todo_link_or_one_without_code_fails_the_declaration() {
+    let root = clean_repo();
+    let r = root.path();
+    declare_todo_link(r, "issue");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(".config/rotproof.toml: unknown todo_link \"issue\" (known: number, key)"),
+        "{said}"
+    );
+    // No code to read with records only: it says nothing, whatever its value
+    for link in ["number", "key"] {
+        let root = repo();
+        declare(
+            root.path(),
+            &format!("stack = \"none\"\nareas = [\"operations\"]\ntodo_link = \"{link}\"\n"),
+        );
+        let out = run(&["--root", &root_arg(root.path()), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{said}");
+        assert!(
+            said.contains("stack = \"none\" has no layers")
+                && said.contains(&format!("take out todo_link = \"{link}\"")),
+            "{said}"
+        );
+    }
+}
+
+#[test]
+fn a_comment_tied_to_an_issue_is_read_in_typescript_and_rust_too() {
+    let ts = repo_with_ui("typescript", "\"ui\"");
+    declare(
+        ts.path(),
+        "stack = \"typescript\"\nareas = [\"a\"]\nui = \"atomic\"\nabsent = [\"ui\"]\ntodo_link = \"key\"\n",
+    );
+    write_file(
+        ts.path(),
+        "src/domain/song.ts",
+        "export const x = 1;\n// TODO(ABC-7): split this\nexport const s = '// TODO(ABC-8): in a string';\n",
+    );
+    let out = run(&["--root", &root_arg(ts.path()), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{said}");
+    assert!(
+        said.starts_with("linked TODO (1)\n  src/domain/song.ts:2  ABC-7\n"),
+        "{said}"
+    );
+    let rust = repo_with_ui("rust", "");
+    declare(
+        rust.path(),
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nabsent = []\ntodo_link = \"number\"\n",
+    );
+    write_file(
+        rust.path(),
+        "crates/domain/src/song.rs",
+        "/// TODO(#7): split this\npub fn f() {}\n",
+    );
+    let out = run(&["--root", &root_arg(rust.path()), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{said}");
+    assert!(
+        said.starts_with("linked TODO (1)\n  crates/domain/src/song.rs:1  #7\n"),
+        "{said}"
+    );
 }
 
 /// Run the binary with `args` as given, as Claude Code runs a hook: with `input` written to its stdin.

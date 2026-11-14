@@ -121,9 +121,10 @@ pub fn problems(root: &Path) -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())?
         .markers;
     xtask_markers(&tree, &mut markers)?;
-    // As `rotproof check` prints them: each heading once, and each finding under it with the line it names
+    // As `rotproof check` prints them: each heading once, and each finding under it with the line it names. Rotproof
+    // declares no todo_link, so its headings offer no form
     for (heading, under) in [
-        (markers.heading(), &markers.found),
+        (markers.heading(None), &markers.found),
         (KNOWLEDGE_HEADING.to_string(), &markers.knowledge),
     ] {
         if !under.is_empty() {
@@ -154,8 +155,9 @@ fn xtask_markers(tree: &dyn Tree, markers: &mut Markers) -> Result<(), String> {
             continue;
         };
         read += 1;
-        for (finding, words) in in_file(path, &source, &domain::rust::comments(&source)) {
-            markers.add(finding, &words);
+        // Rotproof declares no todo_link: every marker fails
+        for line in in_file(path, &source, &domain::rust::comments(&source), None) {
+            markers.add(line);
         }
     }
     if read == 0 {

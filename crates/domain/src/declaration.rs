@@ -13,6 +13,7 @@ use serde::Deserialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
 use crate::layers::{Layout, Place, RECORDS_ONLY, known_stacks, layout, table, uis};
+use crate::markers::TodoLink;
 use crate::paths::within;
 use crate::version::VERSION;
 
@@ -50,6 +51,12 @@ pub struct Declaration {
     pub absent: Vec<String>,
     #[serde(default)]
     pub unchecked: Vec<String>,
+    /// How the reference of an issue is written in a comment that keeps the first marker of the marker check, one of
+    /// [`TodoLink::KNOWN`]. Optional, and never written by `rotproof init` or `rotproof create`: absent, every marker
+    /// fails. Read as a string so that an unknown value reaches the check that names it. A declaration that holds the
+    /// key fails to read in a Rotproof that lacks it, as it does for any field it does not know
+    #[serde(default)]
+    pub todo_link: Option<String>,
     /// The version of Rotproof the project's files are up to (`upgrade.rs`). `None` is the first release; only
     /// `rotproof init` writes it
     #[serde(default)]
@@ -258,6 +265,8 @@ pub struct Declared {
     /// What `absent` names in a layer the declared UI leaves out (`ui` with `ui = "none"`): it says nothing, and the
     /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs
     pub left_out: Vec<String>,
+    /// How a comment that keeps the first marker names its issue, from `todo_link`: `None` when it is not declared
+    pub todo_link: Option<TodoLink>,
 }
 
 impl Declared {
@@ -279,6 +288,11 @@ impl Declared {
                     "{DECLARATION}: stack = \"none\" has no layers, so it has no ui: take out ui = {ui:?}"
                 ));
             }
+            if let Some(link) = &declaration.todo_link {
+                found.push(format!(
+                    "{DECLARATION}: stack = \"none\" has no layers, so it has no code to read and no todo_link: take out todo_link = {link:?}"
+                ));
+            }
             if !found.is_empty() {
                 return Err(found);
             }
@@ -287,6 +301,7 @@ impl Declared {
                 layout: None,
                 places: Vec::new(),
                 left_out: Vec::new(),
+                todo_link: None,
             });
         }
         let Some(offered) = uis(&declaration.stack) else {
@@ -313,22 +328,34 @@ impl Declared {
             .filter(|name| !places.iter().any(|p| &p.name == *name))
             .cloned()
             .partition(|name| layout.leaves_out(name));
-        if !unknown.is_empty() {
-            return Err(unknown
-                .iter()
-                .map(|name| {
-                    format!(
-                        "{DECLARATION}: absent names {name:?}, which the {} layout does not have",
-                        declaration.stack
-                    )
-                })
-                .collect());
+        let mut found: Vec<String> = unknown
+            .iter()
+            .map(|name| {
+                format!(
+                    "{DECLARATION}: absent names {name:?}, which the {} layout does not have",
+                    declaration.stack
+                )
+            })
+            .collect();
+        let todo_link = declaration.todo_link.as_deref().and_then(|value| {
+            let link = TodoLink::parse(value);
+            if link.is_none() {
+                found.push(format!(
+                    "{DECLARATION}: unknown todo_link {value:?} (known: {})",
+                    TodoLink::KNOWN.join(", ")
+                ));
+            }
+            link
+        });
+        if !found.is_empty() {
+            return Err(found);
         }
         Ok(Declared {
             declaration,
             layout: Some(layout),
             places,
             left_out,
+            todo_link,
         })
     }
 
@@ -516,6 +543,61 @@ mod tests {
             declared("stack = \"none\"\nareas = []\nui = \"none\"\n").unwrap_err()[0]
                 .contains("has no ui")
         );
+    }
+
+    #[test]
+    fn todo_link_is_one_of_two_values_and_needs_code_to_read() {
+        let declared = |text: &str| Declared::new(parse_declaration(text).unwrap());
+        let python = "stack = \"python\"\nareas = []\nui = \"none\"\n";
+        assert_eq!(declared(python).unwrap().todo_link, None);
+        assert_eq!(
+            declared(&format!("{python}todo_link = \"number\"\n"))
+                .unwrap()
+                .todo_link,
+            Some(TodoLink::Number)
+        );
+        assert_eq!(
+            declared("stack = \"rust\"\nareas = []\nui = \"none\"\ntodo_link = \"key\"\n")
+                .unwrap()
+                .todo_link,
+            Some(TodoLink::Key)
+        );
+        // Any other value fails, naming the two known ones, as an unknown ui does
+        for value in ["Number", "issue", "", "#"] {
+            assert_eq!(
+                declared(&format!("{python}todo_link = {value:?}\n")).unwrap_err(),
+                [format!(
+                    ".config/rotproof.toml: unknown todo_link {value:?} (known: number, key)"
+                )]
+            );
+        }
+        // Not a string, or twice as bad: every reason is named
+        assert!(parse_declaration(&format!("{python}todo_link = 1\n")).is_err());
+        assert_eq!(
+            declared(&format!(
+                "{python}todo_link = \"x\"\nabsent = [\"nowhere\"]\n"
+            ))
+            .unwrap_err()
+            .len(),
+            2
+        );
+        // No layers, no code to read: whatever the value, it says nothing
+        for value in ["number", "key", "x"] {
+            let found = declared(&format!(
+                "stack = \"none\"\nareas = []\ntodo_link = \"{value}\"\n"
+            ))
+            .unwrap_err();
+            assert_eq!(found.len(), 1);
+            assert!(
+                found[0].contains("stack = \"none\" has no layers")
+                    && found[0].contains(&format!("take out todo_link = \"{value}\"")),
+                "{found:?}"
+            );
+        }
+        // The declaration init writes does not hold it: it is documented in the README alone
+        for stack in known_stacks() {
+            assert!(!declaration_text(stack, "none").contains("todo_link"));
+        }
     }
 
     #[test]
