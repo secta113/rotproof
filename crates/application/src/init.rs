@@ -14,11 +14,11 @@
 
 use crate::create::{refresh, ui_in_tree};
 use crate::tree::{exactly, read_text, read_written};
-use domain::declaration::{DECLARATION, Fields, declaration_text, fields, with_files};
-use domain::layers::{
-    NO_UI, ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses,
-    known_stacks, layout, retired, uis,
+use domain::crossing::{
+    ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, retired,
 };
+use domain::declaration::{DECLARATION, Fields, declaration_text, fields, with_files};
+use domain::layers::{NO_UI, known_stacks, layout, uis};
 use domain::tree::Written;
 use domain::upgrade::{FIRST, Update, pending};
 use protocol::inbound::{Initialized, Upgraded};

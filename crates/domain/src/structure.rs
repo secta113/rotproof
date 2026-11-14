@@ -20,8 +20,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::crossing::{ONION, retired};
 use crate::declaration::{DECLARATION, Declared};
-use crate::layers::{Layout, ONION, Place, retired};
+use crate::layers::{Layout, Place};
 use crate::paths::{join, within};
 
 /// What the structure check reads from the tree.
