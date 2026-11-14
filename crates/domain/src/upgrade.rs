@@ -11,11 +11,10 @@
 //!   cannot do without a person, it says, and the project does by hand or declines by naming the update in `declined`.
 
 use serde_json::{Map, Value, json};
-use toml_edit::DocumentMut;
 
 use crate::approvals::APPROVALS;
+use crate::declaration::DECLARATION;
 use crate::hook;
-use crate::layers::{DECLARATION, DECLINED_COMMENT, FILES_COMMENT};
 
 /// The version of Rotproof that runs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -468,95 +467,6 @@ fn versions(files: &str, running: &str) -> Result<(Version, Version), String> {
     Ok((from, to))
 }
 
-/// What an upgrade reads from a declaration, before the rest of it is checked: a declaration written by an older
-/// Rotproof may lack a field the running one requires, which the upgrade adds.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Fields {
-    pub stack: Option<String>,
-    pub ui: Option<String>,
-    pub absent: Vec<String>,
-    /// `None` when the declaration has no `files`
-    pub files: Option<String>,
-    pub declined: Vec<String>,
-}
-
-/// The fields of the declaration `text` an upgrade needs, or why they cannot be read.
-pub fn fields(text: &str) -> Result<Fields, String> {
-    let document = text
-        .parse::<DocumentMut>()
-        .map_err(|e| format!("{DECLARATION}: {}", e.message()))?;
-    let string = |name: &str| -> Result<Option<String>, String> {
-        match document.get(name) {
-            None => Ok(None),
-            Some(item) => item
-                .as_str()
-                .map(|s| Some(s.to_string()))
-                .ok_or_else(|| format!("{DECLARATION}: {name} is not a string")),
-        }
-    };
-    let names = |name: &str| -> Result<Vec<String>, String> {
-        match document.get(name) {
-            None => Ok(Vec::new()),
-            Some(item) => item
-                .as_array()
-                .and_then(|array| {
-                    array
-                        .iter()
-                        .map(|v| v.as_str().map(str::to_string))
-                        .collect::<Option<Vec<_>>>()
-                })
-                .ok_or_else(|| format!("{DECLARATION}: {name} is not a list of names")),
-        }
-    };
-    Ok(Fields {
-        stack: string("stack")?,
-        ui: string("ui")?,
-        absent: names("absent")?,
-        files: string("files")?,
-        declined: names("declined")?,
-    })
-}
-
-/// The declaration `text` with `files` set to `running`, and `declined` added when it lacks one, each under its
-/// comment, and the fields added as `name = value`, as `rotproof create` names those it adds. Every other comment and
-/// value is kept, and the lines end with `\n`, as `text` was read: the caller writes it as the project wrote the file
-/// ([`Written`](crate::tree::Written)).
-pub fn with_files(text: &str, running: &str) -> Result<(String, Vec<String>), String> {
-    let mut document = text
-        .parse::<DocumentMut>()
-        .map_err(|e| format!("{DECLARATION}: {}", e.message()))?;
-    let mut added = Vec::new();
-    match document.get_mut("files") {
-        Some(item) => {
-            // The value changes, its comment and place stay
-            let decor = item.as_value().map(|v| v.decor().clone());
-            *item = toml_edit::value(running);
-            if let (Some(decor), Some(value)) = (decor, item.as_value_mut()) {
-                *value.decor_mut() = decor;
-            }
-        }
-        None => {
-            document.insert("files", toml_edit::value(running));
-            document
-                .key_mut("files")
-                .expect("inserted just before")
-                .leaf_decor_mut()
-                .set_prefix(format!("\n{FILES_COMMENT}"));
-            added.push(format!("files = {}", document["files"]));
-        }
-    }
-    if !document.contains_key("declined") {
-        document.insert("declined", toml_edit::value(toml_edit::Array::new()));
-        document
-            .key_mut("declined")
-            .expect("inserted just before")
-            .leaf_decor_mut()
-            .set_prefix(format!("\n{DECLINED_COMMENT}"));
-        added.push(format!("declined = {}", document["declined"]));
-    }
-    Ok((document.to_string(), added))
-}
-
 /// What `rotproof check` finds in the declaration's `files` and `declined`, against the running version.
 pub fn problems(files: Option<&str>, declined: &[String], running: &str) -> Vec<String> {
     let mut found = Vec::new();
@@ -735,21 +645,6 @@ mod tests {
                 .unwrap_err()
                 .contains("not a version")
         );
-    }
-
-    #[test]
-    fn setting_files_names_every_field_it_adds() {
-        let (text, added) = with_files("stack = \"none\"\n", "0.5.0").unwrap();
-        assert_eq!(added, ["files = \"0.5.0\"", "declined = []"]);
-        let read = fields(&text).unwrap();
-        assert_eq!(read.files.as_deref(), Some("0.5.0"));
-        // files set, not added: only declined is added
-        let (text, added) = with_files("files = \"0.4.0\" # kept\n", "0.5.0").unwrap();
-        assert_eq!(added, ["declined = []"]);
-        assert!(text.starts_with("files = \"0.5.0\" # kept\n"), "{text:?}");
-        // Both there: nothing added
-        let (_, added) = with_files(&text, "0.5.0").unwrap();
-        assert!(added.is_empty(), "{added:?}");
     }
 
     #[test]

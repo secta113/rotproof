@@ -8,7 +8,7 @@
 //! The texts are in `project/`, built into the binary. Each is named after the file it becomes, without a leading dot
 //! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
 
-use crate::layers::Declared;
+use crate::declaration::Declared;
 
 const AGENTS_TEXT: &str = include_str!("../../../project/AGENTS.md.in");
 const CLAUDE_TEXT: &str = include_str!("../../../project/CLAUDE.md.in");
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn every_stack_has_its_project_files() {
-        use crate::layers::Declaration;
+        use crate::declaration::Declaration;
         for stack in known_stacks() {
             let declared = Declared::new(Declaration {
                 stack: stack.to_string(),

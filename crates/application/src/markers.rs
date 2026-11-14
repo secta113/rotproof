@@ -5,7 +5,8 @@
 use std::io;
 
 use crate::tree::{code_files, read_code};
-use domain::layers::{Declared, Language};
+use domain::declaration::Declared;
+use domain::layers::Language;
 use domain::markers::{Markers, has_comments, in_file, is_unchecked};
 use domain::suppressions::Effect;
 use protocol::outbound::Parsers;

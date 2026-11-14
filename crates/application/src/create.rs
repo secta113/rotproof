@@ -12,14 +12,14 @@ use crate::bundle::Bundle;
 use crate::layers::declaration;
 use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::{LOG, in_docs, record_tags as tags_in};
+use domain::declaration::{
+    DECLARATION, Declared, First, MISSING, completed, fields, lacking, parse_declaration,
+    unreadable,
+};
 use domain::guide::{GUIDE, guide};
 use domain::hook::SETTINGS;
-use domain::layers::{
-    DECLARATION, Declared, First, MISSING, NO_UI, Place, completed, lacking, layout,
-    parse_declaration, table, uis, unreadable,
-};
+use domain::layers::{NO_UI, Place, layout, table, uis};
 use domain::project::project_files;
-use domain::upgrade::fields;
 use protocol::inbound::Made;
 use protocol::outbound::{Tree, Writer};
 
@@ -126,7 +126,7 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
     Ok(made)
 }
 
-/// The declaration with every field of [`ADDED`](domain::layers::ADDED) it lacks, each under its comment, and
+/// The declaration with every field of [`ADDED`](domain::declaration::ADDED) it lacks, each under its comment, and
 /// the fields added as `name = value`. `None` when it lacks none, or is not TOML: then its own error stands.
 fn complete(tree: &dyn Tree) -> Result<Option<(String, Vec<String>)>, String> {
     let Ok((path, _)) = exactly(tree, DECLARATION) else {

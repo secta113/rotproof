@@ -7,8 +7,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::declaration::DECLARATION;
 use crate::frontmatter::{Sections, split};
-use crate::layers::DECLARATION;
 use crate::schema::{
     CLOSED_SECTION, Guide, Knowledge, KnowledgeDoc, Status, WHEN_SECTION, knowledge_doc,
 };

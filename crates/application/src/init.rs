@@ -14,12 +14,13 @@
 
 use crate::create::{refresh, ui_in_tree};
 use crate::tree::{exactly, read_text, read_written};
+use domain::declaration::{DECLARATION, Fields, declaration_text, fields, with_files};
 use domain::layers::{
-    DECLARATION, NO_UI, ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT,
-    crosses, declaration_text, known_stacks, layout, retired, uis,
+    NO_UI, ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses,
+    known_stacks, layout, retired, uis,
 };
 use domain::tree::Written;
-use domain::upgrade::{FIRST, Fields, Update, fields, pending, with_files};
+use domain::upgrade::{FIRST, Update, pending};
 use protocol::inbound::{Initialized, Upgraded};
 use protocol::outbound::{Tree, Writer};
 
@@ -253,7 +254,7 @@ fn written_done(tree: &dyn Tree, update: Update, written: &[String]) -> Result<b
 mod tests {
     use super::*;
     use crate::tree::fake::Fake;
-    use domain::upgrade::fields as read_fields;
+    use domain::declaration::fields as read_fields;
 
     const SETTINGS: &str = ".claude/settings.json";
 

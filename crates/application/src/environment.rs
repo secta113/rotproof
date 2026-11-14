@@ -4,8 +4,9 @@
 use std::io;
 
 use crate::tree::{code_files, exactly, read_code};
+use domain::declaration::Declared;
 use domain::environment::{BUILD_SCRIPT, finding, in_rust, is_judged};
-use domain::layers::{Declared, Language, table};
+use domain::layers::{Language, table};
 use domain::markers::has_comments;
 use domain::paths::join;
 use protocol::outbound::Parsers;
@@ -189,7 +190,7 @@ const all = import.meta.env;
             ),
         ]);
         let declared = Declared::new(
-            domain::layers::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
+            domain::declaration::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
                 .unwrap(),
         )
         .unwrap();
