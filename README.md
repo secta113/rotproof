@@ -310,8 +310,8 @@ It keeps two structures:
   upgrading it, in a commit of its own.
 - **The same structure in every language.** Rotproof is one binary with no language runtime, so a Rust or TypeScript
   project keeps the same layers and records as a Python one.
-- **Whoever picks up the work next reads one index, not every file.** The index files are generated, never written by
-  hand.
+- **Whoever wants to know how things are now reads the index of the knowledge, not every file.** The index files are
+  generated, never written by hand. Open work is in the issues.
 
 ## Specification
 
