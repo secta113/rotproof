@@ -232,6 +232,25 @@ fn every_kind_of_warning_is_printed_under_its_heading_in_order_and_fails_nothing
 }
 
 #[test]
+fn a_knowledge_document_that_cannot_be_read_is_named_by_check_as_by_index_and_create() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::write(r.join("docs/knowledge/bad.md"), [0xff, 0xfe, 0xfa]).unwrap();
+    for command in [&["check"][..], &["index"], &["create", "--yes"]] {
+        let mut args = vec!["--root", &arg];
+        args.extend(command);
+        let out = run(&args);
+        let said = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(out.status.code(), Some(2), "{command:?}: {said}");
+        assert_eq!(
+            said, "docs/knowledge/bad.md: stream did not contain valid UTF-8\n",
+            "{command:?}"
+        );
+    }
+}
+
+#[test]
 fn each_broken_rule_fails_under_its_check() {
     let doc = |body: &str| {
         format!(

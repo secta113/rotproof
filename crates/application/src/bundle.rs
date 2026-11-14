@@ -23,22 +23,12 @@ impl<'a> Bundle<'a> {
     /// The documents directly in `docs/<folder>/`, except reserved names: file name -> text. An error names the path
     /// it could not read.
     pub fn read_folder(&self, folder: &str) -> io::Result<Docs> {
-        self.read_docs(folder).map_err(Unreadable::with_path)
-    }
-
-    /// The documents directly in `docs/<folder>/`, as [`read_folder`](Self::read_folder) reads them, with the path an
-    /// error could not read kept apart from why, for a caller that says it in its own words.
-    pub fn read_docs(&self, folder: &str) -> Result<Docs, Unreadable> {
         let dir = in_docs(folder);
         let mut docs = Docs::new();
-        for (name, is_dir) in self.tree.entries(&dir).map_err(|error| Unreadable {
-            path: dir.clone(),
-            error,
-        })? {
+        for (name, is_dir) in self.tree.entries(&dir).map_err(|e| with_path(e, &dir))? {
             if is_document(&name, is_dir) {
                 let path = format!("{dir}/{name}");
-                let text =
-                    read_text(self.tree, &path).map_err(|error| Unreadable { path, error })?;
+                let text = read_text(self.tree, &path).map_err(|e| with_path(e, &path))?;
                 docs.insert(name, text);
             }
         }
@@ -68,16 +58,6 @@ impl<'a> Bundle<'a> {
     }
 }
 
-/// A file or directory of the bundle that could not be read: its path, and why.
-#[derive(Debug)]
-pub struct Unreadable {
-    pub path: String,
-    pub error: io::Error,
-}
-
-impl Unreadable {
-    /// The error with the path in front of why, as the commands that write say it.
-    pub fn with_path(self) -> io::Error {
-        io::Error::new(self.error.kind(), format!("{}: {}", self.path, self.error))
-    }
+fn with_path(e: io::Error, path: &str) -> io::Error {
+    io::Error::new(e.kind(), format!("{path}: {e}"))
 }

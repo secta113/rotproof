@@ -74,9 +74,8 @@ pub fn problems(
 
     let written = read_log(tree)?;
     let bundle = Bundle::new(tree, areas);
-    // Read once, and judged three ways below. The error is as the check has said it since it read the folder for the
-    // links: why, without the path
-    let docs = bundle.read_docs("knowledge").map_err(|u| u.error)?;
+    // Read once, and judged three ways below. An error names the file, as `rotproof index` and `rotproof create` say it
+    let docs = bundle.read_folder("knowledge")?;
     found.extend(links(tree, parsers, &docs, written.as_ref().ok()));
     found.extend(log(&written, now));
     let knowledge = knowledge(tree, parsers, &bundle, &docs, now)?;
