@@ -489,6 +489,34 @@ mod tests {
     }
 
     #[test]
+    fn a_rust_raw_identifier_is_followed_by_its_name_without_r_hash() {
+        let tree = project(&[]);
+        let source = "pub fn r#match() -> u8 {\n    1\n}\n\npub struct r#type;\n\nimpl r#type {\n    \
+                      pub fn r#fn(&self) -> u8 {\n        2\n    }\n}\n";
+        tree.write("domain/raw.rs", source).unwrap();
+        let now = |tree: &Fake, key: &str| current(tree, &Readers, key);
+        let (matcher, kind, method) = (
+            now(&tree, "domain/raw.rs::match").unwrap().unwrap(),
+            now(&tree, "domain/raw.rs::type").unwrap().unwrap(),
+            now(&tree, "domain/raw.rs::type.fn").unwrap().unwrap(),
+        );
+        // The key is the name, as a key never carries the `r#`; the `r` is no definition of its own
+        assert!(now(&tree, "domain/raw.rs::r#match").is_err());
+        assert_eq!(now(&tree, "domain/raw.rs::r"), Ok(None));
+        tree.write("domain/raw.rs", &source.replace("        2", "        3"))
+            .unwrap();
+        assert_ne!(
+            now(&tree, "domain/raw.rs::type.fn").unwrap().unwrap(),
+            method
+        );
+        assert_ne!(now(&tree, "domain/raw.rs::type").unwrap().unwrap(), kind);
+        assert_eq!(
+            now(&tree, "domain/raw.rs::match").unwrap().unwrap(),
+            matcher
+        );
+    }
+
+    #[test]
     fn a_python_name_defined_twice_is_hashed_on_all_its_pieces() {
         let tree = project(&[]);
         let getter = "@property\n    def size(self):\n        return 1";

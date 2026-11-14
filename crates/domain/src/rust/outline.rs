@@ -4,7 +4,8 @@
 //! - **What counts:** `fn`, `struct`, `enum` and each of its variants, `union`, `trait` and each of its items, `type`,
 //!   `const`, `static`, `macro_rules!` by its name, an inline `mod` with a body and the items in it, and the items of
 //!   an `impl` block, exported or not. The names of a definition are the names above it: `["Table"]`,
-//!   `["Table", "add"]`, `["Command", "Before"]`, `["tests", "helper"]`.
+//!   `["Table", "add"]`, `["Command", "Before"]`, `["tests", "helper"]`. A raw identifier is named without its `r#`
+//!   (`pub fn r#match` is `match`, as `r#match` and `match` are one name to Rust), so a key never carries it.
 //! - **A type covers its `impl` blocks:** an `impl` block is a definition of the type it is for, so the key of a type
 //!   selects its definition and every `impl` block for it in the file (`impl Table`, `impl X for Table`,
 //!   `impl<T> Table<T>`), and `Type.item` the item of that name in any of them, whether the block implements a trait
@@ -25,7 +26,7 @@ use crate::definitions::Definition;
 /// each piece.
 pub fn outline(source: &str) -> Vec<Definition> {
     let code = code(source);
-    let tokens = tokens(&code);
+    let tokens = raw_identifiers(tokens(&code));
     let docs = comments(source)
         .into_iter()
         .filter(|(_, text)| is_outer_doc(text))
@@ -39,6 +40,36 @@ pub fn outline(source: &str) -> Vec<Definition> {
     let end = reader.tokens.len();
     reader.items(0, end, 0, &mut Vec::new());
     reader.found
+}
+
+/// The tokens with each raw identifier (`r#match`: an `r`, a `#` and a word, written together) made one word that keeps
+/// its `r#`, so that it is neither a keyword (`r#fn` starts no function) nor a word the scanner cut in three.
+fn raw_identifiers(tokens: Vec<(usize, Token)>) -> Vec<(usize, Token)> {
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        if let [
+            (at, Token::Word(r)),
+            (hash, Token::Punct('#')),
+            (word, Token::Word(name)),
+        ] = &tokens[i..tokens.len().min(i + 3)]
+            && r == "r"
+            && at + 1 == *hash
+            && hash + 1 == *word
+        {
+            out.push((*at, Token::Word(format!("r#{name}"))));
+            i += 3;
+        } else {
+            out.push(tokens[i].clone());
+            i += 1;
+        }
+    }
+    out
+}
+
+/// A name as a key writes it: without the `r#` of a raw identifier, which is the same name (`r#match` is `match`).
+fn plain(name: &str) -> &str {
+    name.strip_prefix("r#").unwrap_or(name)
 }
 
 /// Whether a comment is an outer doc comment: `/// text` and `/** text */`, not `////`, `/***` or `/**/`, and not an
@@ -232,7 +263,7 @@ impl Reader {
                 i + 1
             };
         };
-        let name = self.word(i + 1).map(str::to_string);
+        let name = self.word(i + 1).map(|w| plain(w).to_string());
         match (keyword.as_str(), name) {
             ("fn", Some(name)) => {
                 let end = self.item_end(i + 2, hi, true);
@@ -248,8 +279,8 @@ impl Reader {
             }
             ("static", Some(name)) => {
                 // `static mut NAME`
-                let (name, from) = match (name.as_str(), self.word(i + 2)) {
-                    ("mut", Some(real)) => (real.to_string(), i + 3),
+                let (name, from) = match (self.word(i + 1), self.word(i + 2)) {
+                    (Some("mut"), Some(real)) => (plain(real).to_string(), i + 3),
                     _ => (name, i + 2),
                 };
                 let end = self.item_end(from, hi, false);
@@ -271,7 +302,7 @@ impl Reader {
             },
             ("impl", _) => self.implementation(i, hi, start, scope),
             ("macro_rules", _) if self.punct(i + 1, '!') => {
-                let Some(name) = self.word(i + 2).map(str::to_string) else {
+                let Some(name) = self.word(i + 2).map(|w| plain(w).to_string()) else {
                     return i + 2;
                 };
                 let mut end = self.skip_group(i + 3).min(hi);
@@ -364,7 +395,7 @@ impl Reader {
             while self.punct(j, '#') && self.punct(j + 1, '[') {
                 j = self.skip_group(j + 1);
             }
-            let variant = self.word(j).map(str::to_string);
+            let variant = self.word(j).map(|w| plain(w).to_string());
             let begin = self.start(first, since);
             // To the comma that separates the variants, outside any group
             let mut k = j;
@@ -468,12 +499,12 @@ impl Reader {
                 // A lifetime is a `'` and a name
                 Token::Word(_) if j > 0 && self.punct(j - 1, '\'') => j += 1,
                 Token::Word(w) => {
-                    name = Some(w.clone());
+                    name = Some(plain(w).to_string());
                     j += 1;
                     // `::Name`, until what ends the path
                     while matches!(self.tokens.get(j), Some((_, Token::PathSep))) {
                         if let Some(next) = self.word(j + 1) {
-                            name = Some(next.to_string());
+                            name = Some(plain(next).to_string());
                         }
                         j += 2;
                     }
@@ -770,6 +801,51 @@ pub const unsafe fn dangerous() {}
             ["struct R<'a, T = [u8; { 1 }]> where T: 'a { r: &'a T }"]
         );
         assert_eq!(at("z"), ["fn z() {}"]);
+    }
+
+    #[test]
+    fn a_raw_identifier_is_named_without_its_r_hash() {
+        let source = "pub fn r#match() {}\npub struct r#type;\nimpl r#type { pub fn r#fn(&self) {} }\n\
+                      impl Tr for m::r#type { fn y() {} }\npub enum Kind { r#loop, Plain(u8) }\n\
+                      const r#in: u8 = 1;\nstatic mut r#mut: u8 = 0;\nmacro_rules! r#m { () => {} }\n\
+                      union r#union { a: u8 }\nfn r() {}\nfn after() {}\n";
+        let names: Vec<String> = outline(source).iter().map(|d| d.names.join(".")).collect();
+        assert_eq!(
+            names,
+            [
+                "match",
+                "type",
+                "type",
+                "type.fn",
+                "type",
+                "type.y",
+                "Kind",
+                "Kind.loop",
+                "Kind.Plain",
+                "in",
+                "mut",
+                "m",
+                "union",
+                "r",
+                "after"
+            ]
+        );
+        let at = |name: &str| definition(source, name);
+        assert_eq!(at("match"), ["pub fn r#match() {}"]);
+        assert_eq!(at("type.fn"), ["pub fn r#fn(&self) {}"]);
+        assert_eq!(at("Kind.loop"), ["r#loop"]);
+        assert_eq!(at("mut"), ["static mut r#mut: u8 = 0;"]);
+        // The `r` of `r#` is no name of its own, and the name with it is no key
+        assert_eq!(at("r"), ["fn r() {}"]);
+        assert_eq!(at("r#match"), Vec::<String>::new());
+        // A raw keyword is not the keyword: it starts no item
+        assert_eq!(
+            definition("r#fn f() {}\nfn g() {}", "f"),
+            Vec::<String>::new()
+        );
+        assert_eq!(definition("r#fn f() {}\nfn g() {}", "g"), ["fn g() {}"]);
+        // `r # x` apart is not a raw identifier
+        assert_eq!(definition("fn r # x() {}", "r"), ["fn r # x() {}"]);
     }
 
     #[test]

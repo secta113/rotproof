@@ -322,7 +322,8 @@ namespace, a variable (`export const f = () => ...`, the whole statement), the m
 enum, and `default` for an `export default` that has no name; in Rust, a `fn`, `struct`, `enum` and its variants,
 `union`, `trait` and its items, `type`, `const`, `static`, `macro_rules!` and an inline `mod` with its items
 (`tests.helper`). A Rust type's key covers its definition and every `impl` block for it in the file, `Type.method` is
-the method of that name in any of them, and a Rust definition starts at its first attribute or `///` doc comment. What
+the method of that name in any of them, and a Rust definition starts at its first attribute or `///` doc comment, and one
+named by a raw identifier (`pub fn r#match`) is written without the `r#` (`src/lib.rs::match`). What
 a macro defines is not seen. Once the document is reviewed against the code, `rotproof follows knowledge/api.md
 <key>...` (or `docs/knowledge/api.md`) pins each key at its hash as the code is now, adding a key `follows` lacks with
 its hash quoted, and writes all the keys or none: pinning changes the document, so its commit records the review.

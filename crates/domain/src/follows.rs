@@ -396,6 +396,10 @@ mod tests {
         assert!(followed("src/api.ts::$el.$on").is_ok());
         assert!(followed("src/api.py::$el").is_err());
         assert!(followed("src/api.rs::$el").is_err());
+        // A raw identifier is named without its `r#`, which is no part of a name
+        assert!(followed("src/api.rs::match").is_ok());
+        assert!(followed("src/api.rs::Table.fn").is_ok());
+        assert!(followed("src/api.rs::r#match").is_err());
         for bad in [
             "",
             "/src/api.py",
