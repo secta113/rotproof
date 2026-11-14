@@ -22,10 +22,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::code::is_source;
 use crate::declaration::Declared;
-use crate::layers::{Language, Layout};
-use crate::paths::within;
 use crate::text::line_of;
 
 /// The words that fail in a comment: the first four put off a finding, and the last, at [`KNOWLEDGE`], keeps
@@ -112,27 +109,6 @@ pub fn either(words: &[&str]) -> String {
     }
 }
 
-/// Whether the file named `name`, in a project of `layout`, has comments to read.
-pub fn has_comments(layout: &Layout, name: &str) -> bool {
-    match layout.language {
-        // Every code file of a Python layout is a `.py` file: a test reads every layout
-        Language::Python => layout.is_code(name),
-        // Every file in `src/` is code in the layout; only source has comments to read
-        Language::TypeScript => layout.is_code(name) && is_source(name),
-        // The code files of a Rust layout are its crates' manifests; the comments are in the `.rs` files beside them
-        Language::Rust => crate::rust::is_source(name),
-    }
-}
-
-/// Whether the file at `path` sits in a path the project lists in `unchecked`. A path that holds or sits in a layer
-/// switches nothing off, as the structure check says of it: the markers in that layer are read all the same.
-pub fn is_unchecked(declared: &Declared, path: &str) -> bool {
-    declared
-        .unchecked()
-        .filter(|skip| declared.overlapped(skip).is_none())
-        .any(|skip| within(path, skip))
-}
-
 /// The findings in the file at `path`, whose text is `source` and whose reader found `comments` (byte offset, text):
 /// each line whose comments hold a marker, as `path:line` and the line, with the markers on it as positions in
 /// [`MARKERS`].
@@ -208,34 +184,6 @@ mod tests {
             KNOWLEDGE_HEADING.starts_with("no comment holds NOTE (")
                 && KNOWLEDGE_HEADING.contains("docs/knowledge/")
         );
-    }
-
-    #[test]
-    fn a_file_in_a_path_listed_in_unchecked_is_skipped() {
-        let declared = Declared::new(
-            crate::declaration::parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"scripts/\", \"gen\"]\n",
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert!(is_unchecked(&declared, "scripts/run.py"));
-        assert!(is_unchecked(&declared, "gen/a/b.py"));
-        assert!(!is_unchecked(&declared, "generated/a.py"));
-        assert!(!is_unchecked(&declared, "domain/scripts/x.py"));
-    }
-
-    #[test]
-    fn a_path_in_unchecked_that_holds_or_sits_in_a_layer_skips_nothing() {
-        let declared = Declared::new(
-            crate::declaration::parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"domain\", \"ui/atoms/gen/\"]\n",
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert!(!is_unchecked(&declared, "domain/song.py"));
-        assert!(!is_unchecked(&declared, "ui/atoms/gen/x.py"));
     }
 
     #[test]

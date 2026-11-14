@@ -7,7 +7,7 @@ use std::io;
 use crate::tree::{code_files, read_code};
 use domain::declaration::Declared;
 use domain::layers::Language;
-use domain::markers::{Markers, has_comments, in_file, is_unchecked};
+use domain::markers::{Markers, in_file};
 use domain::suppressions::Effect;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -36,8 +36,8 @@ pub fn problems(
     };
     let mut found = Comments::default();
     let mut read = 0;
-    for path in code_files(tree, &layout.scope, |name| has_comments(layout, name))? {
-        if is_unchecked(declared, &path) {
+    for path in code_files(tree, &layout.scope, |name| layout.has_comments(name))? {
+        if declared.is_unchecked(&path) {
             continue;
         }
         let Some(source) = read_code(tree, &path, "comments", &mut found.markers.found)? else {

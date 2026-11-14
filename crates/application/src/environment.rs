@@ -7,7 +7,6 @@ use crate::tree::{code_files, is_file, read_code};
 use domain::declaration::Declared;
 use domain::environment::{BUILD_SCRIPT, finding, in_rust, is_judged};
 use domain::layers::{Language, table};
-use domain::markers::has_comments;
 use domain::paths::join;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -33,7 +32,7 @@ pub fn problems(
         // A crate's build script runs before Rust compiles it, and reads what Cargo sets for it
         let build_script = join(&layer.path, BUILD_SCRIPT);
         files.extend(
-            code_files(tree, &layer.path, |name| has_comments(layout, name))?
+            code_files(tree, &layer.path, |name| layout.has_comments(name))?
                 .into_iter()
                 .filter(|path| layout.language != Language::Rust || *path != build_script),
         );

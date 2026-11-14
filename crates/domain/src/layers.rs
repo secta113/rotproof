@@ -367,6 +367,20 @@ impl Layout {
             None => name == self.code.to_ascii_lowercase(),
         }
     }
+
+    /// Whether the file named `name`, in a project of this layout, has comments to read. Not every code file has them,
+    /// and one that has them is not always a code file: a Rust layout's code files are its manifests.
+    pub fn has_comments(&self, name: &str) -> bool {
+        match self.language {
+            // Every code file of a Python layout is a `.py` file: a test reads every layout
+            Language::Python => self.is_code(name),
+            // Every file in `src/` is code in the layout; only source has comments to read
+            Language::TypeScript => self.is_code(name) && crate::code::is_source(name),
+            // The code files of a Rust layout are its crates' manifests; the comments are in the `.rs` files beside
+            // them
+            Language::Rust => crate::rust::is_source(name),
+        }
+    }
 }
 
 impl NoView {
@@ -707,5 +721,18 @@ mod tests {
         layout.code = "Cargo.toml".into();
         assert!(layout.is_code("Cargo.toml") && !layout.is_code("Cargo.lock"));
         assert!(layout.is_code("cargo.toml") && layout.is_code("CARGO.TOML"));
+    }
+
+    #[test]
+    fn the_comments_to_read_are_in_the_source_of_the_language() {
+        let python = layout("python", "atomic").unwrap();
+        assert!(python.has_comments("a.py") && !python.has_comments("a.pyi"));
+        // Source of TypeScript and JavaScript, not what its layout calls code and a reader skips
+        let typescript = layout("typescript", "atomic").unwrap();
+        assert!(typescript.has_comments("a.ts") && typescript.has_comments("a.jsx"));
+        assert!(!typescript.has_comments("a.json"));
+        // A Rust layout's code files are manifests; the comments are in the `.rs` files
+        let rust = layout("rust", "none").unwrap();
+        assert!(rust.has_comments("lib.rs") && !rust.has_comments("Cargo.toml"));
     }
 }

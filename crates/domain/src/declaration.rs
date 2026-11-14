@@ -352,6 +352,14 @@ impl Declared {
             .iter()
             .find(|p| within(&p.path, path) || within(path, &p.path))
     }
+
+    /// Whether the file at `path` sits in a path the project lists in `unchecked`. A path that holds or sits in a layer
+    /// switches nothing off, as the structure check says of it: the code in that layer is read all the same.
+    pub fn is_unchecked(&self, path: &str) -> bool {
+        self.unchecked()
+            .filter(|skip| self.overlapped(skip).is_none())
+            .any(|skip| within(path, skip))
+    }
 }
 
 /// What an upgrade reads from a declaration, before the rest of it is checked: a declaration written by an older
@@ -570,6 +578,34 @@ mod tests {
             let areas: Vec<String> = areas.into_iter().map(String::from).collect();
             assert_eq!(area_problems(&areas).len(), 1, "{areas:?}");
         }
+    }
+
+    #[test]
+    fn a_file_in_a_path_listed_in_unchecked_is_skipped() {
+        let declared = Declared::new(
+            parse_declaration(
+                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"scripts/\", \"gen\"]\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(declared.is_unchecked("scripts/run.py"));
+        assert!(declared.is_unchecked("gen/a/b.py"));
+        assert!(!declared.is_unchecked("generated/a.py"));
+        assert!(!declared.is_unchecked("domain/scripts/x.py"));
+    }
+
+    #[test]
+    fn a_path_in_unchecked_that_holds_or_sits_in_a_layer_skips_nothing() {
+        let declared = Declared::new(
+            parse_declaration(
+                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"domain\", \"ui/atoms/gen/\"]\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!declared.is_unchecked("domain/song.py"));
+        assert!(!declared.is_unchecked("ui/atoms/gen/x.py"));
     }
 
     #[test]
