@@ -206,10 +206,12 @@ that has a declaration:
 | Update | Version | File | What it does |
 |---|---|---|---|
 | `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
-| `claude-stop-hook-on-path` | 0.4.0 | `.claude/settings.json` | Adds a second `Stop` hook that said when `rotproof` was not on the `PATH`, as a group of its own after the others, while a `Stop` hook runs `rotproof stop-hook`. Written again as above. Not applied in an upgrade that also crosses `claude-remove-stop-hook`, which would take it out again |
-| `claude-time-hook` | 0.4.0 | `.claude/settings.json` | Adds the time hook on `SessionStart` and `UserPromptSubmit`, each as a group of its own after the others there, while a `Stop` hook runs `rotproof stop-hook`. Written again as above. Not applied in an upgrade that also crosses `claude-remove-time-hook`, which would take it out again |
-| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook` or the second hook of `claude-stop-hook-on-path`, a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above: an untouched file ends as `rotproof create` writes it now |
+| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook`, or the hook beside it that 0.4.0 added (it said when `rotproof` was not on the `PATH`), a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above: an untouched file ends as `rotproof create` writes it now |
 | `claude-remove-time-hook` | 1.0.0-rc.4 | `.claude/settings.json` | Takes out each hook on `SessionStart` and `UserPromptSubmit` whose command is exactly `rotproof time-hook`, a group left with no hook, an event left with no group, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). A hook with another command that runs it, such as a path to the binary, stays. Written again as above: an untouched file ends as `rotproof create` writes it now |
+
+The two updates 0.4.0 brought, `claude-stop-hook-on-path` and `claude-time-hook`, which added the hooks the two updates
+above take out again, are gone, as nothing adds those hooks now. A declaration that still names either in `declined` is
+reported by `rotproof check` as naming no update: take the name out.
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from

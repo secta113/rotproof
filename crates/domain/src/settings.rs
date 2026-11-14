@@ -2,8 +2,8 @@
 //! `rotproof create` writes and the commands of the hooks Rotproof wrote are in `hook.rs`; which update asks for which
 //! edit, and what a person is told when one cannot be made, is in `upgrade.rs`.
 //!
-//! - **An edit only adds what Rotproof wrote, or takes out what Rotproof wrote,** matched exactly, and keeps every
-//!   other key and value of the project's, and the order of the keys.
+//! - **An edit only adds the rule Rotproof writes, or takes out the hooks Rotproof wrote,** matched exactly, and keeps
+//!   every other key and value of the project's, and the order of the keys.
 //! - **An edit says what it came to and nothing about the update that asked for it.** It gives the settings' new text,
 //!   `None` when they have it already, or why a person has to make the edit.
 
@@ -45,57 +45,6 @@ pub fn deny_approvals(text: Option<&str>) -> Edited {
     }
     deny.push(Value::String(rule));
     Ok(Some(written(settings)))
-}
-
-/// Add the hook that says when `rotproof` is not on the `PATH` ([`hook::ON_PATH`]) to Claude Code's settings, `text`,
-/// as a group of its own after the `Stop` hooks there. Needed only while a `Stop` hook runs the stop hook
-/// ([`hook::COMMAND`]): a project that has no settings, or took the stop hook out, has nothing to guard.
-pub fn stop_hook_on_path(text: Option<&str>) -> Edited {
-    let Some(text) = text else {
-        return Ok(None);
-    };
-    let mut settings = object(text)?;
-    let Some(Value::Array(stop)) = settings
-        .get_mut("hooks")
-        .and_then(|hooks| hooks.get_mut("Stop"))
-    else {
-        return Ok(None);
-    };
-    if !runs(stop, &[hook::COMMAND]) || runs(stop, &[hook::ON_PATH]) {
-        return Ok(None);
-    }
-    stop.push(group(hook::ON_PATH));
-    Ok(Some(written(settings)))
-}
-
-/// Add the time hook ([`hook::TIME_COMMAND`]) to Claude Code's settings, `text`, as a group of its own on each of its
-/// events whose hooks do not run it yet, after them. Needed only while a `Stop` hook runs the stop hook
-/// ([`hook::COMMAND`]): a project that has no settings, or took Rotproof's hooks out, did not take them.
-pub fn time_hook(text: Option<&str>) -> Edited {
-    let Some(text) = text else {
-        return Ok(None);
-    };
-    let mut settings = object(text)?;
-    let Some(Value::Object(hooks)) = settings.get_mut("hooks") else {
-        return Ok(None);
-    };
-    if !matches!(hooks.get("Stop"), Some(Value::Array(stop)) if runs(stop, &[hook::COMMAND])) {
-        return Ok(None);
-    }
-    let mut changed = false;
-    for event in hook::TIME_EVENTS {
-        let groups = hooks
-            .entry(event)
-            .or_insert_with(|| Value::Array(Vec::new()));
-        let Value::Array(groups) = groups else {
-            return Err(format!("hooks.{event} is not a list"));
-        };
-        if !runs(groups, &[hook::TIME_COMMAND]) {
-            groups.push(group(hook::TIME_COMMAND));
-            changed = true;
-        }
-    }
-    Ok(changed.then(|| written(settings)))
 }
 
 /// Take the stop hook ([`hook::COMMAND`]) and the hook beside it ([`hook::ON_PATH`]) out of Claude Code's settings,
@@ -203,13 +152,8 @@ mod tests {
     /// Every edit reads the settings the same way, and says why when it cannot.
     #[test]
     fn settings_that_are_no_object_are_left_to_a_person_by_every_edit() {
-        let edits: [fn(Option<&str>) -> Edited; 5] = [
-            deny_approvals,
-            stop_hook_on_path,
-            time_hook,
-            remove_stop_hook,
-            remove_time_hook,
-        ];
+        let edits: [fn(Option<&str>) -> Edited; 3] =
+            [deny_approvals, remove_stop_hook, remove_time_hook];
         for edit in edits {
             for text in ["not json", "[]", "\"x\""] {
                 assert_eq!(
@@ -229,12 +173,7 @@ mod tests {
             deny_approvals(None),
             Err("there is no such file".to_string())
         );
-        for edit in [
-            stop_hook_on_path,
-            time_hook,
-            remove_stop_hook,
-            remove_time_hook,
-        ] {
+        for edit in [remove_stop_hook, remove_time_hook] {
             assert_eq!(edit(None), Ok(None));
         }
     }
