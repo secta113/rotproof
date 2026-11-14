@@ -1,5 +1,7 @@
 # Rotproof
 
+English | [日本語](https://github.com/secta113/rotproof/blob/main/README.ja.md)
+
 Rotproof keeps a project's structure from drifting while LLMs and people change it, so that it does not rot. It is one
 binary with no language runtime, and `rotproof check` is the command a project's CI runs: it fails when the code breaks
 the layers the project declared, or when a document about the code is left behind after the code changed.
@@ -350,7 +352,9 @@ only Docker: `docker compose run --rm dev cargo xtask ci`.
 
 The same run fails when a version the README or the specification installs is not the one in `Cargo.toml`, and when a
 link in the README to another file is not a full URL (the README is the page on PyPI and npm, where a relative one
-breaks) or a link, inside the page or into this repository, names a file or a heading that is not there.
+breaks) or a link, inside the page or into this repository, names a file or a heading that is not there. It fails too
+when this README changed since `README.ja.md` was translated from it: the translation names the hash of the README it
+was brought to.
 
 The binary links the crates Rotproof depends on, and their licenses require their notices to go with it.
 `THIRD-PARTY-LICENSES.txt` holds them: every crate the binary links on any platform, with the license text each one

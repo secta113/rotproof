@@ -270,6 +270,34 @@ pub fn link_problems(tracked: &[String], files: &[(&str, &str)]) -> Vec<String> 
     found
 }
 
+/// What the line of a translation that pins the README starts with, before the hash
+pub const TRANSLATED: &str = "Translated from README.md at ";
+
+/// Where a translation of the README was left behind: it names the hash of the README it was translated from (the hash
+/// of `follows`, on the text with every line ending as `\n` and no byte order mark), and fails once the README is
+/// another text. The hash says only that the README changed: whether the translation still says the same is read by
+/// whoever pins it again. A translation that names no hash is a problem too, so that it cannot pass unpinned.
+pub fn translation_problems(readme: &str, name: &str, translation: &str) -> Vec<String> {
+    let now =
+        domain::follows::content_hash(&readme.trim_start_matches('\u{feff}').replace("\r\n", "\n"));
+    let pinned = translation.split(TRANSLATED).nth(1).map(|rest| {
+        rest.chars()
+            .take_while(char::is_ascii_hexdigit)
+            .collect::<String>()
+    });
+    match pinned {
+        Some(pinned) if pinned == now => Vec::new(),
+        Some(pinned) if !pinned.is_empty() => vec![format!(
+            "{name} was translated from README.md at {pinned}, and README.md is now {now}: bring its text to the \
+             README's, then write {now} in that line"
+        )],
+        _ => vec![format!(
+            "{name} does not say which README.md it was translated from: write `{TRANSLATED}{now}` in a comment, \
+             once its text says what the README says"
+        )],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,6 +586,52 @@ Also tracked: `c`.
             ),
             ["Cargo.toml names no version under [workspace.package]"]
         );
+    }
+
+    #[test]
+    fn a_translation_pinned_at_the_readme_as_it_is_passes_whatever_the_line_endings() {
+        let hash = domain::follows::content_hash("# R\n\ntext\n");
+        let japanese = format!("# R\n\n<!-- {TRANSLATED}{hash}. -->\n");
+        for readme in [
+            "# R\n\ntext\n",
+            "# R\r\n\r\ntext\r\n",
+            "\u{feff}# R\n\ntext\n",
+        ] {
+            assert_eq!(
+                translation_problems(readme, "README.ja.md", &japanese),
+                Vec::<String>::new()
+            );
+        }
+    }
+
+    #[test]
+    fn a_translation_left_behind_fails_with_both_hashes() {
+        let (old, now) = (
+            domain::follows::content_hash("# R\n\ntext\n"),
+            domain::follows::content_hash("# R\n\nanother text\n"),
+        );
+        let japanese = format!("<!-- {TRANSLATED}{old}. -->\n");
+        assert_eq!(
+            translation_problems("# R\n\nanother text\n", "README.ja.md", &japanese),
+            [format!(
+                "README.ja.md was translated from README.md at {old}, and README.md is now {now}: bring its text to \
+                 the README's, then write {now} in that line"
+            )]
+        );
+    }
+
+    #[test]
+    fn a_translation_that_names_no_hash_fails() {
+        for japanese in ["# R\n", "<!-- Translated from README.md at . -->\n"] {
+            let found = translation_problems("# R\n", "README.ja.md", japanese);
+            assert_eq!(found.len(), 1, "{japanese}");
+            assert!(
+                found[0].starts_with(
+                    "README.ja.md does not say which README.md it was translated from"
+                ),
+                "{found:?}"
+            );
+        }
     }
 
     const SPEC_URL: &str = "https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md";

@@ -26,6 +26,7 @@ keeps and writes is in `SPECIFICATION.md`, and what it gives, how to start with 
 | `THIRD-PARTY-LICENSES.txt` | The licenses of every crate the binary links, which go with the binary: in the wheel next to Rotproof's own. Generated, never edited by hand |
 | `about.toml`, `about.hbs` | What cargo-about writes `THIRD-PARTY-LICENSES.txt` from: the licenses Rotproof may ship, and the file's template |
 | `README.md` | What Rotproof gives, how to install it, a tutorial, what a version promises, and how to build it. It is the page on PyPI and npm: every link in it to another file is a full URL |
+| `README.ja.md` | The README in Japanese, without the sections on development and the release. The English README is the one that holds when they differ. It names the hash of the README it was translated from, and `cargo xtask ci` fails once the README is another text (`xtask/src/drift.rs`): bring the Japanese text to it in the same commit, then write the hash the failure names. The hash says only that the README changed, so read the two against each other before pinning |
 | `SPECIFICATION.md` | What Rotproof checks, keeps and writes, in full: the commands, the project's files, the layers, the records and every rule of `rotproof check`. The README links to its sections by full URL |
 | `LICENSE-MIT`, `LICENSE-APACHE` | The license: MIT OR Apache-2.0 |
 
@@ -207,6 +208,5 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
   was wrongly rejected or stops a crash, the words of a message, documentation. When in doubt, major. Projects pin the
   exact version, so they take the change in a commit of their own.
 - **Raise the version in `Cargo.toml` and every `pip install rotproof==<version>` and `npm install -D -E
-  rotproof@<version>` in `README.md` and `SPECIFICATION.md` together;** `cargo xtask ci` fails while they differ (the
-  README is the page on PyPI and on npm). Release by pushing the tag `v<version>` of that
-  commit. Before the tag, `gh workflow run release.yml` builds and tests the release without publishing it.
+  rotproof@<version>` in `README.md`, `README.ja.md` and `SPECIFICATION.md` together;** `cargo xtask ci` fails while
+  they differ (the README is the page on PyPI and on npm). Release by pushing the tag `v<version>` of that commit. Before the tag, `gh workflow run release.yml` builds and tests the release without publishing it.
