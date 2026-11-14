@@ -12,6 +12,7 @@ pub mod direction;
 pub mod environment;
 pub mod follows;
 pub mod frontmatter;
+pub mod guide;
 pub mod hook;
 pub mod layers;
 pub mod links;

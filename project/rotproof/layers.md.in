@@ -22,4 +22,4 @@
   An agent cannot approve: the command refuses without a terminal, and Claude Code is denied editing that file.
   `rotproof check` prints every approval on every run, and fails on one that matches no forbidden import any more:
   after fixing an approved import, run `rotproof approve --prune`, which removes such entries and needs no terminal.
-{environment}{types}{ui}
+{rules}{ui}

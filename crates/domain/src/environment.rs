@@ -19,7 +19,7 @@
 //! Python and TypeScript are read by the readers of their language, which find the forms above in the syntax tree
 //! (`Source::environment`); Rust by Rotproof's own scanner, here.
 
-use crate::layers::Place;
+use crate::layers::{Language, Place};
 use crate::rust::{code, items};
 use crate::text::line_of;
 
@@ -44,6 +44,24 @@ pub const READER: &str = "infrastructure";
 pub const HEADING: &str = "only infrastructure reads the environment (read it there into a settings type it \
                            validates, and let composition pass that on: the environment is input from outside, as \
                            unchecked as a request)";
+
+const GUIDE_TEXT: &str = include_str!("../../../project/rotproof/environment.md.in");
+
+/// What the guide says of this rule in the section on the layers, for a project in `language`: what counts there.
+pub fn guide(language: Language) -> String {
+    let reads = match language {
+        Language::Python => {
+            "`os.environ` and `os.getenv` (and the other names of `os` that touch it)"
+        }
+        Language::TypeScript => {
+            "`process.env` and `import.meta.env` (except what Vite sets itself, such as `import.meta.env.DEV`)"
+        }
+        Language::Rust => {
+            "`std::env::var` and the other functions of `std::env` that read or set a variable"
+        }
+    };
+    GUIDE_TEXT.replace("{reads}", reads)
+}
 
 /// Whether the code of `place` is judged: every place but `infrastructure` and its levels. The entry file is a place
 /// of its own, and judged.

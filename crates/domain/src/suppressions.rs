@@ -30,6 +30,20 @@ pub const HEADING: &str = "no comment switches the type checker off (fix the typ
                            becomes a validated type where it comes in, in infrastructure; a comment that hides an \
                            error hides where that is missing)";
 
+const GUIDE_PYTHON: &str = include_str!("../../../project/rotproof/suppressions-python.md.in");
+const GUIDE_TYPESCRIPT: &str =
+    include_str!("../../../project/rotproof/suppressions-typescript.md.in");
+
+/// What the guide says of this rule in the section on the layers, for a project in `language`: nothing for Rust,
+/// whose compiler has no comment that switches it off.
+pub fn guide(language: Language) -> &'static str {
+    match language {
+        Language::Python => GUIDE_PYTHON,
+        Language::TypeScript => GUIDE_TYPESCRIPT,
+        Language::Rust => "",
+    }
+}
+
 /// What a comment does to the type checker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {

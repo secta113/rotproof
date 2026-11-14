@@ -15,11 +15,11 @@ use crate::links::broken;
 use crate::tree::{exactly, read_text};
 use domain::approvals::{shown, sort, stale};
 use domain::bundle::{DOCS, Docs, in_docs, is_document};
+use domain::guide::GUIDE;
 use domain::layers::{DECLARATION, Declared, INIT_OR_CREATE, area_problems};
 use domain::markdown::links;
 use domain::markers::KNOWLEDGE_HEADING;
 use domain::paths::join;
-use domain::project::GUIDE;
 use domain::records::{KNOWLEDGE, floor, log_days_to_come, log_problems, unread_paths};
 use domain::schema::Time;
 use domain::upgrade::VERSION;
@@ -127,7 +127,7 @@ fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
         ),
     )
     .collect();
-    let guide = domain::project::guide(&declared.declaration.stack, declared.layout.as_ref());
+    let guide = domain::guide::guide(&declared.declaration.stack, declared.layout.as_ref());
     let written = exactly(tree, GUIDE)
         .ok()
         .and_then(|(path, _)| read_text(tree, &path).ok());
