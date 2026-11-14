@@ -33,7 +33,7 @@ rotproof --root <repository> init    # after upgrading Rotproof: update the proj
 rotproof --root <repository> create  # list the layers it would make, writing nothing (makes docs/ when it makes no layer)
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
-rotproof --root <repository> index   # write every generated file in docs/ (the index files and the knowledge rules)
+rotproof --root <repository> index   # write the generated files in docs/ that are out of date (the index files and the knowledge rules)
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
