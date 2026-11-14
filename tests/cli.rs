@@ -2917,7 +2917,7 @@ fn a_comment_tied_to_an_issue_is_listed_on_every_run_and_fails_nothing() {
     let out = run(&["--root", &arg, "check"]);
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(0), "{said}");
-    // Apart from the findings, and each line with its place and its reference, in the order of the files
+    // Apart from the findings, and each line with its place and its reference, sorted by path
     assert_eq!(
         said,
         "linked TODO (2)\n  domain/model.py:2      #123\n  tests/test_price.py:1  #9\n\

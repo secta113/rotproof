@@ -650,7 +650,7 @@ linked TODO (2)
 
 The list is no finding and no warning: it never changes the exit code, and it is printed apart from both (after the
 approvals, before the warnings), nothing at all when it is empty. The form of its lines is kept, so that a CI step can
-read it: a line is two spaces, `path:line`, padding, and the reference, in the order of the files and their lines; the
+read it: a line is two spaces, `path:line`, padding, and the reference, sorted by path and then by line; the
 first field is the place, the last the reference (a path that holds a space is the one case where the place is every
 field but the last).
 

@@ -98,8 +98,8 @@ pub struct Report {
     pub layers_checked: bool,
     /// Every forbidden import a person approved, as printed on every run: one line per entry that approves something
     pub approved: Vec<String>,
-    /// Every comment that keeps the first marker with the reference of an issue, in the order of the files and the
-    /// lines: printed on every run apart from the findings and the warnings, and failing nothing. Empty unless the
+    /// Every comment that keeps the first marker with the reference of an issue, sorted by path and then by
+    /// line: printed on every run apart from the findings and the warnings, and failing nothing. Empty unless the
     /// declaration has `todo_link`
     pub linked: Vec<LinkedTodo>,
     /// Every warning, in the order it is printed, each kind under its own heading: a knowledge document whose

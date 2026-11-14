@@ -89,6 +89,11 @@ fn code(
             reference: linked.reference,
         })
         .collect();
+    // Sorted by path, then by line: the order a directory gives its files in differs between file systems, and a CI
+    // step reads this list
+    report
+        .linked
+        .sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
     report
         .findings
         .extend(under(markers.heading(declared.todo_link), markers.found));
