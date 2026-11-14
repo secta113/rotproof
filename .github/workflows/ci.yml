@@ -22,11 +22,14 @@ jobs:
   wheels:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # What the job runs on: macos-latest is meant to be arm64 (Apple silicon), which this shows
+      - run: uname -sm
+        shell: bash
       - run: rustup toolchain install
       - run: cargo test --workspace --no-fail-fast
       - uses: actions/setup-python@v7
