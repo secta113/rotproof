@@ -30,6 +30,9 @@ pub const HEADING: &str = "no comment switches the type checker off (fix the typ
                            becomes a validated type where it comes in, in infrastructure; a comment that hides an \
                            error hides where that is missing)";
 
+/// The heading a comment that may make the type checker check less is printed under.
+pub const WEAKENS_HEADING: &str = "comments that may make the type checker check less, to look at";
+
 const GUIDE_PYTHON: &str = include_str!("../../../project/rotproof/suppressions-python.md.in");
 const GUIDE_TYPESCRIPT: &str =
     include_str!("../../../project/rotproof/suppressions-typescript.md.in");

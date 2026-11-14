@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use protocol::inbound::{Commands, Initialized, Made, Names};
+use protocol::inbound::{Commands, Initialized, Made, Names, Warning};
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -452,23 +452,14 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
             println!("  {line}");
         }
     }
-    // A warning: printed on every run from the day, and failing nothing
-    if !report.due.is_empty() {
+    // A warning: printed on every run, under the heading of its kind, and failing nothing
+    for (heading, details) in warnings(&report.warnings) {
         println!(
-            "to look at again, past their stale_after (a warning, which fails nothing) ({}):",
-            report.due.len()
+            "{heading} (a warning, which fails nothing) ({}):",
+            details.len()
         );
-        for line in &report.due {
-            println!("  {line}");
-        }
-    }
-    if !report.weakened.is_empty() {
-        println!(
-            "comments that may make the type checker check less, to look at (a warning, which fails nothing) ({}):",
-            report.weakened.len()
-        );
-        for line in &report.weakened {
-            println!("  {}", line.replace('\n', "\n    "));
+        for detail in details {
+            println!("  {}", detail.replace('\n', "\n    "));
         }
     }
     let found = report.findings;
@@ -489,6 +480,21 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
         }
     }
     Ok(found.is_empty())
+}
+
+/// The details of each kind of warning, under its heading, in the order the headings first come.
+fn warnings(all: &[Warning]) -> Vec<(&str, Vec<&str>)> {
+    let mut kinds: Vec<(&str, Vec<&str>)> = Vec::new();
+    for warning in all {
+        match kinds
+            .iter_mut()
+            .find(|(heading, _)| *heading == warning.check)
+        {
+            Some((_, details)) => details.push(&warning.detail),
+            None => kinds.push((&warning.check, vec![&warning.detail])),
+        }
+    }
+    kinds
 }
 
 /// What `rotproof stop-hook` says, as the JSON Claude Code reads from a hook: a `systemMessage`, shown to the person,

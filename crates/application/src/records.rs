@@ -5,16 +5,18 @@ use std::collections::BTreeMap;
 use std::io;
 
 use crate::bundle::Bundle;
-use crate::finding::under;
+use crate::finding::{under, warn};
 use crate::links::broken;
 use crate::tree::{exactly, read_text};
 use domain::bundle::{DOCS, Docs, in_docs, is_document};
 use domain::declaration::{DECLARATION, area_problems};
 use domain::markdown;
 use domain::paths::join;
-use domain::records::{KNOWLEDGE, floor, log_days_to_come, log_problems, unread_paths};
+use domain::records::{
+    DUE_HEADING, KNOWLEDGE, floor, log_days_to_come, log_problems, unread_paths,
+};
 use domain::schema::Time;
-use protocol::inbound::Finding;
+use protocol::inbound::{Finding, Warning};
 use protocol::outbound::{Parsers, Tree};
 
 /// The check that says the records could not be checked at all
@@ -31,7 +33,7 @@ pub struct Records {
     /// Every broken rule, under its check, in the order it is printed
     pub found: Vec<Finding>,
     /// Every knowledge document whose `stale_after` has come, as a warning
-    pub due: Vec<String>,
+    pub warnings: Vec<Warning>,
 }
 
 /// Every broken rule of the records at `now`, grouped by `areas`: `None` when the declaration cannot be read.
@@ -79,7 +81,7 @@ pub fn problems(
     found.extend(generated(tree, &bundle)?);
     Ok(Records {
         found,
-        due: knowledge.due,
+        warnings: knowledge.warnings,
     })
 }
 
@@ -129,7 +131,7 @@ fn knowledge(
         .into_iter()
         .map(|(name, (doc, _))| (name, doc))
         .collect();
-    let due = domain::records::due(&held, now);
+    let warnings = warn(DUE_HEADING, domain::records::due(&held, now)).collect();
     let found = under(
         "every knowledge document matches the code it follows",
         crate::follows::drift(tree, parsers, &held),
@@ -143,7 +145,7 @@ fn knowledge(
         pairs(&read.problems),
     ))
     .collect();
-    Ok(Records { found, due })
+    Ok(Records { found, warnings })
 }
 
 /// The files `rotproof index` writes that are not as it would write them now.

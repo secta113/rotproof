@@ -164,6 +164,9 @@ pub fn floor() -> Vec<String> {
     .into()
 }
 
+/// The heading the knowledge documents that are due are printed under.
+pub const DUE_HEADING: &str = "to look at again, past their stale_after";
+
 /// The knowledge documents that hold, of `documents` (name -> document), whose `stale_after` has come on the day of
 /// `now` in its own zone, the zone of the machine that runs the check, each with what to do. A warning, never a broken
 /// rule: time alone turns no check from green to red, and a line on every run is enough for whoever reads the check to

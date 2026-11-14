@@ -132,7 +132,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `index.rs` | `rotproof index`: every index file written from the frontmatter |
 | `init.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
-| `finding.rs` | A finding of `rotproof check`, made from what a check found and the heading it is printed under |
+| `finding.rs` | A finding or a warning of `rotproof check`, made from what a check found and the heading it is printed under |
 | `records.rs` | The checks of the records, read from the tree: the areas, the floor, the links of `docs/knowledge/` and the log, the log, the knowledge documents and the generated files |
 | `structure.rs` | The structure check, read from the tree |
 

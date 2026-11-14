@@ -149,6 +149,89 @@ fn a_knowledge_document_past_its_stale_after_is_warned_of_and_fails_nothing() {
 }
 
 #[test]
+fn every_kind_of_warning_is_printed_under_its_heading_in_order_and_fails_nothing() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let late = "---\ntype: Knowledge\ntitle: X\ndescription: Y.\ntags: [a]\nstatus: stable\nstale_after: 2026-01-01\n\
+                ---\n\n# Why\n\nZ.\n";
+    fs::write(r.join("docs/knowledge/x.md"), late).unwrap();
+    fs::write(
+        r.join("docs/knowledge/w.md"),
+        late.replace("title: X", "title: W"),
+    )
+    .unwrap();
+    fs::create_dir_all(r.join("domain")).unwrap();
+    fs::write(r.join("domain/model.py"), "X = 1  # pyright: basic\n").unwrap();
+    fs::write(
+        r.join("domain/song.py"),
+        "Y = 2\n# mypy: disable-error-code=\"arg-type\"\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    // The documents that are due come first, then the comments, each kind under one heading with its own count
+    let due = said
+        .find("to look at again, past their stale_after (a warning, which fails nothing) (2):\n")
+        .unwrap_or_else(|| panic!("{said}"));
+    let weakened = said
+        .find("comments that may make the type checker check less, to look at (a warning, which fails nothing) (2):\n")
+        .unwrap_or_else(|| panic!("{said}"));
+    assert!(due < weakened, "{said}");
+    assert_eq!(
+        said.matches("(a warning, which fails nothing)").count(),
+        2,
+        "{said}"
+    );
+    assert!(
+        said[due..weakened].contains("  knowledge/w.md: stale_after 2026-01-01 has come")
+            && said[due..weakened].contains("  knowledge/x.md: stale_after 2026-01-01 has come"),
+        "{said}"
+    );
+    // A detail of several lines stays under its warning
+    assert!(
+        said[weakened..].contains("  domain/model.py:1\n    X = 1  # pyright: basic\n"),
+        "{said}"
+    );
+    assert!(
+        said.ends_with("the layers and every record keep the rules\n"),
+        "{said}"
+    );
+    // Only the comments: no heading of the documents
+    fs::write(
+        r.join("docs/knowledge/x.md"),
+        late.replace("2026-01-01", "9999-01-01"),
+    )
+    .unwrap();
+    fs::write(
+        r.join("docs/knowledge/w.md"),
+        late.replace("title: X", "title: W")
+            .replace("2026-01-01", "9999-01-01"),
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        !said.contains("stale_after")
+            && said.contains("check less, to look at (a warning, which fails nothing) (2):"),
+        "{said}"
+    );
+    // None: no heading at all
+    fs::write(r.join("domain/model.py"), "X = 1\n").unwrap();
+    fs::write(r.join("domain/song.py"), "Y = 2\n").unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(
+        out.status.success() && !said.contains("a warning"),
+        "{said}"
+    );
+}
+
+#[test]
 fn each_broken_rule_fails_under_its_check() {
     let doc = |body: &str| {
         format!(
