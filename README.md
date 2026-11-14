@@ -32,15 +32,15 @@ still true, only that the code under it changed, so the review stays with a pers
 
 ## Install
 
-Rotproof is released for Windows x86_64 and Linux x86_64 (glibc 2.17 or newer). Pin the exact version, so that an
-upgrade, which can bring new rules, is a commit of its own:
+Rotproof is released for Windows x86_64, Linux x86_64 (glibc 2.17 or newer) and macOS arm64 (Apple silicon, macOS 11 or
+newer). Pin the exact version, so that an upgrade, which can bring new rules, is a commit of its own:
 
 ```sh
 pip install rotproof==1.0.0
 ```
 
 In a Node project, pin it with npm, which installs the binary for your platform with it (the package `rotproof` and
-one of `@rotproof/linux-x64` and `@rotproof/win32-x64`):
+one of `@rotproof/linux-x64`, `@rotproof/win32-x64` and `@rotproof/darwin-arm64`):
 
 ```sh
 npm install -D -E rotproof@1.0.0
@@ -375,7 +375,8 @@ there until the file is written again. The text is checked by `.github/workflows
 the dependencies, `about.toml`, `about.hbs` or the file itself. The Dockerfile and that workflow install the same
 version of cargo-about, and `cargo xtask ci` fails when they differ.
 
-The pip wheels (Windows x86_64 and Linux x86_64) are built with maturin, in the container:
+The pip wheels for Windows x86_64 and Linux x86_64 are built with maturin, in the container (the macOS wheel is built on
+macOS, below):
 
 ```sh
 docker compose run --rm dev maturin build --release --out dist                                   # Linux
@@ -388,13 +389,15 @@ glibc, and its Windows wheel is cross-compiled with cargo-xwin, which downloads 
 under Microsoft's license. Both serve for trying the wheels, not for release.
 
 A release is a pushed tag `v<version>` that matches `Cargo.toml`. `.github/workflows/release.yml` checks the licenses,
-builds the Linux wheel in the manylinux2014 image (glibc 2.17) and the Windows wheel on Windows, installs each into a
-fresh venv on its platform and runs it (`.github/smoke.sh`), and installs the Linux wheel in the manylinux2014 image
-too, so the oldest glibc the tag claims is tested. It packs an archive of the binary per platform, taken out of the
+builds the Linux wheel in the manylinux2014 image (glibc 2.17), the Windows wheel on Windows and the macOS wheel
+(`macosx_11_0_arm64`) on macOS, installs each into a fresh venv on its platform and runs it (`.github/smoke.sh`), and
+installs the Linux wheel in the manylinux2014 image too, so the oldest glibc the tag claims is tested. The macOS
+binary is checked to ask for no macOS newer than 11.0, which its tag claims; no macOS older than the runner's is run.
+It packs an archive of the binary per platform, taken out of the
 tested wheel, and `SHA256SUMS`, and installs them as the CI `rotproof create` writes for rust and none does
 (`.github/project-ci.sh`), so a project's CI is known to find the archive before it is published: the releases are
 immutable. From the archives it makes the npm packages (`npm/pack.py`): one per platform (`@rotproof/linux-x64`,
-`@rotproof/win32-x64`) holding the binary and the licenses, and `rotproof`, whose script runs the binary of the one
+`@rotproof/win32-x64`, `@rotproof/darwin-arm64`) holding the binary and the licenses, and `rotproof`, whose script runs the binary of the one
 npm installed (they are its optional dependencies, each for its own os and cpu). It installs them into a fresh
 package on each platform and runs them through `smoke.sh`. It then publishes the wheels to PyPI and the packages to
 npm (a version with a pre-release part under the dist-tag `next`), and, once both took the version, makes the GitHub
@@ -402,7 +405,8 @@ Release with the wheels, the archives and `SHA256SUMS`. A registry that has the 
 a run that failed after one of them took it can be made again on the same tag. Run by hand
 (`gh workflow run release.yml`), it does everything but publish, and runs the publish to npm with `--dry-run`. CI
 builds and tests the
-Windows wheel natively on Windows too. Other platforms (macOS, Linux aarch64) are welcome as contributions.
+Windows and macOS wheels natively on Windows and macOS too. Other platforms (macOS x86_64, Linux aarch64) are welcome
+as contributions.
 
 ## License
 

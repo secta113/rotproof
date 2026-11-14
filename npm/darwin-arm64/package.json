@@ -1,0 +1,12 @@
+{
+  "name": "@rotproof/darwin-arm64",
+  "description": "The binary of Rotproof for macOS arm64 (Apple silicon, macOS 11 or newer). Install the package rotproof, which installs this one on that platform",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/secta113/rotproof.git"
+  },
+  "homepage": "https://github.com/secta113/rotproof#readme",
+  "os": ["darwin"],
+  "cpu": ["arm64"]
+}

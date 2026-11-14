@@ -42,6 +42,8 @@ jobs:
             os: ubuntu-latest
           - platform: windows
             os: windows-latest
+          - platform: macos
+            os: macos-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -60,14 +62,15 @@ jobs:
             /opt/build/bin/pip install "$(grep "^maturin==" requirements-build.txt)"
             /opt/build/bin/maturin build --release --locked --compatibility manylinux2014 --out dist
           '
-      - if: matrix.platform == 'windows'
+      # Windows (MSVC) and macOS (arm64, as macos-latest is Apple silicon) build natively, where the binary is tested
+      - if: matrix.platform != 'linux'
         run: rustup toolchain install
-      - if: matrix.platform == 'windows'
+      - if: matrix.platform != 'linux'
         uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-      - name: Build (MSVC)
-        if: matrix.platform == 'windows'
+      - name: Build (natively)
+        if: matrix.platform != 'linux'
         shell: bash
         run: |
           pip install "$(grep '^maturin==' requirements-build.txt)"
@@ -88,6 +91,8 @@ jobs:
             os: ubuntu-latest
           - platform: windows
             os: windows-latest
+          - platform: macos
+            os: macos-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     defaults:
@@ -113,6 +118,17 @@ jobs:
           fi
           python -m pip install --no-index --find-links dist rotproof
           bash .github/smoke.sh
+      # The tag of the macOS wheel (macosx_11_0_arm64) claims the oldest macOS the binary runs on, which is the one it
+      # asks for: a binary built for a newer one would be refused by dyld on the older, and pip would still install it
+      - name: The binary asks for the macOS its wheel's tag claims
+        if: matrix.platform == 'macos'
+        run: |
+          minos=$(otool -l "$RUNNER_TEMP/venv/bin/rotproof" | awk '/minos/ { print $2; exit }')
+          echo "minos $minos"
+          if [ "$minos" != 11.0 ]; then
+            echo "::error::the binary asks for macOS $minos, but the tag of the wheel names 11.0"
+            exit 1
+          fi
       # pip in the manylinux2014 image (glibc 2.17) installs the wheel only if its tag allows that glibc, and the binary
       # runs there only if it needs no newer one
       - name: Install and run in the oldest Linux the tag claims
@@ -143,14 +159,15 @@ jobs:
           shopt -s nullglob
           wheels=(dist/*.whl)
           # The floor: one wheel per platform in the table of the publishing spec
-          if [ "${#wheels[@]}" -ne 2 ]; then
-            echo "::error::${#wheels[@]} wheels, but 2 platforms: ${wheels[*]}"
+          if [ "${#wheels[@]}" -ne 3 ]; then
+            echo "::error::${#wheels[@]} wheels, but 3 platforms: ${wheels[*]}"
             exit 1
           fi
           linux=(dist/*-manylinux_2_17_x86_64.manylinux2014_x86_64.whl)
           windows=(dist/*-win_amd64.whl)
-          if [ "${#linux[@]}" -ne 1 ] || [ "${#windows[@]}" -ne 1 ]; then
-            echo "::error::expected one manylinux2014 x86_64 wheel and one win_amd64 wheel: ${wheels[*]}"
+          macos=(dist/*-macosx_11_0_arm64.whl)
+          if [ "${#linux[@]}" -ne 1 ] || [ "${#windows[@]}" -ne 1 ] || [ "${#macos[@]}" -ne 1 ]; then
+            echo "::error::expected one manylinux2014 x86_64 wheel, one win_amd64 wheel and one macosx_11_0_arm64 wheel: ${wheels[*]}"
             exit 1
           fi
           mkdir archives
@@ -172,6 +189,9 @@ jobs:
           tar -czf "archives/$dir.tar.gz" -C work "$dir"
           dir=$(pack "${windows[0]}" x86_64-pc-windows-msvc rotproof.exe)
           (cd work && zip -q -r "../archives/$dir.zip" "$dir")
+          dir=$(pack "${macos[0]}" aarch64-apple-darwin rotproof)
+          chmod +x "work/$dir/rotproof"
+          tar -czf "archives/$dir.tar.gz" -C work "$dir"
           (cd dist && sha256sum -- *.whl) > SHA256SUMS
           (cd archives && sha256sum -- *) >> SHA256SUMS
           cat SHA256SUMS
@@ -215,6 +235,8 @@ jobs:
             npm: linux-x64
           - os: windows-latest
             npm: win32-x64
+          - os: macos-latest
+            npm: darwin-arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     defaults:
@@ -262,7 +284,7 @@ jobs:
           packages-dir: release/dist
           skip-existing: true
 
-  # Trusted Publishing, as for PyPI: each of the three packages on npm trusts this repository, this workflow and the
+  # Trusted Publishing, as for PyPI: each of the four packages on npm trusts this repository, this workflow and the
   # environment, and npm adds the provenance, which needs the repository.url of each package.json to be this
   # repository's. The platform packages go first, so the package rotproof never names a version npm lacks. Without a
   # tag it runs with --dry-run, so a publish npm would refuse fails before the tag: at 1.0.0-rc.3 it read a path as a
