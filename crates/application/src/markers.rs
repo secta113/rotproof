@@ -45,8 +45,8 @@ pub fn problems(
         };
         read += 1;
         let comments = comments(parsers, layout.language, &source, &path);
-        for (finding, words) in in_file(&path, &source, &comments) {
-            found.markers.add(finding, &words);
+        for line in in_file(&path, &source, &comments, declared.todo_link) {
+            found.markers.add(line);
         }
         for (finding, effect) in
             domain::suppressions::in_file(layout.language, &path, &source, &comments)
@@ -85,17 +85,16 @@ mod tests {
     /// The lines of a source with a marker in a comment, as the reader of `language` finds its comments, and the
     /// markers on them in order
     fn words(language: Language, source: &str, path: &str) -> (Vec<usize>, Vec<&'static str>) {
-        let found = in_file(path, source, &comments(&Readers, language, source, path));
-        let lines = found
-            .iter()
-            .map(|(finding, _)| {
-                let at = finding.split_once('\n').unwrap().0;
-                at.rsplit(':').next().unwrap().parse().unwrap()
-            })
-            .collect();
+        let found = in_file(
+            path,
+            source,
+            &comments(&Readers, language, source, path),
+            None,
+        );
+        let lines = found.iter().map(|line| line.number).collect();
         let markers = found
             .into_iter()
-            .flat_map(|(_, positions)| positions)
+            .flat_map(|line| line.positions)
             .map(|i| MARKERS[i])
             .collect();
         (lines, markers)

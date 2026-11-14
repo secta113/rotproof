@@ -82,7 +82,7 @@ fn code(
     let markers = comments.markers;
     report
         .findings
-        .extend(under(markers.heading(), markers.found));
+        .extend(under(markers.heading(declared.todo_link), markers.found));
     report
         .findings
         .extend(under(KNOWLEDGE_HEADING, markers.knowledge));

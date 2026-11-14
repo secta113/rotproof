@@ -224,6 +224,7 @@ mod tests {
                 ui: (stack != RECORDS_ONLY).then(|| NO_UI.to_string()),
                 absent: Vec::new(),
                 unchecked: Vec::new(),
+                todo_link: None,
                 files: None,
                 declined: Vec::new(),
             })
