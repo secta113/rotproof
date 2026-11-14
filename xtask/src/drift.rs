@@ -3,6 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use domain::markdown;
+
 /// Fewer table rows than this means the map's format changed and nothing was read, not that the repository shrank
 pub const MIN_ROWS: usize = 10;
 
@@ -164,10 +166,12 @@ pub fn toolchain_problems(toolchain: &str, dockerfile: &str, ci: &str) -> Vec<St
     found
 }
 
-/// Where a version the README installs (`pip install rotproof==<version>`, `npm install -D -E rotproof@<version>`)
-/// differs from the one in `Cargo.toml`. The README is the page on PyPI and on npm, so a version left behind would tell
-/// every reader to install an old Rotproof. A README that names no version for one of them is a problem too.
-pub fn install_problems(cargo_toml: &str, readme: &str) -> Vec<String> {
+/// Where a version the README or the specification installs (`pip install rotproof==<version>`,
+/// `npm install -D -E rotproof@<version>`) differs from the one in `Cargo.toml`. The README is the page on PyPI and on
+/// npm, so a version left behind would tell every reader to install an old Rotproof. A README that names no version for
+/// one of them is a problem too. `files` are the README first, then the files that may install it as well, each with
+/// its name and text.
+pub fn install_problems(cargo_toml: &str, files: &[(&str, &str)]) -> Vec<String> {
     // The version every crate of the workspace takes, written once under [workspace.package]
     let mut in_workspace_package = false;
     let version = cargo_toml.lines().find_map(|l| {
@@ -190,26 +194,80 @@ pub fn install_problems(cargo_toml: &str, readme: &str) -> Vec<String> {
     ];
     let mut problems = Vec::new();
     for (command, package) in commands {
-        let installed: Vec<&str> = readme
-            .split(command)
-            .skip(1)
-            .filter_map(|rest| {
-                rest.split(|c: char| !(c.is_ascii_alphanumeric() || ".-+".contains(c)))
-                    .next()
-            })
-            .collect();
-        if installed.is_empty() {
-            problems.push(format!(
-                "README.md installs no version ({command}<version>)"
-            ));
+        for (n, (name, text)) in files.iter().enumerate() {
+            let installed: Vec<&str> = text
+                .split(command)
+                .skip(1)
+                .filter_map(|rest| {
+                    rest.split(|c: char| !(c.is_ascii_alphanumeric() || ".-+".contains(c)))
+                        .next()
+                })
+                .collect();
+            if n == 0 && installed.is_empty() {
+                problems.push(format!("{name} installs no version ({command}<version>)"));
+            }
+            problems.extend(
+                installed.iter().filter(|v| **v != version).map(|v| {
+                    format!("{name} installs {package}{v}, but Cargo.toml names {version}")
+                }),
+            );
         }
-        problems.extend(
-            installed.iter().filter(|v| **v != version).map(|v| {
-                format!("README.md installs {package}{v}, but Cargo.toml names {version}")
-            }),
-        );
     }
     problems
+}
+
+/// What a link from the README to a file of this repository on GitHub starts with. A full URL, since the README is the
+/// page on PyPI and on npm, which take it as it is
+const BLOB: &str = "https://github.com/secta113/rotproof/blob/main/";
+
+/// Where a link in the README or the specification fails. A link in the README to another file that is not a full URL
+/// breaks on PyPI and on npm, where a relative one points nowhere. A link inside the page (`#heading`) works on both,
+/// which give the headings the anchors GitHub gives them (PyPI's renderer was run, and a page on npm was tried), so it
+/// passes in either file when it names a heading of that file. In either file, a link into this repository names a
+/// tracked file, and its `#anchor` names a heading of a file among `files` (the README first, then the specification,
+/// each with its name and text).
+pub fn link_problems(tracked: &[String], files: &[(&str, &str)]) -> Vec<String> {
+    let mut found = Vec::new();
+    for (n, (name, text)) in files.iter().enumerate() {
+        for (_, target) in markdown::links(text) {
+            if let Some(anchor) = target.strip_prefix('#') {
+                if !markdown::anchors(text).contains(anchor) {
+                    found.push(format!(
+                        "{name} links to #{anchor}, which is no heading of it"
+                    ));
+                }
+                continue;
+            }
+            if n == 0 && !target.starts_with("https://") && !target.starts_with("mailto:") {
+                found.push(format!(
+                    "{name} links to {target}, which breaks on PyPI and npm: write a full URL"
+                ));
+            }
+            let Some(rest) = target.strip_prefix(BLOB) else {
+                continue;
+            };
+            let (path, anchor) = rest
+                .split_once('#')
+                .map_or((rest, None), |(path, anchor)| (path, Some(anchor)));
+            if !tracked.iter().any(|file| file == path) {
+                found.push(format!("{name} links to {path}, which is not tracked"));
+                continue;
+            }
+            let Some(anchor) = anchor else {
+                continue;
+            };
+            match files.iter().find(|(file, _)| *file == path) {
+                Some((_, text)) if markdown::anchors(text).contains(anchor) => {}
+                Some(_) => found.push(format!(
+                    "{name} links to {path}#{anchor}, which is no heading of it"
+                )),
+                None => found.push(format!(
+                    "{name} links to {path}#{anchor}, a file whose headings this check does not read"
+                )),
+            }
+        }
+    }
+    found
 }
 
 #[cfg(test)]
@@ -430,7 +488,31 @@ Also tracked: `c`.
     #[test]
     fn the_version_the_readme_installs_is_the_one_in_cargo_toml() {
         let readme = "```sh\npip install rotproof==0.2.0\nnpm install -D -E rotproof@0.2.0\n```\n";
-        assert_eq!(install_problems(CARGO, readme), Vec::<String>::new());
+        assert_eq!(
+            install_problems(CARGO, &[("README.md", readme)]),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn an_old_version_in_the_specification_fails_but_it_need_not_install() {
+        let readme = "pip install rotproof==0.2.0\nnpm install -D -E rotproof@0.2.0\n";
+        let files = |specification| [("README.md", readme), ("SPECIFICATION.md", specification)];
+        assert_eq!(
+            install_problems(CARGO, &files("no command here\n")),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            install_problems(CARGO, &files("npm install -D -E rotproof@0.2.0\n")),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            install_problems(
+                CARGO,
+                &files("then `npm install -D -E rotproof@0.1.0` there\n")
+            ),
+            ["SPECIFICATION.md installs rotproof@0.1.0, but Cargo.toml names 0.2.0"]
+        );
     }
 
     #[test]
@@ -438,7 +520,7 @@ Also tracked: `c`.
         let readme = "pip install rotproof==0.2.0\n\nor `pip install rotproof==0.1.0`\n\n\
                       `npm install -D -E rotproof@0.1.0-rc.1`, and npm install -D -E rotproof@0.2.0\n";
         assert_eq!(
-            install_problems(CARGO, readme),
+            install_problems(CARGO, &[("README.md", readme)]),
             [
                 "README.md installs rotproof==0.1.0, but Cargo.toml names 0.2.0",
                 "README.md installs rotproof@0.1.0-rc.1, but Cargo.toml names 0.2.0"
@@ -451,21 +533,97 @@ Also tracked: `c`.
         assert_eq!(
             install_problems(
                 CARGO,
-                "pip install rotproof\nnpm install -D -E rotproof@0.2.0\n"
+                &[(
+                    "README.md",
+                    "pip install rotproof\nnpm install -D -E rotproof@0.2.0\n"
+                )]
             ),
             ["README.md installs no version (pip install rotproof==<version>)"]
         );
         assert_eq!(
-            install_problems(CARGO, "pip install rotproof==0.2.0\nnpm install rotproof\n"),
+            install_problems(
+                CARGO,
+                &[(
+                    "README.md",
+                    "pip install rotproof==0.2.0\nnpm install rotproof\n"
+                )]
+            ),
             ["README.md installs no version (npm install -D -E rotproof@<version>)"]
         );
         assert_eq!(
             // A version of the package alone, or one under [workspace], is not the one every crate takes
             install_problems(
                 "[package]\nversion = \"1\"\n\n[workspace]\nversion = \"1\"\n",
-                "pip install rotproof==1\n"
+                &[("README.md", "pip install rotproof==1\n")]
             ),
             ["Cargo.toml names no version under [workspace.package]"]
+        );
+    }
+
+    const SPEC_URL: &str = "https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md";
+
+    fn links(readme: &str, specification: &str) -> Vec<String> {
+        let tracked = tracked(&["README.md", "SPECIFICATION.md", "LICENSE-MIT"]);
+        link_problems(
+            &tracked,
+            &[("README.md", readme), ("SPECIFICATION.md", specification)],
+        )
+    }
+
+    #[test]
+    fn a_full_url_to_a_file_and_a_heading_of_this_repository_passes() {
+        let readme = format!(
+            "[a]({SPEC_URL}#the-layers), [b][c], [d](https://github.com/secta113/rotproof/blob/main/LICENSE-MIT) and \
+             [e](https://rustup.rs/)\n\n[c]: {SPEC_URL}#what-rotproof-check-checks\n"
+        );
+        let specification =
+            "# Title\n\n## The layers\n\n## What `rotproof check` checks\n\nsee [x](#the-layers)\n";
+        assert_eq!(links(&readme, specification), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_relative_link_in_the_readme_fails_but_not_in_the_specification() {
+        let found = links(
+            "[a](SPECIFICATION.md) and ![c](x.png)\n",
+            "[d](README.md)\n",
+        );
+        assert_eq!(
+            found,
+            [
+                "README.md links to SPECIFICATION.md, which breaks on PyPI and npm: write a full URL",
+                "README.md links to x.png, which breaks on PyPI and npm: write a full URL",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_link_inside_the_page_passes_when_it_names_a_heading_of_that_file() {
+        let found = links(
+            "## Install\n\n[a](#install) and [b](#the-layers)\n",
+            "## The layers\n\n[c](#the-layers) and [d](#install)\n",
+        );
+        assert_eq!(
+            found,
+            [
+                "README.md links to #the-layers, which is no heading of it",
+                "SPECIFICATION.md links to #install, which is no heading of it",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_link_to_a_file_that_is_not_tracked_or_a_heading_that_is_not_there_fails() {
+        let readme = format!(
+            "[a]({SPEC_URL}#gone) [b](https://github.com/secta113/rotproof/blob/main/NOPE.md) \
+             [c](https://github.com/secta113/rotproof/blob/main/LICENSE-MIT#x)\n"
+        );
+        assert_eq!(
+            links(&readme, "## Here\n"),
+            [
+                "README.md links to SPECIFICATION.md#gone, which is no heading of it",
+                "README.md links to NOPE.md, which is not tracked",
+                "README.md links to LICENSE-MIT#x, a file whose headings this check does not read",
+            ]
         );
     }
 }

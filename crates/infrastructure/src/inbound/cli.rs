@@ -465,7 +465,8 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
 
 /// What `print_linked` prints for `linked`: the heading with the count, then a line for each, indented by two spaces,
 /// with `path:line`, padded to the longest, two spaces and the reference. Nothing when there are none. A CI step reads
-/// these lines (the README says their form is kept): the first field of a line is the place, the last the reference.
+/// these lines (the specification says their form is kept): the first field of a line is the place, the last the
+/// reference.
 fn linked_lines(linked: &[LinkedTodo]) -> Vec<String> {
     if linked.is_empty() {
         return Vec::new();

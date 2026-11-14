@@ -1,5 +1,5 @@
 //! `rotproof check`: every rule of the structure and the records, run against one repository. The rules are listed
-//! for a person in the help of `rotproof check` (`CHECK_HELP` in `cli.rs`) and in the README ("What `rotproof
+//! for a person in the help of `rotproof check` (`CHECK_HELP` in `cli.rs`) and in the specification ("What `rotproof
 //! check` checks"); each is judged in the module of `domain` that holds it, and this use case reads what it needs and
 //! runs them.
 //!

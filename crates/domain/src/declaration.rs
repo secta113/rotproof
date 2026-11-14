@@ -594,7 +594,7 @@ mod tests {
                 "{found:?}"
             );
         }
-        // The declaration init writes does not hold it: it is documented in the README alone
+        // The declaration init writes does not hold it: it is documented in the specification alone
         for stack in known_stacks() {
             assert!(!declaration_text(stack, "none").contains("todo_link"));
         }
