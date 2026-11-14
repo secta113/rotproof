@@ -47,7 +47,9 @@ two structures:
 
 Rotproof makes the layer directories, checks that they are where the project declares them, and checks their
 direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
-the levels inside a crate, from the paths its code names.
+the levels inside a crate, from the paths its code names. From the same reading of the code it checks that only
+`infrastructure` reads the environment variables, and that no comment switches the type checker off (see "What
+`rotproof check` checks").
 
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 (its `SPEC.md` as of commit `ad30107`): every document has YAML frontmatter with a `type`, `index.md` and `log.md` are
@@ -67,14 +69,14 @@ Rotproof is released for Windows x86_64 and Linux x86_64 (glibc 2.17 or newer). 
 upgrade, which can bring new rules, is a commit of its own:
 
 ```sh
-pip install rotproof==1.0.0-rc.3
+pip install rotproof==1.0.0-rc.4
 ```
 
 In a Node project, pin it with npm, which installs the binary for your platform with it (the package `rotproof` and
 one of `@rotproof/linux-x64` and `@rotproof/win32-x64`):
 
 ```sh
-npm install -D -E rotproof@1.0.0-rc.3
+npm install -D -E rotproof@1.0.0-rc.4
 ```
 
 The wheel carries only the binary; no Python code runs. Without Python or Node, take the archive for your platform from
@@ -128,7 +130,7 @@ before anyone read the list, and it never deletes them again. A run that makes n
 `--yes`.
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
-pin Rotproof in it (`npm install -D -E rotproof@1.0.0-rc.3`), then run `rotproof init --stack typescript --ui atomic`
+pin Rotproof in it (`npm install -D -E rotproof@1.0.0-rc.4`), then run `rotproof init --stack typescript --ui atomic`
 and `rotproof create --yes` there (`npx --no -- rotproof ...`), which keep what Vite wrote. Vite's entry point,
 `src/main.tsx`, is the entry file where it is (`index.html` loads it), and may import `composition` alone: what Vite
 has it import (`./App.tsx`, `./index.css`) moves into `src/composition/`, which `main.tsx` calls. `rotproof check`
