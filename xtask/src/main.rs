@@ -189,20 +189,39 @@ fn toolchain(root: &Path) -> Result<Vec<String>, String> {
 
 fn install_version(root: &Path) -> Result<Vec<String>, String> {
     let (readme, specification) = (read(root, "README.md")?, read(root, "SPECIFICATION.md")?);
+    let japanese = read(root, "README.ja.md")?;
     Ok(drift::install_problems(
         &read(root, "Cargo.toml")?,
-        &[("README.md", &readme), ("SPECIFICATION.md", &specification)],
+        &[
+            ("README.md", &readme),
+            ("SPECIFICATION.md", &specification),
+            ("README.ja.md", &japanese),
+        ],
     ))
 }
 
-/// Where a link in the README or the specification breaks: the README is the page on PyPI and on npm, so its links to
-/// another file are full URLs, and a link inside the page or into this repository names a file that is tracked and a
-/// heading that is there
+/// Where a link in the README, the specification or the Japanese README breaks: the README is the page on PyPI and on
+/// npm, so its links to another file are full URLs, and a link inside the page or into this repository names a file
+/// that is tracked and a heading that is there
 fn doc_links(root: &Path) -> Result<Vec<String>, String> {
     let (readme, specification) = (read(root, "README.md")?, read(root, "SPECIFICATION.md")?);
+    let japanese = read(root, "README.ja.md")?;
     Ok(drift::link_problems(
         &tracked(root)?,
-        &[("README.md", &readme), ("SPECIFICATION.md", &specification)],
+        &[
+            ("README.md", &readme),
+            ("SPECIFICATION.md", &specification),
+            ("README.ja.md", &japanese),
+        ],
+    ))
+}
+
+/// Where the Japanese README was left behind the README it translates: it pins the README's hash
+fn translation(root: &Path) -> Result<Vec<String>, String> {
+    Ok(drift::translation_problems(
+        &read(root, "README.md")?,
+        "README.ja.md",
+        &read(root, "README.ja.md")?,
     ))
 }
 
@@ -408,6 +427,10 @@ fn main() -> ExitCode {
         report("Install version (README)", install_version(root)),
     ));
     results.push(("Links (README)", report("Links (README)", doc_links(root))));
+    results.push((
+        "Translation (README)",
+        report("Translation (README)", translation(root)),
+    ));
     results.push((
         "Dependencies (workspace)",
         report("Dependencies (workspace)", dependencies(root)),
