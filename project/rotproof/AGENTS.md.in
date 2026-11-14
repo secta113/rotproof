@@ -57,7 +57,13 @@ Open work is no record here: it is kept in issues. The rest of `docs/` is the pr
   own when it outlives the task), or let it go, and take the comment out. `rotproof check` fails on `TODO`, `FIXME`,
   `XXX`, `HACK` and `NOTE` in comments in the code. A comment says why the code beside it is written so, without the
   word; what spans several files, how to run or operate something, and what lies outside the repository go in
-  `docs/knowledge/`, tied to the code by `follows`.
+  `docs/knowledge/`, tied to the code by `follows`. If the declaration has `todo_link`, work that an existing issue
+  already tracks may also stay as `TODO(#123): what is left` (`number`) or `TODO(ABC-123): what is left` (`key`), on
+  one line, and `rotproof check` lists every such comment on each run and fails nothing for it. That list is an
+  inventory and asks for nothing, so never delete a comment only to shorten it. Write only the number or key of an
+  issue you created or looked up, never one made up to pass the check: `rotproof check` does not look at whether the
+  issue exists. Whether a project declares `todo_link` is a person's decision: never add, remove or change it in
+  `.config/rotproof.toml` to pass the check.
 - **When a task is done, add one entry to `docs/log.md`, under a `## YYYY-MM-DD` heading for the day, newest first.**
   The log is a flat list of entries under the dates (OKF 0.2, section 9): one list item per task, with its fields as
   nested items, and no other headings. `rotproof check` fails on anything else. An entry keeps only what is found
