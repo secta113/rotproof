@@ -230,23 +230,23 @@ in `CLAUDE.md` for Claude Code:
 ## The hooks Rotproof no longer writes
 
 Until 1.0.0-rc.3, Rotproof wrote two hooks into `.claude/settings.json`, for Claude Code. Neither is written now, and
-`rotproof init` takes each out of a project's settings. Each command stays, hidden, for a project whose settings still
-run it: it reads the hook input on stdin, says that it does nothing now, and exits 0, which keeps no agent from stopping
-and no prompt from going on (Claude Code takes exit code 2 from a hook for "do not stop" and for "block the prompt").
-A command line that is wrong exits 1, never 2, for the same reason.
+`rotproof init` takes each out of a project's settings. Neither command exists any more, but a settings file that runs
+the binary by path (the update matches only the commands Rotproof wrote, exactly) keeps its hook through any upgrade, so
+a command line that names `stop-hook` or `time-hook` says in one line that the hook was removed and what to do about
+it, and exits 1, whatever else is wrong with it. It never exits 2: Claude Code takes exit code 2 from a `Stop` hook as
+"send Claude back to work" (up to 8 times in a row) and from a `UserPromptSubmit` hook as "block the prompt", where exit
+code 1 is an error that is only shown. The hook input on stdin is not read.
 
 - **The `Stop` hook, `rotproof stop-hook`,** sent the agent back when its last message left something open and nothing
   in `docs/` changed. It went with the records of work it asked for. `rotproof init` takes it out (the update
-  `claude-remove-stop-hook`); until then the command says in a `systemMessage`, every time it runs, that it does
-  nothing.
+  `claude-remove-stop-hook`).
 - **The `SessionStart` and `UserPromptSubmit` hook, `rotproof time-hook`,** told the agent the time now (0.4.0 to
   1.0.0-rc.3). It was written when `rotproof check` failed on a time that had not come, and an agent wrote a guess a
   few minutes ahead of the clock. The records hold a day now, and Claude Code gives the agent the day itself.
   `rotproof init` takes it out (the update `claude-remove-time-hook`), matched exactly: a hook whose command is another
-  text (a path to the binary) stays. Until then the command says in a `systemMessage`, at the start of a session, that
-  it does nothing, and says nothing on a prompt. The rule it repeated, to read a day from the clock and never from
-  memory, is in the `.rotproof/AGENTS.md` that `rotproof create` writes; `rotproof check` still fails on a day that has
-  not come.
+  text (a path to the binary) stays, and fails with the line above at the start of every session and on every prompt
+  until it is removed by hand. The rule it repeated, to read a day from the clock and never from memory, is in the
+  `.rotproof/AGENTS.md` that `rotproof create` writes; `rotproof check` still fails on a day that has not come.
 
 ## Approving a forbidden import
 

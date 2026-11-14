@@ -498,7 +498,7 @@ fn index_fails_without_the_areas() {
 }
 
 #[test]
-fn before_says_it_does_nothing_since_1_0_whatever_it_is_given() {
+fn before_is_no_command_and_fails_as_every_unknown_command_does() {
     let root = repo();
     let r = root_arg(root.path());
     for args in [
@@ -512,12 +512,10 @@ fn before_says_it_does_nothing_since_1_0_whatever_it_is_given() {
         assert_eq!(stdout(&out), "", "{args:?}");
         let said = String::from_utf8_lossy(&out.stderr);
         assert!(
-            said.contains("rotproof before does nothing since Rotproof 1.0")
-                && said.contains("rotproof init"),
+            said.contains("unrecognized subcommand 'before'"),
             "{args:?}: {said}"
         );
     }
-    // Hidden from the help
     assert!(!stdout(&run(&["--help"])).contains("  before"));
 }
 
@@ -2872,119 +2870,8 @@ fn the_help_of_check_names_the_markers_of_the_check() {
     }
 }
 
-/// Run the stop hook from `root` with `input` on stdin.
-fn stop_hook(root: &Path, input: &str) -> Output {
-    hook(root, "stop-hook", input)
-}
-
-/// Run the hook `command` from `root` with `input` on stdin.
-fn hook(root: &Path, command: &str, input: &str) -> Output {
-    use std::io::Write;
-    use std::process::Stdio;
-    let mut child = Command::new(env!("CARGO_BIN_EXE_rotproof"))
-        .args(["--root", &root_arg(root), command])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the binary runs");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.as_bytes())
-        .unwrap();
-    child.wait_with_output().unwrap()
-}
-
-#[test]
-fn create_writes_no_stop_hook_and_the_old_one_says_it_does_nothing() {
-    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
-    let r = root.path();
-    assert!(create(&["--root", &root_arg(r), "create"]).status.success());
-    // create wrote the settings that run no hook, for Claude Code only
-    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
-    assert!(!settings.contains("\"Stop\""), "{settings}");
-    assert!(!settings.contains("\"hooks\""), "{settings}");
-    // and that deny Claude Code editing the approvals file, which only a person adds to
-    assert!(
-        settings.contains("\"deny\": [\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]"),
-        "{settings}"
-    );
-    assert!(!r.join(".gemini").exists());
-
-    // The command a project's settings may still run: a message for the person and exit 0, whatever the input and
-    // the root, inside a project or not, as Claude Code takes 2 for "do not stop"
-    let outside = tempfile::tempdir().unwrap();
-    let open = r#"{"hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": "未確認"}"#;
-    for (from, input) in [
-        (r.to_path_buf(), open),
-        (outside.path().to_path_buf(), "not json"),
-        (r.join("no/such/directory"), ""),
-    ] {
-        let out = stop_hook(&from, input);
-        assert_eq!(out.status.code(), Some(0), "{from:?}");
-        let said: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
-        assert!(
-            said["systemMessage"]
-                .as_str()
-                .unwrap()
-                .contains("run `rotproof init`, which takes this hook out"),
-            "{said}"
-        );
-        assert!(said.get("hookSpecificOutput").is_none(), "{said}");
-    }
-    // Hidden from the help
-    let help = stdout(&run(&["--help"]));
-    assert!(!help.contains("stop-hook"), "{help}");
-}
-#[test]
-fn the_old_time_hook_says_it_does_nothing_at_the_start_of_a_session_and_never_fails() {
-    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
-    let r = root.path();
-    assert!(create(&["--root", &root_arg(r), "create"]).status.success());
-    // create wrote no hook of any event: nothing runs `rotproof time-hook`
-    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
-    assert!(!settings.contains("hooks"), "{settings}");
-    assert!(!settings.contains("time-hook"), "{settings}");
-
-    // The command a project's settings may still run: at the start of a session, a message for the person and exit 0
-    let out = hook(r, "time-hook", "{\"hook_event_name\": \"SessionStart\"}");
-    assert_eq!(out.status.code(), Some(0));
-    let said: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
-    assert!(
-        said["systemMessage"]
-            .as_str()
-            .unwrap()
-            .contains("run `rotproof init`, which takes this hook out"),
-        "{said}"
-    );
-    assert!(said.get("hookSpecificOutput").is_none(), "{said}");
-    // On a prompt, and on any input, nothing: the notice would come back on every prompt. It fails on none, and
-    // reads no root, inside a project or not, as Claude Code takes 2 for "block the prompt"
-    let outside = tempfile::tempdir().unwrap();
-    for (from, input) in [
-        (
-            r.to_path_buf(),
-            "{\"hook_event_name\": \"UserPromptSubmit\", \"prompt\": \"go on\"}",
-        ),
-        (r.to_path_buf(), "{\"hook_event_name\": \"Stop\"}"),
-        (outside.path().to_path_buf(), "not json"),
-        (r.join("no/such/directory"), ""),
-        (r.join("no/such/directory"), "{}"),
-    ] {
-        let out = hook(&from, "time-hook", input);
-        assert_eq!(out.status.code(), Some(0), "{from:?} {input}");
-        assert_eq!(stdout(&out), "", "{from:?} {input}");
-        assert_eq!(String::from_utf8_lossy(&out.stderr), "", "{from:?} {input}");
-    }
-    // Hidden from the help
-    let help = stdout(&run(&["--help"]));
-    assert!(!help.contains("time-hook"), "{help}");
-}
-
-/// Run the binary with `args` as given, with `{}` on stdin.
-fn run_with_input(args: &[&str]) -> Output {
+/// Run the binary with `args` as given, as Claude Code runs a hook: with `input` written to its stdin.
+fn run_with_input(args: &[&str], input: &str) -> Output {
     use std::io::Write;
     use std::process::Stdio;
     let mut child = Command::new(env!("CARGO_BIN_EXE_rotproof"))
@@ -2994,42 +2881,94 @@ fn run_with_input(args: &[&str]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("the binary runs");
-    // The binary may exit on its command line before it reads any input
-    let _ = child.stdin.take().unwrap().write_all(b"{}");
+    // The binary exits on its command line before it reads any input
+    let _ = child.stdin.take().unwrap().write_all(input.as_bytes());
     child.wait_with_output().unwrap()
 }
 
 #[test]
-fn a_hook_with_a_wrong_command_line_exits_1_never_2() {
-    // Claude Code reads exit code 2 from a Stop hook as "do not stop" and from a UserPromptSubmit hook as "block the
-    // prompt": a hook set up wrongly fails with 1 and says so, as clap does for the other commands, with 2
+fn create_writes_no_hook_and_the_settings_deny_only_the_approvals_file() {
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    assert!(create(&["--root", &root_arg(r), "create"]).status.success());
+    // create wrote the settings that run no hook, for Claude Code only
+    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
+    assert!(!settings.contains("\"hooks\""), "{settings}");
+    assert!(!settings.contains("stop-hook"), "{settings}");
+    assert!(!settings.contains("time-hook"), "{settings}");
+    // and that deny Claude Code editing the approvals file, which only a person adds to
+    assert!(
+        settings.contains("\"deny\": [\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]"),
+        "{settings}"
+    );
+    assert!(!r.join(".gemini").exists());
+}
+
+#[test]
+fn a_command_line_that_names_a_removed_hook_says_so_and_exits_1_never_2() {
+    // The two hooks Rotproof wrote into a project's Claude Code settings are no commands any more, but a settings file
+    // that runs the binary by path keeps them through an upgrade. Claude Code reads exit code 2 from a Stop hook as
+    // "send Claude back to work" and from a UserPromptSubmit hook as "block the prompt", where 1 is only shown: each
+    // such command line fails with 1, whatever else is wrong with it, and says in one line what to do
     let root = tempfile::tempdir().unwrap();
     let arg = root_arg(root.path());
-    for args in [
-        vec!["stop-hook", "extra"],
-        vec!["time-hook", "--bogus"],
-        vec!["--root", &arg, "stop-hook", "extra"],
-        vec!["--root", &arg, "time-hook", "--bogus"],
-        vec!["--bogus", "stop-hook"],
+    let stop = r#"{"hook_event_name": "Stop", "stop_hook_active": false, "last_assistant_message": "未確認"}"#;
+    let prompt = r#"{"hook_event_name": "UserPromptSubmit", "prompt": "go on"}"#;
+    let start = r#"{"hook_event_name": "SessionStart"}"#;
+    for (args, hook, input) in [
+        (vec!["stop-hook"], "stop-hook", stop),
+        (vec!["time-hook"], "time-hook", prompt),
+        (vec!["time-hook"], "time-hook", start),
+        (vec!["stop-hook"], "stop-hook", "not json"),
+        (vec!["stop-hook"], "stop-hook", ""),
+        (vec!["--root", &arg, "stop-hook"], "stop-hook", stop),
+        (vec!["--root", &arg, "time-hook"], "time-hook", prompt),
+        (
+            vec!["--root", "no/such/directory", "time-hook"],
+            "time-hook",
+            start,
+        ),
+        (vec!["stop-hook", "extra"], "stop-hook", stop),
+        (vec!["time-hook", "--bogus"], "time-hook", prompt),
+        (
+            vec!["--root", &arg, "stop-hook", "extra"],
+            "stop-hook",
+            stop,
+        ),
+        (
+            vec!["--root", &arg, "time-hook", "--bogus"],
+            "time-hook",
+            prompt,
+        ),
+        (vec!["--bogus", "stop-hook"], "stop-hook", stop),
+        (vec!["stop-hook", "--help"], "stop-hook", stop),
+        (vec!["time-hook", "-h"], "time-hook", prompt),
     ] {
-        let out = run_with_input(&args);
+        let out = run_with_input(&args, input);
         assert_eq!(out.status.code(), Some(1), "{args:?}");
-        let said = String::from_utf8_lossy(&out.stderr);
-        assert!(said.contains("unexpected argument"), "{args:?}: {said}");
         assert_eq!(stdout(&out), "", "{args:?}");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(said.lines().count(), 1, "{args:?}: {said}");
+        assert!(
+            said.starts_with(&format!(
+                "rotproof {hook} was removed in Rotproof 1.0 and does nothing: in a project, run `rotproof init`, \
+                 which takes the hook out of .claude/settings.json; elsewhere, remove the hook that runs it from \
+                 your Claude Code settings"
+            )),
+            "{args:?}: {said}"
+        );
     }
-    // The help is not a failure
-    for args in [
-        vec!["stop-hook", "--help"],
-        vec!["time-hook", "-h"],
-        vec!["--root", &arg, "stop-hook", "--help"],
-        vec!["--version", "time-hook"],
-    ] {
-        let out = run_with_input(&args);
-        assert_eq!(out.status.code(), Some(0), "{args:?}");
-        assert!(!stdout(&out).is_empty(), "{args:?}");
-    }
-    // Any other command is as it was: 2
+    // The version is not a failure, wherever the hook's name is
+    let out = run_with_input(&["--version", "time-hook"], "{}");
+    assert_eq!(out.status.code(), Some(0));
+    assert!(!stdout(&out).is_empty());
+    // Neither command is in the help
+    let help = stdout(&run(&["--help"]));
+    assert!(
+        !help.contains("stop-hook") && !help.contains("time-hook"),
+        "{help}"
+    );
+    // Any other command line is as it was: 2
     for args in [
         vec!["check", "extra"],
         vec!["index", "--bogus"],
@@ -3038,7 +2977,7 @@ fn a_hook_with_a_wrong_command_line_exits_1_never_2() {
         vec!["stop-hook-not", "x"],
         vec!["check", "stop-hook"],
     ] {
-        let out = run_with_input(&args);
+        let out = run_with_input(&args, "{}");
         assert_eq!(out.status.code(), Some(2), "{args:?}");
     }
 }

@@ -1,10 +1,10 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
 //! person on the terminal), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from
 //! one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and how it exits are
-//! decided here. `rotproof before`, `rotproof stop-hook` and `rotproof time-hook`, hidden, only say that they do
-//! nothing since 1.0, and call no port.
+//! decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's
+//! Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
 
-use std::io::{IsTerminal, Read, Write};
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -180,16 +180,6 @@ enum Command {
     /// in docs/work/, which Rotproof no longer reads. Lists the documents it left out and why, also under `# Left out`
     /// in the index. Exits 2 when the declaration or a document cannot be read.
     Index,
-    /// Does nothing since 1.0, which no longer manages tasks: says so, and exits 2
-    ///
-    /// Before 1.0 it printed the open records of docs/work/ that close before a record. Rotproof no longer reads
-    /// docs/work/: keep open work in issues, and run `rotproof init` to update .rotproof/AGENTS.md. Takes any
-    /// arguments, as an old guide or an agent's memory may still pass them.
-    #[command(hide = true)]
-    Before {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
-        _args: Vec<String>,
-    },
     /// Pin keys in a knowledge document's follows, at the hash of the code as it is now
     ///
     /// Run it once the document is reviewed against the code: when it starts to follow something, or after what it
@@ -215,23 +205,6 @@ enum Command {
         #[arg(required = true)]
         keys: Vec<String>,
     },
-    /// Does nothing since 1.0: says so to the person when Claude Code runs it as the Stop hook Rotproof wrote before
-    ///
-    /// Before 1.0 it sent the agent back when its last message left something open and nothing in docs/ changed.
-    /// `rotproof init` takes it out of the project's .claude/settings.json (the update claude-remove-stop-hook). Until
-    /// then it reads the hook input on stdin, prints a systemMessage, which keeps no agent from stopping, and exits 0.
-    /// A command line that is wrong exits 1, never 2, as Claude Code takes 2 for "do not stop".
-    #[command(hide = true)]
-    StopHook,
-    /// Does nothing since 1.0.0-rc.4: says so to the person when Claude Code runs it as the time hook Rotproof wrote
-    ///
-    /// Until 1.0.0-rc.3 it told the agent the time on every prompt and at the start of every session. Records hold a
-    /// day now, and Claude Code gives the agent the day itself. `rotproof init` takes it out of the project's
-    /// .claude/settings.json (the update claude-remove-time-hook). Until then it reads the hook input on stdin, prints
-    /// a systemMessage at the start of a session and nothing on a prompt, and exits 0 on any input. A command line
-    /// that is wrong exits 1, never 2, as Claude Code takes 2 for "block the prompt".
-    #[command(hide = true)]
-    TimeHook,
 }
 
 /// The command line as clap reads it, with the long help of `rotproof check` naming the markers of the check.
@@ -251,19 +224,6 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Ok(cli) => cli,
         Err(e) => return wrong_command_line(&e, &names),
     };
-    // The hooks answer before the root is checked below, whose exit code 2 Claude Code takes from a hook for "block":
-    // neither reads a root
-    if let Command::StopHook = cli.command {
-        return stop_hook();
-    }
-    if let Command::TimeHook = cli.command {
-        return time_hook();
-    }
-    // Whatever its root: it reads none
-    if let Command::Before { .. } = cli.command {
-        eprintln!("{BEFORE_REMOVED}");
-        return ExitCode::from(2);
-    }
     // A root that does not exist fails here. Read as an empty tree, it would pass every check with nothing checked
     if !cli.root.is_dir() {
         eprintln!("the root is not a directory: {}", cli.root.display());
@@ -299,9 +259,6 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Command::Follows { document, keys } => {
             follows(commands, root, &document, &keys).map(|()| true)
         }
-        Command::StopHook | Command::TimeHook | Command::Before { .. } => {
-            unreachable!("answered above")
-        }
     };
     match result {
         Ok(true) => ExitCode::SUCCESS,
@@ -314,35 +271,53 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
     }
 }
 
+/// The hooks Rotproof wrote into a project's Claude Code settings, which a settings file may still run: the commands
+/// that were removed, and are named here only to be told apart from a mistyped command.
+const REMOVED_HOOKS: [&str; 2] = ["stop-hook", "time-hook"];
+
+/// What to do about a removed hook, as the one line a command line that names it says.
+const TAKE_IT_OUT: &str = "in a project, run `rotproof init`, which takes the hook out of .claude/settings.json; \
+    elsewhere, remove the hook that runs it from your Claude Code settings";
+
+/// What a command line that names a removed hook says, on stderr, once.
+fn hook_removed(hook: &str) -> String {
+    format!("rotproof {hook} was removed in Rotproof 1.0 and does nothing: {TAKE_IT_OUT}")
+}
+
 /// Say what is wrong with the command line, and exit. Exit 2 for a wrong command line, as clap does, and 0 for the
-/// help and the version, which clap reports as errors too; but 1 when the command line names a hook (`stop-hook` or
-/// `time-hook`, whatever else is wrong with it), as a hook exits 1, never 2: Claude Code takes exit code 2 from one
-/// for "do not stop" or "block the prompt", and a hook set up wrongly would keep the agent or the prompt from going on.
+/// help and the version, which clap reports as errors too; but 1 when the command line names a removed hook
+/// (`stop-hook` or `time-hook`, whatever else is wrong with it), with one line that says so in place of clap's: a
+/// settings file that runs the binary by path keeps the hook through any upgrade, and Claude Code takes exit code 2
+/// from a `Stop` hook as "send Claude back to work" (up to 8 times in a row) and from a `UserPromptSubmit` hook as
+/// "block the prompt", where 1 is an error that is only shown. Stdin is not read: the hook input is not looked at, and
+/// a hook that exits before its input is written is ordinary to Claude Code.
 fn wrong_command_line(e: &clap::Error, names: &Names) -> ExitCode {
-    if e.use_stderr() && names_a_hook(names) {
-        // `print` writes to stderr for an error that uses it, as `exit` does
-        let _ = e.print();
+    if e.use_stderr()
+        && let Some(hook) = names_a_hook(names)
+    {
+        eprintln!("{}", hook_removed(hook));
         return ExitCode::FAILURE;
     }
     e.exit()
 }
 
-/// Whether the command line names `stop-hook` or `time-hook` as its subcommand, though it did not parse. clap is asked
-/// again with its errors ignored, so that it finds the subcommand as it always does, past the global `--root` and its
-/// value, rather than a guess here at which word is the subcommand. When clap finds none (a flag it does not know
-/// before the subcommand stops it there), a word that is a hook's name is enough: a hook set up with a mistyped flag
-/// must not exit 2 either, and any other command line that holds the word fails with 1 instead of 2, which no hook
-/// is run by.
-fn names_a_hook(names: &Names) -> bool {
-    const HOOKS: [&str; 2] = ["stop-hook", "time-hook"];
+/// The removed hook the command line names as its subcommand, though it did not parse: none of them is a command
+/// now, so clap rejects it. clap is asked again with its errors ignored, so that it finds the subcommand as it always
+/// does, past the global `--root` and its value, rather than a guess here at which word is the subcommand. When clap
+/// finds none (a hook's name is not a command, and a flag it does not know before the subcommand stops it there), a
+/// word that is a hook's name is enough: a hook set up with a mistyped flag must not exit 2 either, and any other
+/// command line that holds the word fails with 1 instead of 2, which no hook is run by.
+fn names_a_hook(names: &Names) -> Option<&'static str> {
     let found = command(names).ignore_errors(true).try_get_matches();
     match found
         .as_ref()
         .ok()
         .and_then(|matches| matches.subcommand_name())
     {
-        Some(name) => HOOKS.contains(&name),
-        None => std::env::args_os().any(|arg| HOOKS.iter().any(|hook| arg == *hook)),
+        Some(name) => REMOVED_HOOKS.into_iter().find(|hook| *hook == name),
+        None => REMOVED_HOOKS
+            .into_iter()
+            .find(|hook| std::env::args_os().any(|arg| arg == *hook)),
     }
 }
 
@@ -495,44 +470,6 @@ fn warnings(all: &[Warning]) -> Vec<(&str, Vec<&str>)> {
         }
     }
     kinds
-}
-
-/// What `rotproof stop-hook` says, as the JSON Claude Code reads from a hook: a `systemMessage`, shown to the person,
-/// which keeps no agent from stopping. Its text holds no `"` or `\`, so it is JSON as written.
-const STOP_HOOK_REMOVED: &str = "{\"systemMessage\": \"rotproof stop-hook does nothing since Rotproof 1.0, which \
-    no longer manages tasks. In a project, run `rotproof init`, which takes this hook out of .claude/settings.json; \
-    elsewhere, remove the Stop hook that runs rotproof stop-hook from your Claude Code settings.\"}";
-
-/// Answer a stop hook Rotproof wrote before 1.0, which a project's settings still run: say that it does nothing now,
-/// and exit 0. The input is read and not looked at, so Claude Code writes it whole; reading it fails nothing, and
-/// --root is not read, as a hook that fails is shown with less than the message says.
-fn stop_hook() -> ExitCode {
-    let _ = std::io::stdin().read_to_string(&mut String::new());
-    println!("{STOP_HOOK_REMOVED}");
-    ExitCode::SUCCESS
-}
-
-/// What `rotproof time-hook` says at the start of a session, as the JSON Claude Code reads from a hook: a
-/// `systemMessage`, shown to the person. Its text holds no `"` or `\`, so it is JSON as written.
-const TIME_HOOK_REMOVED: &str = "{\"systemMessage\": \"rotproof time-hook does nothing since Rotproof 1.0: records \
-    hold a day now, and Claude Code gives the agent the day itself. In a project, run `rotproof init`, which takes \
-    this hook out of .claude/settings.json; elsewhere, remove the SessionStart and UserPromptSubmit hooks that run \
-    rotproof time-hook from your Claude Code settings.\"}";
-
-/// Answer a time hook Rotproof wrote before 1.0.0-rc.4, which a project's settings still run: at the start of a
-/// session, say that it does nothing now; on a prompt, and on any other input, say nothing, as the notice would come
-/// back on every prompt. Exit 0 whatever the input, so a hook never blocks the prompt (Claude Code takes 2 for that) or
-/// is shown as failed. The input is read for its event and nothing else, and --root is not read.
-fn time_hook() -> ExitCode {
-    let mut input = String::new();
-    let _ = std::io::stdin().read_to_string(&mut input);
-    let event = serde_json::from_str::<serde_json::Value>(&input)
-        .ok()
-        .and_then(|input| input["hook_event_name"].as_str().map(str::to_string));
-    if event.as_deref() == Some("SessionStart") {
-        println!("{TIME_HOOK_REMOVED}");
-    }
-    ExitCode::SUCCESS
 }
 
 /// Ask a person on the terminal to approve the forbidden import of `import` by `file`, and add the entry. Every answer
@@ -709,7 +646,3 @@ fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-
-/// What `rotproof before` says, on stderr, before it exits 2.
-const BEFORE_REMOVED: &str = "rotproof before does nothing since Rotproof 1.0, which no longer manages tasks: keep \
-    open work in issues. Run `rotproof init` to update .rotproof/AGENTS.md, which no longer tells you to run it.";

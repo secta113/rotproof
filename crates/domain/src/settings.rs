@@ -101,7 +101,7 @@ pub fn time_hook(text: Option<&str>) -> Edited {
 /// Take the stop hook ([`hook::COMMAND`]) and the hook beside it ([`hook::ON_PATH`]) out of Claude Code's settings,
 /// `text`: each hook that runs one of them exactly, a group left with no hook, `Stop` when no group is left, and
 /// `hooks` when no event is left. A hook the project changed (another command that runs `rotproof stop-hook`) is not
-/// Rotproof's text, and stays: the command says, on every stop, that it does nothing now.
+/// Rotproof's text, and stays: the command fails with exit 1 on every stop, saying it was removed.
 pub fn remove_stop_hook(text: Option<&str>) -> Edited {
     remove(text, &["Stop"], &[hook::COMMAND, hook::ON_PATH])
 }
@@ -109,8 +109,8 @@ pub fn remove_stop_hook(text: Option<&str>) -> Edited {
 /// Take the time hook ([`hook::TIME_COMMAND`]) out of Claude Code's settings, `text`: each hook that runs it exactly
 /// on `SessionStart` and `UserPromptSubmit`, a group left with no hook, an event left with no group, and `hooks` when
 /// no event is left. A hook the project changed (another command that runs `rotproof time-hook`, such as a path to
-/// the binary) is not Rotproof's text, and stays: the command says, at the start of every session, that it does
-/// nothing now.
+/// the binary) is not Rotproof's text, and stays: the command fails with exit 1 at the start of every session and on
+/// every prompt, saying it was removed.
 pub fn remove_time_hook(text: Option<&str>) -> Edited {
     remove(text, &hook::TIME_EVENTS, &[hook::TIME_COMMAND])
 }
