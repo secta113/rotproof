@@ -502,7 +502,7 @@ mod tests {
         );
         assert!(changed(&tree, &Readers).unwrap().is_empty());
 
-        // Pinned as it is now: nothing written, and no log line to write
+        // Pinned as it is now: nothing written
         let again = pin(
             &tree,
             &tree,
