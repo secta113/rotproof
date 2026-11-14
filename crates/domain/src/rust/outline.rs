@@ -12,7 +12,9 @@
 //!   `Vec<Table>` is a piece of `Vec`.
 //! - **A definition starts at its first outer attribute,** and `///` and `/** */` doc comments count as attributes,
 //!   wherever they sit before the item and its attributes; the comments before that are not part of it. It ends at its
-//!   closing brace or semicolon.
+//!   closing brace or semicolon, the first one outside any group: the `< >` of generics are a group too, so the `{`
+//!   of a const argument or default (`Table<{ 3 }>`, `<const N: usize = { 3 }>`) is not its body. In a head every
+//!   `<` opens generics, as an expression there is only inside braces, and a `>` closes them unless it ends `->`.
 //! - **Not seen:** what a macro defines, a `mod name;` without a body, an `extern` block, the fields of a struct, and
 //!   whatever a function holds (an item inside a body).
 
@@ -93,16 +95,31 @@ impl Reader {
         self.tokens.len()
     }
 
+    /// Whether the `>` at token `j` is the end of `->`, which closes no angle group.
+    fn arrow(&self, j: usize) -> bool {
+        j > 0 && self.punct(j - 1, '-') && self.tokens[j - 1].0 + 1 == self.tokens[j].0
+    }
+
     /// The index after the item whose head ends at token `from`: past the first `;` outside any group, or, when
     /// `brace_ends`, past the first `{ }` group outside any other (a body ends the item; a braced value does not).
+    /// The `< >` of generics are a group too: a `{` between them is a const argument or a default, not a body.
     fn item_end(&self, from: usize, hi: usize, brace_ends: bool) -> usize {
         let mut j = from;
+        let mut angles = 0usize;
         while j < hi {
             match self.tokens[j].1 {
                 Token::Punct('(' | '[') => j = self.skip_group(j),
+                Token::Punct('<') => {
+                    angles += 1;
+                    j += 1;
+                }
+                Token::Punct('>') if !self.arrow(j) => {
+                    angles = angles.saturating_sub(1);
+                    j += 1;
+                }
                 Token::Punct('{') => {
                     j = self.skip_group(j);
-                    if brace_ends {
+                    if brace_ends && angles == 0 {
                         return j.min(hi);
                     }
                 }
@@ -113,13 +130,23 @@ impl Reader {
         hi
     }
 
-    /// The index of the first `{` outside any group from token `from`, before any `;`: `None` for an item without a
-    /// body.
+    /// The index of the first `{` outside any group (the `< >` of generics included) from token `from`, before any
+    /// `;`: `None` for an item without a body.
     fn body(&self, from: usize, hi: usize) -> Option<usize> {
         let mut j = from;
+        let mut angles = 0usize;
         while j < hi {
             match self.tokens[j].1 {
                 Token::Punct('(' | '[') => j = self.skip_group(j),
+                Token::Punct('<') => {
+                    angles += 1;
+                    j += 1;
+                }
+                Token::Punct('>') if !self.arrow(j) => {
+                    angles = angles.saturating_sub(1);
+                    j += 1;
+                }
+                Token::Punct('{') if angles > 0 => j = self.skip_group(j),
                 Token::Punct('{') => return Some(j),
                 Token::Punct(';') => return None,
                 _ => j += 1,
@@ -392,19 +419,26 @@ impl Reader {
         if self.punct(j, '<') {
             let mut depth = 0;
             while j < open {
-                if self.punct(j, '<') {
-                    depth += 1;
-                } else if self.punct(j, '>') && !(j > 0 && self.punct(j - 1, '-')) {
-                    depth -= 1;
-                    if depth == 0 {
-                        j += 1;
-                        break;
+                match self.tokens[j].1 {
+                    // A group holds no angle of the generics: `{ 1 < 2 }`
+                    Token::Punct('(' | '[' | '{') => {
+                        j = self.skip_group(j).min(open);
+                        continue;
                     }
+                    Token::Punct('<') => depth += 1,
+                    Token::Punct('>') if !self.arrow(j) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            j += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
                 j += 1;
             }
         }
-        // The type is after the last `for` outside brackets and angles, before `where`
+        // The type is after the last `for` outside groups and angles, before `where`
         let mut at = j;
         let mut depth = 0;
         let mut k = j;
@@ -412,9 +446,12 @@ impl Reader {
             match &self.tokens[k].1 {
                 Token::Word(w) if w == "where" && depth == 0 => break,
                 Token::Word(w) if w == "for" && depth == 0 => at = k + 1,
-                Token::Punct('<' | '(' | '[') => depth += 1,
-                Token::Punct('>') if !(k > 0 && self.punct(k - 1, '-')) => depth -= 1,
-                Token::Punct(')' | ']') => depth -= 1,
+                Token::Punct('(' | '[' | '{') => {
+                    k = self.skip_group(k).min(open);
+                    continue;
+                }
+                Token::Punct('<') => depth += 1,
+                Token::Punct('>') if !self.arrow(k) => depth -= 1,
                 _ => {}
             }
             k += 1;
@@ -663,6 +700,76 @@ pub const unsafe fn dangerous() {}
         );
         assert_eq!(definition(source, "c"), ["fn c() {}"]);
         assert_eq!(definition(source, "a"), ["fn a() {}"]);
+    }
+
+    #[test]
+    fn a_brace_inside_generics_is_a_const_argument_and_not_the_body() {
+        let source = "pub struct Before<const N: usize = { 3 }> { pub items: [u8; N] }\n\
+                      pub fn takes<const M: usize = { 2 + { 1 } }>() -> usize { M }\n\
+                      impl Foo<{ 3 }> { pub fn inside() -> u8 { 1 } }\n\
+                      pub fn ret() -> Foo<{ 2 }> { Foo }\n\
+                      pub enum E<const N: usize = { 1 }> { A, B }\n\
+                      pub trait T<const N: usize = { 1 }>: Sized { fn t(&self); }\n\
+                      pub union U<const N: usize = { 1 }> { a: [u8; N] }\n\
+                      mod m { pub fn after() {} }\n";
+        let at = |name: &str| definition(source, name);
+        assert_eq!(
+            at("Before"),
+            ["pub struct Before<const N: usize = { 3 }> { pub items: [u8; N] }"]
+        );
+        assert_eq!(
+            at("takes"),
+            ["pub fn takes<const M: usize = { 2 + { 1 } }>() -> usize { M }"]
+        );
+        assert_eq!(at("Foo").len(), 1);
+        assert_eq!(at("Foo.inside"), ["pub fn inside() -> u8 { 1 }"]);
+        assert_eq!(at("inside"), Vec::<String>::new());
+        assert_eq!(at("ret"), ["pub fn ret() -> Foo<{ 2 }> { Foo }"]);
+        assert_eq!(at("E")[0], "pub enum E<const N: usize = { 1 }> { A, B }");
+        assert_eq!(at("E.B"), ["B"]);
+        assert_eq!(at("T.t"), ["fn t(&self);"]);
+        assert_eq!(
+            at("U"),
+            ["pub union U<const N: usize = { 1 }> { a: [u8; N] }"]
+        );
+        assert_eq!(at("m.after"), ["pub fn after() {}"]);
+    }
+
+    #[test]
+    fn what_looks_like_an_angle_but_is_not_one_does_not_hide_the_body() {
+        // `->` and `=>` close nothing, a comparison sits inside braces, and a head ends in `>` before its body
+        let source = "fn a<F: Fn(u8) -> u8>(f: F) -> Vec<u8> { f(1); vec![] }\n\
+                      fn b() -> impl Fn(u8) -> u8 { |x| x }\n\
+                      fn c<const N: usize>() -> [u8; { N }] where [(); { N > 1 } as usize]: { [0; N] }\n\
+                      fn d() where for<'a> Box<dyn Fn(&'a u8) -> &'a u8>: Sized { }\n\
+                      fn e<T: Iterator<Item = Vec<u8>>>(t: T) -> Option<Box<dyn Fn() -> u8>> { None }\n\
+                      impl<T: Fn() -> u8> Tr<{ 1 << 2 }> for W<T, { 1 < 2 }> where T: Copy { fn f() {} }\n\
+                      impl<T> Q for m::Y<[u8; { 1 < 2 } as usize], T> { fn g() {} }\n\
+                      fn turbo() { let _ = x::<{ 1 }>(); }\n\
+                      struct P<const N: usize = 3>(u8);\n\
+                      struct R<'a, T = [u8; { 1 }]> where T: 'a { r: &'a T }\n\
+                      fn z() {}\n";
+        let at = |name: &str| definition(source, name);
+        assert_eq!(
+            at("a"),
+            ["fn a<F: Fn(u8) -> u8>(f: F) -> Vec<u8> { f(1); vec![] }"]
+        );
+        assert_eq!(at("b"), ["fn b() -> impl Fn(u8) -> u8 { |x| x }"]);
+        assert!(at("c")[0].ends_with("{ [0; N] }"), "{:?}", at("c"));
+        assert_eq!(
+            at("d"),
+            ["fn d() where for<'a> Box<dyn Fn(&'a u8) -> &'a u8>: Sized { }"]
+        );
+        assert!(at("e")[0].ends_with("None }"), "{:?}", at("e"));
+        assert_eq!(at("W.f"), ["fn f() {}"]);
+        assert_eq!(at("Y.g"), ["fn g() {}"]);
+        assert_eq!(at("turbo"), ["fn turbo() { let _ = x::<{ 1 }>(); }"]);
+        assert_eq!(at("P"), ["struct P<const N: usize = 3>(u8);"]);
+        assert_eq!(
+            at("R"),
+            ["struct R<'a, T = [u8; { 1 }]> where T: 'a { r: &'a T }"]
+        );
+        assert_eq!(at("z"), ["fn z() {}"]);
     }
 
     #[test]

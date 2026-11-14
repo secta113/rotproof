@@ -442,6 +442,53 @@ mod tests {
     }
 
     #[test]
+    fn a_change_after_a_brace_inside_generics_fails_the_key() {
+        let source = "pub struct Before<const N: usize = { 3 }> { pub items: [u8; N] }\n\
+                      pub fn takes<const M: usize = { 2 + { 1 } }>() -> usize { M }\n\
+                      impl Foo<{ 3 }> { pub fn inside() -> u8 { 1 } }\n\
+                      pub fn ret() -> Foo<{ 2 }> { Foo }\n";
+        let edits = [
+            (
+                "domain/g.rs::Before",
+                "pub items: [u8; N]",
+                "pub items: [u16; N]",
+            ),
+            (
+                "domain/g.rs::takes",
+                "() -> usize { M }",
+                "() -> usize { M + 1 }",
+            ),
+            ("domain/g.rs::Foo.inside", "-> u8 { 1 }", "-> u8 { 2 }"),
+            ("domain/g.rs::ret", "{ Foo }", "{ Foo; }"),
+        ];
+        let first = project(&[]);
+        first.write("domain/g.rs", source).unwrap();
+        let hashes: Vec<String> = edits
+            .iter()
+            .map(|(key, ..)| current(&first, &Readers, key).unwrap().unwrap())
+            .collect();
+        let pins: Vec<(&str, &str)> = edits
+            .iter()
+            .zip(&hashes)
+            .map(|((key, ..), hash)| (*key, hash.as_str()))
+            .collect();
+        let tree = project(&pins);
+        tree.write("domain/g.rs", source).unwrap();
+        assert!(changed(&tree, &Readers).unwrap().is_empty());
+        // Each edit is in the body or the fields, past the brace in the generics, and fails its own key alone
+        for (key, from, to) in edits {
+            tree.write("domain/g.rs", &source.replace(from, to))
+                .unwrap();
+            let keys: Vec<String> = changed(&tree, &Readers)
+                .unwrap()
+                .into_iter()
+                .map(|d| d.key)
+                .collect();
+            assert_eq!(keys, [key]);
+        }
+    }
+
+    #[test]
     fn a_python_name_defined_twice_is_hashed_on_all_its_pieces() {
         let tree = project(&[]);
         let getter = "@property\n    def size(self):\n        return 1";
