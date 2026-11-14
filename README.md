@@ -1,7 +1,275 @@
 # Rotproof
 
-Rotproof keeps a project's structure from drifting while LLMs and people change it, so that it does not rot. It keeps
-two structures:
+Rotproof keeps a project's structure from drifting while LLMs and people change it, so that it does not rot. It is one
+binary with no language runtime, and `rotproof check` is the command a project's CI runs: it fails when the code breaks
+the layers the project declared, or when a document about the code is left behind after the code changed.
+
+## What you gain
+
+If LLM agents write the code of a repository, these are the things nobody has to catch in review:
+
+- **A layer an agent crosses fails the build.** Every import is checked against a layer table (the onion architecture:
+  `composition`, `infrastructure`, `application`, `protocol`, `domain`, and `ui` and `presentation` for screens), in
+  Python, TypeScript and Rust. Code that cannot be split into the layers mixes responsibilities, so the table is also
+  how an agent is made to split it. An exception is an entry that a person approves on a terminal, which a reviewer
+  sees in the diff.
+- **What the code cannot say stays true.** The reasons behind the code are kept in knowledge documents that name the
+  code they describe, each pinned to it by a hash. When that code changes, `rotproof check` fails until someone reads
+  the document against it and pins it again.
+- **Put-off work does not hide in a comment.** A `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` in a code comment fails the
+  check: the finding is fixed now, written in an issue, or let go. No comment switches the type checker off, and only
+  `infrastructure` reads the environment variables.
+- **An agent that has only the binary finds its way.** `rotproof --help` gives the order to start in, and the rules
+  are written for the project's stack in `.rotproof/AGENTS.md`, which the `AGENTS.md` and `CLAUDE.md` that
+  `rotproof create` writes point the agent at.
+- **The rules are the ones you pinned.** A project pins one exact version of Rotproof, so the rules change only in a
+  commit of the project's own (see "Compatibility").
+
+What it leaves to you: `rotproof check` only reports, and Rotproof repairs nothing. It cannot tell whether a document is
+still true, only that the code under it changed, so the review stays with a person or the agent that made the change.
+
+## Install
+
+Rotproof is released for Windows x86_64 and Linux x86_64 (glibc 2.17 or newer). Pin the exact version, so that an
+upgrade, which can bring new rules, is a commit of its own:
+
+```sh
+pip install rotproof==1.0.0
+```
+
+In a Node project, pin it with npm, which installs the binary for your platform with it (the package `rotproof` and
+one of `@rotproof/linux-x64` and `@rotproof/win32-x64`):
+
+```sh
+npm install -D -E rotproof@1.0.0
+```
+
+The wheel carries only the binary; no Python code runs. Without Python or Node, take the archive for your platform from
+[GitHub Releases](https://github.com/secta113/rotproof/releases) and check it against `SHA256SUMS` there. Each archive
+holds the binary with `LICENSE-MIT`, `LICENSE-APACHE` and `THIRD-PARTY-LICENSES.txt`. The releases are immutable from
+the release after 1.0.0-rc.2: once published, their archives cannot be replaced, so a version names one binary. A
+`rust` or `none` project made by `rotproof create` installs Rotproof this way in CI.
+
+On another platform, pip finds no Rotproof to install. Build it from source with [rustup](https://rustup.rs/) installed
+(the toolchain version comes from `rust-toolchain.toml`):
+
+```sh
+cargo build --release   # the binary is target/release/rotproof (rotproof.exe on Windows)
+```
+
+## Tutorial: five minutes
+
+A new Python project, a layer broken on purpose, and a knowledge document that follows code. It needs `rotproof` on the
+`PATH` (a `pip install` in an activated virtual environment puts it there) and a text editor. The project need not be a
+Git repository, and no Python is run. The output shown is what Rotproof printed when this was written, with the lines
+left out marked `...`.
+
+### 1. Make the project
+
+```sh
+mkdir shop
+cd shop
+rotproof init --stack python --ui none
+```
+
+```text
+wrote .config/rotproof.toml
+next: declare in absent the layers this project does not have, then run `rotproof create`, which lists the layers it would make, and `rotproof create --yes` to make them
+```
+
+`init` writes only the declaration, `.config/rotproof.toml`, which is the structure this project declares: the stack,
+and `--ui none` for a project with no screens (a command-line tool, a library, a server). Its `absent` lists the layers
+the project does not have; this one has all five, so leave it as it is. `rotproof create` alone lists the layers it
+would make and writes nothing, so that the list is read first; with `--yes` it makes them:
+
+```sh
+rotproof create --yes
+```
+
+```text
+wrote composition/__init__.py
+...
+wrote domain/__init__.py
+wrote docs/log.md
+wrote .rotproof/AGENTS.md
+...
+wrote docs/knowledge/index.md
+next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md
+```
+
+Each layer is a directory whose `__init__.py` says its role. `docs/` holds the records, and the rest is what an agent
+reads (`AGENTS.md` and `CLAUDE.md`, which point at `.rotproof/AGENTS.md`, the rules written for the stack) and a CI
+workflow that runs `rotproof check`. A new project passes its first check with nothing to write:
+
+```sh
+rotproof check
+```
+
+```text
+the layers and every record keep the rules
+```
+
+### 2. Break a layer on purpose
+
+`domain` is the innermost layer and imports no other. Make it import one. Create `infrastructure/outbound/db.py`:
+
+```python
+def load_rate(currency: str) -> float:
+    return 1.0
+```
+
+and `domain/price.py`, which reaches for it:
+
+```python
+from infrastructure.outbound.db import load_rate
+
+
+def convert(amount: float, currency: str) -> float:
+    return amount * load_rate(currency)
+```
+
+```sh
+rotproof check
+```
+
+```text
+the layers import only what layers/table.toml allows:
+  domain/price.py:1: imports infrastructure.outbound.db.load_rate, in infrastructure.outbound; domain imports no other layer
+```
+
+It exits 1, naming the file, the line and the rule. The table it names is built into Rotproof, and `.rotproof/AGENTS.md`
+lists it. Fix it the way the layers ask: `domain` takes the rate as an argument, and whoever calls it in an outer layer
+reads the rate. Replace `domain/price.py`:
+
+```python
+def convert(amount: float, rate: float) -> float:
+    return amount * rate
+```
+
+`rotproof check` prints `the layers and every record keep the rules` again.
+
+### 3. Make a document follow the code
+
+The reason `convert` takes a rate is not in the code. Knowledge like that goes in `docs/knowledge/`, in a document that
+names the code it describes. A document belongs to one area, so first declare one: in `.config/rotproof.toml`, change
+`areas = []` to
+
+```toml
+areas = ["pricing"]
+```
+
+Create `docs/knowledge/rates.md`:
+
+```markdown
+---
+type: Knowledge
+title: A price is converted with the rate it is handed
+description: 'convert does not look the rate up: the rate comes from the bank feed, which domain may not reach, so a caller passes it in.'
+tags: [pricing]
+status: stable
+---
+
+The rate is read from the bank's feed in `infrastructure`, and `domain` imports no other layer, so `convert` takes it as
+an argument. Looking it up inside `convert` was tried first and was rejected by `rotproof check`.
+```
+
+The index of `docs/knowledge/` is generated, never written by hand; `rotproof check` fails until it is written again:
+
+```sh
+rotproof check
+```
+
+```text
+every generated file is up to date:
+  out of date, run `rotproof index`: docs/knowledge/index.md
+```
+
+Run `rotproof index`, which writes it. Now make the document follow `convert`: read the document against the code, and
+pin it.
+
+```sh
+rotproof follows knowledge/rates.md domain/price.py::convert
+```
+
+```text
+  domain/price.py::convert: added 08e2917d
+wrote docs/knowledge/rates.md
+```
+
+The document now has `follows` in its frontmatter, with the hash of `convert`'s source:
+
+```yaml
+follows:
+  domain/price.py::convert: "08e2917d"
+```
+
+`rotproof check` passes. Change the code, so that the result is rounded to cents, in `domain/price.py`:
+
+```python
+def convert(amount: float, rate: float) -> float:
+    return round(amount * rate, 2)
+```
+
+```sh
+rotproof check
+```
+
+```text
+every knowledge document matches the code it follows:
+  knowledge/rates.md follows domain/price.py::convert, which changed since the document was last reviewed: review the document against it, then run `rotproof follows knowledge/rates.md domain/price.py::convert`
+```
+
+It exits 1 again: the document may now be wrong, and nothing else would tell. Rotproof does not judge it; a hash says only
+that the code changed. Read the document against the new code, add what it lacks (a line at the end of
+`docs/knowledge/rates.md`: `The result is rounded to cents.`), and pin it again with the command the message names:
+
+```sh
+rotproof follows knowledge/rates.md domain/price.py::convert
+```
+
+```text
+  domain/price.py::convert: 08e2917d -> d2e4eb3b
+wrote docs/knowledge/rates.md
+```
+
+`rotproof check` passes. The commit that changes the code now holds the reviewed document beside it.
+
+### Where to go from here
+
+Commit the project. The CI workflow it made runs `rotproof check` on every push, and `requirements-dev.txt` pins
+Rotproof to an exact version. What `rotproof check` checks, field by field, the commands and the layers of each stack
+are in the sections below (the specification), and "Compatibility" says what an upgrade of Rotproof can change.
+
+## Compatibility
+
+From 1.0.0, a release raises exactly one part of the version, chosen by the most breaking change it holds since the
+previous release:
+
+- **Major** (`1.2.0` to `2.0.0`): something a project did under the previous version can fail, or do something else,
+  under this one. A new rule, or a stricter one, in `rotproof check`. A command, a flag or a field of
+  `.config/rotproof.toml` removed, renamed, or given another meaning. A command line that succeeded and now stops or
+  exits with another code. A fix that makes `rotproof check` reject what it wrongly accepted.
+- **Minor** (`1.1.3` to `1.2.0`): everything that worked still works the same way, and there is something new to use: a
+  new command, a new optional flag, a new optional field of the declaration.
+- **Patch** (`1.1.2` to `1.1.3`): everything that worked still works the same way, and nothing new is offered: a fix
+  that makes Rotproof accept what it wrongly rejected, or stop crashing; the words of a message; documentation.
+
+So whatever makes something that worked under 1.0.0 fail or behave otherwise waits for 2.0.0, and a new rule never
+arrives in a minor or a patch. When in doubt, the release is a major. One thing is no sign of a breaking change: every
+upgrade, a patch included, fails `rotproof check` until `rotproof init` has run, since `files` in the declaration names
+the version the project's files are up to (see "Upgrading Rotproof").
+
+A major goes out first as release candidates (`2.0.0-rc.1`), used in real work before the release follows; between two
+candidates anything may break, so pin one only to try it. A minor or a patch goes out directly. pip installs a
+pre-release only when it is pinned or asked for with `--pre`, and npm publishes it under the dist-tag `next`.
+
+Projects pin the exact version, so an upgrade is always a commit of the project's own: it tells whoever makes it how much
+to read, a patch taken without looking, a minor for what is new, a major with its release notes. Before 1.0, the minor
+version took the major's role.
+
+## What Rotproof keeps
+
+It keeps two structures:
 
 - **The layers:** which part of the code may import which, on the onion architecture (`composition`,
   `infrastructure`, `application`, `protocol`, `domain`, and `ui` and `presentation` for screens). Code that cannot
@@ -45,6 +313,8 @@ two structures:
 - **Whoever picks up the work next reads one index, not every file.** The index files are generated, never written by
   hand.
 
+## Overview
+
 Rotproof makes the layer directories, checks that they are where the project declares them, and checks their
 direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
 the levels inside a crate, from the paths its code names. From the same reading of the code it checks that only
@@ -62,62 +332,6 @@ timestamp be a datetime with a UTC offset (section 5): the `at` of `verified` an
 tell a time of day it guessed a few minutes early from one it measured, so the records hold no time of day rather than
 one that may be untrue; OKF's `verified` is written for a person or a process with a clock to confirm. A reader that
 knows only OKF may not read a day there as a datetime.
-
-## Install
-
-Rotproof is released for Windows x86_64 and Linux x86_64 (glibc 2.17 or newer). Pin the exact version, so that an
-upgrade, which can bring new rules, is a commit of its own:
-
-```sh
-pip install rotproof==1.0.0
-```
-
-In a Node project, pin it with npm, which installs the binary for your platform with it (the package `rotproof` and
-one of `@rotproof/linux-x64` and `@rotproof/win32-x64`):
-
-```sh
-npm install -D -E rotproof@1.0.0
-```
-
-The wheel carries only the binary; no Python code runs. Without Python or Node, take the archive for your platform from
-[GitHub Releases](https://github.com/secta113/rotproof/releases) and check it against `SHA256SUMS` there. Each archive
-holds the binary with `LICENSE-MIT`, `LICENSE-APACHE` and `THIRD-PARTY-LICENSES.txt`. The releases are immutable from
-the release after 1.0.0-rc.2: once published, their archives cannot be replaced, so a version names one binary. A
-`rust` or `none` project made by `rotproof create` installs Rotproof this way in CI.
-
-On another platform, pip finds no Rotproof to install. Build it from source with [rustup](https://rustup.rs/) installed
-(the toolchain version comes from `rust-toolchain.toml`):
-
-```sh
-cargo build --release   # the binary is target/release/rotproof (rotproof.exe on Windows)
-```
-
-## Compatibility
-
-From 1.0.0, a release raises exactly one part of the version, chosen by the most breaking change it holds since the
-previous release:
-
-- **Major** (`1.2.0` to `2.0.0`): something a project did under the previous version can fail, or do something else,
-  under this one. A new rule, or a stricter one, in `rotproof check`. A command, a flag or a field of
-  `.config/rotproof.toml` removed, renamed, or given another meaning. A command line that succeeded and now stops or
-  exits with another code. A fix that makes `rotproof check` reject what it wrongly accepted.
-- **Minor** (`1.1.3` to `1.2.0`): everything that worked still works the same way, and there is something new to use: a
-  new command, a new optional flag, a new optional field of the declaration.
-- **Patch** (`1.1.2` to `1.1.3`): everything that worked still works the same way, and nothing new is offered: a fix
-  that makes Rotproof accept what it wrongly rejected, or stop crashing; the words of a message; documentation.
-
-So whatever makes something that worked under 1.0.0 fail or behave otherwise waits for 2.0.0, and a new rule never
-arrives in a minor or a patch. When in doubt, the release is a major. One thing is no sign of a breaking change: every
-upgrade, a patch included, fails `rotproof check` until `rotproof init` has run, since `files` in the declaration names
-the version the project's files are up to (see "Upgrading Rotproof").
-
-A major goes out first as release candidates (`2.0.0-rc.1`), used in real work before the release follows; between two
-candidates anything may break, so pin one only to try it. A minor or a patch goes out directly. pip installs a
-pre-release only when it is pinned or asked for with `--pre`, and npm publishes it under the dist-tag `next`.
-
-Projects pin the exact version, so an upgrade is always a commit of the project's own: it tells whoever makes it how much
-to read, a patch taken without looking, a minor for what is new, a major with its release notes. Before 1.0, the minor
-version took the major's role.
 
 ## Usage
 
