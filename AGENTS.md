@@ -51,11 +51,17 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `mod.rs` | The level's role, and `Local`: the `Machine` Rotproof runs on, from the modules below and the local clock |
 | `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, the reads of the environment, the functions and classes a file defines, and the outline of a file (every function and class with its names and range) |
-| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, the reads of the environment, the outline of a file (a function, class, interface, type, enum or namespace, a variable, and their members, each with its names and range), and the aliases of the `tsconfig*.json` files |
+| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, which it reads itself, with how a file is parsed and the text of a literal string, which the readers in `typescript/` share; and `read`, which gives the imports, the comments and the reads of the environment |
 | `cargo.rs` | Reading a crate's `Cargo.toml` with toml_edit: the dependencies it declares on a path or its workspace, and its workspace |
 | `readers.rs` | `Parsers` with the readers above |
 | `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, the project's name, and the project a directory sits in |
 | `git.rs` | The name `rotproof approve` signs with, git's `user.name` |
+
+| Module of `crates/infrastructure/src/outbound/typescript/` | Content |
+|---|---|
+| `environment.rs` | The reads of the environment in a TypeScript or JavaScript file: `process.env` (the global, `globalThis.process`, or a name the file imports `process` as) and `import.meta.env`, each as a member or taken apart, and `env` imported from `process`, with what Vite sets itself passing |
+| `outline.rs` | The outline of a TypeScript or JavaScript file (a function, class, interface, type, enum or namespace, a variable, and their members, each with its names and range), and `Err` when oxc gives up on the file |
+| `aliases.rs` | The aliases of the project: the `tsconfig*.json` files at the root and the local files they extend, read as JSON with comments, and each entry of `paths` made into an alias |
 
 | Module of `crates/protocol/src/` | Content |
 |---|---|
