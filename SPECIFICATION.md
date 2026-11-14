@@ -541,6 +541,13 @@ changed is in the commits, what was measured and decided along the way in the ta
   so nobody maintains a list by hand, and `docs/knowledge/rules.md`, so the rules a project reads are the rules its
   Rotproof checks. A project's own rules go in another guide beside it.
 
+What a check finds file by file (the layers' imports, the markers, `NOTE`, the environment variables and the
+type-checker suppressions) is listed in the byte order of the whole path, written with `/` from the root and compared
+as bytes compare: `Beta.py`, `_under.py`, `alpha.py`, and `mid2.py` before `mid2/x.py`, since `.` comes before `/`. It
+is the same on every operating system, whatever order its file system lists files in, so two machines that run the
+check on the same tree print the same lines in the same order. The list of linked `TODO` comments keeps the order it
+had (path, then line), which this order agrees with.
+
 One thing is a warning and fails nothing: **a knowledge document whose `stale_after` has come** (the day in the time
 zone of the machine that runs the check) is printed on every run from that day, with what to do: measure again what it
 says of outside the code, which `follows` cannot watch, then write the day in `verified` and the next day in

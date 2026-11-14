@@ -3055,6 +3055,56 @@ fn a_comment_not_in_the_form_fails_and_the_heading_offers_the_form_after_the_way
 }
 
 #[test]
+fn what_is_found_file_by_file_comes_in_the_byte_order_of_the_paths() {
+    // Made in an order that is neither the byte order nor the one NTFS lists them in, with `mid2.py` and the directory
+    // `mid2/` (a path is compared whole: `.` comes before `/`), so the order is the same on every file system
+    let root = clean_repo();
+    let r = root.path();
+    declare_todo_link(r, "number");
+    let made = [
+        "zeta.py",
+        "alpha.py",
+        "mid.py",
+        "Beta.py",
+        "b10.py",
+        "b2.py",
+        "_under.py",
+        "song.py",
+        "mid2/x.py",
+        "mid2.py",
+        "price.py",
+    ];
+    for (n, name) in made.iter().enumerate() {
+        write_file(
+            r,
+            &format!("domain/{name}"),
+            &format!("# TODO(#{}): later\n# NOTE a note\n", n + 1),
+        );
+    }
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    let mut sorted: Vec<String> = made.iter().map(|name| format!("domain/{name}")).collect();
+    sorted.sort();
+    assert_eq!(
+        sorted[5..8],
+        ["domain/mid.py", "domain/mid2.py", "domain/mid2/x.py"]
+    );
+    // The linked list, then the finding of the NOTE: each names every file once, in the same order
+    let places: Vec<&str> = said
+        .lines()
+        .filter(|line| line.starts_with("  ") && !line.starts_with("   "))
+        .map(|line| line.split_whitespace().next().unwrap())
+        .collect();
+    let expected: Vec<String> = sorted
+        .iter()
+        .map(|path| format!("{path}:1"))
+        .chain(sorted.iter().map(|path| format!("{path}:2")))
+        .collect();
+    assert_eq!(places, expected, "{said}");
+}
+
+#[test]
 fn the_linked_list_comes_before_the_warnings_and_the_findings() {
     let root = clean_repo();
     let r = root.path();

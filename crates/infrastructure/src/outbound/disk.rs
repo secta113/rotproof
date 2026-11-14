@@ -64,6 +64,9 @@ impl Tree for Disk {
                 found.push(relative_path(entry.path(), root));
             }
         }
+        // In the order the walk gives them, which differs between file systems: sorted, every check lists the same
+        // findings in the same order on every machine
+        found.sort();
         Ok(found)
     }
 
@@ -142,6 +145,52 @@ mod tests {
             [("backlog".to_string(), true)]
         );
         assert!(disk.entries("README.md").is_err());
+    }
+
+    #[test]
+    fn the_files_come_in_the_byte_order_of_their_paths() {
+        // Neither the order they were made in nor the one a file system lists them in (NTFS: `alpha`, `b10`, `b2`,
+        // `Beta`, ..., `_under`), and a path is compared whole: `mid2.py` comes before `mid2/x.py`, as `.` comes
+        // before `/`
+        let dir = tempfile::tempdir().unwrap();
+        let disk = Disk::new(dir.path());
+        for name in [
+            "zeta.py",
+            "alpha.py",
+            "mid.py",
+            "Beta.py",
+            "b10.py",
+            "b2.py",
+            "_under.py",
+            "song.py",
+            "mid2/x.py",
+            "mid2.py",
+            "price.py",
+            "sub/c.py",
+        ] {
+            disk.write(&format!("domain/{name}"), "x\n").unwrap();
+        }
+        let expected = [
+            "domain/Beta.py",
+            "domain/_under.py",
+            "domain/alpha.py",
+            "domain/b10.py",
+            "domain/b2.py",
+            "domain/mid.py",
+            "domain/mid2.py",
+            "domain/mid2/x.py",
+            "domain/price.py",
+            "domain/song.py",
+            "domain/sub/c.py",
+            "domain/zeta.py",
+        ];
+        assert_eq!(disk.files("domain").unwrap(), expected);
+        // Under the root too, where the directory is one of several
+        disk.write("a.py", "x\n").unwrap();
+        disk.write("tests/t.py", "x\n").unwrap();
+        let all = disk.files("").unwrap();
+        assert!(all.is_sorted(), "{all:?}");
+        assert_eq!(all.len(), expected.len() + 2);
     }
 
     #[test]

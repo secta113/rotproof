@@ -238,6 +238,7 @@ pub mod fake {
             Ok(found.into_iter().collect())
         }
 
+        /// In the byte order of the paths, as the port says: the keys of the map
         fn files(&self, dir: &str) -> io::Result<Vec<String>> {
             Ok(self
                 .files
