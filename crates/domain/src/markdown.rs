@@ -229,15 +229,16 @@ mod tests {
     /// heading -> the anchor GitHub gave it. Each value was read from a page that GitHub rendered, so a change to
     /// `slug` that drifts from GitHub fails here instead of breaking links silently.
     const SEEN_ON_GITHUB: &[(&str, &str)] = &[
-        // project-template README.md, rendered 2026-10-01
-        ("project-template", "project-template"),
+        // A README, measured against GitHub's rendering on 2026-10-01. Its first heading, a repository's name, is
+        // replaced by one of the same shape (lower case and one hyphen), which was not rendered itself
+        ("release-notes", "release-notes"),
         ("始め方", "始め方"),
         ("雛形の改善を取り込む", "雛形の改善を取り込む"),
         (
             "中身（写した先の根になるもの）",
             "中身写した先の根になるもの",
         ),
-        // project-template docs/log.md, rendered 2026-10-02: a slash, an ideographic comma and spaces
+        // A log, measured against GitHub's rendering on 2026-10-02: a slash, an ideographic comma and spaces
         (
             "配る中身を template/ に下ろし、copier で写す",
             "配る中身を-template-に下ろしcopier-で写す",
