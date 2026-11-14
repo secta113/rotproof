@@ -92,6 +92,33 @@ On another platform, pip finds no Rotproof to install. Build it from source with
 cargo build --release   # the binary is target/release/rotproof (rotproof.exe on Windows)
 ```
 
+## Compatibility
+
+From 1.0.0, a release raises exactly one part of the version, chosen by the most breaking change it holds since the
+previous release:
+
+- **Major** (`1.2.0` to `2.0.0`): something a project did under the previous version can fail, or do something else,
+  under this one. A new rule, or a stricter one, in `rotproof check`. A command, a flag or a field of
+  `.config/rotproof.toml` removed, renamed, or given another meaning. A command line that succeeded and now stops or
+  exits with another code. A fix that makes `rotproof check` reject what it wrongly accepted.
+- **Minor** (`1.1.3` to `1.2.0`): everything that worked still works the same way, and there is something new to use: a
+  new command, a new optional flag, a new optional field of the declaration.
+- **Patch** (`1.1.2` to `1.1.3`): everything that worked still works the same way, and nothing new is offered: a fix
+  that makes Rotproof accept what it wrongly rejected, or stop crashing; the words of a message; documentation.
+
+So whatever makes something that worked under 1.0.0 fail or behave otherwise waits for 2.0.0, and a new rule never
+arrives in a minor or a patch. When in doubt, the release is a major. One thing is no sign of a breaking change: every
+upgrade, a patch included, fails `rotproof check` until `rotproof init` has run, since `files` in the declaration names
+the version the project's files are up to (see "Upgrading Rotproof").
+
+A major goes out first as release candidates (`2.0.0-rc.1`), used in real work before the release follows; between two
+candidates anything may break, so pin one only to try it. A minor or a patch goes out directly. pip installs a
+pre-release only when it is pinned or asked for with `--pre`, and npm publishes it under the dist-tag `next`.
+
+Projects pin the exact version, so an upgrade is always a commit of the project's own: it tells whoever makes it how much
+to read, a patch taken without looking, a minor for what is new, a major with its release notes. Before 1.0, the minor
+version took the major's role.
+
 ## Usage
 
 ```sh
