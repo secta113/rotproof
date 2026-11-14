@@ -12,12 +12,13 @@ use crate::bundle::Bundle;
 use crate::layers::declaration;
 use crate::tree::{exactly, read_text, read_written};
 use domain::bundle::{LOG, in_docs, record_tags as tags_in};
+use domain::guide::{GUIDE, guide};
 use domain::hook::SETTINGS;
 use domain::layers::{
     DECLARATION, Declared, First, MISSING, NO_UI, Place, completed, lacking, layout,
     parse_declaration, table, uis, unreadable,
 };
-use domain::project::{GUIDE, guide, project_files};
+use domain::project::project_files;
 use domain::upgrade::fields;
 use protocol::inbound::Made;
 use protocol::outbound::{Tree, Writer};

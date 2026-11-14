@@ -43,15 +43,19 @@ Check the layers and the records, and exit non-zero when one breaks the rules
 
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
 layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view), that each layer imports only \
-what the layer table allows or a person approved in .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that no \
-comment holds {markers}, that the project's files are up to this version (files in the declaration; `rotproof init` \
+what the layer table allows or a person approved in .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that only \
+infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
+import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
+comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
+like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that .rotproof/AGENTS.md is up to date, that every knowledge document in docs/knowledge/ keeps its \
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
 follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \
 than today. The rest of docs/ is the project's, and is not read. \
 Prints every broken rule under the check that found it, and what was not checked and why. Warns of every knowledge \
 document whose stale_after has come, on every run from that day, and fails nothing for it: time alone never turns \
-the check red. Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+the check red. Warns, too, of every comment that may make a Python type checker check less (# pyright: basic, \
+# mypy: allow-untyped-defs), and fails nothing for it. Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
 cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
@@ -456,6 +460,15 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
         );
         for line in &report.due {
             println!("  {line}");
+        }
+    }
+    if !report.weakened.is_empty() {
+        println!(
+            "comments that may make the type checker check less, to look at (a warning, which fails nothing) ({}):",
+            report.weakened.len()
+        );
+        for line in &report.weakened {
+            println!("  {}", line.replace('\n', "\n    "));
         }
     }
     let found = report.findings;

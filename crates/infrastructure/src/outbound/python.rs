@@ -7,6 +7,8 @@
 //!   is resolved against the file's package, and one that climbs above the top package is left out: Python fails on it.
 //!   Imports built at run time (`importlib.import_module`, `__import__`) are not seen.
 //! - **Its comments,** `#` to the end of the line. A docstring is a string, so it is not a comment.
+//! - **Its reads of the environment** (`domain::environment`): a name of `os` that touches it, imported or reached
+//!   through a name bound to `os`.
 //! - **What it defines** ([`definitions`]), for a link to a `.py` file in the records.
 //! - **Its outline** ([`outline`]), every function and class with its names and its range, for a knowledge document
 //!   that follows one.
@@ -15,10 +17,12 @@ use std::collections::BTreeSet;
 
 use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
 use ruff_python_ast::token::TokenKind;
-use ruff_python_ast::{PySourceType, Stmt};
+use ruff_python_ast::visitor::{Visitor, walk_expr};
+use ruff_python_ast::{Expr, PySourceType, Stmt};
 
 use domain::code::{Source, module_parts};
 use domain::definitions::Definition;
+use domain::environment::PYTHON as PYTHON_ENVIRONMENT;
 use domain::text::line_of;
 
 /// Read one file, whose path from the root names the package its relative imports start from.
@@ -50,8 +54,96 @@ pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
     Source {
         imports: imports.found,
         comments,
+        environment: environment(source, &parsed.syntax().body),
         error,
     }
+}
+
+/// Every read or write of the environment in a file (`domain::environment`): a name of `os` in
+/// [`domain::environment::PYTHON`], as `from os import environ` imports it, or as an attribute of a name the file
+/// binds to `os` (`import os`, `import os as o`, `import os.path`). The line, and the name as `os.<name>`.
+fn environment(source: &str, body: &[Stmt]) -> Vec<(usize, String)> {
+    /// The names a file binds to the module `os`, and the names of `os` it imports
+    struct Bindings<'s> {
+        source: &'s str,
+        os: BTreeSet<String>,
+        found: Vec<(usize, String)>,
+    }
+    impl<'a> StatementVisitor<'a> for Bindings<'_> {
+        fn visit_stmt(&mut self, stmt: &'a Stmt) {
+            match stmt {
+                Stmt::Import(import) => {
+                    for alias in &import.names {
+                        let name = alias.name.as_str();
+                        match &alias.asname {
+                            // `import os.path as p` binds `p` to `os.path`, not to `os`
+                            Some(local) if name == "os" => {
+                                self.os.insert(local.to_string());
+                            }
+                            None if name == "os" || name.starts_with("os.") => {
+                                self.os.insert("os".into());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Stmt::ImportFrom(import)
+                    if import.level == 0 && import.module.as_ref().is_some_and(|m| m == "os") =>
+                {
+                    for alias in &import.names {
+                        if PYTHON_ENVIRONMENT.contains(&alias.name.as_str()) {
+                            self.found.push((
+                                line_of(self.source, alias.range.start().to_usize()),
+                                format!("os.{}", alias.name),
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    /// The attributes of those names that read or write the environment
+    struct Reads<'b, 's> {
+        source: &'s str,
+        os: &'b BTreeSet<String>,
+        found: &'b mut Vec<(usize, String)>,
+    }
+    impl<'a> Visitor<'a> for Reads<'_, '_> {
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            if let Expr::Attribute(attribute) = expr
+                && let Expr::Name(name) = attribute.value.as_ref()
+                && self.os.contains(name.id.as_str())
+                && PYTHON_ENVIRONMENT.contains(&attribute.attr.as_str())
+            {
+                self.found.push((
+                    line_of(self.source, attribute.range.start().to_usize()),
+                    format!("os.{}", attribute.attr),
+                ));
+            }
+            walk_expr(self, expr);
+        }
+    }
+    let mut bindings = Bindings {
+        source,
+        os: BTreeSet::new(),
+        found: Vec::new(),
+    };
+    bindings.visit_body(body);
+    let mut found = bindings.found;
+    if !bindings.os.is_empty() {
+        let mut reads = Reads {
+            source,
+            os: &bindings.os,
+            found: &mut found,
+        };
+        for stmt in body {
+            reads.visit_stmt(stmt);
+        }
+    }
+    found.sort();
+    found
 }
 
 struct Imports<'s> {

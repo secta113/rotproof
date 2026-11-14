@@ -25,6 +25,9 @@ pub struct Source<I> {
     /// Every comment: its byte offset in the source, and its text with its delimiters. A reader reads comments past a
     /// syntax error too
     pub comments: Vec<(usize, String)>,
+    /// Every read or write of the environment variables the reader sees (`environment.rs`): the line (from 1), and
+    /// what it names (`os.environ`, `process.env`)
+    pub environment: Vec<(usize, String)>,
     /// The first syntax error, if any: its line and what the parser says. The parser recovers, but what follows may be
     /// misread
     pub error: Option<(usize, String)>,
@@ -35,6 +38,7 @@ impl<I> Default for Source<I> {
         Source {
             imports: Vec::new(),
             comments: Vec::new(),
+            environment: Vec::new(),
             error: None,
         }
     }
@@ -94,36 +98,32 @@ pub enum Landing {
     UnderBaseUrl(Vec<String>),
 }
 
+impl Alias {
+    /// The target `specifier` maps to, with what the `*` matched in place of the target's `*`; `None` when the
+    /// pattern does not match it.
+    pub fn mapped(&self, specifier: &str) -> Option<String> {
+        let rest = specifier.strip_prefix(&self.prefix)?;
+        match &self.suffix {
+            None => rest.is_empty().then(|| self.target.clone()),
+            Some(suffix) => rest
+                .strip_suffix(suffix.as_str())
+                .map(|star| self.target.replacen('*', star, 1)),
+        }
+    }
+}
+
 impl Aliases {
-    /// Where `specifier`, imported by the file at `file` (from the root), lands.
+    /// Where `specifier`, imported by the file at `file` (from the root), lands, in the order TypeScript tries: a
+    /// relative path, a path from the root, `paths`, then each `baseUrl`.
     pub fn resolve(&self, file: &str, specifier: &str) -> Landing {
         let specifier = specifier.split('?').next().unwrap_or(specifier);
-        if specifier == "."
-            || specifier == ".."
-            || specifier.starts_with("./")
-            || specifier.starts_with("../")
-        {
+        if is_relative(specifier) {
             return Landing::At(normalize(&join(parent(file), specifier)));
         }
         if let Some(from_root) = specifier.strip_prefix('/') {
             return Landing::At(normalize(from_root));
         }
-        let matched = self
-            .paths
-            .iter()
-            .filter_map(|alias| {
-                let rest = specifier.strip_prefix(&alias.prefix)?;
-                match &alias.suffix {
-                    None => rest.is_empty().then(|| alias.target.clone()),
-                    Some(suffix) => rest
-                        .strip_suffix(suffix.as_str())
-                        .map(|star| alias.target.replacen('*', star, 1)),
-                }
-                .map(|target| (alias.prefix.len(), target))
-            })
-            // The longest prefix wins, as in TypeScript
-            .max_by_key(|(length, _)| *length);
-        if let Some((_, target)) = matched {
+        if let Some(target) = self.mapped(specifier) {
             return Landing::At(normalize(&target));
         }
         Landing::UnderBaseUrl(
@@ -133,6 +133,23 @@ impl Aliases {
                 .collect(),
         )
     }
+
+    /// The target of the alias in `paths` that maps `specifier`: the one with the longest prefix, as in TypeScript.
+    fn mapped(&self, specifier: &str) -> Option<String> {
+        self.paths
+            .iter()
+            .filter_map(|alias| Some((alias.prefix.len(), alias.mapped(specifier)?)))
+            .max_by_key(|(length, _)| *length)
+            .map(|(_, target)| target)
+    }
+}
+
+/// Whether `specifier` is relative to the file that imports it: `.`, `..`, or a path that starts with either.
+fn is_relative(specifier: &str) -> bool {
+    specifier == "."
+        || specifier == ".."
+        || specifier.starts_with("./")
+        || specifier.starts_with("../")
 }
 
 /// The files that make a module at `path` (from the root), any one of them enough: the file itself, with one of
@@ -182,6 +199,48 @@ pub struct Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_alias_with_the_longest_prefix_maps_and_a_suffix_must_match() {
+        let alias = |pattern: &str, target: &str| {
+            let (prefix, suffix) = match pattern.split_once('*') {
+                Some((prefix, suffix)) => (prefix.to_string(), Some(suffix.to_string())),
+                None => (pattern.to_string(), None),
+            };
+            Alias {
+                prefix,
+                suffix,
+                target: target.into(),
+                config: "tsconfig.json".into(),
+            }
+        };
+        let aliases = Aliases {
+            paths: vec![
+                alias("@/*", "src/*"),
+                alias("@/ui/*", "lib/ui/*"),
+                alias("#styles/*.css", "src/styles/*.css"),
+                alias("#theme", "src/theme"),
+            ],
+            ..Aliases::default()
+        };
+        let at = |s: &str| match aliases.resolve("src/a.ts", s) {
+            Landing::At(path) => path,
+            other => panic!("{s}: {other:?}"),
+        };
+        assert_eq!(at("@/domain/song"), Some("src/domain/song".into()));
+        assert_eq!(at("@/ui/button"), Some("lib/ui/button".into()));
+        assert_eq!(at("#styles/main.css"), Some("src/styles/main.css".into()));
+        assert_eq!(at("#theme"), Some("src/theme".into()));
+        // A pattern without `*` matches only itself, and one with a suffix only what ends in it
+        assert_eq!(
+            aliases.resolve("src/a.ts", "#theme/dark"),
+            Landing::UnderBaseUrl(Vec::new())
+        );
+        assert_eq!(
+            aliases.resolve("src/a.ts", "#styles/main.scss"),
+            Landing::UnderBaseUrl(Vec::new())
+        );
+    }
 
     #[test]
     fn a_relative_or_rooted_specifier_resolves_against_the_file() {

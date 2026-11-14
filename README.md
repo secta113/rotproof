@@ -493,6 +493,16 @@ changed is in the commits, what was measured and decided along the way in the ta
   (`crate::outbound::Db` from `src/inbound/` fails, and so does `domain::Song` there). The crate's `src/lib.rs` only
   declares its levels' modules, so no re-export lets one level reach another; every other file of `src/` sits in a
   level, and `#[path]` fails. Not seen: a path a macro builds from pieces.
+- **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
+  unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
+  that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,
+  `os.getenvb`, `os.putenv` and `os.unsetenv` in Python, `process.env` and `import.meta.env` in TypeScript, and
+  `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var` and `remove_var` in Rust, each through an alias the file
+  binds too (`import os as o`, `from os import getenv as g`, `import { env } from "node:process"`,
+  `const { env } = process`, `use std::env;` then `env::var`). Not judged: the command line (`sys.argv`,
+  `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of
+  `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
+  (`getattr(os, "environ")`, `from os import *`), and the code outside the layers (`tests/` in Python).
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
@@ -515,6 +525,17 @@ changed is in the commits, what was measured and decided along the way in the ta
   to `docs/knowledge/`, tied to the code by `follows`. A line that holds both is named under the first heading alone,
   as taking the comment out settles both. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
   strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read.
+- **No comment switches the type checker off**, in the comments the marker check reads: in Python, `# type: ignore`
+  and `# mypy: ignore`, `# pyright: ignore`, `# pyrefly: ignore` or `# ty: ignore`, with or without codes, and the
+  file-level `ignore-errors` of mypy and Pyrefly, also after another comment (`# noqa  # type: ignore`); in
+  TypeScript, `@ts-ignore` and `@ts-expect-error` where the compiler reads them, at the start of a `//` comment or of
+  the last line of a `/* */` comment, and `@ts-nocheck` at the start of a `//` comment; as the compiler does, the start
+  of the name counts (`@ts-ignored` silences it too). Data from outside becomes a validated type where it comes in, and a comment that hides the
+  checker's error hides where that is missing. Lint suppressions (`eslint-disable`, `# noqa`) are not read. Any other
+  comment of those four checkers is a warning, which fails nothing, unless every option in it only makes the checker
+  stricter: `strict` and `report<Rule>=error` for Pyright, and an option that starts with `disallow-`, `warn-`,
+  `strict-` or `enable-error-code` for mypy (`# pyright: basic` and `# mypy: allow-untyped-defs` warn). Rust has no
+  such comment.
 
 - **The bundle is there:** `docs/knowledge/`, `docs/index.md` and `docs/knowledge/rules.md` exist, and the declaration
   with its `areas` can be read. Without them every other check would pass with nothing checked.
