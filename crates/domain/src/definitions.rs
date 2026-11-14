@@ -1,7 +1,7 @@
 //! The outline of a file, as the definitions a reader found in it, and the one rule that reads the text of a key
 //! from it: each language's reader gives the outline (`python::outline` and `typescript::outline` in
-//! `infrastructure`, `rust::outline` here), and a key of `follows` selects its pieces here, the same for every
-//! language.
+//! `infrastructure`, `rust::outline` here), and a key of `follows`, or the fragment of a link to a TypeScript,
+//! JavaScript or Rust file, selects its pieces here, the same for every language.
 
 /// One definition of a file, as a reader found it: a function, a class, a method, a type, a variant. Every language
 /// is read into the same form, which [`pieces`] reads a key from.

@@ -1,5 +1,6 @@
 //! Whether a link in a record resolves: in the repository, by the exact names of its files, to a heading that is there,
-//! and for a `.py` file to a definition the link names.
+//! for a `.py` file to a definition its text names, and for a TypeScript, JavaScript or Rust file, when it has a
+//! fragment, to the definition its fragment names.
 //!
 //! The rules here judge a link by its target, and then by what the file it names holds; `application` looks the file
 //! up and reads it.
@@ -10,6 +11,9 @@ use std::sync::LazyLock;
 use percent_encoding::percent_decode_str;
 use regex::Regex;
 
+use crate::definitions::{Definition, selected};
+use crate::follows::{is_name, language_of};
+use crate::layers::Language;
 use crate::markdown::anchors;
 
 // A URL scheme. RFC 3986 allows `.` in one, but no scheme in use has it, while a file name with a line number
@@ -30,9 +34,20 @@ pub enum Target {
         start: String,
         rel: String,
         fragment: String,
-        /// Whether it is a Python file, whose link names a definition rather than a heading
-        is_python: bool,
+        names: Names,
     },
+}
+
+/// What the link to a file names in it, by the language of the file.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Names {
+    /// A heading, by the fragment: any file that is not code Rotproof reads definitions in
+    Heading,
+    /// A function or class of a Python file, by the text of the link
+    DefinitionByText,
+    /// A definition of a file of this language (TypeScript, JavaScript or Rust), by the fragment, in the form a key of
+    /// `follows` has after `::`; a link with no fragment names the file, and is not read further
+    DefinitionByFragment(Language),
 }
 
 /// Where `target` points, or why it cannot resolve anywhere.
@@ -80,8 +95,13 @@ pub fn target(target: &str, here: &str, bundle_root: &str) -> Result<Target, Str
         start: start.to_string(),
         rel: rel.to_string(),
         fragment: fragment.to_string(),
-        // In any case: `bundle.PY` is a Python file on Windows, and its link names a definition as any other does
-        is_python: path.to_ascii_lowercase().ends_with(".py"),
+        // By the extension in any case, as `follows` does: `bundle.PY` is a Python file on Windows, and its link names
+        // a definition as any other does
+        names: match language_of(path) {
+            Some(Language::Python) => Names::DefinitionByText,
+            Some(language) => Names::DefinitionByFragment(language),
+            None => Names::Heading,
+        },
     })
 }
 
@@ -121,6 +141,69 @@ pub fn to_definition(text: &str, target: &str, defined: &BTreeSet<String>) -> Op
     })
 }
 
+/// Why a link whose `fragment` names a definition of a file of `language` does not resolve: `outline` is the outline of
+/// the `source` of the file (see [`crate::definitions`]) and the fragment is no key of `follows` there. `fragment` is
+/// the name a key has after `::` (`Router.add`), so a link resolves exactly when a document could follow its target as
+/// a key: a Rust type is its definition and every `impl` block for it, `Type.method` a method in any of them, and an
+/// unexported name counts. `None` for a link with no fragment, which names the file. A file whose definitions
+/// cannot be read is judged by `application`, which has the parser's error.
+pub fn to_outlined_definition(
+    target: &str,
+    fragment: &str,
+    language: Language,
+    source: &str,
+    outline: &[Definition],
+) -> Option<String> {
+    if fragment.is_empty() {
+        return None;
+    }
+    if !fragment.split('.').all(|part| is_name(language, part)) {
+        return Some(format!(
+            "the fragment names no definition: {target}; it is a name, or names joined by dots (Class.method), as \
+             after :: in a key of follows"
+        ));
+    }
+    if selected(source, outline, fragment).is_some() {
+        return None;
+    }
+    let defined: BTreeSet<String> = outline.iter().map(|d| d.names.join(".")).collect();
+    Some(format!(
+        "no definition named {fragment} in {target}; {}",
+        how_to_name_outlined(fragment, &defined)
+    ))
+}
+
+/// How to fix a fragment that names nothing the file defines: the names that end as it does, when there are any (a
+/// method written without its type), and otherwise what the file defines, listed as far as `SHOWN`.
+fn how_to_name_outlined(name: &str, defined: &BTreeSet<String>) -> String {
+    let last = name.rsplit('.').next().unwrap_or(name);
+    let near: Vec<&str> = defined
+        .iter()
+        .map(String::as_str)
+        .filter(|d| d.rsplit('.').next() == Some(last) && *d != name)
+        .take(5)
+        .collect();
+    if !near.is_empty() {
+        return format!(
+            "the fragment is a name as the file defines it: {}",
+            near.join(", ")
+        );
+    }
+    const SHOWN: usize = 20;
+    if defined.is_empty() {
+        return "the file defines nothing a document can follow".into();
+    }
+    let mut names: Vec<&str> = defined.iter().take(SHOWN).map(String::as_str).collect();
+    if defined.len() > SHOWN {
+        names.push("...");
+    }
+    format!(
+        "the fragment is a name as the file defines it ({} defined: {})",
+        defined.len(),
+        names.join(", ")
+    )
+}
+
 /// How to fix a link text that names nothing the file defines, so whoever wrote it can fix it from the message alone.
 /// The text is one name exactly as defined: a call (`f()`) or a dotted path (`Class.method`) names its last part.
 /// Otherwise the message lists what the file defines.
@@ -151,24 +234,57 @@ mod tests {
 
     #[test]
     fn a_target_is_read_before_any_file_is() {
-        let file = |start: &str, rel: &str, fragment: &str, is_python| {
+        let file = |start: &str, rel: &str, fragment: &str, names| {
             Ok(Target::File {
                 start: start.into(),
                 rel: rel.into(),
                 fragment: fragment.into(),
-                is_python,
+                names,
             })
         };
         let at = |t: &str| target(t, "docs/backlog", "docs");
-        assert_eq!(at("/log.md#a%20b"), file("docs", "log.md", "a b", false));
+        assert_eq!(
+            at("/log.md#a%20b"),
+            file("docs", "log.md", "a b", Names::Heading)
+        );
         assert_eq!(
             at("../../src/x.PY"),
-            file("docs/backlog", "../../src/x.PY", "", true)
+            file(
+                "docs/backlog",
+                "../../src/x.PY",
+                "",
+                Names::DefinitionByText
+            )
         );
+        // The language is the one `follows` reads the file as, by its extension in any case
+        for (path, language) in [
+            ("x.rs", Language::Rust),
+            ("X.RS", Language::Rust),
+            ("x.ts", Language::TypeScript),
+            ("x.tsx", Language::TypeScript),
+            ("x.mjs", Language::TypeScript),
+            ("x.JS", Language::TypeScript),
+        ] {
+            assert_eq!(
+                at(&format!("../{path}#T.f")),
+                file(
+                    "docs/backlog",
+                    &format!("../{path}"),
+                    "T.f",
+                    Names::DefinitionByFragment(language)
+                ),
+                "{path}"
+            );
+        }
         assert_eq!(at("https://example.com"), Ok(Target::Url));
         assert_eq!(
             at("nothing.md:12"),
-            file("docs/backlog", "nothing.md:12", "", false)
+            file("docs/backlog", "nothing.md:12", "", Names::Heading)
+        );
+        // A file name with a line number is no source file: the line is part of its name
+        assert_eq!(
+            at("x.rs:12"),
+            file("docs/backlog", "x.rs:12", "", Names::Heading)
         );
         for (t, why) in [
             ("C:/x.md", "a path on one machine"),
@@ -179,6 +295,66 @@ mod tests {
         ] {
             assert!(at(t).unwrap_err().contains(why), "{t}");
         }
+    }
+
+    fn definition(names: &[&str], start: usize, end: usize) -> Definition {
+        Definition {
+            names: names.iter().map(|n| n.to_string()).collect(),
+            start,
+            end,
+        }
+    }
+
+    #[test]
+    fn a_fragment_resolves_when_a_document_could_follow_it() {
+        let source = "struct T;\nimpl T { fn f() {} }\nfn g() {}\n";
+        let outline = [
+            definition(&["T"], 0, 9),
+            definition(&["T"], 10, 29),
+            definition(&["T", "f"], 20, 28),
+            definition(&["g"], 30, 40),
+        ];
+        let said = |fragment: &str| {
+            to_outlined_definition("x.rs", fragment, Language::Rust, source, &outline)
+        };
+        for fragment in ["", "T", "T.f", "g"] {
+            assert_eq!(said(fragment), None, "{fragment}");
+        }
+        // Not a prefix, not the end of a longer name, not a name of another case
+        for fragment in ["f", "T.g", "T.f.x", "t", "T.", ".f"] {
+            assert!(said(fragment).is_some(), "{fragment} passed");
+        }
+        // A method written without its type says where it is
+        assert_eq!(
+            said("f").unwrap(),
+            "no definition named f in x.rs; the fragment is a name as the file defines it: T.f"
+        );
+        // A line anchor is not a name a file defines: it lists what is
+        assert_eq!(
+            said("L12").unwrap(),
+            "no definition named L12 in x.rs; the fragment is a name as the file defines it (3 defined: T, T.f, g)"
+        );
+        // What is no name at all is told apart from a name the file lacks
+        assert!(said("L12-L20").unwrap().contains("names no definition"));
+        assert!(said("a b").unwrap().contains("names no definition"));
+        // Neither a range outside the text nor a file with nothing in it
+        assert!(
+            to_outlined_definition("x.rs", "g", Language::Rust, "fn g() {}", &outline).is_some()
+        );
+        assert!(
+            to_outlined_definition("x.rs", "g", Language::Rust, "", &[])
+                .unwrap()
+                .ends_with("the file defines nothing a document can follow")
+        );
+    }
+
+    #[test]
+    fn a_dollar_is_a_letter_in_typescript_and_not_in_rust() {
+        let source = "const $x = 1;\n";
+        let outline = [definition(&["$x"], 0, 13)];
+        let at = |language| to_outlined_definition("x", "$x", language, source, &outline);
+        assert_eq!(at(Language::TypeScript), None);
+        assert!(at(Language::Rust).unwrap().contains("names no definition"));
     }
 
     #[test]

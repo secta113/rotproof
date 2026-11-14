@@ -2,7 +2,9 @@
 //! and judged by the rules in `domain`.
 
 use crate::tree::{Lookup, lookup, read_text};
-use domain::links::{Target, missing, target as pointed, to_definition, to_heading};
+use domain::links::{
+    Names, Target, missing, target as pointed, to_definition, to_heading, to_outlined_definition,
+};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -17,15 +19,15 @@ pub fn broken(
     here: &str,
     bundle_root: &str,
 ) -> Option<String> {
-    let (start, rel, fragment, is_python) = match pointed(target, here, bundle_root) {
+    let (start, rel, fragment, names) = match pointed(target, here, bundle_root) {
         Err(why) => return Some(why),
         Ok(Target::Url) => return None,
         Ok(Target::File {
             start,
             rel,
             fragment,
-            is_python,
-        }) => (start, rel, fragment, is_python),
+            names,
+        }) => (start, rel, fragment, names),
     };
     let full = match lookup(tree, &start, &rel) {
         Lookup::Found {
@@ -39,10 +41,22 @@ pub fn broken(
         Ok(source) => source,
         Err(e) => return Some(format!("cannot read {target}: {e}")),
     };
-    if is_python {
-        to_definition(text, target, &parsers.python_definitions(&source))
-    } else {
-        to_heading(target, &fragment, &source)
+    match names {
+        Names::DefinitionByText => {
+            to_definition(text, target, &parsers.python_definitions(&source))
+        }
+        // A link with no fragment names the file, which is not parsed for it
+        Names::DefinitionByFragment(_) if fragment.is_empty() => None,
+        // The outline `follows` reads the same file as, so the link resolves when a document could follow its name. A
+        // file the parser gives up on has no definitions to read, as for `follows`: it is told apart from one that
+        // lacks the name
+        Names::DefinitionByFragment(language) => match parsers.outline(language, &source, &full) {
+            Ok(outline) => to_outlined_definition(target, &fragment, language, &source, &outline),
+            Err((line, why)) => Some(format!(
+                "{target} cannot be parsed, so its definitions cannot be read: line {line}: {why}"
+            )),
+        },
+        Names::Heading => to_heading(target, &fragment, &source),
     }
 }
 
@@ -94,6 +108,49 @@ mod tests {
             ),
         )
         .unwrap();
+        // TypeScript, JavaScript and Rust: a definition is named in the fragment, in the form of a key of `follows`
+        fs::write(
+            root.path().join("tests/router.ts"),
+            concat!(
+                "export function route() {}\n",
+                "class Router {\n",
+                "  add() {}\n",
+                "}\n",
+                "export namespace Api { export function get() {} }\n",
+                "// gone() is only mentioned\n",
+                "const text = `function in_string() {}`;\n",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("tests/plain.mjs"),
+            "export const make = () => 1;\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("tests/lib.rs"),
+            concat!(
+                "pub struct Table;\n",
+                "impl Table {\n",
+                "    pub fn add(&self) {}\n",
+                "}\n",
+                "impl Drop for Table {\n",
+                "    fn drop(&mut self) {}\n",
+                "}\n",
+                "fn helper() {}\n",
+                "mod tests {\n",
+                "    fn inner() {}\n",
+                "}\n",
+                "// fn gone() {} is only mentioned\n",
+            ),
+        )
+        .unwrap();
+        // oxc gives up on it, so every definition in it would read as gone
+        fs::write(
+            root.path().join("tests/broken.ts"),
+            "export function f() {}\nclass { {{ \n",
+        )
+        .unwrap();
         root
     }
 
@@ -136,6 +193,101 @@ mod tests {
             ("mail", "mailto:someone@example.com"),
         ];
         assert_eq!(reasons(root.path(), &resolved), vec![None; resolved.len()]);
+    }
+
+    #[test]
+    fn a_link_to_a_definition_of_typescript_javascript_or_rust_resolves() {
+        let root = tree();
+        let resolved = [
+            // The file itself, which has no fragment, and what its text says does not matter
+            ("a TypeScript file", "../../tests/router.ts"),
+            ("a Rust file", "../../tests/lib.rs"),
+            (
+                "a file read as it is, however broken",
+                "../../tests/broken.ts",
+            ),
+            // A definition, exported or not, and a member after its type, as a key of `follows` writes it
+            ("`route`", "../../tests/router.ts#route"),
+            ("`Router`", "../../tests/router.ts#Router"),
+            ("`Router.add`", "../../tests/router.ts#Router.add"),
+            ("`Api.get`", "../../tests/router.ts#Api.get"),
+            ("a variable", "../../tests/plain.mjs#make"),
+            // A Rust type is its definition and every `impl` block for it, and `Type.method` a method of any
+            ("`Table`", "../../tests/lib.rs#Table"),
+            ("`Table.add`", "../../tests/lib.rs#Table.add"),
+            ("`Table.drop`", "../../tests/lib.rs#Table.drop"),
+            ("`helper`", "../../tests/lib.rs#helper"),
+            ("an inline module", "../../tests/lib.rs#tests.inner"),
+            // From the root of the bundle, and encoded
+            ("`route`", "/../tests/router.ts#route"),
+            ("`Table.add`", "../../tests/lib.rs#Table%2Eadd"),
+        ];
+        let found = reasons(root.path(), &resolved);
+        let missing: Vec<_> = resolved
+            .iter()
+            .zip(&found)
+            .filter(|(_, why)| why.is_some())
+            .collect();
+        assert!(missing.is_empty(), "{missing:?}");
+    }
+
+    #[test]
+    fn a_link_to_a_definition_of_typescript_javascript_or_rust_that_is_not_there_is_caught() {
+        let root = tree();
+        let said = |target: &str| {
+            reasons(root.path(), &[("`x`", target)])
+                .remove(0)
+                .unwrap_or_else(|| panic!("{target} passed"))
+        };
+        // Mentioned in a comment, in a string and in a template literal, which define nothing
+        for target in [
+            "router.ts#gone",
+            "router.ts#in_string",
+            "lib.rs#gone",
+            // A name that is only the end or the start of one
+            "router.ts#add",
+            "router.ts#Router.add.x",
+            "lib.rs#add",
+            "lib.rs#Table.helper",
+            "lib.rs#inner",
+            // Another case
+            "lib.rs#table",
+            "plain.mjs#Make",
+        ] {
+            let why = said(&format!("../../tests/{target}"));
+            let (file, name) = target.split_once('#').unwrap();
+            assert!(
+                why.starts_with(&format!(
+                    "no definition named {name} in ../../tests/{file}#{name}; "
+                )),
+                "{why}"
+            );
+        }
+        // How to write it: the names that end as it does, and otherwise what the file defines
+        assert!(
+            said("../../tests/lib.rs#add")
+                .ends_with("the fragment is a name as the file defines it: Table.add")
+        );
+        let listed = said("../../tests/lib.rs#nothing");
+        assert!(
+            listed.ends_with(
+                "the fragment is a name as the file defines it (6 defined: Table, Table.add, Table.drop, helper, \
+                 tests, tests.inner)"
+            ),
+            "{listed}"
+        );
+        // A line anchor is no name of a definition, and what is no name at all says so
+        assert!(said("../../tests/lib.rs#L12").contains("the fragment is a name"));
+        assert!(said("../../tests/lib.rs#L12-L20").contains("names no definition"));
+        // A file that does not parse says so, as `follows` does, not that the definition is gone
+        let why = said("../../tests/broken.ts#f");
+        assert!(
+            why.starts_with("../../tests/broken.ts#f cannot be parsed, so its definitions cannot be read: line 2:"),
+            "{why}"
+        );
+        // The file has to be there as it is for any link
+        assert!(said("../../tests/Lib.rs#Table").contains("the disk has ../../tests/lib.rs"));
+        assert!(said("../../tests/none.rs#Table").starts_with("no such file"));
     }
 
     #[test]

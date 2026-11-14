@@ -522,7 +522,12 @@ changed is in the commits, what was measured and decided along the way in the ta
   defined there, at any depth. The file is parsed as Python, so a `def` line inside a string or a docstring does not
   count. The text is one name exactly as defined (``[`render_index`](../tests/bundle.py)``), not a call
   (`render_index()`) or a dotted path (`Bundle.render`); when it names nothing, the message says which name to write
-  or lists the names the file defines.
+  or lists the names the file defines. A link to a TypeScript, JavaScript or Rust file may name a definition in its
+  fragment, in the form a key of `follows` has after `::` (`../src/api.ts#Router.add`, `../src/lib.rs#Table.add`): it
+  resolves when a document could follow that key, so an unexported name counts, a Rust type is its definition and every
+  `impl` block for it, and the text of the link is not read. A link with no fragment names the file and is not read
+  further. A fragment that is no definition (a line anchor such as `#L12` too) fails, and so does one in a file the
+  parser gives up on, which says that the file cannot be parsed, as `rotproof follows` does.
 - **The log exists, and its second-level headings are dates, newest first.** Below the title, the log is a flat list
   of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented lines (wrapped
   text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the first date fails.
