@@ -18,11 +18,12 @@ jobs:
       # The same entry point as on a developer machine
       - run: cargo xtask ci
 
-  # The wheels pip installs. Windows builds and tests natively, so the binary is tested on the platform it runs on
+  # The wheels pip installs. Windows and macOS (macos-latest is arm64, Apple silicon) build and test natively, so the
+  # binary is tested on the platform it runs on
   wheels:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:

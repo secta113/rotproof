@@ -27,6 +27,7 @@ NPM = ROOT / "npm"
 PLATFORMS = {
     "x86_64-unknown-linux-gnu": "linux-x64",
     "x86_64-pc-windows-msvc": "win32-x64",
+    "aarch64-apple-darwin": "darwin-arm64",
 }
 
 

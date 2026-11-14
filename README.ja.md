@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at e1991cc6. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at c5ca0317. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -38,15 +38,15 @@ Rotproof がやらないこと: `rotproof check` は報告するだけで、何�
 
 ## インストール
 
-Rotproof は Windows x86_64 と Linux x86_64（glibc 2.17 以上）向けに出しています。版は厳密に固定してください。
-アップグレードは新しい規則を持ち込みうるので、それだけのコミットにするためです。
+Rotproof は Windows x86_64、Linux x86_64（glibc 2.17 以上）、macOS arm64（Apple silicon、macOS 11 以上）向けに
+出しています。版は厳密に固定してください。アップグレードは新しい規則を持ち込みうるので、それだけのコミットにするためです。
 
 ```sh
 pip install rotproof==1.0.0
 ```
 
 Node のプロジェクトでは npm で固定します。プラットフォームに合ったバイナリも一緒に入ります（パッケージ `rotproof` と、
-`@rotproof/linux-x64` か `@rotproof/win32-x64` のどちらか）。
+`@rotproof/linux-x64`、`@rotproof/win32-x64`、`@rotproof/darwin-arm64` のいずれか）。
 
 ```sh
 npm install -D -E rotproof@1.0.0

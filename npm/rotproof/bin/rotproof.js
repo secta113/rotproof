@@ -14,8 +14,8 @@ try {
   path = require.resolve(`@rotproof/${platform}/${binary}`);
 } catch {
   console.error(
-    `rotproof: the package @rotproof/${platform} is not installed. Rotproof is released for linux-x64 and ` +
-      "win32-x64 only, and npm installs the package of its platform unless optional dependencies are left out " +
+    `rotproof: the package @rotproof/${platform} is not installed. Rotproof is released for linux-x64, ` +
+      "win32-x64 and darwin-arm64 only, and npm installs the package of its platform unless optional dependencies are left out " +
       "(--omit=optional)",
   );
   process.exit(1);
