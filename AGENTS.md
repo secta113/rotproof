@@ -1,7 +1,8 @@
 # AGENTS.md (Rotproof)
 
 This file holds **the map of this repository** and **short rules that apply to every change**. What Rotproof checks,
-and why, is in `README.md`.
+keeps and writes is in `SPECIFICATION.md`, and what it gives, how to start with it and what a version promises is in
+`README.md`.
 
 ## Map
 
@@ -24,7 +25,8 @@ and why, is in `README.md`.
 | `requirements-build.txt` | The one place that names the packaging tools (maturin, cargo-xwin). The Dockerfile and CI install from it |
 | `THIRD-PARTY-LICENSES.txt` | The licenses of every crate the binary links, which go with the binary: in the wheel next to Rotproof's own. Generated, never edited by hand |
 | `about.toml`, `about.hbs` | What cargo-about writes `THIRD-PARTY-LICENSES.txt` from: the licenses Rotproof may ship, and the file's template |
-| `README.md` | What Rotproof checks, how to use it, and how to build it |
+| `README.md` | What Rotproof gives, how to install it, a tutorial, what a version promises, and how to build it. It is the page on PyPI and npm: every link in it to another file is a full URL |
+| `SPECIFICATION.md` | What Rotproof checks, keeps and writes, in full: the commands, the project's files, the layers, the records and every rule of `rotproof check`. The README links to its sections by full URL |
 | `LICENSE-MIT`, `LICENSE-APACHE` | The license: MIT OR Apache-2.0 |
 
 Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lock`, `AGENTS.md`, and `CLAUDE.md`
@@ -45,7 +47,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/infrastructure/src/inbound/` | Content |
 |---|---|
 | `mod.rs` | The level's role |
-| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here: `rotproof check` prints the approvals, the list of comments tied to an issue (`linked TODO`, whose lines a CI step reads, so their form is kept: the README says it), the warnings, then the findings. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0, says in one line that they were removed and exits 1, never 2 (no command of that name is left) |
+| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here: `rotproof check` prints the approvals, the list of comments tied to an issue (`linked TODO`, whose lines a CI step reads, so their form is kept: the specification says it), the warnings, then the findings. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0, says in one line that they were removed and exits 1, never 2 (no command of that name is left) |
 
 | Module of `crates/infrastructure/src/outbound/` | Content |
 |---|---|
@@ -93,7 +95,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; and where Cargo looks for a workspace |
 | `modules.rs` | The levels inside a Rust crate: the module each file of `src/` is, every path it names from `crate`, `super`, `self` or a dependency on another layer judged by the level it lands in, the crate's root holding only its levels' modules, and no `#[path]` |
 | `layers.rs` | The layer definitions in `layers/`: the table, and one layout per stack with the places it makes, and the questions asked of them (a layer or a level of one, where a layer lives, whether the layout leaves a layer out, which files have comments to read) |
-| `declaration.rs` | A project's declaration, `.config/rotproof.toml`: what it says, read as it is and against the layout it names (`Declared`, which also says whether a path is in `unchecked`, and what `todo_link` means: an optional key, one of two values, failing with `stack = "none"`, and written by no command, the README alone describes it), the fields `rotproof create` adds to it and the text `rotproof init` writes, and what an upgrade reads from it and sets in it (`files`, `declined`) |
+| `declaration.rs` | A project's declaration, `.config/rotproof.toml`: what it says, read as it is and against the layout it names (`Declared`, which also says whether a path is in `unchecked`, and what `todo_link` means: an optional key, one of two values, failing with `stack = "none"`, and written by no command, the specification alone describes it), the fields `rotproof create` adds to it and the text `rotproof init` writes, and what an upgrade reads from it and sets in it (`files`, `declined`) |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust), judged once the comments of a file are read; and, for a project that declares `todo_link`, the one form in which a `TODO` names its issue (`TodoLink`), whose comments are listed (`Markers::linked`) instead of failing, the line a linked comment shares with another marker failing as before, and the heading that offers the form after the three ways out |
 | `environment.rs` | The environment check: only `infrastructure` reads or writes the environment variables (the names of Python's `os`, TypeScript's `process.env` and `import.meta.env`, the functions of Rust's `std::env`), the code of every other layer and the entry file judged, the reads of a Rust file found by the scanner, and what the guide says of it |
@@ -140,7 +142,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 
 - **No `docs/` here.** Rotproof's own records (its knowledge, its log, and the specs and work items it kept before 1.0)
   are kept outside this repository.
-- **In layers, and no `.config/rotproof.toml`.** Every layer of the Rust layout Rotproof keeps (README) is a crate of
+- **In layers, and no `.config/rotproof.toml`.** Every layer of the Rust layout Rotproof keeps (specification) is a crate of
   its own in `crates/`, with the levels of `infrastructure` and `protocol` as modules, the entry file is `src/main.rs`
   of the root package, and it declares `ui = "none"`, the one UI that layout offers. `cargo xtask ci` checks them as
   `rotproof check` checks a project's (structure, direction, markers), with the declaration written in
@@ -166,6 +168,11 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
   names,** as Ruff and `ruff` are written. A sentence that starts with the command still writes it in backticks.
 - **Wrap a line that holds a comment at 120 characters.** rustfmt wraps code, not comments; `cargo xtask ci` fails on
   a longer one in any tracked `.rs` file (`xtask/src/width.rs`).
+- **Write what `rotproof check` checks, and what Rotproof keeps and writes, in `SPECIFICATION.md`, and link to it from
+  the README with a full URL** (`https://github.com/secta113/rotproof/blob/main/...`): the README is the page on PyPI
+  and npm, which take it as it is, so a relative link breaks there. A link inside the page (`#heading`) works on both.
+  `cargo xtask ci` fails on a link in the README to another file that is not a full URL, and on a link, inside the page
+  or into this repository, whose file is not tracked or whose heading is not there (`xtask/src/drift.rs`).
 
 - **Run CI with `cargo xtask ci`, on the host or in the container (`docker compose run --rm dev cargo xtask ci`).** The
   container is the Linux of CI and needs only Docker. On Windows, the host needs Visual Studio's C++ tools and the
@@ -192,13 +199,14 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
   internal crates of Ruff, whose API changes between any two versions. Bump them by hand when the toolchain changes
   (a new Ruff may need a newer Rust) and when Python gains syntax Rotproof fails to read.
 - **Try a wheel as a user gets it:** build it (README) and `pip install` it into a fresh venv, outside the build tree.
-- **While Rotproof is `0.x`, a release that can make something that worked under the previous version fail or behave
-  otherwise raises the minor version; anything else raises the patch version.** Minor: a new or stricter rule, a
-  command, flag or field removed, renamed or given another meaning, a command line that succeeded and now stops or
-  exits otherwise, a fix that rejects what was wrongly accepted. Patch: a fix that accepts what was wrongly rejected or
-  stops a crash, the words of a message, a new command or optional flag, documentation. When in doubt, minor. Projects
-  pin the exact version, so they take the change in a commit of their own.
+- **From 1.0, a release that can make something that worked under the previous version fail or behave otherwise raises
+  the major version, and goes out first as release candidates; one that only adds raises the minor version; anything
+  else raises the patch version** (README, "Compatibility"). Major: a new or stricter rule, a command, flag or field
+  removed, renamed or given another meaning, a command line that succeeded and now stops or exits otherwise, a fix that
+  rejects what was wrongly accepted. Minor: a new command, a new optional flag or field. Patch: a fix that accepts what
+  was wrongly rejected or stops a crash, the words of a message, documentation. When in doubt, major. Projects pin the
+  exact version, so they take the change in a commit of their own.
 - **Raise the version in `Cargo.toml` and every `pip install rotproof==<version>` and `npm install -D -E
-  rotproof@<version>` in `README.md` together;** `cargo xtask ci` fails while they differ (the README is the page on
-  PyPI and on npm). Release by pushing the tag `v<version>` of that
+  rotproof@<version>` in `README.md` and `SPECIFICATION.md` together;** `cargo xtask ci` fails while they differ (the
+  README is the page on PyPI and on npm). Release by pushing the tag `v<version>` of that
   commit. Before the tag, `gh workflow run release.yml` builds and tests the release without publishing it.

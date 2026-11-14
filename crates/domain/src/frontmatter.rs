@@ -225,23 +225,28 @@ mod tests {
     fn the_frontmatter_a_reader_copies_reads() {
         // The work item the README showed once failed as YAML (an unquoted `: ` in its description), and its comments
         // would now fail too: an example is copied, so it is read as a document is
-        let readme = include_str!("../../../README.md");
         let rules = include_str!("../../../records/knowledge-rules.md");
-        let document = readme
-            .split_once("```markdown\n---\n")
-            .expect("the README shows a knowledge document")
-            .1;
         let follows = rules
             .split_once("```yaml\n")
             .expect("the knowledge rules show follows")
             .1;
-        let document = format!("---\n{}\n---\n", document.split_once("\n---\n").unwrap().0);
-        // The README's is a whole frontmatter, so it keeps the knowledge format too
-        assert!(
-            crate::schema::knowledge_doc(&document).is_ok(),
-            "{document}: {:?}",
-            crate::schema::knowledge_doc(&document).err()
-        );
+        // The README's tutorial and the specification's example are each a whole frontmatter, so they keep the
+        // knowledge format too
+        for (name, text) in [
+            ("README", include_str!("../../../README.md")),
+            ("specification", include_str!("../../../SPECIFICATION.md")),
+        ] {
+            let document = text
+                .split_once("```markdown\n---\n")
+                .unwrap_or_else(|| panic!("the {name} shows a knowledge document"))
+                .1;
+            let document = format!("---\n{}\n---\n", document.split_once("\n---\n").unwrap().0);
+            assert!(
+                crate::schema::knowledge_doc(&document).is_ok(),
+                "{name}: {document}: {:?}",
+                crate::schema::knowledge_doc(&document).err()
+            );
+        }
         // The block is indented under a list item
         let follows = format!(
             "---\n{}\n---\n",
