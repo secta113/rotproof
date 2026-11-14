@@ -180,7 +180,8 @@ enum Command {
     /// Write docs/index.md and docs/knowledge/index.md from the frontmatter, and the rules.md Rotproof keeps
     ///
     /// Rewrites docs/index.md and docs/knowledge/index.md from the frontmatter of the knowledge documents, and
-    /// docs/knowledge/rules.md. Run it after a knowledge document changes; never edit these by hand. Writes nothing
+    /// docs/knowledge/rules.md, each only when it differs from what it would write, and names each it wrote (when none
+    /// differs, it says so). Run it after a knowledge document changes; never edit these by hand. Writes nothing
     /// in docs/work/, which Rotproof no longer reads. Lists the documents it left out and why, also under `# Left out`
     /// in the index. Exits 2 when the declaration or a document cannot be read.
     Index,
@@ -675,9 +676,12 @@ fn follows(
     Ok(())
 }
 
-/// Write every index file, then list what was left out of them.
+/// Write each index file that is out of date, or say that none is, then list what was left out of them.
 fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     let indexed = commands.index(root)?;
+    if indexed.written.is_empty() {
+        println!("nothing written: every index file is up to date");
+    }
     for path in indexed.written {
         println!("wrote {path}");
     }

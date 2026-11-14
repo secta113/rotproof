@@ -463,6 +463,45 @@ fn index_writes_every_index_file() {
 }
 
 #[test]
+fn index_run_again_writes_no_file_and_says_so() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    let first = run(&["--root", &arg, "index"]);
+    assert!(first.status.success(), "{}", stdout(&first));
+    assert!(
+        !stdout(&first).contains("nothing written"),
+        "{}",
+        stdout(&first)
+    );
+    let paths = [
+        "docs/index.md",
+        "docs/knowledge/rules.md",
+        "docs/knowledge/index.md",
+    ];
+    let before: Vec<_> = paths
+        .iter()
+        .map(|path| fs::read_to_string(root.path().join(path)).unwrap())
+        .collect();
+    let second = run(&["--root", &arg, "index"]);
+    assert!(second.status.success(), "{}", stdout(&second));
+    assert_eq!(
+        stdout(&second),
+        "nothing written: every index file is up to date\n"
+    );
+    for (path, before) in paths.iter().zip(&before) {
+        assert_eq!(&fs::read_to_string(root.path().join(path)).unwrap(), before);
+    }
+    // One that is out of date is written, and named alone
+    fs::write(root.path().join("docs/knowledge/index.md"), "stale\n").unwrap();
+    let third = run(&["--root", &arg, "index"]);
+    assert_eq!(stdout(&third), "wrote docs/knowledge/index.md\n");
+    assert_eq!(
+        fs::read_to_string(root.path().join("docs/knowledge/index.md")).unwrap(),
+        before[2]
+    );
+}
+
+#[test]
 fn index_names_what_it_left_out() {
     let root = repo();
     fs::write(
@@ -1651,7 +1690,9 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
             "{name}: {said}"
         );
         assert_eq!(out.status.code(), Some(1));
-        assert!(said.contains("the layers import only what layers/table.toml allows:"));
+        assert!(said.contains(
+            "the layers import only what the layer table in .rotproof/AGENTS.md allows:"
+        ));
     }
 }
 

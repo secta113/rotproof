@@ -59,7 +59,7 @@ fn code(
     let approvals = crate::approvals::read(tree)?;
     let sorted = sort(&direction.forbidden, &approvals.entries);
     report.findings.extend(under(
-        "the layers import only what layers/table.toml allows",
+        "the layers import only what the layer table in .rotproof/AGENTS.md allows",
         direction
             .problems
             .into_iter()
