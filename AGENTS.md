@@ -123,7 +123,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly (and whether it is a file), where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
-| `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
+| `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place: for Rust, each dependency of a crate resolved to the path it comes from (through its workspace too) and then the levels inside each crate |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
 | `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, the re-pin of `rotproof approve --reviewed`, and the pin of `rotproof follows` |
