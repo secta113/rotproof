@@ -11,7 +11,7 @@ use std::io;
 use serde_json::Value;
 
 use domain::code::{Alias, Aliases};
-use domain::paths::{join, parent};
+use domain::paths::{join, normalize, parent};
 use domain::tree::with_lf;
 use protocol::outbound::Tree;
 
@@ -88,23 +88,44 @@ fn add(aliases: &mut Aliases, alias: Alias, pattern: &str) {
     }
 }
 
+/// The most configs one chain of `extends` may hold. No real chain comes near it: it ends the ones that name a new
+/// path at every step and so never repeat one, which a spelling that climbs above the root and a link back into the
+/// project both make.
+const MAX_CHAIN: usize = 64;
+
 /// The options of the config at `name` (from the root), its local `extends` followed: a field it sets wins over the
 /// configs it extends, and a later one in `extends` over an earlier one. `None`, with a problem, when it cannot be
 /// read.
+///
+/// `seen` holds the configs on the way here, each by the path it names with its `.` and `..` folded (`./a.json`,
+/// `a.json` and `x/../a.json` are one config), and a cycle is found on that. `name` itself stays as it was written, so
+/// that the problems about a config say what they said before and the file is read through the name it was given. A
+/// path that climbs above the root cannot be folded and is compared as written: the configs there are read as before
+/// (a monorepo's base config beside the project), and `MAX_CHAIN` ends a cycle that reaches them under a new spelling
+/// each time. Names are compared exactly, as everywhere in Rotproof, so `TSCONFIG.json` is another config than
+/// `tsconfig.json` even where the file system opens one for the other: the cycle is found a step later, since the
+/// configs hold only so many spellings.
 fn load(
     tree: &dyn Tree,
     name: &str,
     seen: &mut Vec<String>,
     problems: &mut Vec<String>,
 ) -> io::Result<Option<Options>> {
-    if seen.contains(&name.to_string()) {
+    let key = normalize(name).unwrap_or_else(|| name.to_string());
+    if seen.contains(&key) {
+        problems.push(format!("{key}: extends itself through {}", seen.join(", ")));
+        return Ok(None);
+    }
+    if seen.len() >= MAX_CHAIN {
+        // The config the chain starts at is named: the one it is cut at has a path as long as the chain
         problems.push(format!(
-            "{name}: extends itself through {}",
-            seen.join(", ")
+            "{}: extends more than {MAX_CHAIN} configs in a row, which Rotproof takes for a cycle, so its paths are not \
+             known",
+            seen[0]
         ));
         return Ok(None);
     }
-    seen.push(name.to_string());
+    seen.push(key);
     let options = load_one(tree, name, seen, problems);
     seen.pop();
     options
@@ -334,6 +355,127 @@ mod tests {
                 .iter()
                 .any(|p| p.contains("missing.json: extended by tsconfig.app.json"))
         );
+    }
+
+    fn problems_of(files: &[(&str, &str)]) -> Vec<String> {
+        let root = project(files);
+        aliases(&Disk::new(root.path())).unwrap().problems
+    }
+
+    #[test]
+    fn a_config_that_extends_itself_is_a_problem_however_the_path_is_spelled() {
+        // Itself, with `./`
+        assert_eq!(
+            problems_of(&[("tsconfig.json", "{ \"extends\": \"./tsconfig.json\" }")]),
+            ["tsconfig.json: extends itself through tsconfig.json"]
+        );
+        // Two that extend each other with `./`: each root config finds the cycle from where it starts
+        assert_eq!(
+            problems_of(&[
+                ("tsconfig.json", "{ \"extends\": \"./tsconfig.app.json\" }"),
+                ("tsconfig.app.json", "{ \"extends\": \"./tsconfig.json\" }"),
+            ]),
+            [
+                "tsconfig.app.json: extends itself through tsconfig.app.json, tsconfig.json",
+                "tsconfig.json: extends itself through tsconfig.json, tsconfig.app.json",
+            ]
+        );
+        // In a directory, back to itself through `..`, a `.` and a part that is left again
+        assert_eq!(
+            problems_of(&[
+                ("tsconfig.json", "{ \"extends\": \"./configs/a.json\" }"),
+                ("configs/a.json", "{ \"extends\": \"../configs/./a.json\" }"),
+            ]),
+            ["configs/a.json: extends itself through tsconfig.json, configs/a.json"]
+        );
+        // A longer chain, with the `.json` left off, and the first config met again as `x/../a.json` from another
+        // spelling of its directory
+        assert_eq!(
+            problems_of(&[
+                ("tsconfig.json", "{ \"extends\": \"./configs/a\" }"),
+                ("configs/a.json", "{ \"extends\": \"../configs/b.json\" }"),
+                ("configs/b.json", "{ \"extends\": \"./x/../a.json\" }"),
+            ]),
+            [
+                "configs/a.json: extends itself through tsconfig.json, configs/a.json, configs/b.json"
+            ]
+        );
+    }
+
+    #[test]
+    fn one_config_extended_twice_by_different_spellings_is_no_cycle() {
+        let aliases = |root: &tempfile::TempDir| aliases(&Disk::new(root.path())).unwrap();
+        let root = project(&[
+            (
+                "tsconfig.json",
+                "{ \"extends\": [\"./configs/a.json\", \"./x/../configs/a\"] }",
+            ),
+            (
+                "configs/a.json",
+                "{ \"compilerOptions\": { \"paths\": { \"@/*\": [\"src/*\"] } } }",
+            ),
+            // The config is read as it is written: Linux opens `x/../configs/a.json` only when `x` is there, where
+            // Windows folds the path before it looks
+            ("x/kept", ""),
+        ]);
+        let aliases = aliases(&root);
+        assert_eq!(aliases.problems, Vec::<String>::new());
+        assert_eq!(aliases.paths.len(), 1);
+    }
+
+    #[test]
+    fn a_cycle_through_another_letter_case_is_found_or_the_config_is_not_there() {
+        let root = project(&[("tsconfig.json", "{ \"extends\": \"./TSCONFIG.json\" }")]);
+        let problems = aliases(&Disk::new(root.path())).unwrap().problems;
+        if root.path().join("TSCONFIG.json").exists() {
+            assert_eq!(
+                problems,
+                ["TSCONFIG.json: extends itself through tsconfig.json, TSCONFIG.json"]
+            );
+        } else {
+            assert_eq!(
+                problems,
+                ["./TSCONFIG.json: extended by tsconfig.json, and not there"]
+            );
+        }
+    }
+
+    #[test]
+    fn a_config_above_the_root_is_read_and_a_cycle_reaching_it_ends_in_a_problem() {
+        let outer = tempfile::tempdir().unwrap();
+        fs::create_dir(outer.path().join("proj")).unwrap();
+        let config = |text: &str, path: &str| fs::write(outer.path().join(path), text).unwrap();
+        let aliases = |root: &str| aliases(&Disk::new(&outer.path().join(root))).unwrap();
+        // The base config of a monorepo, beside the project
+        config(
+            "{ \"compilerOptions\": { \"baseUrl\": \"src\" } }",
+            "base.json",
+        );
+        config("{ \"extends\": \"../base.json\" }", "proj/tsconfig.json");
+        let found = aliases("proj");
+        assert_eq!(found.problems, Vec::<String>::new());
+        assert!(found.base_urls.contains("../src"), "{:?}", found.base_urls);
+        // Not there
+        config("{ \"extends\": \"../gone.json\" }", "proj/tsconfig.json");
+        assert_eq!(
+            aliases("proj").problems,
+            ["../gone.json: extended by tsconfig.json, and not there"]
+        );
+        // Back into the project by its own name: every step names a longer path, and none can be folded
+        config(
+            "{ \"extends\": \"../proj/tsconfig.json\" }",
+            "proj/tsconfig.json",
+        );
+        let too_long = [
+            "tsconfig.json: extends more than 64 configs in a row, which Rotproof takes for a cycle, so its paths are \
+             not known",
+        ];
+        assert_eq!(aliases("proj").problems, too_long);
+        // Two configs above the root that extend each other: `./` is no part to fold there either
+        config("{ \"extends\": \"./other.json\" }", "base.json");
+        config("{ \"extends\": \"./base.json\" }", "other.json");
+        config("{ \"extends\": \"../base.json\" }", "proj/tsconfig.json");
+        assert_eq!(aliases("proj").problems, too_long);
     }
 
     #[test]
