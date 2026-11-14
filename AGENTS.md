@@ -108,7 +108,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `lib.rs` | The layer's role, and its modules |
 | `approvals.rs` | Reading the approvals file from the tree, and `rotproof approve`: an entry added for a forbidden import a person approved, and the entries that match nothing removed (`--prune`), the file written back as it was written |
 | `bundle.rs` | Reading `docs/knowledge/` from the tree |
-| `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and `docs/knowledge/` and the log read for the rules of the records |
+| `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and what each found printed under its heading |
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
@@ -122,6 +122,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `index.rs` | `rotproof index`: every index file written from the frontmatter |
 | `init.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
+| `finding.rs` | A finding of `rotproof check`, made from what a check found and the heading it is printed under |
+| `records.rs` | The checks of the records, read from the tree: the areas, the floor, the links of `docs/knowledge/` and the log, the log, the knowledge documents and the generated files |
 | `structure.rs` | The structure check, read from the tree |
 
 ## How this repository differs from what Rotproof keeps
