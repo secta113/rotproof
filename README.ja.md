@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at c5ca0317. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at d04f9361. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -143,7 +143,7 @@ rotproof check
 ```
 
 ```text
-the layers import only what layers/table.toml allows:
+the layers import only what the layer table in .rotproof/AGENTS.md allows:
   domain/price.py:1: imports infrastructure.outbound.db.load_rate, in infrastructure.outbound; domain imports no other layer
 ```
 

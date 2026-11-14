@@ -1651,7 +1651,9 @@ fn every_pair_of_places_is_allowed_or_fails_as_the_table_says() {
             "{name}: {said}"
         );
         assert_eq!(out.status.code(), Some(1));
-        assert!(said.contains("the layers import only what layers/table.toml allows:"));
+        assert!(said.contains(
+            "the layers import only what the layer table in .rotproof/AGENTS.md allows:"
+        ));
     }
 }
 

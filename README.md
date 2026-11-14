@@ -135,7 +135,7 @@ rotproof check
 ```
 
 ```text
-the layers import only what layers/table.toml allows:
+the layers import only what the layer table in .rotproof/AGENTS.md allows:
   domain/price.py:1: imports infrastructure.outbound.db.load_rate, in infrastructure.outbound; domain imports no other layer
 ```
 
