@@ -1,96 +1,17 @@
-//! The layers: what they are (the table, the same in every stack), where they live (one layout per stack), and what a
-//! project declares (`.config/rotproof.toml`).
+//! The layers: what they are (the table, the same in every stack) and where they live (one layout per stack). What a
+//! project declares of them is in `declaration.rs`.
 //!
 //! The table and the layouts are data files in `layers/`, built into the binary, so reviewing a layout means reading
 //! one file.
 
 use std::collections::BTreeMap;
 
-use crate::paths::within;
 use serde::Deserialize;
-use toml_edit::{Array, DocumentMut, Item, Value};
 
-use crate::upgrade::VERSION;
-
-/// Where a project declares its structure, from the root
-pub const DECLARATION: &str = ".config/rotproof.toml";
-/// What to do when the declaration is missing, with every stack: a test keeps the list equal to [`known_stacks`]
-pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotproof init --stack <stack>` (python, \
-                           typescript, rust, or none for records only) and `--ui atomic` or `--ui none` for python \
-                           and typescript";
-/// Which command brings a project's files into line, said the same way wherever a file or a field is missing: after an
-/// upgrade of Rotproof it is `rotproof init`, which also sets `files` and says what to do by hand, and `rotproof
-/// create` only otherwise
-pub const INIT_OR_CREATE: &str =
-    "run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise";
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
 /// The UI of a project with no screens: none of the layers that name a UI in the table
 pub const NO_UI: &str = "none";
-
-/// The version whose table is built on the onion architecture. Crossing it, `rotproof init` says how to move a
-/// project's layers, and moves nothing: an entry point and its wiring may sit in one file of `handler`, and each part
-/// of `utils` goes where its concept is, which no machine can tell.
-pub const ONION: &str = "0.4.0";
-
-/// The layers of the table before [`ONION`], each with where its code goes now.
-pub const RETIRED: [(&str, &str); 2] = [
-    (
-        "handler",
-        "its entry points go in infrastructure.inbound, each calling an input port of protocol.inbound; the wiring \
-         in composition; and the start of the program in the entry file, which calls composition alone",
-    ),
-    (
-        "utils",
-        "each part goes in the layer whose concept it speaks, and a general procedure comes from the standard library \
-         or an external one",
-    ),
-];
-
-/// What moved at [`ONION`] inside layers that are still there, which no directory shows.
-pub const PORTS_MOVED: &str = "the ports (the interfaces to the outside) move from domain to protocol.outbound, and \
-                               the use cases the entry points call get interfaces in protocol.inbound, with plain data";
-
-/// The version whose table splits the UI into the view (`ui`) and the Presentation Model (`presentation`), and whose
-/// declaration says which UI a project has (`ui`). Crossing it, `rotproof init` says what moves, and moves nothing:
-/// which part of a page is the state of the screen and which is its view, no machine can tell.
-pub const PRESENTATION: &str = "1.0.0-rc.3";
-
-/// What crossing [`PRESENTATION`] asks of a project whose `ui` is there, which the upgrade declares `ui = "atomic"`:
-/// the new layer is missing until it is made, and `rotproof check` fails until then.
-pub const PRESENTATION_ADDED: &str = "the layer presentation is new, and comes with ui = \"atomic\": what a screen \
-                                      holds and decides goes in presentation.models, and the plain data it hands the \
-                                      view in presentation.display. Run `rotproof create --yes` to make it";
-
-/// What crossing [`PRESENTATION`] asks of a project that declared `ui` absent, which the upgrade declares
-/// `ui = "none"`: the entry in absent names a layer the declaration no longer has.
-pub const UI_NONE: &str = "ui = \"none\" now says that this project has no screens, so neither ui nor presentation \
-                           is made or checked: take ui out of absent in .config/rotproof.toml";
-
-/// What moved at [`PRESENTATION`] inside `ui`, said to a project that has it.
-pub const UI_SPLIT: &str = "ui imports neither application nor domain any more: the state of a page and its calls \
-                            of the use cases move to a model in presentation.models, which the page uses, and the \
-                            domain values that organisms and templates show become plain values in \
-                            presentation.display";
-
-/// Whether an upgrade from `files` to `running` crosses the version `at`.
-pub fn crosses(at: &str, files: &str, running: &str) -> bool {
-    let at = crate::upgrade::version(at);
-    crate::upgrade::version(files) < at && at <= crate::upgrade::version(running)
-}
-
-/// Where the layout would hold each retired layer, with where its code goes now.
-pub fn retired(layout: &Layout) -> Vec<(&'static str, String, &'static str)> {
-    RETIRED
-        .iter()
-        .map(|(name, goes)| (*name, layout.layer.path.replace("{name}", name), *goes))
-        .collect()
-}
-
-/// What every command says of a declaration that cannot be read, for `why`.
-pub fn unreadable(why: &str) -> String {
-    format!("{DECLARATION}: {why}")
-}
 
 const TABLE: &str = include_str!("../../../layers/table.toml");
 /// Stack -> its layout
@@ -268,6 +189,23 @@ pub struct Place {
     pub files: Vec<(String, String)>,
 }
 
+impl Place {
+    /// Whether this is a layer, and not a level of one.
+    pub fn is_layer(&self) -> bool {
+        self.parent.is_none()
+    }
+
+    /// Whether this is a level of `layer`.
+    pub fn is_level_of(&self, layer: &Place) -> bool {
+        self.parent.as_ref() == Some(&layer.name)
+    }
+
+    /// The layer this place is, or sits in: the name of a layer, or of the layer of a level.
+    pub fn layer_name(&self) -> &str {
+        self.parent.as_deref().unwrap_or(&self.name)
+    }
+}
+
 /// The layout of a stack for a project whose UI is `ui`, or `None` when Rotproof has no stack by that name or the stack
 /// offers no such UI ([`uis`]).
 pub fn layout(stack: &str, ui: &str) -> Option<Layout> {
@@ -317,10 +255,7 @@ impl Layout {
     pub fn places(&self, table: &Table) -> Vec<Place> {
         let mut out = Vec::new();
         // A place imports only the layers this stack has, and their levels: a Rust crate cannot import `ui`
-        let has = |name: &str| {
-            let layer = name.split_once('.').map_or(name, |(layer, _)| layer);
-            !self.without.iter().any(|w| w == layer)
-        };
+        let has = |name: &str| !self.leaves_out(name);
         let imports = |imports: &[String]| -> Vec<String> {
             imports.iter().filter(|n| has(n)).cloned().collect()
         };
@@ -331,7 +266,7 @@ impl Layout {
                 .map_or(&self.layer.files, |o| &o.files);
             let mut place = Place {
                 name: layer.name.clone(),
-                path: self.layer.path.replace("{name}", &layer.name),
+                path: self.layer_path(&layer.name),
                 parent: None,
                 role: layer.role.clone(),
                 imports: imports(&layer.imports),
@@ -400,12 +335,24 @@ impl Layout {
                 .entry
                 .imports
                 .iter()
-                .filter(|n| !self.without.contains(n))
+                .filter(|n| !self.leaves_out(n))
                 .cloned()
                 .collect(),
             below: Vec::new(),
             files: Vec::new(),
         })
+    }
+
+    /// Where the layer `name` lives in this stack, from the root.
+    pub fn layer_path(&self, name: &str) -> String {
+        self.layer.path.replace("{name}", name)
+    }
+
+    /// Whether this layout has no place by the name `name`, a layer or a level (`ui`, `ui.pages`), because the layer it
+    /// sits in is of a UI this layout is not for.
+    pub fn leaves_out(&self, name: &str) -> bool {
+        let layer = name.split_once('.').map_or(name, |(layer, _)| layer);
+        self.without.iter().any(|w| w == layer)
     }
 
     /// Whether a file name is code in this stack.
@@ -418,6 +365,20 @@ impl Layout {
             Some("") => true,
             Some(suffix) => name.ends_with(&suffix.to_ascii_lowercase()),
             None => name == self.code.to_ascii_lowercase(),
+        }
+    }
+
+    /// Whether the file named `name`, in a project of this layout, has comments to read. Not every code file has them,
+    /// and one that has them is not always a code file: a Rust layout's code files are its manifests.
+    pub fn has_comments(&self, name: &str) -> bool {
+        match self.language {
+            // Every code file of a Python layout is a `.py` file: a test reads every layout
+            Language::Python => self.is_code(name),
+            // Every file in `src/` is code in the layout; only source has comments to read
+            Language::TypeScript => self.is_code(name) && crate::code::is_source(name),
+            // The code files of a Rust layout are its crates' manifests; the comments are in the `.rs` files beside
+            // them
+            Language::Rust => crate::rust::is_source(name),
         }
     }
 }
@@ -489,176 +450,6 @@ fn render(files: &[File], at: &str, name: &str, prefix: &str, doc: &str) -> Vec<
         .collect()
 }
 
-/// What a project declares in `.config/rotproof.toml`.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Declaration {
-    pub stack: String,
-    /// The areas the records are grouped by, in this order. Required, so a declaration written before areas existed
-    /// fails with the field it lacks rather than with every record's tag
-    pub areas: Vec<String>,
-    /// The UI, which picks the layers of the screens: one of [`uis`] of the stack. Required with a stack that has
-    /// layers, and `rotproof create` adds it ([`ADDED`]); never set for a repository of records only. Read as optional
-    /// so that a declaration without it reaches the check that names it, rather than failing to read
-    #[serde(default)]
-    pub ui: Option<String>,
-    #[serde(default)]
-    pub absent: Vec<String>,
-    #[serde(default)]
-    pub unchecked: Vec<String>,
-    /// The version of Rotproof the project's files are up to (`upgrade.rs`). `None` is the first release; only
-    /// `rotproof init` writes it
-    #[serde(default)]
-    pub files: Option<String>,
-    /// The updates of the project's files it declines, by name (`upgrade.rs`)
-    #[serde(default)]
-    pub declined: Vec<String>,
-}
-
-/// What is wrong with a list of areas. An area becomes a heading, so it has text, no space at either end, and no other
-/// area differs from it only in case.
-pub fn area_problems(areas: &[String]) -> Vec<String> {
-    let mut found = Vec::new();
-    for (i, area) in areas.iter().enumerate() {
-        if area.trim().is_empty() {
-            found.push(format!("{DECLARATION}: areas has an empty area"));
-        } else if area.trim() != area {
-            found.push(format!(
-                "{DECLARATION}: areas has {area:?}, with a space at one end"
-            ));
-        } else if area.contains(['\n', '\r']) {
-            // A heading is one line: the rest would become text, or a heading of its own
-            found.push(format!(
-                "{DECLARATION}: areas has {area:?}, on more than one line: an area is one heading"
-            ));
-        }
-        if let Some(earlier) = areas[..i]
-            .iter()
-            .find(|earlier| earlier.to_lowercase() == area.to_lowercase())
-        {
-            found.push(format!(
-                "{DECLARATION}: areas has {earlier:?} and {area:?}, two names for one heading"
-            ));
-        }
-    }
-    found
-}
-
-/// The declaration `text` holds, or why it cannot be read.
-pub fn parse_declaration(text: &str) -> Result<Declaration, String> {
-    toml::from_str(text).map_err(|e| {
-        let why = e.message().to_string();
-        // A field a newer Rotproof requires: the upgrade is not to look the field up
-        match ADDED
-            .iter()
-            .find(|f| why == format!("missing field `{}`", f.name))
-        {
-            Some(_) => missing_field(&why),
-            None => why,
-        }
-    })
-}
-
-/// What a declaration that lacks a field of [`ADDED`] says: which command adds it. A declaration written by an older
-/// Rotproof lacks one, and `rotproof create` adds it but does not set `files` nor say what the upgrade asks of the
-/// project by hand, so the upgrade is `rotproof init`. The declaration cannot tell the two cases apart when it cannot
-/// be read, so the words are those of every other file that is missing.
-fn missing_field(why: &str) -> String {
-    format!("{why}: {INIT_OR_CREATE}; either adds it")
-}
-
-/// What `areas` is, as the declaration says it above the field.
-const AREAS_COMMENT: &str = "# The areas the knowledge documents are grouped by, in this order, such as \"billing\" or \"records\".\n\
-                             # Every knowledge document has exactly one of them in tags, and its index groups by them\n";
-
-/// What `ui` is, as the declaration says it above the field.
-const UI_COMMENT: &str = "# The UI of this project, which picks the layers of its screens: \"none\" for a project with no screens\n\
-                          # (a command-line tool, a library, a server), so none is made or checked\n";
-
-/// A field the declaration requires that `rotproof create` adds when it is missing, so a declaration written by an
-/// older Rotproof fails only until the upgrade runs `rotproof init` (or `rotproof create`), never on its shape.
-pub struct Added {
-    pub name: &'static str,
-    /// What it is, as `rotproof init` writes it above the field
-    pub comment: &'static str,
-    /// Where the first value came from, and what to do with it, written under the comment
-    pub first_value: &'static str,
-    /// Required only with a stack that has layers: a repository of records only never gets it
-    pub layers_only: bool,
-}
-
-/// Every field `rotproof create` adds. Each has a rule for its first value in `create.rs`.
-pub const ADDED: [Added; 2] = [
-    Added {
-        name: "areas",
-        comment: AREAS_COMMENT,
-        first_value: "# Added by `rotproof create` with the tags the records use, sorted by name: put them in the order\n\
-                      # the index files should show them\n",
-        layers_only: false,
-    },
-    Added {
-        name: "ui",
-        comment: UI_COMMENT,
-        first_value: "# Added by `rotproof create`: the UI whose layers the tree held, or \"none\" when it held none\n",
-        layers_only: true,
-    },
-];
-
-/// The names of the fields of [`ADDED`] the declaration `text` lacks, in that order. `None` when it is not TOML: then
-/// its own error stands.
-pub fn lacking(text: &str) -> Option<Vec<&'static str>> {
-    let document = text.parse::<DocumentMut>().ok()?;
-    let records_only = document.get("stack").and_then(Item::as_str) == Some(RECORDS_ONLY);
-    Some(
-        ADDED
-            .iter()
-            .filter(|field| !(field.layers_only && records_only))
-            .map(|field| field.name)
-            .filter(|name| !document.contains_key(name))
-            .collect(),
-    )
-}
-
-/// The first value of a field `rotproof create` adds: a list (`areas`) or a name (`ui`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum First {
-    List(Vec<String>),
-    Name(String),
-}
-
-/// The declaration `text` with each field of `values` (a name of [`ADDED`], and its first value) added under its
-/// comment, and the fields added as `name = value`. The comments and the values already there are kept, and the
-/// lines end with `\n`, as `text` was read: the caller writes it as the project wrote the file
-/// ([`Written`](crate::tree::Written)).
-pub fn completed(text: &str, values: &[(&str, First)]) -> (String, Vec<String>) {
-    let mut document = text
-        .parse::<DocumentMut>()
-        .expect("lacking read it as TOML");
-    let mut added = Vec::new();
-    for (name, value) in values {
-        let field = ADDED
-            .iter()
-            .find(|field| field.name == *name)
-            .unwrap_or_else(|| panic!("{name} is a field of ADDED"));
-        let value = match value {
-            First::List(items) => {
-                let mut array = Array::new();
-                array.extend(items.iter().map(String::as_str));
-                Value::Array(array)
-            }
-            First::Name(name) => Value::from(name.as_str()),
-        };
-        document.insert(field.name, Item::Value(value));
-        let mut key = document
-            .key_mut(field.name)
-            .expect("the field was inserted just before");
-        key.leaf_decor_mut()
-            .set_prefix(format!("\n{}{}", field.comment, field.first_value));
-        added.push(format!("{} = {}", field.name, document[field.name]));
-    }
-    (document.to_string(), added)
-}
-
 /// Every stack a declaration may name, `none` last.
 pub fn known_stacks() -> Vec<&'static str> {
     STACKS
@@ -668,164 +459,10 @@ pub fn known_stacks() -> Vec<&'static str> {
         .collect()
 }
 
-/// The declaration `rotproof init` writes for a stack and, with layers, its UI: every field with what it means, so the
-/// project edits it rather than looking it up.
-pub fn declaration_text(stack: &str, ui: &str) -> String {
-    let head = "# What Rotproof keeps in this project. Edit it, then run `rotproof create` to make what is missing.\n\
-                # `rotproof check` fails when the tree and this file differ, either way.\n";
-    let stacks = known_stacks().join(" | ");
-    let areas = format!("{AREAS_COMMENT}areas = []\n");
-    let upgrades =
-        format!("\n{FILES_COMMENT}files = \"{VERSION}\"\n\n{DECLINED_COMMENT}declined = []\n");
-    if stack == RECORDS_ONLY {
-        return format!(
-            "{head}\n# {stacks}. \"none\": records only (docs/), no layers to make or check\n\
-             stack = \"{stack}\"\n\n{areas}{upgrades}"
-        );
-    }
-    let offered = uis(stack).unwrap_or_default().join(" | ");
-    format!(
-        "{head}\n# {stacks}\nstack = \"{stack}\"\n\n{areas}\n{UI_COMMENT}# {offered}\nui = \"{ui}\"\n\n\
-         # Layers this project does not have, such as \"ui.templates\". Delete the directory too\n\
-         absent = []\n\n\
-         # Paths outside the layers that Rotproof does not look into, such as \"scripts\" (helper scripts, generated\n\
-         # or vendored code). A path that holds a layer, or does not exist, fails\n\
-         unchecked = []\n{upgrades}"
-    )
-}
-
-/// What `declined` is, as the declaration says it above the field.
-pub const DECLINED_COMMENT: &str = "# Updates of the project's files this project declines, by name, such as \"claude-deny-approvals\".\n\
-                                    # `rotproof init` says when one cannot be applied without a person\n";
-
-/// What `files` is, as the declaration says it above the field.
-pub const FILES_COMMENT: &str = "# The version of Rotproof the project's files are up to. Written by `rotproof init`: after upgrading\n\
-                                 # Rotproof, run it again, and it updates them\n";
-
-/// A declaration together with the layout it names. `Err` is every reason the two do not fit, for the check.
-#[derive(Debug)]
-pub struct Declared {
-    pub declaration: Declaration,
-    /// `None` for a repository that keeps records only (`stack = "none"`)
-    pub layout: Option<Layout>,
-    pub places: Vec<Place>,
-    /// What `absent` names in a layer the declared UI leaves out (`ui` with `ui = "none"`): it says nothing, and the
-    /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs
-    pub left_out: Vec<String>,
-}
-
-impl Declared {
-    pub fn new(declaration: Declaration) -> Result<Self, Vec<String>> {
-        if declaration.stack == RECORDS_ONLY {
-            let mut found = Vec::new();
-            for (field, values) in [
-                ("absent", &declaration.absent),
-                ("unchecked", &declaration.unchecked),
-            ] {
-                if !values.is_empty() {
-                    found.push(format!(
-                        "{DECLARATION}: stack = \"none\" has no layers, so {field} must be empty: {values:?}"
-                    ));
-                }
-            }
-            if let Some(ui) = &declaration.ui {
-                found.push(format!(
-                    "{DECLARATION}: stack = \"none\" has no layers, so it has no ui: take out ui = {ui:?}"
-                ));
-            }
-            if !found.is_empty() {
-                return Err(found);
-            }
-            return Ok(Declared {
-                declaration,
-                layout: None,
-                places: Vec::new(),
-                left_out: Vec::new(),
-            });
-        }
-        let Some(offered) = uis(&declaration.stack) else {
-            return Err(vec![format!(
-                "{DECLARATION}: unknown stack {:?} (known: {})",
-                declaration.stack,
-                known_stacks().join(", ")
-            )]);
-        };
-        let Some(ui) = &declaration.ui else {
-            return Err(vec![unreadable(&missing_field("missing field `ui`"))]);
-        };
-        let Some(layout) = layout(&declaration.stack, ui) else {
-            return Err(vec![format!(
-                "{DECLARATION}: unknown ui {ui:?} for the {} stack (known: {})",
-                declaration.stack,
-                offered.join(", ")
-            )]);
-        };
-        let places = layout.places(&table());
-        let in_layer = |name: &str| {
-            name.split_once('.')
-                .map_or(name, |(layer, _)| layer)
-                .to_string()
-        };
-        let (left_out, unknown): (Vec<String>, Vec<String>) = declaration
-            .absent
-            .iter()
-            .filter(|name| !places.iter().any(|p| &p.name == *name))
-            .cloned()
-            .partition(|name| layout.without.contains(&in_layer(name)));
-        if !unknown.is_empty() {
-            return Err(unknown
-                .iter()
-                .map(|name| {
-                    format!(
-                        "{DECLARATION}: absent names {name:?}, which the {} layout does not have",
-                        declaration.stack
-                    )
-                })
-                .collect());
-        }
-        Ok(Declared {
-            declaration,
-            layout: Some(layout),
-            places,
-            left_out,
-        })
-    }
-
-    /// Declared absent itself, or inside a layer declared absent.
-    pub fn is_absent(&self, place: &Place) -> bool {
-        let absent = &self.declaration.absent;
-        absent.contains(&place.name) || place.parent.as_ref().is_some_and(|p| absent.contains(p))
-    }
-
-    /// The paths in `unchecked`, as compared: without a `/` at the end.
-    pub fn unchecked(&self) -> impl Iterator<Item = &str> {
-        self.declaration
-            .unchecked
-            .iter()
-            .map(|path| path.trim_end_matches('/'))
-    }
-
-    /// The layer or level a path in `unchecked` holds or sits in. Such a path switches nothing off: a layer cannot be.
-    pub fn overlapped(&self, path: &str) -> Option<&Place> {
-        self.places
-            .iter()
-            .find(|p| within(&p.path, path) || within(path, &p.path))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_line_for_a_missing_declaration_lists_every_stack() {
-        let listed = MISSING.split_once('(').unwrap().1;
-        for stack in known_stacks() {
-            assert!(listed.contains(stack), "{stack} is not in: {MISSING}");
-        }
-        // Nothing more: a stack removed from `layers/` leaves the line too
-        assert_eq!(listed.matches(',').count() + 1, known_stacks().len());
-    }
+    use crate::paths::within;
 
     #[test]
     fn every_definition_reads() {
@@ -1018,17 +655,14 @@ mod tests {
         let lib = &protocol.files[1].1;
         assert!(lib.starts_with("//! The contracts") && lib.contains("\n//!\n"));
         // A crate compiles a module only when its `lib.rs` declares it
-        for layer in rust.iter().filter(|p| p.parent.is_none()) {
+        for layer in rust.iter().filter(|p| p.is_layer()) {
             let lib = layer
                 .files
                 .iter()
                 .find(|(path, _)| path.ends_with("/src/lib.rs"))
                 .map(|(_, text)| text)
                 .unwrap_or_else(|| panic!("{} has no lib.rs", layer.name));
-            let levels: Vec<&Place> = rust
-                .iter()
-                .filter(|p| p.parent.as_ref() == Some(&layer.name))
-                .collect();
+            let levels: Vec<&Place> = rust.iter().filter(|p| p.is_level_of(layer)).collect();
             let declared = lib.lines().filter(|l| l.starts_with("pub mod ")).count();
             assert_eq!(declared, levels.len(), "{}: {lib}", layer.name);
             for level in levels {
@@ -1058,122 +692,22 @@ mod tests {
     }
 
     #[test]
-    fn the_declaration_init_writes_reads_back() {
-        for stack in known_stacks() {
-            for ui in uis(stack).unwrap_or_else(|| vec![String::new()]) {
-                let declaration: Declaration = parse_declaration(&declaration_text(stack, &ui))
-                    .unwrap_or_else(|e| panic!("{stack}: {e}"));
-                assert_eq!(declaration.stack, stack);
-                assert_eq!(declaration.ui, (!ui.is_empty()).then_some(ui.clone()));
-                assert!(Declared::new(declaration).is_ok(), "{stack} {ui}");
-            }
-        }
-    }
-
-    #[test]
-    fn the_ui_picks_the_layers_of_the_screens() {
-        let declared = |text: &str| Declared::new(parse_declaration(text).unwrap());
-        let names = |declared: &Declared| -> Vec<String> {
-            declared.places.iter().map(|p| p.name.clone()).collect()
-        };
-        let atomic = declared("stack = \"python\"\nareas = []\nui = \"atomic\"\n").unwrap();
-        assert!(names(&atomic).contains(&"ui.pages".to_string()));
-        assert!(names(&atomic).contains(&"presentation.models".to_string()));
-        let none = declared("stack = \"python\"\nareas = []\nui = \"none\"\n").unwrap();
-        assert!(
-            !names(&none)
-                .iter()
-                .any(|n| n.starts_with("ui") || n.starts_with("presentation")),
-            "{:?}",
-            names(&none)
-        );
-        // Nothing imports a layer that is not there: composition loses ui and presentation
-        let composition = none
-            .places
-            .iter()
-            .find(|p| p.name == "composition")
-            .unwrap();
-        assert!(!composition.imports.contains(&"ui".to_string()));
-        // absent naming a layer the UI leaves out reads, so an upgrade still runs, and is kept for the check to name
-        let left = declared("stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"ui\", \"presentation.display\"]\n")
-            .unwrap();
-        assert_eq!(left.left_out, ["ui", "presentation.display"]);
-        assert_eq!(
-            declared("stack = \"python\"\nareas = []\n").unwrap_err(),
-            [
-                ".config/rotproof.toml: missing field `ui`: run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise; either adds it"
-            ]
-        );
-        assert_eq!(
-            declared("stack = \"rust\"\nareas = []\nui = \"atomic\"\n").unwrap_err(),
-            [".config/rotproof.toml: unknown ui \"atomic\" for the rust stack (known: none)"]
-        );
-        assert!(
-            declared("stack = \"none\"\nareas = []\nui = \"none\"\n").unwrap_err()[0]
-                .contains("has no ui")
-        );
-    }
-
-    #[test]
-    fn a_field_create_adds_is_named_with_the_commands_that_add_it() {
-        // After an upgrade the command is init, which sets `files`, and create otherwise: the declaration, which
-        // cannot be read without the field, says both
-        assert_eq!(
-            parse_declaration("stack = \"none\"\n").unwrap_err(),
-            "missing field `areas`: run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise; \
-             either adds it"
-        );
-        assert_eq!(
-            parse_declaration("areas = []\n").unwrap_err(),
-            "missing field `stack`"
-        );
-    }
-
-    #[test]
-    fn a_lacking_field_is_added_under_its_comment_and_the_rest_is_kept() {
-        let old = "# The project's own note\nstack = \"none\"\n";
-        assert_eq!(lacking(old), Some(vec!["areas"]));
-        assert_eq!(lacking("stack = \"none\"\nareas = []\n"), Some(Vec::new()));
-        assert_eq!(lacking("stack = "), None);
-        let tags = vec!["billing".to_string(), "ops".to_string()];
-        let (text, added) = completed(old, &[("areas", First::List(tags))]);
-        assert_eq!(added, ["areas = [\"billing\", \"ops\"]"]);
-        assert!(text.starts_with(old), "{text}");
-        assert!(text.contains(&format!("\n{AREAS_COMMENT}")), "{text}");
-        assert_eq!(parse_declaration(&text).unwrap().areas, ["billing", "ops"]);
-        // ui only with layers
-        let python = "stack = \"python\"\nareas = []\n";
-        assert_eq!(lacking(python), Some(vec!["ui"]));
-        let (text, added) = completed(python, &[("ui", First::Name("none".into()))]);
-        assert_eq!(added, ["ui = \"none\""]);
-        assert!(text.contains(&format!("\n{UI_COMMENT}")), "{text}");
-        assert_eq!(
-            parse_declaration(&text).unwrap().ui.as_deref(),
-            Some("none")
-        );
-    }
-
-    #[test]
-    fn areas_are_distinct_headings() {
-        let good: Vec<String> = ["rotproof", "記録", "Records of billing"]
-            .map(String::from)
-            .into();
-        assert_eq!(area_problems(&good), Vec::<String>::new());
-        let bad = [
-            vec![""],
-            vec!["  "],
-            vec![" rotproof"],
-            vec!["rotproof "],
-            vec!["rotproof", "Rotproof"],
-            vec!["rotproof", "rotproof"],
-            // A heading is one line, or the rest of the area becomes a heading of its own
-            vec!["injected\n# EVIL_AREA"],
-            vec!["a\rb"],
-        ];
-        for areas in bad {
-            let areas: Vec<String> = areas.into_iter().map(String::from).collect();
-            assert_eq!(area_problems(&areas).len(), 1, "{areas:?}");
-        }
+    fn a_place_is_asked_what_it_is_and_a_layout_what_it_leaves_out() {
+        let table = table();
+        let rust = layout("rust", "none").unwrap();
+        assert_eq!(rust.layer_path("domain"), "crates/domain");
+        // A level is left out with its layer, and a name no layer has is left out by nothing
+        assert!(rust.leaves_out("ui") && rust.leaves_out("ui.pages"));
+        assert!(!rust.leaves_out("infrastructure.inbound") && !rust.leaves_out("nothing"));
+        let atomic = layout("typescript", "atomic").unwrap();
+        assert!(!atomic.leaves_out("ui.pages"));
+        let places = atomic.places(&table);
+        let ui = places.iter().find(|p| p.name == "ui").unwrap();
+        let pages = places.iter().find(|p| p.name == "ui.pages").unwrap();
+        let domain = places.iter().find(|p| p.name == "domain").unwrap();
+        assert!(ui.is_layer() && !pages.is_layer());
+        assert!(pages.is_level_of(ui) && !pages.is_level_of(domain) && !ui.is_level_of(ui));
+        assert_eq!((ui.layer_name(), pages.layer_name()), ("ui", "ui"));
     }
 
     #[test]
@@ -1187,5 +721,18 @@ mod tests {
         layout.code = "Cargo.toml".into();
         assert!(layout.is_code("Cargo.toml") && !layout.is_code("Cargo.lock"));
         assert!(layout.is_code("cargo.toml") && layout.is_code("CARGO.TOML"));
+    }
+
+    #[test]
+    fn the_comments_to_read_are_in_the_source_of_the_language() {
+        let python = layout("python", "atomic").unwrap();
+        assert!(python.has_comments("a.py") && !python.has_comments("a.pyi"));
+        // Source of TypeScript and JavaScript, not what its layout calls code and a reader skips
+        let typescript = layout("typescript", "atomic").unwrap();
+        assert!(typescript.has_comments("a.ts") && typescript.has_comments("a.jsx"));
+        assert!(!typescript.has_comments("a.json"));
+        // A Rust layout's code files are manifests; the comments are in the `.rs` files
+        let rust = layout("rust", "none").unwrap();
+        assert!(rust.has_comments("lib.rs") && !rust.has_comments("Cargo.toml"));
     }
 }

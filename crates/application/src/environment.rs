@@ -3,10 +3,10 @@
 
 use std::io;
 
-use crate::tree::{code_files, exactly, read_code};
+use crate::tree::{code_files, is_file, read_code};
+use domain::declaration::Declared;
 use domain::environment::{BUILD_SCRIPT, finding, in_rust, is_judged};
-use domain::layers::{Declared, Language, table};
-use domain::markers::has_comments;
+use domain::layers::{Language, table};
 use domain::paths::join;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -27,18 +27,18 @@ pub fn problems(
     for layer in declared
         .places
         .iter()
-        .filter(|p| p.parent.is_none() && !declared.is_absent(p) && is_judged(p))
+        .filter(|p| p.is_layer() && !declared.is_absent(p) && is_judged(p))
     {
         // A crate's build script runs before Rust compiles it, and reads what Cargo sets for it
         let build_script = join(&layer.path, BUILD_SCRIPT);
         files.extend(
-            code_files(tree, &layer.path, |name| has_comments(layout, name))?
+            code_files(tree, &layer.path, |name| layout.has_comments(name))?
                 .into_iter()
                 .filter(|path| layout.language != Language::Rust || *path != build_script),
         );
     }
     if let Some(entry) = layout.entry(&table())
-        && exactly(tree, &entry.path).is_ok_and(|(_, is_dir)| !is_dir)
+        && is_file(tree, &entry.path)
     {
         files.push(entry.path);
     }
@@ -189,7 +189,7 @@ const all = import.meta.env;
             ),
         ]);
         let declared = Declared::new(
-            domain::layers::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
+            domain::declaration::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
                 .unwrap(),
         )
         .unwrap();

@@ -14,12 +14,13 @@
 
 use crate::create::{refresh, ui_in_tree};
 use crate::tree::{exactly, read_text, read_written};
-use domain::layers::{
-    DECLARATION, NO_UI, ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT,
-    crosses, declaration_text, known_stacks, layout, retired, uis,
+use domain::crossing::{
+    ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, retired,
 };
+use domain::declaration::{DECLARATION, Fields, declaration_text, fields, with_files};
+use domain::layers::{NO_UI, known_stacks, layout, uis};
 use domain::tree::Written;
-use domain::upgrade::{FIRST, Fields, Update, fields, pending, with_files};
+use domain::upgrade::{FIRST, Update, pending};
 use protocol::inbound::{Initialized, Upgraded};
 use protocol::outbound::{Tree, Writer};
 
@@ -190,8 +191,8 @@ fn presentation_moves(tree: &dyn Tree, declared: &Fields) -> Vec<String> {
     let Some(layout) = layout(stack, &ui) else {
         return Vec::new();
     };
-    let path = |name: &str| layout.layer.path.replace("{name}", name);
-    let has = |name: &str| !layout.without.iter().any(|w| w == name);
+    let path = |name: &str| layout.layer_path(name);
+    let has = |name: &str| !layout.leaves_out(name);
     let mut moves = Vec::new();
     if has("presentation")
         && !declared.absent.iter().any(|a| a == "presentation")
@@ -253,7 +254,7 @@ fn written_done(tree: &dyn Tree, update: Update, written: &[String]) -> Result<b
 mod tests {
     use super::*;
     use crate::tree::fake::Fake;
-    use domain::upgrade::fields as read_fields;
+    use domain::declaration::fields as read_fields;
 
     const SETTINGS: &str = ".claude/settings.json";
 
@@ -618,7 +619,7 @@ mod tests {
         ));
         // Up to 0.2.0 whatever this Rotproof is: the declaration is written with its version
         let written = tree.text(DECLARATION).unwrap();
-        let running = format!("files = \"{}\"", domain::upgrade::VERSION);
+        let running = format!("files = \"{}\"", domain::version::VERSION);
         assert!(written.contains(&running), "{written}");
         let declaration = written
             .replace(&running, "files = \"0.2.0\"")
@@ -688,7 +689,7 @@ mod tests {
         ));
         // Up to 0.3.0 whatever this Rotproof is: the declaration is written with its version
         let written = tree.text(DECLARATION).unwrap();
-        let running = format!("files = \"{}\"", domain::upgrade::VERSION);
+        let running = format!("files = \"{}\"", domain::version::VERSION);
         assert!(written.contains(&running), "{written}");
         tree.write(DECLARATION, &written.replace(&running, "files = \"0.3.0\""))
             .unwrap();

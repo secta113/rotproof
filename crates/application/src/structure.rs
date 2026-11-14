@@ -5,7 +5,7 @@ use std::io;
 
 use crate::layers::read;
 use crate::tree::{code_files, exactly};
-use domain::layers::{DECLARATION, Declared};
+use domain::declaration::{DECLARATION, Declared};
 use domain::structure::{Seen, listed, named, problems as judged};
 use protocol::outbound::Tree;
 

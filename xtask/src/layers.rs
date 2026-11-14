@@ -10,7 +10,7 @@ use std::io;
 use std::path::Path;
 
 use application::tree::read_code;
-use domain::layers::DECLARATION;
+use domain::declaration::DECLARATION;
 use domain::markers::{KNOWLEDGE_HEADING, Markers, in_file};
 use infrastructure::outbound::disk::Disk;
 use infrastructure::outbound::readers::Readers;

@@ -3,7 +3,7 @@
 use std::io;
 
 use crate::tree::{Lookup, exactly, lookup};
-use domain::layers::{DECLARATION, Declaration, MISSING, parse_declaration, unreadable};
+use domain::declaration::{DECLARATION, Declaration, MISSING, parse_declaration, unreadable};
 use protocol::outbound::Tree;
 
 /// The areas a project declares, or why the declaration cannot be read.

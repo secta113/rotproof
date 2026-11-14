@@ -20,7 +20,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::layers::{DECLARATION, Declared, Layout, ONION, Place, retired};
+use crate::crossing::{ONION, retired};
+use crate::declaration::{DECLARATION, Declared};
+use crate::layers::{Layout, Place};
 use crate::paths::{join, within};
 
 /// What the structure check reads from the tree.
@@ -77,11 +79,11 @@ pub fn listed(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> 
 /// Each layer with levels that is there and not declared absent, with its levels.
 fn with_levels<'a>(declared: &'a Declared, seen: &Seen) -> Vec<(&'a Place, Vec<&'a Place>)> {
     let mut found = Vec::new();
-    for layer in declared.places.iter().filter(|p| p.parent.is_none()) {
+    for layer in declared.places.iter().filter(|p| p.is_layer()) {
         let levels: Vec<&Place> = declared
             .places
             .iter()
-            .filter(|p| p.parent.as_ref() == Some(&layer.name))
+            .filter(|p| p.is_level_of(layer))
             .collect();
         if levels.is_empty() || declared.is_absent(layer) || !seen.present(&layer.path) {
             continue;
@@ -91,8 +93,23 @@ fn with_levels<'a>(declared: &'a Declared, seen: &Seen) -> Vec<(&'a Place, Vec<&
     found
 }
 
-/// Every way the tree, as `seen`, differs from the declaration of a project with layers.
+/// Every way the tree, as `seen`, differs from the declaration of a project with layers, in the order they are
+/// printed: each place there or declared absent, how `unchecked` is written, code outside the layers, views in a layer
+/// that holds none, and code beside the levels of a layer.
 pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> {
+    let mut found = presence(declared, layout, seen);
+    let (unchecked, kept) = unchecked_paths(declared, seen);
+    found.extend(unchecked);
+    found.extend(outside_layers(declared, layout, seen, &kept));
+    found.extend(views(declared, layout, seen));
+    found.extend(outside_levels(declared, seen));
+    found
+}
+
+/// Whether each place is there or declared absent, and the floor: some layer is present. A level is judged only
+/// while its layer is there and not declared absent. The names `absent` holds that the declared UI leaves out come
+/// first.
+fn presence(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> {
     let mut found: Vec<String> = declared
         .left_out
         .iter()
@@ -137,14 +154,20 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
             declared
                 .places
                 .iter()
-                .filter(|p| p.parent.is_none())
+                .filter(|p| p.is_layer())
                 .map(|p| format!("{}/", p.path))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
     }
+    found
+}
 
-    let mut skipped: Vec<&str> = layout.not_layers.iter().map(String::as_str).collect();
+/// How `unchecked` is written, one finding for each path that is not fit to be read as it is, and the paths that are:
+/// the ones that switch the check of code off.
+fn unchecked_paths<'a>(declared: &'a Declared, seen: &Seen) -> (Vec<String>, Vec<&'a str>) {
+    let mut found = Vec::new();
+    let mut kept = Vec::new();
     for path in declared.unchecked() {
         if path.contains('\\') {
             found.push(format!(
@@ -168,9 +191,23 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
                 "unchecked lists {path}, which does not exist: remove it"
             ));
         } else {
-            skipped.push(path);
+            kept.push(path);
         }
     }
+    (found, kept)
+}
+
+/// The code outside the layers, one finding for each entry of the layout's scope that holds some: the paths that are
+/// not layers (`tests/`), the entry file and `unchecked_paths`, the ones `unchecked` keeps, are not counted.
+fn outside_layers(
+    declared: &Declared,
+    layout: &Layout,
+    seen: &Seen,
+    unchecked: &[&str],
+) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut skipped: Vec<&str> = layout.not_layers.iter().map(String::as_str).collect();
+    skipped.extend(unchecked);
     // The entry file is no layer, and code all the same: the direction check reads it
     if let Some(entry) = &layout.entry {
         skipped.push(entry);
@@ -195,7 +232,12 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
             "code outside the layers: {outside} (move it into a layer{goes} or list it in unchecked in {DECLARATION})"
         ));
     }
-    found.extend(views(declared, layout, seen));
+    found
+}
+
+/// The code in a layer with levels that sits beside them, one finding for each entry of the layer that holds some.
+fn outside_levels(declared: &Declared, seen: &Seen) -> Vec<String> {
+    let mut found = Vec::new();
     for (layer, levels) in with_levels(declared, seen) {
         // Where a part of the UI goes needs saying; elsewhere the levels say it by their names
         let goes = if layer.name == "ui" {
@@ -306,7 +348,7 @@ fn where_ui_parts_go(places: &[Place]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layers::parse_declaration;
+    use crate::declaration::parse_declaration;
 
     fn declared(text: &str) -> Declared {
         Declared::new(parse_declaration(text).unwrap()).unwrap()
@@ -350,6 +392,32 @@ mod tests {
                 .iter()
                 .any(|p| p.starts_with("ui") || p.starts_with("presentation"))
         );
+    }
+
+    #[test]
+    fn unchecked_is_read_path_by_path_and_keeps_the_ones_that_fit() {
+        let declared = declared(
+            "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"a\\\\b\", \"./scripts\", \"domain/x\", \
+             \"gone/\", \"scripts/\"]\n",
+        );
+        let mut seen = Seen::default();
+        for path in named(&declared) {
+            seen.named.insert(path, Ok(()));
+        }
+        seen.named
+            .insert("gone".into(), Err("missing: gone".into()));
+        let (found, kept) = unchecked_paths(&declared, &seen);
+        assert_eq!(
+            found,
+            [
+                "unchecked lists \"a\\\\b\": separate a path with /, which every platform reads",
+                "unchecked lists \"./scripts\": write a path from the root, such as scripts or src/generated",
+                "unchecked lists domain/x, which holds or sits in the layer domain (domain/): a layer cannot be \
+                 switched off",
+                "unchecked lists gone, which does not exist: remove it",
+            ]
+        );
+        assert_eq!(kept, ["scripts"]);
     }
 
     #[test]

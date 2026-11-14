@@ -119,6 +119,12 @@ pub fn exactly(tree: &dyn Tree, rel: &str) -> Result<(String, bool), String> {
     }
 }
 
+/// Whether `path` names a file exactly, as [`exactly`] reads it: not a directory, and not there only as Windows reads
+/// names.
+pub fn is_file(tree: &dyn Tree, path: &str) -> bool {
+    exactly(tree, path).is_ok_and(|(_, is_dir)| !is_dir)
+}
+
 /// Where `path` (from the root) lands as the operating system resolves it ([`Tree::landed`]): the longest beginning of
 /// it that lands inside the root, with the rest as written, so an import that names a module without its extension, or
 /// a name inside a file, lands by the directory it is in. On Windows, a directory in another case, with dots or spaces

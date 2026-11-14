@@ -79,14 +79,9 @@ pub fn place_of<'a>(path: &str, places: &[&'a Place]) -> Option<&'a Place> {
         .max_by_key(|place| place.path.len())
 }
 
-/// The layer a place sits in: itself, or the layer of a level.
-fn layer_name(place: &Place) -> &str {
-    place.parent.as_deref().unwrap_or(&place.name)
-}
-
 /// Whether an entry of a place's imports takes in the place `to`: a layer with its levels, or one level.
 fn covers(import: &str, to: &Place) -> bool {
-    import == to.name || import == layer_name(to)
+    import == to.name || import == to.layer_name()
 }
 
 /// Whether the place `from` may import the place `to`.
@@ -97,10 +92,10 @@ fn allowed(from: &Place, to: &Place) -> bool {
     let imported = |to: &Place| from.imports.iter().any(|i| covers(i, to));
     match &from.parent {
         // A layer may import itself, the levels inside it included, and what its imports name
-        None => layer_name(to) == from.name || imported(to),
+        None => to.layer_name() == from.name || imported(to),
         // A level may import the levels below it, and what its imports name; not its layer beside the levels
         Some(parent) => {
-            if layer_name(to) != parent {
+            if to.layer_name() != parent {
                 return imported(to);
             }
             from.below.contains(&to.name)
@@ -111,7 +106,7 @@ fn allowed(from: &Place, to: &Place) -> bool {
 /// The place an import lands in, for the message. A level that imports its own layer imports what sits beside the
 /// levels, which has no place in their order.
 fn described(from: &Place, to: &Place) -> String {
-    if to.parent.is_none() && from.parent.as_deref() == Some(to.name.as_str()) {
+    if to.is_layer() && from.is_level_of(to) {
         return format!("in {} outside its levels", to.name);
     }
     format!("in {}", to.name)

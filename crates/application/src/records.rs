@@ -9,7 +9,7 @@ use crate::finding::under;
 use crate::links::broken;
 use crate::tree::{exactly, read_text};
 use domain::bundle::{DOCS, Docs, in_docs, is_document};
-use domain::layers::{DECLARATION, area_problems};
+use domain::declaration::{DECLARATION, area_problems};
 use domain::markdown;
 use domain::paths::join;
 use domain::records::{KNOWLEDGE, floor, log_days_to_come, log_problems, unread_paths};
