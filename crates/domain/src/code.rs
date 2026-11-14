@@ -3,8 +3,8 @@
 //!
 //! The readers wrap parsers (Ruff for Python, oxc for TypeScript, toml_edit for a `Cargo.toml`) and give what a file
 //! imports, its comments and its first syntax error; the checks judge those values and never see a parser. The
-//! rules on the values are here too: the module a Python file is, which files are TypeScript source, and where a
-//! TypeScript import lands through the project's aliases.
+//! rules on the values are here too: the module a Python file is, which files are TypeScript source, the alias an
+//! entry of `compilerOptions.paths` makes, and where a TypeScript import lands through the project's aliases.
 //!
 //! Where a TypeScript import lands is a path from the root, found without asking whether a file is there: the place of
 //! an import is its directory. A relative specifier resolves against the file's directory, and one that starts with
@@ -99,6 +99,27 @@ pub enum Landing {
 }
 
 impl Alias {
+    /// The alias one entry of `paths`, `pattern` mapped to its first `target`, makes, the target resolved against the
+    /// directory `base` (from the root) and the entry kept as the one of `config`. `None` when the entry cannot be
+    /// read: a pattern with more than one `*`, or a target with more `*` than the pattern, since there would be no
+    /// text to put in the extra one.
+    pub fn from_entry(pattern: &str, target: &str, base: &str, config: &str) -> Option<Alias> {
+        let stars = pattern.matches('*').count();
+        if stars > 1 || target.matches('*').count() > stars {
+            return None;
+        }
+        let (prefix, suffix) = match pattern.split_once('*') {
+            Some((prefix, suffix)) => (prefix.to_string(), Some(suffix.to_string())),
+            None => (pattern.to_string(), None),
+        };
+        Some(Alias {
+            prefix,
+            suffix,
+            target: join(base, target),
+            config: config.to_string(),
+        })
+    }
+
     /// The target `specifier` maps to, with what the `*` matched in place of the target's `*`; `None` when the
     /// pattern does not match it.
     pub fn mapped(&self, specifier: &str) -> Option<String> {
@@ -203,16 +224,7 @@ mod tests {
     #[test]
     fn the_alias_with_the_longest_prefix_maps_and_a_suffix_must_match() {
         let alias = |pattern: &str, target: &str| {
-            let (prefix, suffix) = match pattern.split_once('*') {
-                Some((prefix, suffix)) => (prefix.to_string(), Some(suffix.to_string())),
-                None => (pattern.to_string(), None),
-            };
-            Alias {
-                prefix,
-                suffix,
-                target: target.into(),
-                config: "tsconfig.json".into(),
-            }
+            Alias::from_entry(pattern, target, "", "tsconfig.json").unwrap()
         };
         let aliases = Aliases {
             paths: vec![
@@ -240,6 +252,33 @@ mod tests {
             aliases.resolve("src/a.ts", "#styles/main.scss"),
             Landing::UnderBaseUrl(Vec::new())
         );
+    }
+
+    #[test]
+    fn an_entry_of_paths_with_one_star_at_most_on_both_sides_is_an_alias() {
+        let alias = Alias::from_entry("@/*", "*", "src", "tsconfig.app.json").unwrap();
+        assert_eq!(alias.prefix, "@/");
+        assert_eq!(alias.suffix.as_deref(), Some(""));
+        assert_eq!(alias.target, "src/*");
+        assert_eq!(alias.config, "tsconfig.app.json");
+        // A pattern without `*` is itself, and so is its target, from the root when the base is
+        let theme = Alias::from_entry("#theme", "ui/theme", "", "tsconfig.json").unwrap();
+        assert_eq!((theme.prefix.as_str(), theme.suffix), ("#theme", None));
+        assert_eq!(theme.target, "ui/theme");
+        // A suffix is what follows the `*`
+        let css = Alias::from_entry("#styles/*.css", "s/*.css", "src", "t.json").unwrap();
+        assert_eq!(
+            (css.prefix.as_str(), css.suffix.as_deref()),
+            ("#styles/", Some(".css"))
+        );
+        // Two `*` in the pattern, or more in the target than in the pattern, cannot be read
+        for (pattern, target) in [("*/*", "src/*"), ("a", "src/*"), ("a/*", "*/*")] {
+            assert_eq!(
+                Alias::from_entry(pattern, target, "", "t.json"),
+                None,
+                "{pattern} {target}"
+            );
+        }
     }
 
     #[test]

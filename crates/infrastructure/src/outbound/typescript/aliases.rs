@@ -61,24 +61,13 @@ fn config_names(tree: &dyn Tree) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
-/// The alias one entry of `paths` in the config `name` makes, its target resolved against `base`; the problem when
-/// Rotproof cannot read the entry: a `*` more than once in the pattern, or more in the target than in the pattern.
+/// The alias one entry of `paths` in the config `name` makes ([`Alias::from_entry`]), its target resolved against
+/// `base`; the problem when Rotproof cannot read the entry.
 fn alias_of(name: &str, base: &str, pattern: &str, target: &str) -> Result<Alias, String> {
-    let stars = pattern.matches('*').count();
-    if stars > 1 || target.matches('*').count() > stars {
-        return Err(format!(
+    Alias::from_entry(pattern, target, base, name).ok_or_else(|| {
+        format!(
             "{name}: paths maps {pattern:?} to {target:?}, which Rotproof cannot read: one * at most, on both sides"
-        ));
-    }
-    let (prefix, suffix) = match pattern.split_once('*') {
-        Some((prefix, suffix)) => (prefix.to_string(), Some(suffix.to_string())),
-        None => (pattern.to_string(), None),
-    };
-    Ok(Alias {
-        prefix,
-        suffix,
-        target: join(base, target),
-        config: name.to_string(),
+        )
     })
 }
 

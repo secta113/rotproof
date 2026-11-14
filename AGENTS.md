@@ -86,7 +86,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `records.rs` | The rules of the records `rotproof check` runs on what it read: the files under `docs/knowledge/` Rotproof would not read, the log's structure, its days that have not come (against the latest day it is anywhere), and the floor of the bundle |
 | `tree.rs` | How Rotproof reads a file's text, how it writes the text back as the file was written (its line endings and byte order mark), and how Windows reads a name |
 | `upgrade.rs` | Upgrading a project's files: the version they are up to (`files` in the declaration), the named updates a later version brings to the files `rotproof create` writes once, and what each does to its file |
-| `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, and where a TypeScript import lands |
+| `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, the alias an entry of `paths` makes, and where a TypeScript import lands |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; and where Cargo looks for a workspace |
 | `modules.rs` | The levels inside a Rust crate: the module each file of `src/` is, every path it names from `crate`, `super`, `self` or a dependency on another layer judged by the level it lands in, the crate's root holding only its levels' modules, and no `#[path]` |
 | `layers.rs` | The layer definitions in `layers/`, what a project's `.config/rotproof.toml` says, and the fields `rotproof create` adds to it |
