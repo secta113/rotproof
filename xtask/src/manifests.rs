@@ -31,6 +31,14 @@ pub fn members(root: &str) -> Result<Vec<String>, String> {
         .collect()
 }
 
+/// The manifests to read, as paths from the root: the root `Cargo.toml` itself, whose package `rotproof` is no member
+/// of the workspace, and the manifest of each member. `members` is what the root lists
+pub fn manifests(members: &[String]) -> Vec<String> {
+    std::iter::once("Cargo.toml".to_string())
+        .chain(members.iter().map(|m| format!("{m}/Cargo.toml")))
+        .collect()
+}
+
 /// Where the manifest at `path` names a dependency's version or path itself, instead of taking it from the workspace
 pub fn problems(path: &str, manifest: &str) -> Result<Vec<String>, String> {
     let doc: DocumentMut = manifest.parse().map_err(|e| format!("{path}: {e}"))?;
@@ -75,6 +83,20 @@ mod tests {
         let root = "[workspace]\nmembers = [\"xtask\", \"crates/domain\"]\n";
         assert_eq!(members(root).unwrap(), ["xtask", "crates/domain"]);
         assert!(members("[package]\nname = \"a\"\n").is_err());
+    }
+
+    #[test]
+    fn the_root_manifest_is_read_with_the_members() {
+        let members = ["xtask", "crates/domain"].map(String::from);
+        assert_eq!(
+            manifests(&members),
+            ["Cargo.toml", "xtask/Cargo.toml", "crates/domain/Cargo.toml"]
+        );
+        // The root's own tables are read like a member's, and `[workspace.dependencies]` is not one of them
+        let root = "[package]\nname = \"r\"\n\n[dependencies]\ncomposition.workspace = true\n\n\
+                    [dev-dependencies]\ntempfile = \"3\"\n\n[workspace]\nmembers = []\n\n\
+                    [workspace.dependencies]\ntempfile = \"3.27.0\"\n";
+        assert_eq!(problems("Cargo.toml", root).unwrap().len(), 1);
     }
 
     #[test]

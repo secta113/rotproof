@@ -194,15 +194,15 @@ fn install_version(root: &Path) -> Result<Vec<String>, String> {
     ))
 }
 
-/// Where a member of the workspace names a dependency's source itself. The floor: at least one member is read
+/// Where the root package or a member of the workspace names a dependency's source itself. The floor: at least one
+/// member is read
 fn dependencies(root: &Path) -> Result<Vec<String>, String> {
     let members = manifests::members(&read(root, "Cargo.toml")?)?;
     if members.is_empty() {
         return Err("Cargo.toml lists no member, so no crate's dependencies were read".into());
     }
     let mut found = Vec::new();
-    for member in members {
-        let path = format!("{member}/Cargo.toml");
+    for path in manifests::manifests(&members) {
         found.extend(manifests::problems(&path, &read(root, &path)?)?);
     }
     Ok(found)
@@ -434,6 +434,21 @@ mod tests {
         let path = root.join(file);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn a_dependency_in_the_root_manifest_fails_the_check_beside_the_members() {
+        let root = tempfile::tempdir().unwrap();
+        let manifest = "[package]\nname = \"a\"\n\n[dependencies]\nregex.workspace = true\n";
+        let workspace = "\n[workspace]\nmembers = [\"xtask\"]\n";
+        write(root.path(), "xtask/Cargo.toml", manifest);
+        write(root.path(), "Cargo.toml", &format!("{manifest}{workspace}"));
+        assert!(dependencies(root.path()).unwrap().is_empty());
+        let planted = format!("{manifest}\n[dev-dependencies]\ntempfile = \"3\"\n{workspace}");
+        write(root.path(), "Cargo.toml", &planted);
+        let found = dependencies(root.path()).unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].starts_with("Cargo.toml: [dev-dependencies] tempfile"));
     }
 
     #[test]
