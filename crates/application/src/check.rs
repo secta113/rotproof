@@ -16,7 +16,7 @@ use domain::markers::KNOWLEDGE_HEADING;
 use domain::schema::Time;
 use domain::suppressions::WEAKENS_HEADING;
 use domain::version::VERSION;
-use protocol::inbound::{Finding, Report, Warning};
+use protocol::inbound::{Finding, LinkedTodo, Report, Warning};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -47,7 +47,8 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
 
 /// Every broken rule of the code of `declared`, into `report`: the direction with its approvals, the markers, who
 /// reads the environment, and the comments that switch the type checker off. The approvals go in `report` too, as they
-/// are printed apart from what fails; the comments that may make the checker check less are returned, as warnings.
+/// are printed apart from what fails, and so do the comments tied to an issue; the comments that may make the checker
+/// check less are returned, as warnings.
 fn code(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -79,7 +80,15 @@ fn code(
     report.approved.sort();
     report.approved.dedup();
     let comments = crate::markers::problems(tree, parsers, declared)?;
-    let markers = comments.markers;
+    let mut markers = comments.markers;
+    report.linked = std::mem::take(&mut markers.linked)
+        .into_iter()
+        .map(|linked| LinkedTodo {
+            path: linked.path,
+            line: linked.line,
+            reference: linked.reference,
+        })
+        .collect();
     report
         .findings
         .extend(under(markers.heading(declared.todo_link), markers.found));

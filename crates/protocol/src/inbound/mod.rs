@@ -76,6 +76,18 @@ pub struct Warning {
     pub detail: String,
 }
 
+/// A comment that keeps the first marker of the marker check with the reference of the issue that tracks the work, in a
+/// project that declares `todo_link`. It is no finding: it is listed on every run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedTodo {
+    /// The file, from the root
+    pub path: String,
+    /// Counted from 1
+    pub line: usize,
+    /// The reference as written: `#123` for a number, `ABC-123` for a key
+    pub reference: String,
+}
+
 /// What `rotproof check` found.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -86,6 +98,10 @@ pub struct Report {
     pub layers_checked: bool,
     /// Every forbidden import a person approved, as printed on every run: one line per entry that approves something
     pub approved: Vec<String>,
+    /// Every comment that keeps the first marker with the reference of an issue, in the order of the files and the
+    /// lines: printed on every run apart from the findings and the warnings, and failing nothing. Empty unless the
+    /// declaration has `todo_link`
+    pub linked: Vec<LinkedTodo>,
     /// Every warning, in the order it is printed, each kind under its own heading: a knowledge document whose
     /// `stale_after` has come, with what to do, and a comment that may make the type checker check less
     /// (`# pyright: basic`), as `path:line` and the line under it

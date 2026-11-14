@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use protocol::inbound::{Commands, Initialized, Made, Names, Warning};
+use protocol::inbound::{Commands, Initialized, LinkedTodo, Made, Names, Warning};
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -55,7 +55,11 @@ than today. The rest of docs/ is the project's, and is not read. \
 Prints every broken rule under the check that found it, and what was not checked and why. Warns of every knowledge \
 document whose stale_after has come, on every run from that day, and fails nothing for it: time alone never turns \
 the check red. Warns, too, of every comment that may make a Python type checker check less (# pyright: basic, \
-# mypy: allow-untyped-defs), and fails nothing for it. Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+# mypy: allow-untyped-defs), and fails nothing for it. With todo_link in the declaration (\"number\" or \"key\"), a \
+comment that holds TODO(#123): what is left (\"number\") or TODO(ABC-123): what is left (\"key\"), on one line, with the \
+number or key of the issue that tracks the work, is not a finding: every one is printed on every run under `linked \
+TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. Writes \
+nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
 cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
@@ -427,6 +431,8 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
             println!("  {line}");
         }
     }
+    // A comment tied to an issue is listed apart, on every run, before the warnings and what fails, and fails nothing
+    print_linked(&report.linked);
     // A warning: printed on every run, under the heading of its kind, and failing nothing
     for (heading, details) in warnings(&report.warnings) {
         println!(
@@ -455,6 +461,39 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
         }
     }
     Ok(found.is_empty())
+}
+
+/// What `print_linked` prints for `linked`: the heading with the count, then a line for each, indented by two spaces,
+/// with `path:line`, padded to the longest, two spaces and the reference. Nothing when there are none. A CI step reads
+/// these lines (the README says their form is kept): the first field of a line is the place, the last the reference.
+fn linked_lines(linked: &[LinkedTodo]) -> Vec<String> {
+    if linked.is_empty() {
+        return Vec::new();
+    }
+    let places: Vec<String> = linked
+        .iter()
+        .map(|todo| format!("{}:{}", todo.path, todo.line))
+        .collect();
+    let width = places
+        .iter()
+        .map(|place| place.chars().count())
+        .max()
+        .unwrap_or_default();
+    let mut lines = vec![format!("linked TODO ({})", linked.len())];
+    lines.extend(
+        places
+            .iter()
+            .zip(linked)
+            .map(|(place, todo)| format!("  {place:<width$}  {}", todo.reference)),
+    );
+    lines
+}
+
+/// Print the comments tied to an issue under their heading, apart from the warnings and the findings.
+fn print_linked(linked: &[LinkedTodo]) {
+    for line in linked_lines(linked) {
+        println!("{line}");
+    }
 }
 
 /// The details of each kind of warning, under its heading, in the order the headings first come.
