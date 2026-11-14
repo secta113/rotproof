@@ -25,6 +25,10 @@ pub trait Tree {
     /// Only the `.gitignore` files inside the project count. A global excludes file, `.git/info/exclude` and a
     /// `.gitignore` above the root differ from one machine to another, and would hide code on one machine that fails on
     /// another.
+    ///
+    /// The paths, from the root with `/`, come in the byte order of the whole path (as `String` compares), whatever
+    /// order the file system lists them in, so what a check finds file by file is printed in the same order on every
+    /// machine. A check relies on this and does not sort again.
     fn files(&self, dir: &str) -> io::Result<Vec<String>>;
     /// Where the path `rel`, named from the directory `dir`, lands as the operating system resolves it: from the root,
     /// or `None` when it lands nowhere or outside the root. On Windows, another case, dots and spaces at the end and

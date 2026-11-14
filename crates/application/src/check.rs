@@ -89,11 +89,8 @@ fn code(
             reference: linked.reference,
         })
         .collect();
-    // Sorted by path, then by line: the order a directory gives its files in differs between file systems, and a CI
-    // step reads this list
-    report
-        .linked
-        .sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+    // In the order of the path, then of the line, which a CI step reads, with no sort here: the tree gives the files in
+    // the byte order of their paths (`Tree::files`), and a file's lines come in the order of the file
     report
         .findings
         .extend(under(markers.heading(declared.todo_link), markers.found));

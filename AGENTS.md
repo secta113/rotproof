@@ -57,7 +57,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, which it reads itself, with how a file is parsed and the text of a literal string, which the readers in `typescript/` share; and `read`, which gives the imports, the comments and the reads of the environment |
 | `cargo.rs` | Reading a crate's `Cargo.toml` with toml_edit: the dependencies it declares on a path or its workspace, and its workspace |
 | `readers.rs` | `Parsers` with the readers above |
-| `disk.rs` | `Tree` and `Writer` on the file system, the project's `.gitignore` files kept, the project's name, and the project a directory sits in |
+| `disk.rs` | `Tree` and `Writer` on the file system (`Tree::files` gives the paths in the byte order of the whole path, which a check does not sort again), the project's `.gitignore` files kept, the project's name, and the project a directory sits in |
 | `git.rs` | The name `rotproof approve` signs with, git's `user.name` |
 
 | Module of `crates/infrastructure/src/outbound/typescript/` | Content |
