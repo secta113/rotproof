@@ -176,6 +176,8 @@ pub mod fake {
     pub struct Fake {
         files: RefCell<BTreeMap<String, String>>,
         dirs: RefCell<BTreeSet<String>>,
+        /// Each path read through the port, in order
+        reads: RefCell<Vec<String>>,
     }
 
     impl Fake {
@@ -191,10 +193,20 @@ pub mod fake {
         pub fn text(&self, path: &str) -> Option<String> {
             self.files.borrow().get(path).cloned()
         }
+
+        /// How many times `path` was read through the port
+        pub fn reads_of(&self, path: &str) -> usize {
+            self.reads
+                .borrow()
+                .iter()
+                .filter(|read| *read == path)
+                .count()
+        }
     }
 
     impl Tree for Fake {
         fn read(&self, path: &str) -> io::Result<String> {
+            self.reads.borrow_mut().push(path.to_string());
             self.text(path)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.to_string()))
         }
