@@ -307,17 +307,12 @@ impl Declared {
             )]);
         };
         let places = layout.places(&table());
-        let in_layer = |name: &str| {
-            name.split_once('.')
-                .map_or(name, |(layer, _)| layer)
-                .to_string()
-        };
         let (left_out, unknown): (Vec<String>, Vec<String>) = declaration
             .absent
             .iter()
             .filter(|name| !places.iter().any(|p| &p.name == *name))
             .cloned()
-            .partition(|name| layout.without.contains(&in_layer(name)));
+            .partition(|name| layout.leaves_out(name));
         if !unknown.is_empty() {
             return Err(unknown
                 .iter()

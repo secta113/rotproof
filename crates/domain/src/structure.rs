@@ -79,11 +79,11 @@ pub fn listed(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> 
 /// Each layer with levels that is there and not declared absent, with its levels.
 fn with_levels<'a>(declared: &'a Declared, seen: &Seen) -> Vec<(&'a Place, Vec<&'a Place>)> {
     let mut found = Vec::new();
-    for layer in declared.places.iter().filter(|p| p.parent.is_none()) {
+    for layer in declared.places.iter().filter(|p| p.is_layer()) {
         let levels: Vec<&Place> = declared
             .places
             .iter()
-            .filter(|p| p.parent.as_ref() == Some(&layer.name))
+            .filter(|p| p.is_level_of(layer))
             .collect();
         if levels.is_empty() || declared.is_absent(layer) || !seen.present(&layer.path) {
             continue;
@@ -139,7 +139,7 @@ pub fn problems(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String
             declared
                 .places
                 .iter()
-                .filter(|p| p.parent.is_none())
+                .filter(|p| p.is_layer())
                 .map(|p| format!("{}/", p.path))
                 .collect::<Vec<_>>()
                 .join(", ")

@@ -155,7 +155,7 @@ fn map(declared: &Declared) -> String {
     declared
         .places
         .iter()
-        .filter(|p| p.parent.is_none() && !declared.is_absent(p))
+        .filter(|p| p.is_layer() && !declared.is_absent(p))
         .map(|place| {
             let role = place
                 .role

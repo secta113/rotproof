@@ -3,7 +3,7 @@
 
 use std::io;
 
-use crate::tree::{code_files, exactly, read_code};
+use crate::tree::{code_files, is_file, read_code};
 use domain::declaration::Declared;
 use domain::environment::{BUILD_SCRIPT, finding, in_rust, is_judged};
 use domain::layers::{Language, table};
@@ -28,7 +28,7 @@ pub fn problems(
     for layer in declared
         .places
         .iter()
-        .filter(|p| p.parent.is_none() && !declared.is_absent(p) && is_judged(p))
+        .filter(|p| p.is_layer() && !declared.is_absent(p) && is_judged(p))
     {
         // A crate's build script runs before Rust compiles it, and reads what Cargo sets for it
         let build_script = join(&layer.path, BUILD_SCRIPT);
@@ -39,7 +39,7 @@ pub fn problems(
         );
     }
     if let Some(entry) = layout.entry(&table())
-        && exactly(tree, &entry.path).is_ok_and(|(_, is_dir)| !is_dir)
+        && is_file(tree, &entry.path)
     {
         files.push(entry.path);
     }

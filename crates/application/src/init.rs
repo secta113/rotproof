@@ -191,8 +191,8 @@ fn presentation_moves(tree: &dyn Tree, declared: &Fields) -> Vec<String> {
     let Some(layout) = layout(stack, &ui) else {
         return Vec::new();
     };
-    let path = |name: &str| layout.layer.path.replace("{name}", name);
-    let has = |name: &str| !layout.without.iter().any(|w| w == name);
+    let path = |name: &str| layout.layer_path(name);
+    let has = |name: &str| !layout.leaves_out(name);
     let mut moves = Vec::new();
     if has("presentation")
         && !declared.absent.iter().any(|a| a == "presentation")

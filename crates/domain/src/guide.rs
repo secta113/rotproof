@@ -90,9 +90,7 @@ fn rows(layout: &Layout) -> String {
     let places = layout.places(&table());
     for place in &places {
         let importable = importable(place);
-        let has_levels = places
-            .iter()
-            .any(|p| p.parent.as_ref() == Some(&place.name));
+        let has_levels = places.iter().any(|p| p.is_level_of(place));
         let imports = if has_levels {
             "Nothing: it holds only its levels".to_string()
         } else if importable.is_empty() {
@@ -145,8 +143,13 @@ fn not_layers(layout: &Layout) -> String {
 
 /// The rules of the screens, when the layout has `ui`: atomic design, and where a view may not go.
 fn ui(layout: &Layout) -> String {
-    let has = |name: &String| !layout.without.contains(name);
-    let mut ui = if has(&"ui".to_string()) { UI_TEXT } else { "" }.to_string();
+    let has = |name: &String| !layout.leaves_out(name);
+    let mut ui = if !layout.leaves_out("ui") {
+        UI_TEXT
+    } else {
+        ""
+    }
+    .to_string();
     let no_view = layout.no_view.as_ref().filter(|n| n.layers.iter().any(has));
     if let Some(no_view) = no_view {
         let names: Vec<String> = no_view.layers.iter().filter(|n| has(n)).cloned().collect();
@@ -246,7 +249,7 @@ mod tests {
             }
             assert_eq!(
                 text.contains("atomic design"),
-                !layout.without.contains(&"ui".to_string()),
+                !layout.leaves_out("ui"),
                 "{stack}: the rule on ui goes with the layer"
             );
         }

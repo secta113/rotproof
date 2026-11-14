@@ -175,7 +175,7 @@ pub fn ui_in_tree(tree: &dyn Tree, stack: &str) -> String {
                 .layers
                 .iter()
                 .filter(|l| l.ui.as_ref() == Some(ui))
-                .any(|l| tree.found(&base.layer.path.replace("{name}", &l.name)) == Some(true))
+                .any(|l| tree.found(&base.layer_path(&l.name)) == Some(true))
         })
         .unwrap_or_else(|| NO_UI.to_string())
 }

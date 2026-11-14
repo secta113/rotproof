@@ -92,7 +92,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `crossing.rs` | What `rotproof init` says when an upgrade crosses a version that changed what the layers are (the onion table, the split of the screens into `ui` and `presentation`): the versions, what each moved and where each retired layer's code goes, and whether an upgrade crosses one. Nothing moves; a project does it by hand |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; and where Cargo looks for a workspace |
 | `modules.rs` | The levels inside a Rust crate: the module each file of `src/` is, every path it names from `crate`, `super`, `self` or a dependency on another layer judged by the level it lands in, the crate's root holding only its levels' modules, and no `#[path]` |
-| `layers.rs` | The layer definitions in `layers/`: the table, and one layout per stack with the places it makes |
+| `layers.rs` | The layer definitions in `layers/`: the table, and one layout per stack with the places it makes, and the questions asked of them (a layer or a level of one, where a layer lives, whether the layout leaves a layer out) |
 | `declaration.rs` | A project's declaration, `.config/rotproof.toml`: what it says, read as it is and against the layout it names (`Declared`), the fields `rotproof create` adds to it and the text `rotproof init` writes, and what an upgrade reads from it and sets in it (`files`, `declined`) |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
 | `markers.rs` | The marker check: no comment in the code holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` (Python, TypeScript, Rust), judged once the comments of a file are read |
@@ -121,7 +121,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and what each found printed under its heading |
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
-| `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly, where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
+| `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly (and whether it is a file), where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
 | `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |

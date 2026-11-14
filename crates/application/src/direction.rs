@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::io;
 
 use crate::code::lands;
-use crate::tree::{code_files, exactly, read_code, resolved};
+use crate::tree::{code_files, exactly, is_file, read_code, resolved};
 use domain::code::{Manifest, Origin, is_source, module_parts};
 use domain::declaration::Declared;
 use domain::direction::{Forbidden, judged, place_of, workspace_dirs};
@@ -63,7 +63,7 @@ fn rust(
     // Each manifest's dependencies that land in a place, by the name the crate's code uses
     let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
     let mut crates: Vec<(String, &Place)> = Vec::new();
-    for layer in places.iter().filter(|p| p.parent.is_none()) {
+    for layer in places.iter().filter(|p| p.is_layer()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
             if let Some(from) = place_of(&path, places) {
                 crates.push((path, from));
@@ -74,7 +74,7 @@ fn rust(
     let entry = layout.entry(&table());
     if let Some(entry) = &entry {
         let manifest = join(parent(parent(&entry.path)), "Cargo.toml");
-        if exactly(tree, &manifest).is_ok_and(|(_, is_dir)| !is_dir) {
+        if is_file(tree, &manifest) {
             crates.push((manifest, entry));
         }
     }
@@ -141,11 +141,11 @@ fn rust(
         }
     }
     // The levels inside a crate, which its manifest cannot tell apart: its code is read
-    for layer in places.iter().filter(|p| p.parent.is_none()) {
+    for layer in places.iter().filter(|p| p.is_layer()) {
         let levels: Vec<&Place> = places
             .iter()
             .copied()
-            .filter(|p| p.parent.as_ref() == Some(&layer.name))
+            .filter(|p| p.is_level_of(layer))
             .collect();
         if levels.is_empty() {
             continue;
@@ -168,7 +168,7 @@ fn rust(
                 levels: places
                     .iter()
                     .copied()
-                    .filter(|p| p.parent.as_ref() == Some(&to.name))
+                    .filter(|p| p.is_level_of(to))
                     .collect(),
             })
             .collect();
@@ -240,7 +240,7 @@ impl<'p> Manifests<'p> {
         };
         for at in dirs {
             let path = join(&at, "Cargo.toml");
-            if exactly(tree, &path).is_ok_and(|(_, is_dir)| !is_dir)
+            if is_file(tree, &path)
                 && let Some(candidate) = self.read(tree, &path, found)?
                 && candidate.is_workspace
             {
@@ -268,7 +268,7 @@ fn typescript(
         .collect();
     let entry = layout.entry(&table());
     let mut files: Vec<(String, &Place)> = Vec::new();
-    for layer in places.iter().filter(|p| p.parent.is_none()) {
+    for layer in places.iter().filter(|p| p.is_layer()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
             if let Some(from) = place_of(&path, places) {
                 files.push((path, from));
@@ -325,7 +325,7 @@ fn python(
     let mut forbidden = Vec::new();
     let entry = layout.entry(&table());
     let mut files: Vec<(String, &Place)> = Vec::new();
-    for layer in places.iter().filter(|p| p.parent.is_none()) {
+    for layer in places.iter().filter(|p| p.is_layer()) {
         for path in code_files(tree, &layer.path, |name| layout.is_code(name))? {
             if let Some(from) = place_of(&module_parts(&path).join("/"), places) {
                 files.push((path, from));
@@ -368,7 +368,5 @@ fn python(
 /// the layers does not find it.
 fn entry_file<'a>(tree: &dyn Tree, entry: Option<&'a Place>) -> Option<(String, &'a Place)> {
     let entry = entry?;
-    exactly(tree, &entry.path)
-        .is_ok_and(|(_, is_dir)| !is_dir)
-        .then(|| (entry.path.clone(), entry))
+    is_file(tree, &entry.path).then(|| (entry.path.clone(), entry))
 }

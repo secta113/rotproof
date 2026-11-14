@@ -63,7 +63,7 @@ pub fn crosses(at: &str, files: &str, running: &str) -> bool {
 pub fn retired(layout: &Layout) -> Vec<(&'static str, String, &'static str)> {
     RETIRED
         .iter()
-        .map(|(name, goes)| (*name, layout.layer.path.replace("{name}", name), *goes))
+        .map(|(name, goes)| (*name, layout.layer_path(name), *goes))
         .collect()
 }
 

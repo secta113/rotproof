@@ -189,6 +189,23 @@ pub struct Place {
     pub files: Vec<(String, String)>,
 }
 
+impl Place {
+    /// Whether this is a layer, and not a level of one.
+    pub fn is_layer(&self) -> bool {
+        self.parent.is_none()
+    }
+
+    /// Whether this is a level of `layer`.
+    pub fn is_level_of(&self, layer: &Place) -> bool {
+        self.parent.as_ref() == Some(&layer.name)
+    }
+
+    /// The layer this place is, or sits in: the name of a layer, or of the layer of a level.
+    pub fn layer_name(&self) -> &str {
+        self.parent.as_deref().unwrap_or(&self.name)
+    }
+}
+
 /// The layout of a stack for a project whose UI is `ui`, or `None` when Rotproof has no stack by that name or the stack
 /// offers no such UI ([`uis`]).
 pub fn layout(stack: &str, ui: &str) -> Option<Layout> {
@@ -238,10 +255,7 @@ impl Layout {
     pub fn places(&self, table: &Table) -> Vec<Place> {
         let mut out = Vec::new();
         // A place imports only the layers this stack has, and their levels: a Rust crate cannot import `ui`
-        let has = |name: &str| {
-            let layer = name.split_once('.').map_or(name, |(layer, _)| layer);
-            !self.without.iter().any(|w| w == layer)
-        };
+        let has = |name: &str| !self.leaves_out(name);
         let imports = |imports: &[String]| -> Vec<String> {
             imports.iter().filter(|n| has(n)).cloned().collect()
         };
@@ -252,7 +266,7 @@ impl Layout {
                 .map_or(&self.layer.files, |o| &o.files);
             let mut place = Place {
                 name: layer.name.clone(),
-                path: self.layer.path.replace("{name}", &layer.name),
+                path: self.layer_path(&layer.name),
                 parent: None,
                 role: layer.role.clone(),
                 imports: imports(&layer.imports),
@@ -321,12 +335,24 @@ impl Layout {
                 .entry
                 .imports
                 .iter()
-                .filter(|n| !self.without.contains(n))
+                .filter(|n| !self.leaves_out(n))
                 .cloned()
                 .collect(),
             below: Vec::new(),
             files: Vec::new(),
         })
+    }
+
+    /// Where the layer `name` lives in this stack, from the root.
+    pub fn layer_path(&self, name: &str) -> String {
+        self.layer.path.replace("{name}", name)
+    }
+
+    /// Whether this layout has no place by the name `name`, a layer or a level (`ui`, `ui.pages`), because the layer it
+    /// sits in is of a UI this layout is not for.
+    pub fn leaves_out(&self, name: &str) -> bool {
+        let layer = name.split_once('.').map_or(name, |(layer, _)| layer);
+        self.without.iter().any(|w| w == layer)
     }
 
     /// Whether a file name is code in this stack.
@@ -615,17 +641,14 @@ mod tests {
         let lib = &protocol.files[1].1;
         assert!(lib.starts_with("//! The contracts") && lib.contains("\n//!\n"));
         // A crate compiles a module only when its `lib.rs` declares it
-        for layer in rust.iter().filter(|p| p.parent.is_none()) {
+        for layer in rust.iter().filter(|p| p.is_layer()) {
             let lib = layer
                 .files
                 .iter()
                 .find(|(path, _)| path.ends_with("/src/lib.rs"))
                 .map(|(_, text)| text)
                 .unwrap_or_else(|| panic!("{} has no lib.rs", layer.name));
-            let levels: Vec<&Place> = rust
-                .iter()
-                .filter(|p| p.parent.as_ref() == Some(&layer.name))
-                .collect();
+            let levels: Vec<&Place> = rust.iter().filter(|p| p.is_level_of(layer)).collect();
             let declared = lib.lines().filter(|l| l.starts_with("pub mod ")).count();
             assert_eq!(declared, levels.len(), "{}: {lib}", layer.name);
             for level in levels {
@@ -652,6 +675,25 @@ mod tests {
             "May import the levels below it, and `presentation.models`, `presentation.display` and \
                      `protocol.inbound`"
         ));
+    }
+
+    #[test]
+    fn a_place_is_asked_what_it_is_and_a_layout_what_it_leaves_out() {
+        let table = table();
+        let rust = layout("rust", "none").unwrap();
+        assert_eq!(rust.layer_path("domain"), "crates/domain");
+        // A level is left out with its layer, and a name no layer has is left out by nothing
+        assert!(rust.leaves_out("ui") && rust.leaves_out("ui.pages"));
+        assert!(!rust.leaves_out("infrastructure.inbound") && !rust.leaves_out("nothing"));
+        let atomic = layout("typescript", "atomic").unwrap();
+        assert!(!atomic.leaves_out("ui.pages"));
+        let places = atomic.places(&table);
+        let ui = places.iter().find(|p| p.name == "ui").unwrap();
+        let pages = places.iter().find(|p| p.name == "ui.pages").unwrap();
+        let domain = places.iter().find(|p| p.name == "domain").unwrap();
+        assert!(ui.is_layer() && !pages.is_layer());
+        assert!(pages.is_level_of(ui) && !pages.is_level_of(domain) && !ui.is_level_of(ui));
+        assert_eq!((ui.layer_name(), pages.layer_name()), ("ui", "ui"));
     }
 
     #[test]
