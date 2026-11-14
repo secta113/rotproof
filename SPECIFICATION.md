@@ -63,7 +63,7 @@ before anyone read the list, and it never deletes them again. A run that makes n
 `--yes`.
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
-pin Rotproof in it (`npm install -D -E rotproof@1.0.0`), then run `rotproof init --stack typescript --ui atomic`
+pin Rotproof in it (`npm install -D -E rotproof@2.0.0-rc.1`), then run `rotproof init --stack typescript --ui atomic`
 and `rotproof create --yes` there (`npx --no -- rotproof ...`), which keep what Vite wrote. Vite's entry point,
 `src/main.tsx`, is the entry file where it is (`index.html` loads it), and may import `composition` alone: what Vite
 has it import (`./App.tsx`, `./index.css`) moves into `src/composition/`, which `main.tsx` calls. `rotproof check`

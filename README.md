@@ -37,14 +37,14 @@ Rotproof is released for Windows x86_64, Linux x86_64 (glibc 2.17 or newer) and 
 newer). Pin the exact version, so that an upgrade, which can bring new rules, is a commit of its own:
 
 ```sh
-pip install rotproof==1.0.0
+pip install rotproof==2.0.0-rc.1
 ```
 
 In a Node project, pin it with npm, which installs the binary for your platform with it (the package `rotproof` and
 one of `@rotproof/linux-x64`, `@rotproof/win32-x64` and `@rotproof/darwin-arm64`):
 
 ```sh
-npm install -D -E rotproof@1.0.0
+npm install -D -E rotproof@2.0.0-rc.1
 ```
 
 The wheel carries only the binary; no Python code runs. Without Python or Node, take the archive for your platform from
