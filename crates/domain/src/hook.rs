@@ -31,7 +31,7 @@ pub const TIME_EVENTS: [&str; 2] = ["SessionStart", "UserPromptSubmit"];
 /// The settings Claude Code runs the project with, and where `rotproof create` writes them, once: the project's file
 /// from then on. They deny editing the approvals file (`approvals.rs`): Claude Code then refuses its edit tools and
 /// its shell's file commands and redirects on it, with no prompt, so only a person adds an approval, through
-/// `rotproof approve`. The text is as the updates write it (`upgrade.rs`), so a project upgraded with an untouched
+/// `rotproof approve`. The text is as the updates write it (`settings.rs`), so a project upgraded with an untouched
 /// file ends with the same settings as a new one.
 pub const SETTINGS: [(&str, &str); 1] = [(
     ".claude/settings.json",

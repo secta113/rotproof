@@ -7,7 +7,7 @@ use domain::approvals::{APPROVALS, Approved, Kept};
 use domain::declaration::{DECLARATION, MISSING};
 use domain::layers::RECORDS_ONLY;
 use domain::markers::{MARKERS, either};
-use domain::upgrade::VERSION;
+use domain::version::VERSION;
 use protocol::inbound::{
     Commands, Drift, Indexed, Initialized, Made, Names, Pinned, Removed, Report,
 };

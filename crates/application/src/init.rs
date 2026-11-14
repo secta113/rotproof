@@ -619,7 +619,7 @@ mod tests {
         ));
         // Up to 0.2.0 whatever this Rotproof is: the declaration is written with its version
         let written = tree.text(DECLARATION).unwrap();
-        let running = format!("files = \"{}\"", domain::upgrade::VERSION);
+        let running = format!("files = \"{}\"", domain::version::VERSION);
         assert!(written.contains(&running), "{written}");
         let declaration = written
             .replace(&running, "files = \"0.2.0\"")
@@ -689,7 +689,7 @@ mod tests {
         ));
         // Up to 0.3.0 whatever this Rotproof is: the declaration is written with its version
         let written = tree.text(DECLARATION).unwrap();
-        let running = format!("files = \"{}\"", domain::upgrade::VERSION);
+        let running = format!("files = \"{}\"", domain::version::VERSION);
         assert!(written.contains(&running), "{written}");
         tree.write(DECLARATION, &written.replace(&running, "files = \"0.3.0\""))
             .unwrap();

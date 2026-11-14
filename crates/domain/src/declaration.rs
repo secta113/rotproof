@@ -14,7 +14,7 @@ use toml_edit::{Array, DocumentMut, Item, Value};
 
 use crate::layers::{Layout, Place, RECORDS_ONLY, known_stacks, layout, table, uis};
 use crate::paths::within;
-use crate::upgrade::VERSION;
+use crate::version::VERSION;
 
 /// Where a project declares its structure, from the root
 pub const DECLARATION: &str = ".config/rotproof.toml";

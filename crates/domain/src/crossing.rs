@@ -6,7 +6,7 @@
 //! updates that change a file are in `upgrade.rs`.
 
 use crate::layers::Layout;
-use crate::upgrade::version;
+use crate::version::version;
 
 /// The version whose table is built on the onion architecture. Crossing it, `rotproof init` says how to move a
 /// project's layers, and moves nothing: an entry point and its wiring may sit in one file of `handler`, and each part

@@ -14,7 +14,7 @@ use domain::declaration::{Declared, INIT_OR_CREATE};
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
 use domain::schema::Time;
-use domain::upgrade::VERSION;
+use domain::version::VERSION;
 use protocol::inbound::{Finding, Report};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
