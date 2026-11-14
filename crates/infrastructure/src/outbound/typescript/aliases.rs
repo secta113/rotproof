@@ -26,17 +26,10 @@ struct Options {
 
 /// The aliases of the project in `tree`. An error is a config that cannot be read at all.
 pub fn aliases(tree: &dyn Tree) -> io::Result<Aliases> {
-    let mut names: Vec<String> = Vec::new();
-    for (name, is_dir) in tree.entries("")? {
-        if name.starts_with("tsconfig") && name.ends_with(".json") && !is_dir {
-            names.push(name);
-        }
-    }
-    names.sort();
     let mut aliases = Aliases::default();
-    for name in &names {
+    for name in config_names(tree)? {
         let mut seen = Vec::new();
-        let Some(options) = load(tree, name, &mut seen, &mut aliases.problems)? else {
+        let Some(options) = load(tree, &name, &mut seen, &mut aliases.problems)? else {
             continue;
         };
         if let Some(base) = &options.base_url {
@@ -45,42 +38,65 @@ pub fn aliases(tree: &dyn Tree) -> io::Result<Aliases> {
         let Some((paths, dir)) = options.paths else {
             continue;
         };
-        let base = options.base_url.clone().unwrap_or(dir);
+        let base = options.base_url.unwrap_or(dir);
         for (pattern, target) in paths {
-            let stars = pattern.matches('*').count();
-            if stars > 1 || target.matches('*').count() > stars {
-                aliases.problems.push(format!(
-                    "{name}: paths maps {pattern:?} to {target:?}, which Rotproof cannot read: one * at most, on both \
-                     sides"
-                ));
-                continue;
-            }
-            let (prefix, suffix) = match pattern.split_once('*') {
-                Some((prefix, suffix)) => (prefix.to_string(), Some(suffix.to_string())),
-                None => (pattern.clone(), None),
-            };
-            let target = join(&base, &target);
-            let alias = Alias {
-                prefix,
-                suffix,
-                target,
-                config: name.clone(),
-            };
-            match aliases
-                .paths
-                .iter()
-                .find(|a| a.prefix == alias.prefix && a.suffix == alias.suffix)
-            {
-                Some(other) if other.target != alias.target => aliases.problems.push(format!(
-                    "{} and {name} map {pattern:?} to different paths, so Rotproof does not know which a file uses",
-                    other.config
-                )),
-                Some(_) => {}
-                None => aliases.paths.push(alias),
+            match alias_of(&name, &base, &pattern, &target) {
+                Ok(alias) => add(&mut aliases, alias, &pattern),
+                Err(problem) => aliases.problems.push(problem),
             }
         }
     }
     Ok(aliases)
+}
+
+/// The `tsconfig*.json` files at the root, in the order they are read.
+fn config_names(tree: &dyn Tree) -> io::Result<Vec<String>> {
+    let mut names: Vec<String> = Vec::new();
+    for (name, is_dir) in tree.entries("")? {
+        if name.starts_with("tsconfig") && name.ends_with(".json") && !is_dir {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// The alias one entry of `paths` in the config `name` makes, its target resolved against `base`; the problem when
+/// Rotproof cannot read the entry: a `*` more than once in the pattern, or more in the target than in the pattern.
+fn alias_of(name: &str, base: &str, pattern: &str, target: &str) -> Result<Alias, String> {
+    let stars = pattern.matches('*').count();
+    if stars > 1 || target.matches('*').count() > stars {
+        return Err(format!(
+            "{name}: paths maps {pattern:?} to {target:?}, which Rotproof cannot read: one * at most, on both sides"
+        ));
+    }
+    let (prefix, suffix) = match pattern.split_once('*') {
+        Some((prefix, suffix)) => (prefix.to_string(), Some(suffix.to_string())),
+        None => (pattern.to_string(), None),
+    };
+    Ok(Alias {
+        prefix,
+        suffix,
+        target: join(base, target),
+        config: name.to_string(),
+    })
+}
+
+/// `alias`, made from the entry `pattern`, among the aliases found so far. A pattern an earlier config maps already
+/// is kept as it was when both give the same path, and is a problem when they give two: which a file uses is not known.
+fn add(aliases: &mut Aliases, alias: Alias, pattern: &str) {
+    match aliases
+        .paths
+        .iter()
+        .find(|a| a.prefix == alias.prefix && a.suffix == alias.suffix)
+    {
+        Some(other) if other.target != alias.target => aliases.problems.push(format!(
+            "{} and {} map {pattern:?} to different paths, so Rotproof does not know which a file uses",
+            other.config, alias.config
+        )),
+        Some(_) => {}
+        None => aliases.paths.push(alias),
+    }
 }
 
 /// The options of the config at `name` (from the root), its local `extends` followed: a field it sets wins over the
@@ -200,16 +216,8 @@ fn strip_jsonc(text: &str) -> String {
                     break;
                 }
             }
-        } else if c == '/' && chars.get(i + 1) == Some(&'/') {
-            while i < chars.len() && chars[i] != '\n' {
-                i += 1;
-            }
-        } else if c == '/' && chars.get(i + 1) == Some(&'*') {
-            i += 2;
-            while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
-                i += 1;
-            }
-            i += 2;
+        } else if let Some(end) = skip_comment(&chars, i) {
+            i = end;
         } else if c == ',' {
             if !matches!(next_token(&chars, i + 1), Some('}' | ']')) {
                 out.push(c);
@@ -226,24 +234,37 @@ fn strip_jsonc(text: &str) -> String {
 /// The first character from `i` on that is neither white space nor in a comment.
 fn next_token(chars: &[char], mut i: usize) -> Option<char> {
     while i < chars.len() {
-        match (chars[i], chars.get(i + 1)) {
-            (c, _) if c.is_whitespace() => i += 1,
-            ('/', Some('/')) => {
-                while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
-                }
-            }
-            ('/', Some('*')) => {
-                i += 2;
-                while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
-                    i += 1;
-                }
-                i += 2;
-            }
-            (c, _) => return Some(c),
+        if chars[i].is_whitespace() {
+            i += 1;
+        } else if let Some(end) = skip_comment(chars, i) {
+            i = end;
+        } else {
+            return Some(chars[i]);
         }
     }
     None
+}
+
+/// Where the text goes on when a comment starts at `i`: after a `//` comment's last character (at its line break, which
+/// is not in it), and after a `/* */` comment's closing `*/`. Past the end of `chars` when the comment is left open,
+/// which ends the text. `None` when none starts at `i`.
+fn skip_comment(chars: &[char], mut i: usize) -> Option<usize> {
+    match (chars.get(i)?, chars.get(i + 1)) {
+        ('/', Some('/')) => {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            Some(i)
+        }
+        ('/', Some('*')) => {
+            i += 2;
+            while i < chars.len() && !(chars[i] == '*' && chars.get(i + 1) == Some(&'/')) {
+                i += 1;
+            }
+            Some(i + 2)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -327,11 +348,55 @@ mod tests {
     }
 
     #[test]
+    fn two_configs_that_map_a_pattern_to_different_paths_are_a_problem_and_to_the_same_path_are_not()
+     {
+        let config = |target: &str| {
+            format!("{{ \"compilerOptions\": {{ \"paths\": {{ \"@/*\": [\"{target}\"] }} }} }}")
+        };
+        let root = project(&[
+            ("tsconfig.a.json", &config("src/*")),
+            ("tsconfig.b.json", &config("lib/*")),
+            ("tsconfig.c.json", &config("src/*")),
+        ]);
+        let aliases = aliases(&Disk::new(root.path())).unwrap();
+        assert_eq!(
+            aliases.problems,
+            [
+                "tsconfig.a.json and tsconfig.b.json map \"@/*\" to different paths, so Rotproof does not know which a \
+                 file uses"
+            ]
+        );
+        // The first config's alias stays
+        assert_eq!(aliases.paths.len(), 1);
+        assert_eq!(aliases.paths[0].target, "src/*");
+    }
+
+    #[test]
     fn jsonc_loses_its_comments_and_trailing_commas_and_keeps_its_strings() {
         let text =
             "{ \"a\": \"// not a comment, /* nor this */\", // gone\n \"b\": [1, 2,], /* gone */ }";
         let json: Value = serde_json::from_str(&strip_jsonc(text)).unwrap();
         assert_eq!(json["a"], "// not a comment, /* nor this */");
         assert_eq!(json["b"], serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn a_comment_ends_where_the_text_goes_on_and_one_left_open_ends_the_text() {
+        let chars = |text: &str| text.chars().collect::<Vec<char>>();
+        // A line comment stops at the line break, which is not in it; a block comment after its closing `*/`
+        assert_eq!(skip_comment(&chars("// a\nb"), 0), Some(4));
+        assert_eq!(skip_comment(&chars("x/* a */b"), 1), Some(8));
+        // Left open, both run to the end of the text
+        assert!(skip_comment(&chars("// open"), 0).unwrap() >= 7);
+        assert!(skip_comment(&chars("/* open"), 0).unwrap() >= 7);
+        // A lone `/`, another character, and the end of the text start none
+        for (text, at) in [("/", 0), ("a/", 1), ("a", 0), ("", 0)] {
+            assert_eq!(skip_comment(&chars(text), at), None, "{text:?}");
+        }
+        assert_eq!(strip_jsonc("{} // open"), "{} ");
+        assert_eq!(strip_jsonc("{} /* open"), "{} ");
+        assert_eq!(strip_jsonc("[1, // c\n]"), "[1 \n]");
+        assert_eq!(next_token(&chars("  /* a */ // b\n ]"), 0), Some(']'));
+        assert_eq!(next_token(&chars(" /* open"), 0), None);
     }
 }
