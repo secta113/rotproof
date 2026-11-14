@@ -22,19 +22,38 @@ pub fn read(tree: &dyn Tree) -> io::Result<Result<Declaration, String>> {
 
 /// The declaration, or why it cannot be read. `Ok(None)` when the file does not exist.
 pub fn declaration(tree: &dyn Tree) -> io::Result<Option<Result<Declaration, String>>> {
+    Ok(match source(tree)? {
+        Source::Missing => None,
+        Source::Spelled(why) => Some(Err(why)),
+        Source::Text(text) => Some(parse_declaration(&text)),
+    })
+}
+
+/// What the tree holds as the declaration.
+pub enum Source {
+    /// There is no such file
+    Missing,
+    /// The file is there only under another spelling: what to say of it
+    Spelled(String),
+    /// The text of the file, as it is
+    Text(String),
+}
+
+/// The declaration file of `tree`, read once. An error is a file that could not be read, in the words of the commands.
+pub fn source(tree: &dyn Tree) -> io::Result<Source> {
     // By the exact name, before anything asks the operating system: `.config/Rotproof.toml` opens as the declaration on
     // Windows, and is not there on Linux, where asking first would say only that the declaration is missing
     let path = match lookup(tree, "", DECLARATION) {
         Lookup::Found { path, .. } => path,
-        Lookup::Missing => return Ok(None),
+        Lookup::Missing => return Ok(Source::Missing),
         Lookup::Spelled(_) => {
-            return Ok(Some(Err(
-                exactly(tree, DECLARATION).expect_err("spelled otherwise")
-            )));
+            return Ok(Source::Spelled(
+                exactly(tree, DECLARATION).expect_err("spelled otherwise"),
+            ));
         }
     };
     let text = tree
         .read(&path)
         .map_err(|e| io::Error::new(e.kind(), unreadable(&e.to_string())))?;
-    Ok(Some(parse_declaration(&text)))
+    Ok(Source::Text(text))
 }
