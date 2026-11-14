@@ -442,6 +442,81 @@ mod tests {
     }
 
     #[test]
+    fn a_change_after_a_brace_inside_generics_fails_the_key() {
+        let source = "pub struct Before<const N: usize = { 3 }> { pub items: [u8; N] }\n\
+                      pub fn takes<const M: usize = { 2 + { 1 } }>() -> usize { M }\n\
+                      impl Foo<{ 3 }> { pub fn inside() -> u8 { 1 } }\n\
+                      pub fn ret() -> Foo<{ 2 }> { Foo }\n";
+        let edits = [
+            (
+                "domain/g.rs::Before",
+                "pub items: [u8; N]",
+                "pub items: [u16; N]",
+            ),
+            (
+                "domain/g.rs::takes",
+                "() -> usize { M }",
+                "() -> usize { M + 1 }",
+            ),
+            ("domain/g.rs::Foo.inside", "-> u8 { 1 }", "-> u8 { 2 }"),
+            ("domain/g.rs::ret", "{ Foo }", "{ Foo; }"),
+        ];
+        let first = project(&[]);
+        first.write("domain/g.rs", source).unwrap();
+        let hashes: Vec<String> = edits
+            .iter()
+            .map(|(key, ..)| current(&first, &Readers, key).unwrap().unwrap())
+            .collect();
+        let pins: Vec<(&str, &str)> = edits
+            .iter()
+            .zip(&hashes)
+            .map(|((key, ..), hash)| (*key, hash.as_str()))
+            .collect();
+        let tree = project(&pins);
+        tree.write("domain/g.rs", source).unwrap();
+        assert!(changed(&tree, &Readers).unwrap().is_empty());
+        // Each edit is in the body or the fields, past the brace in the generics, and fails its own key alone
+        for (key, from, to) in edits {
+            tree.write("domain/g.rs", &source.replace(from, to))
+                .unwrap();
+            let keys: Vec<String> = changed(&tree, &Readers)
+                .unwrap()
+                .into_iter()
+                .map(|d| d.key)
+                .collect();
+            assert_eq!(keys, [key]);
+        }
+    }
+
+    #[test]
+    fn a_rust_raw_identifier_is_followed_by_its_name_without_r_hash() {
+        let tree = project(&[]);
+        let source = "pub fn r#match() -> u8 {\n    1\n}\n\npub struct r#type;\n\nimpl r#type {\n    \
+                      pub fn r#fn(&self) -> u8 {\n        2\n    }\n}\n";
+        tree.write("domain/raw.rs", source).unwrap();
+        let now = |tree: &Fake, key: &str| current(tree, &Readers, key);
+        let (matcher, kind, method) = (
+            now(&tree, "domain/raw.rs::match").unwrap().unwrap(),
+            now(&tree, "domain/raw.rs::type").unwrap().unwrap(),
+            now(&tree, "domain/raw.rs::type.fn").unwrap().unwrap(),
+        );
+        // The key is the name, as a key never carries the `r#`; the `r` is no definition of its own
+        assert!(now(&tree, "domain/raw.rs::r#match").is_err());
+        assert_eq!(now(&tree, "domain/raw.rs::r"), Ok(None));
+        tree.write("domain/raw.rs", &source.replace("        2", "        3"))
+            .unwrap();
+        assert_ne!(
+            now(&tree, "domain/raw.rs::type.fn").unwrap().unwrap(),
+            method
+        );
+        assert_ne!(now(&tree, "domain/raw.rs::type").unwrap().unwrap(), kind);
+        assert_eq!(
+            now(&tree, "domain/raw.rs::match").unwrap().unwrap(),
+            matcher
+        );
+    }
+
+    #[test]
     fn a_python_name_defined_twice_is_hashed_on_all_its_pieces() {
         let tree = project(&[]);
         let getter = "@property\n    def size(self):\n        return 1";
