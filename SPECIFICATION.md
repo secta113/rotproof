@@ -925,11 +925,20 @@ changed is in the commits, what was measured and decided along the way in the ta
   separated with `/`: only Windows reads a backslash as a separator, so a path with one fails. A path that climbs
   above the repository fails: GitHub serves only the repository. Links are read as a CommonMark reader reads them:
   with a title (`[a](b.md "title")`), in angle brackets, as reference links defined in the document, as images, and as
-  `href` in HTML, and not inside code or comments. A link to a `.py` file names, in its text, a function or class
-  defined there, at any depth. The file is parsed as Python, so a `def` line inside a string or a docstring does not
-  count. The text is one name exactly as defined (``[`render_index`](../tests/bundle.py)``), not a call
-  (`render_index()`) or a dotted path (`Bundle.render`); when it names nothing, the message says which name to write
-  or lists the names the file defines.
+  `href` in HTML, and not inside code or comments. A link to a file of code (`.py`, `.rs`, and TypeScript and
+  JavaScript source, in any case) shows a name the check has looked up: its text is one code span, either the name of
+  a definition in the file, written as a key of `follows` writes it after `::` (``[`render_index`](../src/bundle.py)``,
+  a method with its type ``[`Router.add`](../src/api.ts)``, a Rust type covering its definition and every `impl` block
+  for it ``[`Table`](../src/table.rs)``), or the file's own name (``[`bundle.py`](../src/bundle.py)``) or a path that
+  ends in it (``[`src/bundle.py`](../src/bundle.py)``): its last parts, whole and spelled exactly, from a directory
+  boundary, with none that is empty, `.` or `..` (`rc/bundle.py`, `Bundle.py`, `lib/bundle.py` for a file in `src/`
+  and `/src/bundle.py` fail), which tells a reader which file when several share a name (`lib.rs`, `index.ts`). The
+  names are those of the outline `follows` reads, so a `def` line inside a string or a docstring does not count, and
+  what sits in an `if` or a `try` is not named. A text in prose (`[the router](../src/api.ts)`), a name not in a code
+  span, a call (`render_index()`), a method without its type (`add`) and a fragment (`#L12`, whose number goes stale
+  without a word) fail; when the text names nothing, the message says which name to write or lists the names the file
+  defines. A file that cannot be parsed far enough to read its definitions can be linked by its own name or a path
+  ending in it only.
 - **The log exists, and its second-level headings are dates, newest first.** Below the title, the log is a flat list
   of entries grouped under the dates (OKF 0.2, section 9): every entry is a list item, and its indented lines (wrapped
   text, nested items) belong to it. A task heading (`### ...`), a paragraph, or an entry before the first date fails.

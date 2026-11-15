@@ -4,7 +4,6 @@
 //! Paths are from the root, with `/`, and "" is the root. A check never asks the operating system itself: it takes a
 //! [`Tree`], which the disk implements on the file system and the tests implement in memory.
 
-use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
 
@@ -57,8 +56,6 @@ pub trait Parsers {
     /// A Python file, whose path from the root names the package its relative imports start from: every module it
     /// imports, as parts.
     fn python(&self, source: &str, path: &str) -> Source<Vec<String>>;
-    /// The names of the functions and classes a Python file defines, at any depth.
-    fn python_definitions(&self, source: &str) -> BTreeSet<String>;
     /// The outline of a file of `language`, whose path from the root is `path`: every definition in it, each with its
     /// names from the outermost and the range of its source, from its first decorator or attribute to its end.
     /// Which key names a definition, and how the pieces of a name are joined, is the rule of

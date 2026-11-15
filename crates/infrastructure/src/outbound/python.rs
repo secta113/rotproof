@@ -12,9 +12,8 @@
 //! - **Its comments,** `#` to the end of the line. A docstring is a string, so it is not a comment.
 //! - **Its reads of the environment** (`domain::environment`): a name of `os` that touches it, imported or reached
 //!   through a name bound to `os`.
-//! - **What it defines** ([`definitions`]), for a link to a `.py` file in the records.
 //! - **Its outline** ([`outline`]), every function and class with its names and its range, for a knowledge document
-//!   that follows one.
+//!   that follows one and for a link that names one.
 
 use std::collections::BTreeSet;
 
@@ -325,32 +324,6 @@ fn package(path: &str) -> Vec<String> {
     parts
 }
 
-/// The names of the functions and classes a Python file defines, at any depth (methods, and definitions inside
-/// functions, `if` and `try`). The file is parsed, so a `def` line inside a string or a docstring is not a definition.
-/// A file with a syntax error is read past the error, as far as the parser recovers.
-pub fn definitions(source: &str) -> BTreeSet<String> {
-    #[derive(Default)]
-    struct Definitions(BTreeSet<String>);
-    impl<'a> StatementVisitor<'a> for Definitions {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            match stmt {
-                Stmt::FunctionDef(def) => {
-                    self.0.insert(def.name.to_string());
-                }
-                Stmt::ClassDef(class) => {
-                    self.0.insert(class.name.to_string());
-                }
-                _ => {}
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-    let module = ruff_python_parser::parse_unchecked_source(source, PySourceType::Python);
-    let mut definitions = Definitions::default();
-    definitions.visit_body(&module.syntax().body);
-    definitions.0
-}
-
 /// The outline of a Python file: every function and class at the top, and inside a class or a function (a method, a
 /// function in a function), each with its names from the outermost and its range from its first decorator to its end,
 /// for a knowledge document that follows it (`follows.rs` in `domain`). What sits in an `if` or a `try` is not in the
@@ -596,7 +569,7 @@ other.__import__(\"billing.domain.x\")
     #[test]
     fn definitions_after_a_syntax_error_are_read() {
         // A half-written file still names what it defines below the error
-        let names = definitions("def broken(:\n    pass\n\ndef after():\n    pass\n");
-        assert!(names.contains("after"), "{names:?}");
+        let source = "def broken(:\n    pass\n\ndef after():\n    pass\n";
+        assert_eq!(found(source, "after"), ["def after():\n    pass"]);
     }
 }

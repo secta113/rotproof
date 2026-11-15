@@ -357,6 +357,97 @@ fn each_broken_rule_fails_under_its_check() {
     }
 }
 
+/// A link to a file of code, in any language, shows a name the check has looked up: code naming a definition (as a key
+/// of `follows` does) or the file, and never prose.
+#[test]
+fn a_link_to_code_shows_a_name_that_is_checked() {
+    let check = "every link in docs/knowledge/ and the log resolves";
+    let root = clean_repo();
+    let r = root.path();
+    fs::create_dir_all(r.join("tools")).unwrap();
+    fs::write(
+        r.join("tools/table.rs"),
+        "pub struct Table;\nimpl Table {\n    pub fn add(&self) {}\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        r.join("tools/router.ts"),
+        "export class Router { add() {} }\n",
+    )
+    .unwrap();
+    fs::write(
+        r.join("tools/helper.py"),
+        "class Bundle:\n    def render(self):\n        pass\n",
+    )
+    .unwrap();
+    let log = |entry: &str| {
+        fs::write(
+            r.join("docs/log.md"),
+            format!("# Log\n\n## 2026-10-02\n\n* {entry}\n"),
+        )
+        .unwrap();
+        let out = run(&["--root", &root_arg(r), "check"]);
+        stdout(&out)
+    };
+    for entry in [
+        "[`Table.add`](../tools/table.rs)",
+        "[`Table`](../tools/table.rs)",
+        "[`table.rs`](../tools/table.rs)",
+        "[`tools/table.rs`](../tools/table.rs)",
+        "[`Router.add`](../tools/router.ts)",
+        "[`Bundle.render`](../tools/helper.py)",
+    ] {
+        let said = log(entry);
+        assert!(!said.contains(check), "{entry}: {said}");
+    }
+    for (entry, why) in [
+        // Prose names nothing a check has looked up
+        (
+            "[the table](../tools/table.rs)",
+            "is code naming a definition, or the file or a path ending in it",
+        ),
+        (
+            "[Router](../tools/router.ts)",
+            "is code naming a definition, or the file or a path ending in it",
+        ),
+        (
+            "[the bundle](../tools/helper.py)",
+            "is code naming a definition, or the file or a path ending in it",
+        ),
+        // A method is named with its type
+        (
+            "[`render`](../tools/helper.py)",
+            "a method is named with its type",
+        ),
+        (
+            "[`Table.gone`](../tools/table.rs)",
+            "no definition named Table.gone",
+        ),
+        // A path is its last parts whole
+        (
+            "[`ols/table.rs`](../tools/table.rs)",
+            "no definition named ols/table.rs",
+        ),
+        // The file's name with another directory before it, as a record whose directory moved
+        (
+            "[`lib/table.rs`](../tools/table.rs)",
+            "no definition named lib/table.rs",
+        ),
+        (
+            "[`/tools/table.rs`](../tools/table.rs)",
+            "no definition named /tools/table.rs",
+        ),
+        // A fragment is no name
+        ("[`Table`](../tools/table.rs#L1)", "has no fragment"),
+    ] {
+        let said = log(entry);
+        assert!(
+            said.contains(check) && said.contains(why),
+            "{entry}: {said}"
+        );
+    }
+}
+
 /// The rest of `docs/` is the project's: the records of work of a project made before 1.0, broken or not, and any
 /// directory of its own, are not read.
 #[test]
