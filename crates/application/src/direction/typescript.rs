@@ -103,14 +103,14 @@ pub(super) fn typescript(
 
 /// How an import of a layer of the unit `to` is written from the file `from`, for the finding that says an import
 /// landed in the unit outside its layers (an import that lands in a place needs no words). Through the unit's package
-/// when it has one: `<name>/protocol/inbound` where its `exports` lists subpaths (a pattern such as `./protocol/*`
-/// makes it so), else the path of the layer in the package, as Node reads a package with no `exports`
-/// (`@acme/billing/src/protocol/inbound`); a unit with no package by the relative path from the importing file.
+/// when it has one: `<name>/<layer>` where its `exports` lists subpaths (a pattern such as `./protocol/*` makes it
+/// so), else the path of the layer in the package, as Node reads a package with no `exports`
+/// (`@acme/billing/src/<layer>`); a unit with no package by the relative path from the importing file. What is given
+/// is where the layers begin, and the example of a layer follows ([`Way`]).
 fn way_of(to: Landing, aliases: &Aliases, from: &str) -> Way {
     let Landing::InUnit(unit) = to else {
         return Way::default();
     };
-    let layer = |dir: &str| join(dir, "protocol/inbound");
     match aliases.packages.iter().find(|p| p.root == unit.root) {
         Some(package) => {
             let dir = if package.exports.is_some() {
@@ -121,10 +121,14 @@ fn way_of(to: Landing, aliases: &Aliases, from: &str) -> Way {
                     inside => inside.to_string(),
                 }
             };
-            Way::Package(format!("{}/{}", package.name, layer(&dir)))
+            Way::Package(if dir.is_empty() {
+                package.name.clone()
+            } else {
+                join(&package.name, &dir)
+            })
         }
         None => {
-            let path = relative(parent(from), &layer(&unit.path));
+            let path = relative(parent(from), &unit.path);
             Way::Path(if path.starts_with('.') {
                 path
             } else {
@@ -384,10 +388,12 @@ mod tests {
     #[test]
     fn a_package_without_exports_is_reached_by_the_path_of_its_files() {
         let found = read(&[
+            ("packages/billing/src/composition/index.ts", ""),
             (
                 "apps/web/src/composition/wire.ts",
                 "import { a } from \"@acme/billing/src/domain\";\n\
-                 import { b } from \"@acme/billing/src/application/index\";\n",
+                 import { b } from \"@acme/billing/src/application/index\";\n\
+                 import { c } from \"@acme/billing/src/composition\";\n",
             ),
             (
                 "packages/db/src/domain/row.ts",
@@ -395,12 +401,23 @@ mod tests {
             ),
         ]);
         assert_eq!(found.problems, Vec::<String>::new());
-        // The composition of an app wires a unit that is not shared; a shared unit imports shared units only
+        // The composition of an app wires a unit that is not shared, through its composition and protocol alone; a
+        // shared unit imports shared units only
+        let wired = "the composition of an app imports only the composition and protocol of another unit: billing \
+                     builds its own insides in its own composition";
         assert_eq!(
             details(&found),
             [
                 "packages/db/src/domain/row.ts:1: imports @acme/billing/src/domain (packages/billing/src/domain), \
-                 in domain of unit billing; the shared unit db imports only shared units, and billing is not shared"
+                 in domain of unit billing; the shared unit db imports only shared units, and billing is not shared",
+                &format!(
+                    "apps/web/src/composition/wire.ts:1: imports @acme/billing/src/domain \
+                     (packages/billing/src/domain), in domain of unit billing; {wired}"
+                ),
+                &format!(
+                    "apps/web/src/composition/wire.ts:2: imports @acme/billing/src/application/index \
+                     (packages/billing/src/application/index), in application of unit billing; {wired}"
+                ),
             ]
         );
     }

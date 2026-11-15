@@ -330,9 +330,12 @@ each unit, with the unit named in a finding. The rules between units are few:
 - A unit imports the layers of its own unit as the table says, and no other unit unless it is shared.
 - A shared unit imports shared units only, never in a cycle. A layer imports the layer of a shared unit that its own
   layer may import by the table (`infrastructure.inbound` imports `protocol.inbound` of a shared unit), except that
-  `application` never imports another unit's `application`: the use cases are passed in.
-- The `composition` of an app wires the units, so it imports every layer of the units it wires, and never another
-  app's. An entry file imports the `composition` of its own unit alone.
+  `application` never imports another unit's `application`: the use cases are passed in. The one addition is
+  `protocol.inbound`, which also imports the `domain` of a shared unit, where the value types used across units live,
+  so that an input port names them and does not copy their shape.
+- A `composition` imports another unit only through that unit's `protocol`, since each unit builds its own insides in
+  its own `composition`. The `composition` of an app wires the units, so it imports their `composition` too, and never
+  another app's. An entry file imports the `composition` of its own unit alone.
 - An import of another unit names a module of one of its layers, never the unit as a whole: what the code reads from
   outside the layers cannot be seen.
 

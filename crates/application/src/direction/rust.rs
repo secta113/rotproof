@@ -576,6 +576,57 @@ mod tests {
     }
 
     #[test]
+    fn the_inbound_module_of_a_protocol_crate_names_the_domain_crate_of_a_shared_unit_and_no_other()
+    {
+        let (tree, declared) = project(
+            UNITS,
+            &[
+                (
+                    "packages/billing/protocol/Cargo.toml",
+                    &package(
+                        "billing_protocol",
+                        &[
+                            ("core_domain", "../../core/domain"),
+                            ("billing_domain", "../domain"),
+                        ],
+                    ),
+                ),
+                (
+                    "packages/billing/protocol/src/lib.rs",
+                    "pub mod inbound;\npub mod outbound;\n",
+                ),
+                (
+                    "packages/billing/protocol/src/inbound/mod.rs",
+                    "use core_domain::Money;\nuse billing_domain::Invoice;\n",
+                ),
+                (
+                    "packages/billing/protocol/src/outbound/mod.rs",
+                    "use core_domain::Money;\nuse billing_domain::Invoice;\n",
+                ),
+                (
+                    "packages/billing/domain/Cargo.toml",
+                    &package("billing_domain", &[]),
+                ),
+                (
+                    "packages/core/domain/Cargo.toml",
+                    &package("core_domain", &[]),
+                ),
+            ],
+        );
+        let (problems, forbidden) = details(&tree, &declared);
+        assert!(problems.is_empty(), "{problems:?}");
+        // The crate depends on both, as `protocol` may depend on `domain`; the level that is for ports of the use
+        // cases takes the shared unit's, and its own unit's no more than it takes its own in any project
+        assert_eq!(
+            forbidden,
+            [
+                "packages/billing/protocol/src/inbound/mod.rs:2: uses billing_domain::Invoice, in domain; \
+                 protocol.inbound imports no other layer"
+            ]
+        );
+    }
+
+    #[test]
     fn what_is_read_of_a_shared_unit_is_the_path_a_crate_writes_through_its_dependency_on_it() {
         let (tree, declared) = project(
             &[

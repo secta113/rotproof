@@ -19,11 +19,16 @@
 - **A unit imports only the layers of its own unit, by the table, and no other unit unless it is shared.** A shared
   unit may be imported by any unit and imports only shared units, never in a cycle. A layer imports the layer of a
   shared unit that its own layer may import by the table, the same name in the other unit (`infrastructure.inbound`
-  imports `protocol.inbound` of a shared unit), with two exceptions: `application` never imports another unit's
-  `application` (`composition` passes the use cases in), and `composition` is imported by the `composition` of an app
-  alone. The `composition` of an app wires the units, so it imports every layer of the units it wires, as it does its
-  own, and never another app's; an entry file imports the `composition` of its own unit alone. Only direct imports are
-  judged, and the exceptions mean the table is no longer closed under chaining across units.
+  imports `protocol.inbound` of a shared unit), with these exceptions: `application` never imports another unit's
+  `application` (`composition` passes the use cases in), `composition` is imported by the `composition` of an app
+  alone, and `protocol.inbound` also imports the `domain` of a shared unit, where the value types used across units
+  live (an input port names them, and does not copy their shape in its own data); it still imports nothing of its
+  own unit's `domain` and nothing of a unit that is not shared. A `composition` imports another unit only through
+  that unit's `protocol` (both levels), since each unit builds its own insides in its own `composition`. The
+  `composition` of an app, which wires the units, imports their `composition` too, and never another app's. An entry
+  file imports the `composition` of its own unit alone. Only direct imports are judged, and the exceptions mean the
+  table is no longer closed under chaining across units: what reads a `protocol.inbound` meets the types of a shared
+  `domain` in its data, though it may not import that `domain`.
 - **An import of another unit names a module of one of its layers, never the unit as a whole.** An import that lands
   in the unit's directory outside its layers fails, since what the code reads from it afterwards cannot be seen.
   {names}

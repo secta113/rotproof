@@ -186,7 +186,8 @@ name = "inbound"
 imports = []
 role = """
 Input ports: the interfaces of the use cases that the entry points call, with the data each takes and returns.
-That data is plain, with no `domain` type, so an entry point knows nothing of `domain`."""
+That data is plain, with no `domain` type but a shared unit's (see the rules of units), so an entry point knows
+nothing of `domain`."""
 
 [[layer.level]]
 name = "outbound"

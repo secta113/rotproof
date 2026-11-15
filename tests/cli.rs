@@ -4494,16 +4494,17 @@ fn init_drafts_the_document_of_the_units_once_and_the_check_passes_with_it() {
     let root = modular_monolith();
     let r = root.path();
     let arg = root_arg(r);
-    // `billing` reads the shared `core`, and the app wires `billing` in its composition
+    // `billing` reads the shared `core`, and the app wires `billing` through its composition
     write_file(
         r,
         "modules/billing/application/play.py",
         "from core.domain import score\n",
     );
+    write_file(r, "modules/billing/composition/build.py", "");
     write_file(
         r,
         "modules/app/composition/wire.py",
-        "from billing.application import play\n",
+        "from billing.composition import build\n",
     );
     let doc = r.join("docs/knowledge/units.md");
     assert!(!doc.exists());
@@ -5026,7 +5027,8 @@ fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
         assert!(said.contains(line), "{line}:\n{said}");
     }
 
-    // The composition of the app wires a unit that is not shared, and a name that is no unit's package is a package
+    // The composition of the app wires a unit that is not shared through that unit's composition, and a name that is no
+    // unit's package is a package
     write_file(
         r,
         "packages/billing/src/domain/song.ts",
@@ -5034,22 +5036,49 @@ fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
     );
     write_file(
         r,
+        "packages/billing/src/composition/index.ts",
+        "export const y = 1;\n",
+    );
+    write_file(
+        r,
         "apps/web/src/composition/index.ts",
-        "import { y } from '@acme/billing/src/domain/song';\nimport React from 'react';\nexport const z = y;\n",
+        "import { y } from '@acme/billing/src/composition/index';\nimport React from 'react';\nexport const z = y;\n",
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
-    // The entry file reads the composition of its own unit alone
+    // and builds none of its insides, which that unit's own composition builds
     write_file(
         r,
-        "apps/web/src/main.ts",
-        "import { y } from '@acme/billing/src/domain/song';\nexport const w = y;\n",
+        "apps/web/src/composition/index.ts",
+        "import { y } from '@acme/billing/src/domain/song';\nexport const z = y;\n",
     );
     let out = run(&["--root", &arg, "check"]);
     let said = stdout(&out);
     assert!(!out.status.success(), "{said}");
     assert!(
-        said.contains("apps/web/src/main.ts:1: imports @acme/billing/src/domain/song"),
+        said.contains(
+            "apps/web/src/composition/index.ts:1: imports @acme/billing/src/domain/song \
+             (packages/billing/src/domain/song), in domain of unit billing; the composition of an app imports only \
+             the composition and protocol of another unit: billing builds its own insides in its own composition"
+        ),
+        "{said}"
+    );
+    write_file(
+        r,
+        "apps/web/src/composition/index.ts",
+        "import { y } from '@acme/billing/src/composition/index';\nexport const z = y;\n",
+    );
+    // The entry file reads the composition of its own unit alone
+    write_file(
+        r,
+        "apps/web/src/main.ts",
+        "import { y } from '@acme/billing/src/composition/index';\nexport const w = y;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    assert!(
+        said.contains("apps/web/src/main.ts:1: imports @acme/billing/src/composition/index"),
         "{said}"
     );
 }

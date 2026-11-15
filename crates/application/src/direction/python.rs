@@ -247,10 +247,18 @@ mod tests {
                     "shipping/composition/wire.py",
                     "from billing.domain import invoice\n",
                 ),
-                // An app's composition wires them
+                // The composition of a unit reads the shared unit through its protocol alone, an app's through its
+                // composition too
+                (
+                    "billing/composition/wire.py",
+                    "from core.protocol.inbound import port\nfrom core.domain import money\n",
+                ),
+                // An app's composition wires them, through their composition and protocol, and builds none of their
+                // insides
                 (
                     "cli/composition/wire.py",
-                    "from billing.composition import wire\nimport shipping.infrastructure.outbound.db\n",
+                    "from billing.composition import wire\nimport shipping.protocol.outbound\n\
+                     import shipping.infrastructure.outbound.db\nfrom core.domain import money\n",
                 ),
                 // The entry file reads its own unit's composition, and not another's
                 (
@@ -263,10 +271,19 @@ mod tests {
         assert_eq!(
             forbidden,
             [
+                "billing/composition/wire.py:2: imports core.domain.money, in domain of unit core; the composition of \
+                 a unit imports only the protocol of another unit: core builds its own insides in its own \
+                 composition",
                 "billing/domain/invoice.py:1: imports shipping.domain.parcel, in domain of unit shipping; billing \
                  imports no unit that is not shared, and shipping is not: an app's composition wires the two",
                 "cli/__main__.py:2: imports billing.composition.wire, in composition of unit billing; cli imports no \
                  unit that is not shared, and billing is not: an app's composition wires the two",
+                "cli/composition/wire.py:3: imports shipping.infrastructure.outbound.db, in infrastructure.outbound \
+                 of unit shipping; the composition of an app imports only the composition and protocol of another \
+                 unit: shipping builds its own insides in its own composition",
+                "cli/composition/wire.py:4: imports core.domain.money, in domain of unit core; the composition of an \
+                 app imports only the composition and protocol of another unit: core builds its own insides in its \
+                 own composition",
                 "shipping/composition/wire.py:1: imports billing.domain.invoice, in domain of unit billing; shipping \
                  imports no unit that is not shared, and billing is not: an app's composition wires the two",
             ]
@@ -485,7 +502,7 @@ mod tests {
             &[
                 (
                     "shipping/composition/wire.py",
-                    "from billing import domain\nfrom billing.application import pay\nimport core.domain\n",
+                    "from billing import composition\nfrom billing.protocol import inbound\nimport core.protocol.outbound\n",
                 ),
                 (
                     "shipping/domain/own.py",
@@ -500,6 +517,120 @@ mod tests {
         assert!(
             problems.is_empty() && forbidden.is_empty(),
             "{forbidden:#?}"
+        );
+    }
+
+    #[test]
+    fn the_example_in_the_finding_for_the_code_outside_the_layers_is_a_layer_the_unit_holds() {
+        let units = [
+            // A shared unit of value types: it has no `protocol`
+            unit(
+                "kernel",
+                "kernel",
+                "shared = true\nabsent = [\"protocol\"]\n",
+            ),
+            unit(
+                "core",
+                "core",
+                "shared = true\nabsent = [\"protocol.outbound\"]\n",
+            ),
+            unit(
+                "cli",
+                "cli",
+                &format!("entry = \"cli/__main__.py\"\n{APP_ABSENT}"),
+            ),
+        ];
+        let layers: &[(&str, &[&str])] = &[
+            ("kernel", &["domain", "application", "composition"]),
+            ("core", &["domain", "protocol/inbound"]),
+            ("cli", APP),
+        ];
+        let (forbidden, problems) = check(
+            &units,
+            layers,
+            &[("cli/composition/wire.py", "import kernel\nimport core\n")],
+        );
+        assert!(problems.is_empty(), "{problems:#?}");
+        let outside = |import: &str, of: &str, example: &str| {
+            format!(
+                "cli/composition/wire.py:{import}, in the unit {of} outside its layers; import the module of a layer, \
+                 such as {of}.{example}"
+            )
+        };
+        assert_eq!(
+            forbidden,
+            [
+                outside("1: imports kernel", "kernel", "domain"),
+                outside("2: imports core", "core", "protocol.inbound"),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_input_ports_of_any_unit_read_the_domain_of_a_shared_unit_and_no_other() {
+        let units = [
+            unit("core", "core", "shared = true\n"),
+            unit("steps", "steps", "shared = true\n"),
+            unit("billing", "billing", ""),
+            unit("shipping", "shipping", ""),
+        ];
+        let layers: &[(&str, &[&str])] = &[
+            ("core", ALL),
+            ("steps", ALL),
+            ("billing", ALL),
+            ("shipping", ALL),
+        ];
+        let (forbidden, problems) = check(
+            &units,
+            layers,
+            &[
+                // The shared unit's value types: from a unit that is not shared, and from another shared unit
+                (
+                    "billing/protocol/inbound/dto.py",
+                    "from core.domain import money\nfrom core.protocol.inbound import port\n",
+                ),
+                (
+                    "steps/protocol/inbound/dto.py",
+                    "from core.domain import money\n",
+                ),
+                // The unit's own domain, the domain of a unit that is not shared, and the levels beside it, are not
+                (
+                    "billing/protocol/inbound/own.py",
+                    "from billing.domain import invoice\nfrom shipping.domain import parcel\n\
+                     from core.protocol.outbound import port\n",
+                ),
+                (
+                    "core/protocol/inbound/own.py",
+                    "from core.domain import money\n",
+                ),
+                (
+                    "steps/protocol/inbound/own.py",
+                    "from shipping.domain import parcel\n",
+                ),
+                // Nothing else reads it further than the table lets it
+                (
+                    "billing/infrastructure/inbound/api.py",
+                    "from core.domain import money\n",
+                ),
+            ],
+        );
+        assert!(problems.is_empty(), "{problems:#?}");
+        assert_eq!(
+            forbidden,
+            [
+                "billing/infrastructure/inbound/api.py:1: imports core.domain.money, in domain of unit core; \
+                 infrastructure.inbound may import `protocol.inbound`",
+                "billing/protocol/inbound/own.py:1: imports billing.domain.invoice, in domain; protocol.inbound \
+                 imports no other layer",
+                "billing/protocol/inbound/own.py:2: imports shipping.domain.parcel, in domain of unit shipping; \
+                 billing imports no unit that is not shared, and shipping is not: an app's composition wires the two",
+                "billing/protocol/inbound/own.py:3: imports core.protocol.outbound.port, in protocol.outbound of \
+                 unit core; protocol.inbound imports no other layer",
+                "core/protocol/inbound/own.py:1: imports core.domain.money, in domain; protocol.inbound imports no \
+                 other layer",
+                "steps/protocol/inbound/own.py:1: imports shipping.domain.parcel, in domain of unit shipping; the \
+                 shared unit steps imports only shared units, and shipping is not shared",
+            ]
         );
     }
 

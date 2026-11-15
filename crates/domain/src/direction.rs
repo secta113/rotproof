@@ -27,21 +27,32 @@
 //! 1. An import of a unit's code outside its layers (`Landing::InUnit`: the path is in the unit, in none of its
 //!    places) fails. Inside its own unit it is not judged, as before.
 //! 2. A unit that is not shared is imported only by the composition of an app (a unit with an entry), and not by
-//!    that of another app: the composition of an app reads the places of a unit with no entry as far as it reads its
-//!    own (the table, as if the place were in its own unit). Every other place fails, the entry file too.
+//!    that of another app. Every other place fails, the entry file too.
 //! 3. A shared unit imports only shared units (judged before 2).
 //! 4. Of a shared unit, `application` is read by no other unit's `application` (a composition passes its use cases
 //!    in); the `composition` is read by the composition of an app alone; and every other place is read as if it sat
-//!    in the importer's own unit, so the table decides, the place itself included.
+//!    in the importer's own unit, so the table decides, the place itself included. One place is read beyond the
+//!    table: a shared unit's `domain`, which the `protocol.inbound` of any unit may read, since a shared unit is
+//!    where the value types used across units live, and an input port that could not name them would copy their
+//!    shape. It reads nothing of its own unit and nothing of a unit that is not shared, as the table says.
 //! 5. The entry file reads the `composition` of its own unit and nothing of another unit: rules 2 to 4 refuse it.
 //!
-//! Only direct imports are judged between units too, and what these rules allow is closed under chaining but for the
-//! chain of an entry file, which is the point of one: it imports the composition of its unit, which imports what the
-//! entry file may not, in its own unit and in others. A place reaches another unit's place only where the table lets
-//! it import that place in its own unit, and the one place that may reach into another unit's `composition` is an
-//! app's own (a test runs every chain of places across units and names the exception). `import billing` followed by
-//! `billing.protocol.x` is not seen, as a module reached through an attribute never is: rule 1 fails the first,
-//! which names no layer. The finding for the first says how to import a layer in the stack of the reader (`Way`).
+//! The `composition` of any unit, where rules 2 and 4 let it read another unit, reads that unit's `protocol` (both
+//! levels) and no other place, and an app's reads its `composition` too (rule 4 lets no other): each unit builds its
+//! own insides in its own `composition`, and the app wires the units to each other.
+//!
+//! Only direct imports are judged between units too, and what these rules allow is closed under chaining but in
+//! three places. The chain of an entry file is the point of one: it imports the composition of its unit, which
+//! imports what the entry file may not, in its own unit and in others. A `composition` builds its own unit and
+//! imports the `protocol` of another (an app's, the `composition` too), which import what a `composition` may not read
+//! in another unit, so it reaches them through what it builds and through what it is given (the ports of a `protocol`
+//! carry that unit's own `domain`). And whatever reads a `protocol.inbound` reaches, through the data its ports
+//! carry, the shared `domain` that `protocol.inbound` may read, whether or not it may import that `domain` itself;
+//! this holds in a type alone, since nothing but a `protocol.inbound` imports it, and a `protocol.inbound` that reads
+//! the `domain` of another shared unit, which reads its own, closes a cycle (`cycles`) (a test runs every chain of
+//! places across units and names the exceptions). `import billing` followed by `billing.protocol.x` is not seen, as a
+//! module reached through an attribute never is: rule 1 fails the first, which names no layer. The finding for the
+//! first says how to import a layer in the stack of the reader (`Way`), with a layer the unit holds as the example.
 //!
 //! A forbidden import between units is approved as any other, by its file and the import (`approvals.rs`). A cycle of
 //! shared units is not an import but a shape (`cycles`), and cannot be approved.
@@ -58,6 +69,25 @@ use crate::units::Unit;
 const COMPOSITION: &str = "composition";
 /// The layer of the use cases, which no other unit's use cases import.
 const APPLICATION: &str = "application";
+/// The layer of the contracts, both levels of which an app's `composition` reads in the units it wires.
+const PROTOCOL: &str = "protocol";
+/// The level of the input ports, which reads no `domain` but a shared unit's.
+const PROTOCOL_INBOUND: &str = "protocol.inbound";
+/// The layer of the concepts, which `protocol.inbound` reads in a shared unit.
+const DOMAIN: &str = "domain";
+/// The places the example of a layer to import in a finding is taken from, the first that the unit holds: the input
+/// ports first, since that is what another unit is read for, then the rest in the order of the table.
+const EXAMPLES: [&str; 9] = [
+    PROTOCOL_INBOUND,
+    "protocol.outbound",
+    DOMAIN,
+    APPLICATION,
+    COMPOSITION,
+    "infrastructure.inbound",
+    "infrastructure.outbound",
+    "presentation.models",
+    "ui.pages",
+];
 
 /// Where an import lands: in a place of a unit, or in a unit's code outside its layers.
 #[derive(Debug, Clone, Copy)]
@@ -99,9 +129,11 @@ pub enum Way {
     /// Python: a module by its dotted name (`billing.protocol.inbound`). `bare` says that the import names a place by
     /// its own name alone (`domain.song`), which Python looks up from where the program starts, not from the unit
     Module { bare: bool },
-    /// TypeScript, a unit that has a package: the specifier through it (`@acme/billing/protocol/inbound`)
+    /// TypeScript, a unit that has a package: the specifier through it up to where its layers begin (`@acme/billing`),
+    /// which the path of a layer follows (`@acme/billing/protocol/inbound`)
     Package(String),
-    /// TypeScript, a unit that has none: the path from the importing file (`../billing/src/protocol/inbound`)
+    /// TypeScript, a unit that has none: the path from the importing file to where its layers begin (`../billing/src`),
+    /// which the path of a layer follows (`../billing/src/protocol/inbound`)
     Path(String),
     /// Rust: a dependency on the crate of the layer (`billing_protocol`), since a Cargo dependency is no import of a
     /// module
@@ -116,20 +148,44 @@ impl Default for Way {
 }
 
 impl Way {
-    /// What rule 1 says to do instead, for an import that lands in the code of `unit` outside its layers.
+    /// What rule 1 says to do instead, for an import that lands in the code of `unit` outside its layers. The example
+    /// is a place the unit holds ([`example_of`]), not one it lacks.
     fn advice(&self, unit: &Unit) -> String {
         let name = &unit.name;
+        let example = example_of(unit);
+        let path = example.replace('.', "/");
         match self {
             Way::Module { .. } => {
-                format!("import the module of a layer, such as {name}.protocol.inbound")
+                format!("import the module of a layer, such as {name}.{example}")
             }
-            Way::Package(specifier) => {
-                format!("import a layer through the package of the unit, such as {specifier}")
+            Way::Package(base) => {
+                format!("import a layer through the package of the unit, such as {base}/{path}")
             }
-            Way::Path(path) => format!("import a layer by its path, such as {path}"),
-            Way::Crate => format!("depend on the crate of a layer, such as {name}_protocol"),
+            Way::Path(base) => format!("import a layer by its path, such as {base}/{path}"),
+            Way::Crate => {
+                let layer = example.split('.').next().unwrap_or(example);
+                format!("depend on the crate of a layer, such as {name}_{layer}")
+            }
         }
     }
+}
+
+/// The place of `unit` that a finding gives as the example of a layer to import: the first of [`EXAMPLES`] that its
+/// `absent` does not take out, as the place or as the layer around it (a unit that lacks `protocol` has no
+/// `protocol.inbound`). A unit that lacks them all is given the first.
+pub fn example_of(unit: &Unit) -> &'static str {
+    let lacks = |place: &str| {
+        unit.absent.iter().any(|absent| {
+            place == absent
+                || place
+                    .split_once('.')
+                    .is_some_and(|(layer, _)| layer == absent)
+        })
+    };
+    EXAMPLES
+        .into_iter()
+        .find(|place| !lacks(place))
+        .unwrap_or(EXAMPLES[0])
 }
 
 /// What the rules say of an import from a place to where it lands.
@@ -267,6 +323,22 @@ pub fn verdict(from: &Place, to: Landing, way: &Way) -> Verdict {
             refuse(what_it_may_import(from))
         }
     };
+    // A composition, in another unit: that unit's protocol, and its composition too for an app's (the composition of a
+    // unit is refused to any other before this), which the table has to let it import too, and no other place
+    let in_composition = || {
+        if to.name != COMPOSITION && to.layer_name() != PROTOCOL {
+            let (whose, only) = if wires {
+                ("an app", "composition and protocol")
+            } else {
+                ("a unit", "protocol")
+            };
+            return refuse(format!(
+                "the composition of {whose} imports only the {only} of another unit: {t} builds its own insides in \
+                 its own composition"
+            ));
+        }
+        by_table()
+    };
     if !to.unit.shared {
         if from.unit.shared {
             return refuse(format!(
@@ -283,7 +355,12 @@ pub fn verdict(from: &Place, to: Landing, way: &Way) -> Verdict {
                 "{f} imports no unit that is not shared, and {t} is not: an app's composition wires the two"
             ));
         }
-        return by_table();
+        return in_composition();
+    }
+    if from.name == PROTOCOL_INBOUND && to.name == DOMAIN {
+        // The value types of a shared unit, which an input port may carry: the one place read beyond the table, which
+        // lets `protocol.inbound` import nothing
+        return Verdict::Allowed;
     }
     if from.layer_name() == APPLICATION && to.layer_name() == APPLICATION {
         return refuse(
@@ -296,6 +373,9 @@ pub fn verdict(from: &Place, to: Landing, way: &Way) -> Verdict {
             "only the composition of an app (a unit with entry) imports another unit's composition"
                 .to_string(),
         );
+    }
+    if from.name == COMPOSITION {
+        return in_composition();
     }
     by_table()
 }
@@ -733,6 +813,18 @@ mod tests {
                 "in the unit {unit} outside its layers; import the module of a layer, such as {unit}.protocol.inbound"
             )
         };
+        let insides = |to: &str| {
+            format!(
+                "the composition of an app imports only the composition and protocol of another unit: {to} builds \
+                 its own insides in its own composition"
+            )
+        };
+        let insides_of_a_unit = |to: &str| {
+            format!(
+                "the composition of a unit imports only the protocol of another unit: {to} builds its own insides in \
+                 its own composition"
+            )
+        };
         // (from, to, the finding after `imports x, `, or None when it is allowed)
         let rows: Vec<(&str, &str, Option<String>)> = vec![
             // The same unit: the table, as in a project of one unit, and its code outside the layers is not judged
@@ -770,13 +862,35 @@ mod tests {
                 "cli.domain",
                 Some(format!("in domain of unit cli; {}", shared("steps", "cli"))),
             ),
-            // Rule 2: a unit that is not shared is imported by the composition of an app, and no other app
+            // Rule 2: a unit that is not shared is imported by the composition of an app, and no other app, and
+            // through that unit's composition and protocol alone
             ("cli.composition", "billing.composition", None),
-            ("cli.composition", "billing.domain", None),
-            ("cli.composition", "billing.application", None),
-            ("cli.composition", "billing.infrastructure.outbound", None),
             ("cli.composition", "billing.protocol", None),
-            ("cli.composition", "shipping.ui.atoms", None),
+            ("cli.composition", "billing.protocol.inbound", None),
+            ("cli.composition", "billing.protocol.outbound", None),
+            (
+                "cli.composition",
+                "billing.domain",
+                Some(format!("in domain of unit billing; {}", insides("billing"))),
+            ),
+            (
+                "cli.composition",
+                "billing.application",
+                Some(format!("in application of unit billing; {}", insides("billing"))),
+            ),
+            (
+                "cli.composition",
+                "billing.infrastructure.outbound",
+                Some(format!(
+                    "in infrastructure.outbound of unit billing; {}",
+                    insides("billing")
+                )),
+            ),
+            (
+                "cli.composition",
+                "shipping.ui.atoms",
+                Some(format!("in ui.atoms of unit shipping; {}", insides("shipping"))),
+            ),
             (
                 "billing.composition",
                 "shipping.composition",
@@ -882,9 +996,83 @@ mod tests {
             // Rule 4b: the composition of a shared unit is imported by the composition of an app
             ("cli.composition", "core.composition", None),
             ("web.composition", "steps.composition", None),
-            ("cli.composition", "core.application", None),
-            ("cli.composition", "core.infrastructure.outbound", None),
-            ("cli.composition", "core.domain", None),
+            // ... which reads the rest of a shared unit through the composition and protocol alone
+            ("cli.composition", "core.protocol.inbound", None),
+            ("cli.composition", "core.protocol.outbound", None),
+            (
+                "cli.composition",
+                "core.application",
+                Some(format!("in application of unit core; {}", insides("core"))),
+            ),
+            (
+                "cli.composition",
+                "core.infrastructure.outbound",
+                Some(format!(
+                    "in infrastructure.outbound of unit core; {}",
+                    insides("core")
+                )),
+            ),
+            (
+                "cli.composition",
+                "core.domain",
+                Some(format!("in domain of unit core; {}", insides("core"))),
+            ),
+            // The composition of a unit that is no app reads another unit through its protocol alone
+            ("steps.composition", "core.protocol.inbound", None),
+            ("steps.composition", "core.protocol.outbound", None),
+            (
+                "steps.composition",
+                "core.domain",
+                Some(format!("in domain of unit core; {}", insides_of_a_unit("core"))),
+            ),
+            (
+                "steps.composition",
+                "core.infrastructure.outbound",
+                Some(format!(
+                    "in infrastructure.outbound of unit core; {}",
+                    insides_of_a_unit("core")
+                )),
+            ),
+            (
+                "billing.composition",
+                "core.application",
+                Some(format!("in application of unit core; {}", insides_of_a_unit("core"))),
+            ),
+            // Rule 4: the input ports of any unit read the domain of a shared unit, and nothing else of any other
+            ("billing.protocol.inbound", "core.domain", None),
+            ("steps.protocol.inbound", "core.domain", None),
+            ("cli.protocol.inbound", "core.domain", None),
+            ("billing.protocol", "core.domain", None),
+            (
+                "core.protocol.inbound",
+                "core.domain",
+                Some("in domain; protocol.inbound imports no other layer".into()),
+            ),
+            (
+                "billing.protocol.inbound",
+                "billing.domain",
+                Some("in domain; protocol.inbound imports no other layer".into()),
+            ),
+            (
+                "billing.protocol.inbound",
+                "shipping.domain",
+                Some(format!("in domain of unit shipping; {}", wires("billing", "shipping"))),
+            ),
+            (
+                "core.protocol.inbound",
+                "billing.domain",
+                Some(format!("in domain of unit billing; {}", shared("core", "billing"))),
+            ),
+            (
+                "billing.protocol.inbound",
+                "core.application",
+                Some("in application of unit core; protocol.inbound imports no other layer".into()),
+            ),
+            (
+                "billing.protocol.inbound",
+                "core.protocol.outbound",
+                Some("in protocol.outbound of unit core; protocol.inbound imports no other layer".into()),
+            ),
             (
                 "billing.composition",
                 "core.composition",
@@ -938,7 +1126,7 @@ mod tests {
     #[test]
     fn the_same_unit_is_judged_as_before_and_only_a_composition_or_a_shared_unit_is_crossed() {
         let world = World::new();
-        let (mut crossing, mut same) = (0, 0);
+        let (mut crossing, mut same, mut ports_read) = (0, 0, 0);
         for from in &world.places {
             for to in &world.places {
                 let landing = Landing::Place(to);
@@ -974,10 +1162,21 @@ mod tests {
                 let wires = from.name == "composition" && from.unit.app;
                 // A unit that is not shared is imported by the composition of an app alone, and no app is imported
                 assert!(to.unit.shared || (wires && !to.unit.app), "{name}");
+                // A composition reads another unit through its protocol, and an app's through its composition too
+                assert!(
+                    from.name != "composition"
+                        || to.layer_name() == "protocol"
+                        || (wires && to.name == "composition"),
+                    "{name}"
+                );
                 // A shared unit imports only shared ones
                 assert!(!from.unit.shared || to.unit.shared, "{name}");
-                // What is imported is what the table lets the importer import in its own unit
-                assert!(allows(from, to, true), "{name}");
+                // What is imported is what the table lets the importer import in its own unit, but for the domain of a
+                // shared unit, which an input port reads and the table does not let it
+                let ports =
+                    from.name == "protocol.inbound" && to.name == "domain" && to.unit.shared;
+                ports_read += usize::from(ports);
+                assert!(allows(from, to, true) != ports, "{name}");
                 // The application of a unit never reads the application of another
                 assert!(
                     from.layer_name() != "application" || to.layer_name() != "application",
@@ -998,55 +1197,76 @@ mod tests {
             }
         }
         assert!(same > 0 && crossing > 0, "{same} {crossing}");
+        // Every input port of a unit reads the domain of each shared unit but its own
+        assert_eq!(ports_read, 6 * 2 - 2, "{ports_read}");
     }
 
     #[test]
-    fn what_the_rules_allow_between_units_is_closed_under_chaining_but_for_the_entry_of_an_app() {
+    fn what_the_rules_allow_between_units_is_closed_under_chaining_but_in_four_places() {
         // Only direct imports are judged, so a chain of allowed imports must never reach what its first may not. Across
-        // units this holds because the composition of an app asks no more of a place of another unit than the table
-        // asks of the same place of its own, and no other place reaches the composition of another unit. The one
-        // exception is the entry file of an app, here as in a project of one unit (the table is not closed over it
-        // either): it imports its composition and, through it, what that composition wires, which is what an entry
-        // file is for
+        // units this holds because a place asks no more of a place of another unit than the table asks of the same
+        // place of its own, but in the places below, each named by what it is for (a test counts each, so that none is
+        // there for nothing):
+        // - the entry file of an app, here as in a project of one unit (the table is not closed over it either): it
+        //   imports its composition and, through it, what that composition wires, which is what an entry file is for;
+        // - a composition, which builds its own unit and so reaches, through the places it imports there, what they
+        //   read in other units and it may not: only the protocol of another unit is its to read, and an app's its
+        //   composition too, each unit builds its own insides; and through those, what the composition builds there
+        //   and what the ports of the protocol carry of that unit's own `domain`, as in any unit;
+        // - what reads a `protocol.inbound`, which reaches the shared `domain` it reads by the type of its data, in no
+        //   import: the one thing that imports that `domain` is the `protocol.inbound`;
+        // - and, in that, the `protocol.inbound` of a shared unit that reads the `domain` of another, which reads its
+        //   own: the shared units import each other in a cycle, which `cycles` fails and no approval covers
         let world = World::new();
         let may = |from: &Place, to: &Place| {
             verdict(from, Landing::Place(to), &Way::default()) == Verdict::Allowed
         };
         let entry = |p: &Place| p.name.ends_with("__main__.py");
-        let (mut chains, mut through_the_entry) = (0, 0);
+        let mut chains = 0;
+        let mut through = [0; 5];
         for a in &world.places {
             for b in &world.places {
                 for c in &world.places {
-                    if may(a, b) && may(b, c) {
-                        chains += 1;
-                        if !may(a, c)
-                            && entry(a)
-                            && b.name == "composition"
-                            && b.unit.name == a.unit.name
-                        {
-                            through_the_entry += 1;
-                            continue;
-                        }
-                        assert!(
-                            may(a, c),
-                            "{}.{} may import {}.{}, which may import {}.{}, but {}.{} may not import {}.{}",
-                            a.unit.name,
-                            a.name,
-                            b.unit.name,
-                            b.name,
-                            c.unit.name,
-                            c.name,
-                            a.unit.name,
-                            a.name,
-                            c.unit.name,
-                            c.name
-                        );
+                    if !(may(a, b) && may(b, c)) {
+                        continue;
                     }
+                    chains += 1;
+                    if may(a, c) {
+                        continue;
+                    }
+                    let other = |p: &Place, q: &Place| p.unit.name != q.unit.name;
+                    let known = [
+                        entry(a) && b.name == "composition" && !other(a, b),
+                        a.name == "composition"
+                            && other(a, b)
+                            && (b.name == "composition" || b.layer_name() == "protocol"),
+                        a.name == "composition" && !other(a, b) && other(a, c),
+                        b.name == "protocol.inbound"
+                            && c.name == "domain"
+                            && c.unit.shared
+                            && other(b, c),
+                        a.name == "protocol.inbound"
+                            && b.name == "domain"
+                            && c.name == "domain"
+                            && !other(a, c),
+                    ];
+                    let at = known.iter().position(|&known| known);
+                    let name = |p: &Place| format!("{}.{}", p.unit.name, p.name);
+                    assert!(
+                        at.is_some(),
+                        "{} may import {}, which may import {}, but {} may not import {}",
+                        name(a),
+                        name(b),
+                        name(c),
+                        name(a),
+                        name(c)
+                    );
+                    through[at.unwrap()] += 1;
                 }
             }
         }
         assert!(chains > world.places.len(), "{chains} chains");
-        assert!(through_the_entry > 0);
+        assert!(through.iter().all(|&n| n > 0), "{through:?}");
     }
 
     #[test]
@@ -1129,13 +1349,13 @@ mod tests {
         );
         assert_eq!(words(Way::Module { bare: true }), words(Way::default()));
         assert_eq!(
-            words(Way::Package("@acme/core/protocol/inbound".into())),
+            words(Way::Package("@acme/core".into())),
             said(
                 "import a layer through the package of the unit, such as @acme/core/protocol/inbound"
             )
         );
         assert_eq!(
-            words(Way::Path("../core/src/protocol/inbound".into())),
+            words(Way::Path("../core/src".into())),
             said("import a layer by its path, such as ../core/src/protocol/inbound")
         );
         assert_eq!(
@@ -1154,6 +1374,84 @@ mod tests {
         )
         .unwrap();
         assert!(!place.detail.contains("such as"), "{}", place.detail);
+    }
+
+    #[test]
+    fn the_example_of_a_layer_is_a_place_the_unit_holds_whatever_the_stack_says() {
+        // (what the unit lacks, the example it is given: its place, then the layer of it for Rust)
+        let rows: [(&[&str], &str, &str); 8] = [
+            (&[], "protocol.inbound", "protocol"),
+            (&["domain"], "protocol.inbound", "protocol"),
+            // A level that is out, and a layer that is out with the levels it holds
+            (&["protocol.inbound"], "protocol.outbound", "protocol"),
+            (&["protocol"], "domain", "domain"),
+            (&["protocol", "domain"], "application", "application"),
+            // An app, which holds only its composition and infrastructure
+            (
+                &["domain", "application", "protocol"],
+                "composition",
+                "composition",
+            ),
+            (
+                &["domain", "application", "protocol", "composition"],
+                "infrastructure.inbound",
+                "infrastructure",
+            ),
+            // A unit that holds none of what is listed has the first, which the structure check has failed already
+            (
+                &[
+                    "protocol",
+                    "domain",
+                    "application",
+                    "composition",
+                    "infrastructure",
+                    "presentation",
+                    "ui",
+                ],
+                "protocol.inbound",
+                "protocol",
+            ),
+        ];
+        for (lacks, example, layer) in rows {
+            let mut unit = unit("kernel", "kernel", true, None);
+            unit.absent = lacks.iter().map(|name| name.to_string()).collect();
+            assert_eq!(example_of(&unit), example, "{lacks:?}");
+            let from = World::new();
+            let from = from.place("billing.application");
+            let said = |way: Way| {
+                judged_landing(
+                    "f",
+                    1,
+                    "kernel",
+                    "imports kernel",
+                    from,
+                    Landing::InUnit(&unit),
+                    &way,
+                )
+                .unwrap()
+                .detail
+            };
+            assert!(
+                said(Way::Module { bare: false }).ends_with(&format!("such as kernel.{example}")),
+                "{lacks:?}"
+            );
+            assert!(
+                said(Way::Package("@acme/kernel/src".into())).ends_with(&format!(
+                    "such as @acme/kernel/src/{}",
+                    example.replace('.', "/")
+                )),
+                "{lacks:?}"
+            );
+            assert!(
+                said(Way::Path("../kernel".into()))
+                    .ends_with(&format!("such as ../kernel/{}", example.replace('.', "/"))),
+                "{lacks:?}"
+            );
+            assert!(
+                said(Way::Crate).ends_with(&format!("such as kernel_{layer}")),
+                "{lacks:?}"
+            );
+        }
     }
 
     #[test]
