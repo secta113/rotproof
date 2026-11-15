@@ -311,8 +311,9 @@ left out: the code says that, and a copy goes stale. A document is edited in pla
 deprecated, opening with `# Resolution`, only when it no longer holds. A document that describes code names it in
 `follows`, each with its hash when the document was last reviewed: a file in any language; in Python, TypeScript,
 JavaScript and Rust also a definition, written `<file>::<Name>.<Name>` in all of them (`src/api.py::Router.add`,
-`src/api.ts::Router.add`, `crates/x/src/cli.rs::Command.Before`); or every file Rotproof reads as code under a
-directory (`src/api/`: `.py`, `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` and `.rs`, in any case,
+`src/api.ts::Router.add`, `crates/x/src/cli.rs::Command.Before`); in a `.toml` file also a table, written
+`<file>::<name>` (`.config/rotproof.toml::unit`, `Cargo.toml::workspace.dependencies`); or every file Rotproof reads as
+code under a directory (`src/api/`: `.py`, `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` and `.rs`, in any case,
 whatever the stack of the project). A definition is hashed on its own source, so a change elsewhere in its file does
 not fail it. A name that is more than one piece in its file (overloads, a getter and its setter, a Python property and
 its `@x.setter`, an interface merged with a class, the `impl` blocks of a Rust type) is hashed on all of them, in the
@@ -324,7 +325,17 @@ enum, and `default` for an `export default` that has no name; in Rust, a `fn`, `
 (`tests.helper`). A Rust type's key covers its definition and every `impl` block for it in the file, `Type.method` is
 the method of that name in any of them, and a Rust definition starts at its first attribute or `///` doc comment, and one
 named by a raw identifier (`pub fn r#match`) is written without the `r#` (`src/lib.rs::match`). What
-a macro defines is not seen. Once the document is reviewed against the code, `rotproof follows knowledge/api.md
+a macro defines is not seen. A table is a heading, `[unit]` or `[[unit]]`, and a piece of it is the text from its
+heading to the next heading in the file, without the blank lines after it (a comment above the next heading is part of
+the piece above it). A name selects every table whose heading begins with it, as a class holds its methods: `unit` is
+each `[[unit]]` and each `[unit.x]` below one, `workspace` the `[workspace]` table and `[workspace.dependencies]`,
+and `workspace.dependencies` that table alone; the pieces are joined in the order they appear, as an overload's are.
+The keys above the first heading are in no table, so a document that follows `.config/rotproof.toml::unit` fails when
+a unit changes and not when `areas` or `files` does (the file as a key fails for both). A name is bare keys joined by
+dots (letters, digits, `-` and `_`). A table with no heading of its own (a value, `unit = [{ ... }]`, or one made by a
+dotted key) is not named, so it is "not there"; a `.toml` file that is not TOML cannot be read, which the check says as
+it says it of a Python file that does not parse. A `.toml` file is no code of a directory: `src/` is hashed on the same
+files as before. Once the document is reviewed against the code, `rotproof follows knowledge/api.md
 <key>...` (or `docs/knowledge/api.md`) pins each key at its hash as the code is now, adding a key `follows` lacks with
 its hash quoted, and writes all the keys or none: pinning changes the document, so its commit records the review.
 Nothing else in the document changes: it keeps a byte order mark and its line endings (CRLF on every line when one
@@ -514,9 +525,11 @@ changed is in the commits, what was measured and decided along the way in the ta
   once. A document that breaks one of these is left out of the index, which lists it first, with why.
 - **Every knowledge document matches the code it follows:** each key of `follows` names a path from the root with
   `/` (a file; a directory with a `/` at its end; a definition of a Python, TypeScript, JavaScript or Rust file after
-  `::`, as `f`, `Class` or `Class.method`) with a hash of 8 lower-case hex digits, and that hash is what it names now:
+  `::`, as `f`, `Class` or `Class.method`; a table of a `.toml` file, as `unit` or `workspace.dependencies`) with a
+  hash of 8 lower-case hex digits, and that hash is what it names now:
   the file's text, every line ending as `\n`; the definition's source from its first decorator or attribute to its
-  end, all the pieces of a name defined more than once in the order they appear, joined with `\n`; or every file read
+  end, all the pieces of a name defined more than once in the order they appear, joined with `\n`; a table's
+  headings, each to the next heading in the file, joined in the same way; or every file read
   as code under the directory (`.py`, `.rs` and the TypeScript and JavaScript extensions, in any case, whatever the
   stack; outside what the project's `.gitignore` files exclude, and hidden ones), each with its path. What is not
   there fails. A deprecated document no longer holds, so what it follows is not read.

@@ -10,6 +10,7 @@ use domain::definitions::selected;
 use domain::follows::content_hash;
 use domain::follows::{
     Followed, added, directory_hash, document_name, drifted, followed, language_of, repinned,
+    table_text,
 };
 use domain::schema::{Knowledge, KnowledgeDoc, Status, knowledge_doc};
 use protocol::inbound::{Drift, Pinned};
@@ -18,7 +19,7 @@ use protocol::outbound::{Tree, Writer};
 
 /// The hash of what `key` names as it is now: `Ok(None)` when it is not there, `Err` when it cannot be read. Every
 /// file is read as `read_text` reads it, so a checkout with CRLF or a byte order mark hashes as one with LF, a
-/// definition too, as it is cut out of that text.
+/// definition or a table too, as it is cut out of that text.
 pub fn current(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -50,6 +51,15 @@ pub fn current(
                     )
                 })?;
             Ok(selected(&source, &outline, &name).map(|text| content_hash(&text)))
+        }
+        Followed::Table { file, name } => {
+            let Some(source) = file_text(&file)? else {
+                return Ok(None);
+            };
+            let table = table_text(&source, &name).map_err(|why| {
+                format!("{file} cannot be parsed as TOML, so its tables cannot be read: {why}")
+            })?;
+            Ok(table.map(|text| content_hash(&text)))
         }
         Followed::Directory(dir) => {
             if !matches!(exactly(tree, &dir), Ok((_, true))) {
@@ -404,6 +414,121 @@ mod tests {
             }
             assert_eq!(now(&tree), before, "{path}");
         }
+    }
+
+    #[test]
+    fn a_table_of_a_toml_file_hashes_on_its_headings_and_not_on_the_fields_above_them() {
+        let tree = project(&[]);
+        let source = "areas = [\"a\"]\nfiles = \"1\"\n\n[[unit]]\nname = \"x\"\n\n[[unit]]\nname = \"y\"\n\n\
+                      [other]\nk = 1\n";
+        tree.write("domain/units.toml", source).unwrap();
+        let now = |tree: &Fake, key: &str| current(tree, &Readers, key).unwrap();
+        let (unit, other, file) = (
+            now(&tree, "domain/units.toml::unit"),
+            now(&tree, "domain/units.toml::other"),
+            now(&tree, "domain/units.toml"),
+        );
+        assert!(unit.is_some() && other.is_some() && unit != other);
+
+        // A field above the first heading fails the file, not the tables
+        let above = source
+            .replace("\"1\"", "\"2\"")
+            .replace("areas = [\"a\"]", "areas = [\"a\", \"b\"]");
+        tree.write("domain/units.toml", &above).unwrap();
+        assert_eq!(now(&tree, "domain/units.toml::unit"), unit);
+        assert_eq!(now(&tree, "domain/units.toml::other"), other);
+        assert_ne!(now(&tree, "domain/units.toml"), file);
+
+        // A unit changed fails `unit`, and the table beside it keeps its hash
+        tree.write("domain/units.toml", &source.replace("\"y\"", "\"z\""))
+            .unwrap();
+        assert_ne!(now(&tree, "domain/units.toml::unit"), unit);
+        assert_eq!(now(&tree, "domain/units.toml::other"), other);
+
+        // A table that is not there, and a file that is not, are `None`: the check says so
+        assert_eq!(now(&tree, "domain/units.toml::gone"), None);
+        assert_eq!(now(&tree, "domain/units.toml::areas"), None);
+        assert_eq!(now(&tree, "domain/gone.toml::unit"), None);
+
+        // As with any file, CRLF and a byte order mark are no change
+        tree.write("domain/units.toml", source).unwrap();
+        tree.write(
+            "domain/units.toml",
+            &format!("\u{feff}{}", source.replace('\n', "\r\n")),
+        )
+        .unwrap();
+        assert_eq!(now(&tree, "domain/units.toml::unit"), unit);
+        assert_eq!(now(&tree, "domain/units.toml::other"), other);
+
+        // What is not TOML cannot be read, and is not a table gone
+        tree.write("domain/units.toml", "[[unit]\nname = 1\n")
+            .unwrap();
+        let why = current(&tree, &Readers, "domain/units.toml::unit").unwrap_err();
+        assert!(
+            why.starts_with(
+                "domain/units.toml cannot be parsed as TOML, so its tables cannot be read: line 1:"
+            ),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn a_toml_file_is_no_code_of_a_directory_and_a_table_is_pinned_and_checked_like_a_definition() {
+        let tree = project(&[]);
+        tree.write("domain/units.toml", "[[unit]]\nname = \"x\"\n")
+            .unwrap();
+        let directory = current(&tree, &Readers, "domain/").unwrap();
+        // The hash of a directory is what it was before a table could be named: no `.toml` file is in it
+        tree.write("domain/units.toml", "[[unit]]\nname = \"changed\"\n")
+            .unwrap();
+        tree.write("domain/more.toml", "[a]\n").unwrap();
+        assert_eq!(current(&tree, &Readers, "domain/").unwrap(), directory);
+
+        let keys = ["domain/units.toml::unit".to_string()];
+        let done = pin(&tree, &tree, &Readers, "knowledge/model.md", &keys).unwrap();
+        assert!(done.written);
+        let text = tree.text(DOC).unwrap();
+        assert!(
+            text.contains(&format!(
+                "  domain/units.toml::unit: \"{}\"\n",
+                done.keys[0].2
+            )),
+            "{text}"
+        );
+        assert!(changed(&tree, &Readers).unwrap().is_empty());
+        let found = |tree: &Fake| {
+            let documents = Bundle::new(tree, crate::layers::areas(tree).unwrap().unwrap())
+                .read_knowledge()
+                .unwrap()
+                .documents
+                .into_iter()
+                .map(|(name, (doc, _))| (name, doc))
+                .collect();
+            drift(tree, &Readers, &documents)
+        };
+        assert!(found(&tree).is_empty());
+
+        // A unit changed fails the document, naming the key and the command that pins it
+        tree.write("domain/units.toml", "[[unit]]\nname = \"again\"\n")
+            .unwrap();
+        let said = found(&tree);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(
+            said[0].contains("follows domain/units.toml::unit, which changed")
+                && said[0]
+                    .contains("`rotproof follows knowledge/model.md domain/units.toml::unit`"),
+            "{said:?}"
+        );
+        // The table gone says that, as a definition gone does
+        tree.write("domain/units.toml", "areas = []\n").unwrap();
+        let said = found(&tree);
+        assert!(
+            said.len() == 1
+                && said[0].contains("follows domain/units.toml::unit, which is not there"),
+            "{said:?}"
+        );
+        let why = pin(&tree, &tree, &Readers, "knowledge/model.md", &keys).unwrap_err();
+        assert!(why.contains("domain/units.toml::unit: not there"), "{why}");
     }
 
     #[test]

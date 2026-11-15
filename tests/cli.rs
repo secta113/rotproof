@@ -4001,3 +4001,82 @@ fn follows_pins_the_keys_in_the_document_and_prints_the_log_line() {
         Some(2)
     );
 }
+
+#[test]
+fn follows_pins_a_table_of_a_toml_file_and_the_check_fails_when_only_that_table_changes() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let doc = r.join("docs/knowledge/model.md");
+    let units =
+        "areas = [\"a\"]\nfiles = \"1\"\n\n[[unit]]\nname = \"x\"\n\n[[unit]]\nname = \"y\"\n";
+    fs::write(r.join("domain/units.toml"), units).unwrap();
+    fs::write(
+        &doc,
+        "---\ntype: Knowledge\ntitle: M\ndescription: D.\ntags: [a]\nstatus: stable\n---\n\n# Shape\n\nIt plays.\n",
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+
+    // A table that is not there is said as a definition that is not there is, and nothing is written
+    let before = fs::read_to_string(&doc).unwrap();
+    let out = run(&[
+        "--root",
+        &arg,
+        "follows",
+        "knowledge/model.md",
+        "domain/units.toml::gone",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("domain/units.toml::gone: not there"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+
+    let out = run(&[
+        "--root",
+        &arg,
+        "follows",
+        "knowledge/model.md",
+        "domain/units.toml::unit",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("follows:\n  domain/units.toml::unit: \""),
+        "{}",
+        fs::read_to_string(&doc).unwrap()
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // The fields above the tables are not the table
+    fs::write(
+        r.join("domain/units.toml"),
+        units
+            .replace("\"1\"", "\"2\"")
+            .replace("[\"a\"]", "[\"a\", \"b\"]"),
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // A unit is
+    fs::write(r.join("domain/units.toml"), units.replace("\"y\"", "\"z\"")).unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "follows domain/units.toml::unit, which changed since the document was last reviewed"
+        ),
+        "{}",
+        stdout(&out)
+    );
+}
