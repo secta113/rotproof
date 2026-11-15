@@ -648,9 +648,11 @@ changed is in the commits, what was measured and decided along the way in the ta
   are judged: what the table allows is closed under chaining, so a chain of allowed imports inside a unit never reaches
   a forbidden layer (between units it can: see "Units"). A module is placed where its parts, as a path, land as the operating system that runs the check resolves
   them: on Windows, `Infrastructure.db` lands in `infrastructure`, as Python imports it with `PYTHONCASEOK` set.
-  Imports of modules in no layer (the standard library, packages) are not judged, and imports built at run time
-  (`importlib`) are not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be
-  read.
+  Imports of modules in no layer (the standard library, packages) are not judged. A call of
+  `importlib.import_module` or `__import__` (also as `builtins.__import__`, or by a name imported with `from
+  importlib import import_module`) whose module is a string literal is an import of that module, read as one; a module
+  that is not a literal (a variable, an f-string, a concatenation with `+`) or is relative (`".x"`) is built at run
+  time and is not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be read.
 - **The layers import only what the table allows** (TypeScript): every `import` (`import type` too), `export ...
   from`, `import x = require(...)`, and `import(...)` and `require(...)` with a literal string, in the `.ts`, `.tsx`,
   `.js` and `.jsx` files (and `.mts`, `.cts`, `.mjs`, `.cjs`) of the layers, read with

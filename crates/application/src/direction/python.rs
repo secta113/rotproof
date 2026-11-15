@@ -291,6 +291,40 @@ mod tests {
     }
 
     #[test]
+    fn an_import_by_a_literal_through_importlib_or_dunder_import_is_judged_as_the_import_statement_is()
+     {
+        let (forbidden, problems) = check(
+            &monolith(),
+            MONOLITH,
+            &[
+                (
+                    "shipping/application/q1.py",
+                    "import importlib\nimportlib.import_module(\"billing.domain.invoice\")\n",
+                ),
+                (
+                    "shipping/application/q2.py",
+                    "__import__(\"billing.domain.invoice\")\n",
+                ),
+                // Built at run time: not seen
+                (
+                    "shipping/application/q3.py",
+                    "import importlib\nname = \"billing.domain.invoice\"\nimportlib.import_module(name)\n",
+                ),
+            ],
+        );
+        assert!(problems.is_empty(), "{problems:#?}");
+        assert_eq!(
+            forbidden,
+            [
+                "shipping/application/q1.py:2: imports billing.domain.invoice, in domain of unit billing; shipping \
+                 imports no unit that is not shared, and billing is not: an app's composition wires the two",
+                "shipping/application/q2.py:1: imports billing.domain.invoice, in domain of unit billing; shipping \
+                 imports no unit that is not shared, and billing is not: an app's composition wires the two",
+            ]
+        );
+    }
+
+    #[test]
     fn in_a_src_layout_monorepo_a_unit_is_looked_up_in_the_directory_that_holds_it() {
         let units = [
             unit(
