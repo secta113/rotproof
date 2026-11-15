@@ -63,6 +63,12 @@ pub struct Upgraded {
     pub made: Made,
     /// Whether `files` was set to the running version
     pub files_set: bool,
+    /// The knowledge document of the units, from the root, written as a draft: the project declares units, and no
+    /// document follows them
+    pub drafted: Option<String>,
+    /// Why that document was not drafted, when it would have been: it cannot be written without an area to tag it
+    /// with, or the units cannot be followed
+    pub not_drafted: Option<String>,
 }
 
 /// One broken rule: which check found it, and what is wrong.

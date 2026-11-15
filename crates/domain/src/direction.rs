@@ -76,7 +76,7 @@ impl<'a> From<&'a Place> for Landing<'a> {
 
 impl Landing<'_> {
     /// The name of the unit it is in, "" for the implicit unit.
-    fn unit_name(&self) -> &str {
+    pub fn unit_name(&self) -> &str {
         match self {
             Landing::Place(place) => &place.unit.name,
             Landing::InUnit(unit) => &unit.name,

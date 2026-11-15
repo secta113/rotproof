@@ -15,6 +15,7 @@ use domain::paths::{join, parent};
 use domain::readers::{Read, read_of};
 use domain::rust::{code, is_source as is_rust, paths, renames};
 use domain::units::Unit;
+use domain::units_doc::link;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -33,6 +34,7 @@ pub(super) fn rust<'a>(
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
     let mut reads = Vec::new();
+    let mut links = Vec::new();
     let mut manifests = Manifests::new(parsers);
     // Each manifest's dependencies that land in a place, by the name the crate's code uses
     let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
@@ -84,6 +86,7 @@ pub(super) fn rust<'a>(
                 &Way::Crate,
             ));
             edges.extend(edge(&path, dependency.line, name, from, to));
+            links.extend(link(from, to));
             if let Landing::Place(to) = to
                 && read_of(from, to, name).is_some()
             {
@@ -100,6 +103,7 @@ pub(super) fn rust<'a>(
         forbidden,
         edges,
         reads,
+        links,
     })
 }
 
@@ -621,6 +625,15 @@ mod tests {
             ],
         );
         let found = problems(&tree, &Readers, &declared).unwrap();
+        // A crate depending on a crate of another unit is a link, and one depending on a crate of its own unit is none
+        let mut links: Vec<(&str, &str)> = found
+            .links
+            .iter()
+            .map(|link| (link.from.as_str(), link.to.as_str()))
+            .collect();
+        links.sort();
+        links.dedup();
+        assert_eq!(links, [("billing", "core"), ("steps", "core")]);
         let mut reads: Vec<(String, String)> = found
             .reads
             .iter()

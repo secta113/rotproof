@@ -11,6 +11,7 @@ use domain::layers::{Layout, Place};
 use domain::paths::{join, parent, relative};
 use domain::readers::read_of;
 use domain::units::Unit;
+use domain::units_doc::link;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -29,6 +30,7 @@ pub(super) fn typescript(
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
     let mut reads = Vec::new();
+    let mut links = Vec::new();
     // The packages are the declared units': the implicit unit of a project that declares none is no package
     let roots: Vec<String> = units
         .iter()
@@ -79,6 +81,7 @@ pub(super) fn typescript(
                 &way_of(to, &aliases, &path),
             ));
             edges.extend(edge(&path, line, &specifier, from, to));
+            links.extend(link(from, to));
             // A name is the module the import lands in and each name it takes from it, or the module alone
             let module = without_extension(&target);
             if import.names.is_empty() {
@@ -94,6 +97,7 @@ pub(super) fn typescript(
         forbidden,
         edges,
         reads,
+        links,
     })
 }
 
@@ -275,6 +279,15 @@ mod tests {
                 "import { x } from \"@acme/db\";\n",
             ),
         ]);
+        // Each import of the package, by the unit it is in, is a link, with the one that lands outside the layers
+        let mut links: Vec<(&str, &str)> = found
+            .links
+            .iter()
+            .map(|link| (link.from.as_str(), link.to.as_str()))
+            .collect();
+        links.sort();
+        links.dedup();
+        assert_eq!(links, [("billing", "db"), ("web", "db")]);
         let said = |name: &str, by: &str| (name.to_string(), by.to_string());
         let inbound = "packages/db/src/protocol/inbound/index";
         let client = "packages/db/src/infrastructure/outbound/client";

@@ -13,6 +13,7 @@ use domain::declaration::Declared;
 use domain::direction::{Edge, Forbidden, cycles, place_of};
 use domain::layers::{Language, Layout, Place, table};
 use domain::readers::Read;
+use domain::units_doc::Link;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -28,6 +29,9 @@ pub struct Direction {
     pub edges: Vec<Edge>,
     /// Every name a unit reads of a shared unit other than its own, which `.rotproof/readers.md` is written from
     pub reads: Vec<Read>,
+    /// Every import from a unit to another, whether or not the rules allow it, which the draft of the knowledge
+    /// document of the units is made from
+    pub links: Vec<Link>,
 }
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
@@ -189,6 +193,62 @@ mod tests {
         );
     }
 
+    /// The units an import goes from and to, once each, in order.
+    fn links(direction: &Direction) -> Vec<(&str, &str)> {
+        let mut links: Vec<(&str, &str)> = direction
+            .links
+            .iter()
+            .map(|link| (link.from.as_str(), link.to.as_str()))
+            .collect();
+        links.sort();
+        links.dedup();
+        links
+    }
+
+    #[test]
+    fn every_import_of_one_unit_by_another_is_a_link_whether_or_not_the_rules_allow_it() {
+        let (tree, declared) = project(
+            &[
+                ("core/domain/c.py", ""),
+                (
+                    "core/domain/d.py",
+                    "from core.domain import c
+import os
+",
+                ),
+                (
+                    "app/domain/z.py",
+                    "from core.domain import c
+",
+                ),
+                (
+                    "app/application/a.py",
+                    "from app.domain import z
+",
+                ),
+                // Forbidden: `steps` is shared and imports `app`, which is not
+                (
+                    "steps/application/y.py",
+                    "from app.domain import z
+",
+                ),
+                // The code of a unit outside its layers is forbidden as well, and an import of it is a link
+                (
+                    "steps/domain/w.py",
+                    "import core
+",
+                ),
+            ],
+            &["core", "steps"],
+        );
+        let found = problems(&tree, &Readers, &declared).unwrap();
+        assert_eq!(found.forbidden.len(), 2, "{:?}", found.forbidden);
+        assert_eq!(
+            links(&found),
+            [("app", "core"), ("steps", "app"), ("steps", "core")]
+        );
+    }
+
     #[test]
     fn a_project_of_one_unit_has_no_edge() {
         let declared = Declared::new(
@@ -201,5 +261,6 @@ mod tests {
         ]);
         let found = problems(&tree, &Readers, &declared).unwrap();
         assert!(found.problems.is_empty() && found.forbidden.is_empty() && found.edges.is_empty());
+        assert!(found.links.is_empty());
     }
 }

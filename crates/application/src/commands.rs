@@ -64,10 +64,12 @@ impl Commands for Rotproof<'_> {
         let files = self.machine.files(root);
         let mut initialized =
             crate::init::init(&*files, &*files, stack, ui, &files.name()?, VERSION)?;
-        // An upgrade makes what the project lacks as `rotproof create` does, so it writes the list too
+        // An upgrade makes what the project lacks as `rotproof create` does, so it writes the list too, and drafts the
+        // document of the units once, which reads the imports between them
         if let Initialized::Upgraded(upgraded) = &mut initialized {
             let made = &mut upgraded.made;
             self.list_readers(&*files, &mut made.written, &mut made.removed)?;
+            crate::init::draft(&*files, self.machine.parsers(), &*files, upgraded)?;
         }
         Ok(initialized)
     }

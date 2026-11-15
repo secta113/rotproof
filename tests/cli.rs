@@ -4490,6 +4490,110 @@ fn a_modular_monolith_of_three_units_passes_and_each_new_finding_names_its_unit(
 }
 
 #[test]
+fn init_drafts_the_document_of_the_units_once_and_the_check_passes_with_it() {
+    let root = modular_monolith();
+    let r = root.path();
+    let arg = root_arg(r);
+    // `billing` reads the shared `core`, and the app wires `billing` in its composition
+    write_file(
+        r,
+        "modules/billing/application/play.py",
+        "from core.domain import score\n",
+    );
+    write_file(
+        r,
+        "modules/app/composition/wire.py",
+        "from billing.application import play\n",
+    );
+    let doc = r.join("docs/knowledge/units.md");
+    assert!(!doc.exists());
+
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let said = stdout(&out);
+    assert!(said.contains("drafted docs/knowledge/units.md: "), "{said}");
+    assert!(said.contains("wrote docs/knowledge/index.md\n"), "{said}");
+    let text = fs::read_to_string(&doc).unwrap();
+    assert!(text.contains("\ntags: [\"a\"]\n"), "{text}");
+    assert!(
+        text.contains("\nflowchart LR\n    core([\"core (shared)\"])\n    billing[\"billing\"]\n    app[\"app (app)\"]\n"),
+        "{text}"
+    );
+    for edge in ["billing --> core", "app --> billing"] {
+        assert!(text.contains(&format!("\n    {edge}\n")), "{text}");
+    }
+    for unit in ["core", "billing", "app"] {
+        assert!(text.contains(&format!("\n## {unit}\n")), "{text}");
+    }
+    // It passes the check as it was written, with the readers of the shared unit listed by the same run
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // Written once: a second run says nothing of it and leaves it as it is, even rewritten by a person
+    let again = run(&["--root", &arg, "init"]);
+    assert!(again.status.success(), "{}", stdout(&again));
+    assert!(!stdout(&again).contains("draft"), "{}", stdout(&again));
+    assert_eq!(fs::read_to_string(&doc).unwrap(), text);
+
+    // It pins the units: one that changes fails the check, naming the command that pins the document again
+    let before = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    declare(
+        r,
+        &before.replace(
+            "path = \"modules/billing\"",
+            "path = \"modules/billing\"\nabsent = []",
+        ),
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "knowledge/units.md follows .config/rotproof.toml::unit, which changed since the document was last \
+             reviewed"
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn init_drafts_nothing_without_an_area_and_says_why_until_there_is_one() {
+    let root = declared(&two_units("true").replace("areas = [\"a\"]", "areas = []"));
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let said = stdout(&out);
+    assert!(
+        said.contains(
+            "docs/knowledge/units.md is not drafted: .config/rotproof.toml declares no areas"
+        ),
+        "{said}"
+    );
+    assert!(!r.join("docs/knowledge/units.md").exists());
+
+    declare(
+        r,
+        &fs::read_to_string(r.join(".config/rotproof.toml"))
+            .unwrap()
+            .replace("areas = []", "areas = [\"a\"]"),
+    );
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("drafted docs/knowledge/units.md: "),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stdout(&out).contains("is not drafted"), "{}", stdout(&out));
+}
+
+#[test]
 fn a_project_that_declares_no_unit_is_not_asked_for_manifests_or_given_the_name_of_a_unit() {
     let root = clean_repo();
     let r = root.path();

@@ -372,6 +372,15 @@ fn init(
         println!("move by hand: {how}");
     }
     report_made(names, &upgraded.made);
+    if let Some(path) = &upgraded.drafted {
+        println!(
+            "drafted {path}: the units as the code has them, to write over with the picture you intend; it follows \
+             the units of {declaration}, so `rotproof check` fails when one changes until it is read again"
+        );
+    }
+    if let Some(why) = &upgraded.not_drafted {
+        println!("{why}");
+    }
     if !upgraded.by_hand.is_empty() {
         for why in &upgraded.by_hand {
             println!("needs a person: {why}");

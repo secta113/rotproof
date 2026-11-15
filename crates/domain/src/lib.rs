@@ -36,5 +36,6 @@ pub mod suppressions;
 pub mod text;
 pub mod tree;
 pub mod units;
+pub mod units_doc;
 pub mod upgrade;
 pub mod version;

@@ -132,8 +132,9 @@ that has a declaration:
   `ui/` is there, `"none"` otherwise. With `"atomic"`, it says, as the same lines, that `presentation` is to be made
   (`rotproof create --yes`), and that the state of a page and its calls of the use cases move to
   `presentation.models` and the domain values the parts show to `presentation.display`; with `"none"`, that `ui` is
-  to be taken out of `absent`, where `rotproof check` fails on it. It never changes the declaration's other values,
-  and once it has set `files`, running it again changes nothing.
+  to be taken out of `absent`, where `rotproof check` fails on it. For a project that declares units and has no
+  document that follows them, it also drafts one, once ("The document of the units"). It never changes the
+  declaration's other values, and once it has set `files`, running it again changes nothing.
 - **An update only adds, or takes out what Rotproof itself wrote and no longer keeps, matched exactly,** and does
   nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
   byte order mark it had. What it cannot do without a person (its file is not in a form Rotproof can read),
@@ -461,6 +462,35 @@ the reader sees it:
 An import of a unit's code outside its layers is no read of a name, nor is an import within a unit. The list is there
 when at least one unit is shared, and is not otherwise: `rotproof index` takes away a list that is left when no unit is
 shared any more, and `rotproof check` fails while it is there.
+
+### The document of the units
+
+The rules above say what a unit may import. Why the code is split into these units, and why each edge between them
+exists, are for a person to say, in a knowledge document that follows the declaration: `follows` takes the key
+`.config/rotproof.toml::unit`, every `[[unit]]` table of the file and not its other fields, so `rotproof check` fails
+when a unit is added, removed or changed until the document is read against it again and pinned
+(`rotproof follows knowledge/units.md .config/rotproof.toml::unit`).
+
+`rotproof init` drafts that document when it runs on a project that has a declaration with `[[unit]]` tables, and
+neither a document of `docs/knowledge/` follows that key (a deprecated one counts, as it was deprecated on purpose) nor
+a file named `units.md` is there, in any case. It writes `docs/knowledge/units.md` once, then the index of
+`docs/knowledge/`, and says `drafted docs/knowledge/units.md`; a second run, with the document rewritten or not,
+writes nothing, and it never writes over a file. The draft is a knowledge document that passes `rotproof check` as it
+is written:
+
+- the frontmatter has the type `Knowledge`, the title `Units`, the first of the `areas` as its tag, the status `stable`,
+  and `follows` with the key above at the hash of the tables as they are now;
+- a `flowchart LR` of Mermaid has each unit as a node (a shared unit marked `(shared)`, an app `(app)`) and an arrow
+  from each unit to each unit it imports, once, from the imports the direction check reads in all three stacks,
+  whether or not the rules allow them: an import by the `composition` of an app of the units it wires, and the reads
+  of the shared units, as "Who reads the shared units" lists them;
+- each unit has a section, `## <unit>`, with a line that says its responsibility is not written yet: what the unit is
+  responsible for, why the code is split this way, why each of its edges exists, and which edges are left out on
+  purpose.
+
+The edges are what the code has, as a start to write over, and the draft says so: one that should not be there is a
+defect to fix. With no `areas` there is no tag to give it, so `rotproof init` writes nothing and says why, on every run,
+until there is an area; the same when the units are written in a form the key cannot follow (`unit = [{ ... }]`).
 
 ## The records
 
