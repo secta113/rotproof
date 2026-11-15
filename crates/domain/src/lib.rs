@@ -24,6 +24,7 @@ pub mod members;
 pub mod modules;
 pub mod paths;
 pub mod project;
+pub mod python_stdlib;
 pub mod records;
 pub mod rust;
 pub mod schema;

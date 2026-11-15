@@ -46,7 +46,9 @@ pub fn problems(
         .collect();
     let entries = declared.entries(&table());
     let mut direction = match layout.language {
-        Language::Python => python::python(tree, parsers, layout, &places, &entries),
+        Language::Python => {
+            python::python(tree, parsers, layout, &places, &entries, &declared.units)
+        }
         Language::TypeScript => {
             typescript::typescript(tree, parsers, layout, &places, &entries, &declared.units)
         }

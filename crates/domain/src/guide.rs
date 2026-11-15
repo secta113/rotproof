@@ -90,7 +90,9 @@ fn units(layout: &Layout) -> String {
     let (at, names) = match layout.language {
         Language::Python => (
             "Put the layers in `packages/<unit>/src/<unit>` in a monorepo, or in `<unit>` at the root in a modular\n  \
-             monolith. Python imports a unit as the name of its directory, so the directory is named as the unit is.",
+             monolith. Python imports a unit as the name of its directory, so the directory is named as the unit is,\n  \
+             and no two units have a directory of one name, nor one named as a module of Python's standard library\n  \
+             (`queue`, `string`).",
             "Write `billing.protocol.inbound`, not `billing`. Python finds a bare `domain` from where the program\n  \
              starts, which is the layer of the root and not the unit's own: a unit imports its own layers as\n  \
              `billing.domain`, or relatively.",

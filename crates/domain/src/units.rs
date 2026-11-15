@@ -8,7 +8,8 @@
 
 use crate::declaration::{UnitDeclaration, unreadable};
 use crate::layers::{Language, Layout, Place, Table, UnitTag};
-use crate::paths::{Miswritten, file_name, inside, miswritten, within};
+use crate::paths::{Miswritten, file_name, inside, miswritten, parent, within};
+use crate::python_stdlib::is_standard_library;
 
 /// One unit: where its layers sit, and what it is to the others.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +59,27 @@ impl Unit {
         layout.places_in(table, &self.path, &self.tag())
     }
 
+    /// The name Python imports this unit by and the directory it is looked up in: the last name of its `path` and the
+    /// directory that holds it. `None` for a unit that is not declared or sits at the root of the project, which has no
+    /// directory to name it (what its imports start with is the layer, from the root).
+    pub fn python_import(&self) -> Option<(&str, &str)> {
+        (self.declared && !self.path.is_empty())
+            .then(|| (file_name(&self.path), parent(&self.path)))
+    }
+
+    /// The file `path` that sits directly in this unit's directory and belongs to its package (a Python unit's
+    /// `__init__.py`: [`Layout::unit_files`]), as a place of its own, named by its path: it imports no layer, and what
+    /// it imports of another unit is judged as the rules between units say.
+    pub fn own_file_place(&self, layout: &Layout, table: &Table, path: &str) -> Place {
+        let mut place = layout.entry_at(table, path, &self.tag());
+        place.imports.clear();
+        place.role = format!(
+            "The package file of unit {}: it imports no layer.",
+            self.name
+        );
+        place
+    }
+
     /// The entry files of this unit, each as a place of its own.
     pub fn entry_places(&self, layout: &Layout, table: &Table) -> Vec<Place> {
         let tag = self.tag();
@@ -93,8 +115,33 @@ pub fn declared(
             found.push(unreadable(&format!("two units are named {:?}", unit.name)));
         }
     }
+    if layout.language == Language::Python {
+        imported_alike(&units, &fit, &mut found);
+    }
     together(layout, table, &units, &fit, &mut found);
     (units, found)
+}
+
+/// The units whose directories have one name, each name said once with their paths, in the order the project declares
+/// them: Python imports a unit as the name of its directory, so a name that two directories have is one import.
+fn imported_alike(units: &[Unit], fit: &[bool], found: &mut Vec<String>) {
+    let mut named: Vec<(&str, Vec<&str>)> = Vec::new();
+    for (unit, _) in units.iter().zip(fit).filter(|(_, fit)| **fit) {
+        let Some((name, _)) = unit.python_import() else {
+            continue;
+        };
+        match named.iter_mut().find(|(known, _)| *known == name) {
+            Some((_, paths)) if !paths.contains(&unit.path.as_str()) => paths.push(&unit.path),
+            Some(_) => {}
+            None => named.push((name, vec![&unit.path])),
+        }
+    }
+    for (name, paths) in named.iter().filter(|(_, paths)| paths.len() > 1) {
+        found.push(unreadable(&format!(
+            "two units are imported as {name} ({})",
+            paths.join(", ")
+        )));
+    }
 }
 
 /// The unit a declaration names, as it is compared: no reason it cannot be read yet.
@@ -199,6 +246,12 @@ fn own(
             found.push(unreadable(&format!(
                 "unit {name:?} is at {path}: Python imports a unit as the name of its directory, so name the unit \
                  {directory:?}, or the directory {name:?}"
+            )));
+        }
+        if layout.language == Language::Python && is_standard_library(directory) {
+            found.push(unreadable(&format!(
+                "unit {name:?} is at {path}/, named like a module of Python's standard library: Python would \
+                 import one or the other depending on how it starts; name the directory otherwise"
             )));
         }
         if layer_names(layout, table).iter().any(|n| n == directory) {
@@ -598,6 +651,133 @@ mod tests {
         // Not the other stacks
         assert!(read("typescript", &unit("billing", "packages/billing/src", "")).is_ok());
         assert!(read("rust", &unit("billing", "packages/billing", "")).is_ok());
+    }
+
+    #[test]
+    fn a_python_unit_is_not_named_like_a_module_of_the_standard_library() {
+        // Python would find the module or the directory first, depending on where the program starts
+        for (path, name) in [
+            ("queue", "queue"),
+            ("packages/queue/src/queue", "queue"),
+            ("string", "string"),
+            ("a/distutils", "distutils"),
+            ("a/tomllib", "tomllib"),
+        ] {
+            assert_eq!(
+                fails("python", &unit(name, path, "")),
+                [format!(
+                    "unit \"{name}\" is at {path}/, named like a module of Python's standard library: Python would \
+                     import one or the other depending on how it starts; name the directory otherwise"
+                )],
+                "{path}"
+            );
+        }
+        // The name of the directory is what Python imports, whatever the unit is called, and each reason is said
+        assert_eq!(
+            fails("python", &unit("queues", "a/queue", "")).len(),
+            2,
+            "a unit that is not named as its directory, which is a module of the library"
+        );
+        // Not another stack's, not a name that merely contains one, not the name of a unit at the root
+        assert!(read("typescript", &unit("queue", "packages/queue/src", "")).is_ok());
+        assert!(read("rust", &unit("queue", "packages/queue", "")).is_ok());
+        assert!(read("python", &unit("queue_jobs", "queue_jobs", "")).is_ok());
+        assert!(read("python", &unit("queue", ".", "")).is_ok());
+    }
+
+    #[test]
+    fn two_python_units_are_not_imported_as_one_name() {
+        let two =
+            |a: &str, b: &str| format!("{}\n{}", unit("billing", a, ""), unit("billing2", b, ""));
+        let tables = format!(
+            "{}\n{}",
+            unit("billing", "a/billing", ""),
+            unit("billing", "b/billing", "")
+        );
+        assert_eq!(
+            fails("python", &tables),
+            [
+                "two units are named \"billing\"".to_string(),
+                "two units are imported as billing (a/billing, b/billing)".to_string()
+            ]
+        );
+        // Whether or not they are named alike, and at the root of the project or below it
+        let tables = format!(
+            "{}\n{}\n{}",
+            unit("billing", "billing", ""),
+            unit("shipping", "packages/shipping/src/shipping", ""),
+            unit("other", "packages/billing/src/billing", "")
+        );
+        let found = fails("python", &tables);
+        assert_eq!(
+            found,
+            [
+                "unit \"other\" is at packages/billing/src/billing: Python imports a unit as the name of its \
+                 directory, so name the unit \"billing\", or the directory \"other\"",
+                "two units are imported as billing (billing, packages/billing/src/billing)"
+            ]
+        );
+        // Said once with every path, the units in the order they are declared
+        let tables = format!(
+            "{}\n{}\n{}\n{}",
+            unit("a", "x/a", ""),
+            unit("b", "x/b", ""),
+            unit("a", "y/a", ""),
+            unit("a", "z/a", "")
+        );
+        assert_eq!(
+            fails("python", &tables)[1],
+            "two units are imported as a (x/a, y/a, z/a)"
+        );
+        // Two units at one path are one directory: that is said already
+        let tables = format!(
+            "{}\n{}",
+            unit("billing", "p/billing", ""),
+            unit("billing", "p/billing", "")
+        );
+        assert_eq!(
+            fails("python", &tables),
+            [
+                "two units are named \"billing\"",
+                "units \"billing\" and \"billing\" both have path \"p/billing\""
+            ]
+        );
+        // Units of other directories, a unit at the root, and the same directory name in another stack
+        assert!(read("python", &two("a/billing", "b/shipping")).is_err_and(|e| e.len() == 1));
+        let tables = format!(
+            "{}\n{}",
+            unit("a", ".", ""),
+            unit("b", "packages/b/src/b", "")
+        );
+        assert!(read("python", &tables).is_ok());
+        assert!(read("typescript", &two("a/x", "b/x")).is_ok());
+    }
+
+    #[test]
+    fn a_python_unit_is_imported_from_the_directory_that_holds_it() {
+        let table = table();
+        let layout = layout("python", "atomic").unwrap();
+        let tables = format!(
+            "{}\n{}\n{}",
+            unit("billing", "packages/billing/src/billing", ""),
+            unit("core", "core", ""),
+            unit("shop", ".", "")
+        );
+        let units = read("python", &tables).unwrap();
+        assert_eq!(
+            units[0].python_import(),
+            Some(("billing", "packages/billing/src"))
+        );
+        assert_eq!(units[1].python_import(), Some(("core", "")));
+        // At the root, nothing names it; and the implicit unit is no unit that is declared
+        assert_eq!(units[2].python_import(), None);
+        assert_eq!(Unit::implicit(&layout, &[]).python_import(), None);
+        // The `__init__.py` of a unit is a place that imports no layer, and is the unit's
+        let place =
+            units[0].own_file_place(&layout, &table, "packages/billing/src/billing/__init__.py");
+        assert!(place.imports.is_empty() && place.below.is_empty() && place.is_layer());
+        assert_eq!(place.name, "packages/billing/src/billing/__init__.py");
+        assert_eq!(place.unit, units[0].tag());
     }
 
     #[test]

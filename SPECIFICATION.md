@@ -344,7 +344,10 @@ declaration and the layout alone, before the tree is looked at:
   in them), and a unit whose directory is named like a layer or like a path that is no layer (`tests`), which the
   unit around it would read as one;
 - in Python, a unit whose name is not the name of the directory of its `path`, since Python imports a unit as that
-  name (a unit at the root has none to name it);
+  name (a unit at the root has none to name it); two units whose directories have one name (`two units are imported as
+  billing (a/billing, b/billing)`), which Python cannot tell apart; and a unit whose directory is named like a module
+  of Python's standard library (`queue`, `string`: every name of `sys.stdlib_module_names` in Python 3.10 to 3.14), for
+  Python would import the unit or the module depending on how the program starts;
 - an `entry` that is not written from the root, is no code of the stack, lies inside the path of a unit other than
   the one that declares it (the innermost unit that holds an entry is its own, or none), or is declared by two units;
 - a unit that is `shared` and has an `entry`: an app is imported by none, and a shared unit by all;
@@ -628,6 +631,16 @@ changed is in the commits, what was measured and decided along the way in the ta
   no import of a file, so no approval covers it. In Python, a name that is a layer's alone (`domain`) that fails in
   another unit also says where the unit's own is: Python finds `domain` from where the program starts, and the
   unit's own layer is `billing.domain`.
+
+  In Python a unit is imported as the name of its directory, so an import whose first part is that name is looked up
+  in the directory that holds the unit (`packages/billing/src` for `packages/billing/src/billing`) and lands in a layer
+  of the unit, or in the unit outside its layers: `import billing`, `from billing import models` and the like fail by
+  the first rule (a module reached through an attribute, `billing.protocol` after `import billing.domain`, is not
+  seen). A bare layer name is looked up from the root of the project, as Python does when the program starts there: it lands in the layer of a
+  unit at the root (`path = "."`) and, where the root has none, nowhere, so what it imports is not judged. The
+  `__init__.py` directly in a unit's directory is read as a place that imports no layer: it may import none, and the
+  code of another unit outside its layers fails there as everywhere. A relative import is a path, and lands where the
+  path does; it is named by its full dotted name in a finding and in an approval.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,
