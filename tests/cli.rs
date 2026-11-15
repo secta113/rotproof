@@ -4128,6 +4128,86 @@ fn a_project_that_declares_units_gets_the_layers_of_each_and_is_checked_as_one()
 }
 
 #[test]
+fn the_map_in_agents_md_names_the_unit_of_each_row_and_check_and_init_tell_when_it_is_behind() {
+    let absent = "path = \"packages/billing/src/billing\"\n";
+    let root =
+        declared(&two_units("true").replace(absent, &format!("{absent}absent = [\"protocol\"]\n")));
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let agents = fs::read_to_string(r.join("AGENTS.md")).unwrap();
+    // A row for each layer of each unit, the unit named, and the whole first sentence of the role
+    assert!(
+        agents.contains(
+            "| `packages/core/src/core/domain/` | core: The concepts and rules of the business: types, \
+             calculations and decisions. |\n"
+        ),
+        "{agents}"
+    );
+    assert!(
+        agents.contains("| `packages/billing/src/billing/domain/` | billing: "),
+        "{agents}"
+    );
+    assert!(
+        !agents.contains("packages/billing/src/billing/protocol/"),
+        "{agents}"
+    );
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        out.status.success() && !stdout(&out).contains("AGENTS.md has no row"),
+        "{}",
+        stdout(&out)
+    );
+
+    // The layer is declared absent no more, and made: the map is behind, which is said and fails nothing
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        declaration.replace("absent = [\"protocol\"]\n", ""),
+    )
+    .unwrap();
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let behind = "AGENTS.md has no row in its map for packages/billing/src/billing/protocol/, the layer protocol of \
+                  the unit billing: add it, or declare the layer absent in .config/rotproof.toml";
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains(
+            "the map in AGENTS.md lists the layers .config/rotproof.toml declares (a warning, which fails nothing) (1):"
+        ),
+        "{said}"
+    );
+    assert!(said.contains(&format!("  {behind}\n")), "{said}");
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(&format!("note: {behind}\n")),
+        "{}",
+        stdout(&out)
+    );
+
+    // Add the row, and both are quiet; the file is the project's, and was never written over
+    let row = "| `packages/billing/src/billing/protocol/` | billing: Mine. |\n";
+    fs::write(
+        r.join("AGENTS.md"),
+        agents.replace("| `docs/`", &format!("{row}| `docs/`")),
+    )
+    .unwrap();
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(!said.contains("AGENTS.md has no row"), "{said}");
+    let said = stdout(&run(&["--root", &arg, "init"]));
+    assert!(!said.contains("note: "), "{said}");
+}
+
+#[test]
 fn a_declaration_of_units_that_cannot_be_read_says_every_reason() {
     for (declaration, said) in [
         (

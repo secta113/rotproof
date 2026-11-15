@@ -57,7 +57,8 @@ than today. The rest of docs/ is the project's, and is not read. \
 Prints every broken rule under the check that found it, and what was not checked and why. Warns of every knowledge \
 document whose stale_after has come, on every run from that day, and fails nothing for it: time alone never turns \
 the check red. Warns, too, of every comment that may make a Python type checker check less (# pyright: basic, \
-# mypy: allow-untyped-defs), and fails nothing for it. With todo_link in the declaration (\"number\" or \"key\"), a \
+# mypy: allow-untyped-defs), and fails nothing for it. Warns, too, of a layer the map in AGENTS.md has no row for, and \
+of a row for a layer declared absent, and fails nothing for it: the file is the project's. With todo_link in the declaration (\"number\" or \"key\"), a \
 comment that holds TODO(#123): what is left (\"number\") or TODO(ABC-123): what is left (\"key\"), on one line, with the \
 number or key of the issue that tracks the work, is not a finding: every one is printed on every run under `linked \
 TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. Writes \
@@ -380,6 +381,10 @@ fn init(
     }
     if let Some(why) = &upgraded.not_drafted {
         println!("{why}");
+    }
+    // The map is the project's file, so it is told of and never written over
+    for stale in &upgraded.stale_map {
+        println!("note: {stale}");
     }
     if !upgraded.by_hand.is_empty() {
         for why in &upgraded.by_hand {

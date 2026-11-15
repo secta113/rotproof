@@ -13,6 +13,7 @@ use domain::approvals::{shown, sort, stale};
 use domain::declaration::{Declared, INIT_OR_CREATE};
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
+use domain::project::MAP_HEADING;
 use domain::schema::Time;
 use domain::suppressions::WEAKENS_HEADING;
 use domain::version::VERSION;
@@ -37,11 +38,16 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
         weakened = code(tree, parsers, declared, &mut report)?;
         report.findings.extend(rotproof_files(tree, declared));
     }
+    let mut stale_map = Vec::new();
+    if let Some(declared) = &structure.declared {
+        stale_map = warn(MAP_HEADING, crate::project::map_problems(tree, declared)).collect();
+    }
     let records = crate::records::problems(tree, parsers, structure.areas, now)?;
     report.findings.extend(records.found);
     // The warnings are printed in this order: the documents that are due, then the comments of the code
     report.warnings.extend(records.warnings);
     report.warnings.extend(weakened);
+    report.warnings.extend(stale_map);
     Ok(report)
 }
 

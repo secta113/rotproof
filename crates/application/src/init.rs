@@ -19,6 +19,7 @@ use crate::create::{refresh, ui_in_tree};
 use crate::direction::problems as direction;
 use crate::follows::current;
 use crate::layers::read;
+use crate::project::map_problems;
 use crate::tree::{exactly, read_text, read_written};
 use domain::crossing::{
     ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, retired,
@@ -233,6 +234,19 @@ pub fn draft(
         .extend(crate::index::index(tree, out)?.written);
     upgraded.drafted = Some(FILE.to_string());
     Ok(())
+}
+
+/// Put what is out of date in the map of the project's own `AGENTS.md` into `upgraded`, as `rotproof check` warns of
+/// it: an upgrade says nothing of the file, which is the project's, so a map left behind when a layer was declared
+/// absent and made later, or a unit added, would be told of nowhere else when the project is up to date. Nothing for a
+/// declaration that cannot be read.
+pub fn note_map(tree: &dyn Tree, upgraded: &mut Upgraded) {
+    let Ok(Ok(declaration)) = read(tree) else {
+        return;
+    };
+    if let Ok(declared) = Declared::new(declaration) {
+        upgraded.stale_map = map_problems(tree, &declared);
+    }
 }
 
 /// How to move the code of a project of `stack` onto the onion table: each retired layer that is there, with where its

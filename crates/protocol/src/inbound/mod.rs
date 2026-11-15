@@ -69,6 +69,10 @@ pub struct Upgraded {
     /// Why that document was not drafted, when it would have been: it cannot be written without an area to tag it
     /// with, or the units cannot be followed
     pub not_drafted: Option<String>,
+    /// What is out of date in the map of the project's own `AGENTS.md` against the layers the declaration has: a layer
+    /// with no row, a row for a layer declared absent. Said on every run until it is fixed, and it fails nothing: the
+    /// file is the project's
+    pub stale_map: Vec<String>,
 }
 
 /// One broken rule: which check found it, and what is wrong.

@@ -70,6 +70,7 @@ impl Commands for Rotproof<'_> {
             let made = &mut upgraded.made;
             self.list_readers(&*files, &mut made.written, &mut made.removed)?;
             crate::init::draft(&*files, self.machine.parsers(), &*files, upgraded)?;
+            crate::init::note_map(&*files, upgraded);
         }
         Ok(initialized)
     }

@@ -86,7 +86,7 @@ The project's files are written once, as a starting point, and are the project's
 
 | File | Content |
 |---|---|
-| `AGENTS.md` | The map (the layers present, with their roles to rewrite), the differences from what Rotproof keeps, and the project's own rules. It points at `.rotproof/AGENTS.md` |
+| `AGENTS.md` | The map (the layers present, each with the first sentence of its role to rewrite, and in a project that declares units a row for each layer of each unit, with the unit's name before the role), the differences from what Rotproof keeps, and the project's own rules. It points at `.rotproof/AGENTS.md` |
 | `CLAUDE.md` | `@AGENTS.md` and `@.rotproof/AGENTS.md` |
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
@@ -135,7 +135,9 @@ that has a declaration:
   `presentation.models` and the domain values the parts show to `presentation.display`; with `"none"`, that `ui` is
   to be taken out of `absent`, where `rotproof check` fails on it. For a project that declares units and has no
   document that follows them, it also drafts one, once ("The document of the units"). It never changes the
-  declaration's other values, and once it has set `files`, running it again changes nothing.
+  declaration's other values, and once it has set `files`, running it again changes nothing. It never writes the
+  project's `AGENTS.md`, but says on every run, as `note: ...` lines, what its map has gone behind on (see "The map in
+  `AGENTS.md`").
 - **An update only adds, or takes out what Rotproof itself wrote and no longer keeps, matched exactly,** and does
   nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
   byte order mark it had. What it cannot do without a person (its file is not in a form Rotproof can read),
@@ -891,11 +893,26 @@ is the same on every operating system, whatever order its file system lists file
 check on the same tree print the same lines in the same order. The list of linked `TODO` comments keeps the order it
 had (path, then line), which this order agrees with.
 
-One thing is a warning and fails nothing: **a knowledge document whose `stale_after` has come** (the day in the time
+One thing is a warning and fails nothing, besides the comments that may make a type checker check less and the map in
+`AGENTS.md` (below): **a knowledge document whose `stale_after` has come** (the day in the time
 zone of the machine that runs the check) is printed on every run from that day, with what to do: measure again what it
 says of outside the code, which `follows` cannot watch, then write the day in `verified` and the next day in
 `stale_after`. Failing would turn CI red with no change, from the clock alone. A deprecated document is not read for
 it.
+
+### The map in `AGENTS.md`
+
+`AGENTS.md` is the project's own file, written once by `rotproof create` with a map: a table under `## Map` with a row
+for each layer present, whose first cell is the layer's path. The map goes behind when the declaration changes later: a
+layer declared absent and made afterwards, a unit added, a layer taken out. `rotproof check` warns of it, on every run
+and failing nothing, under `the map in AGENTS.md lists the layers .config/rotproof.toml declares`: a line for each layer
+present that has no row (`AGENTS.md has no row in its map for packages/cli/src/cli/protocol/, the layer protocol of the
+unit cli: add it, or declare the layer absent in .config/rotproof.toml`), and for each row of a layer declared absent;
+after six lines it counts the rest. `rotproof init` says the same, each line after `note: `. The words of a row are the
+project's and are never judged, and a file with no `## Map` and table, or none at all, is not read: a project may keep
+its map as it likes. The map `rotproof create` writes names the unit in each row when the project declares units (`cli:
+The composition root: ...`), as the same layer in two units would otherwise read alike, and gives the whole first
+sentence of the layer's role, not its first line.
 
 The frontmatter is read as YAML 1.2: quoting a date or a datetime never changes whether it passes. It holds no comment: a `#`
 after a space or at the start of a line starts one, which YAML reads as nothing, so an unquoted `title: PR #1` would
