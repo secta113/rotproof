@@ -5009,7 +5009,7 @@ fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
     );
     assert_eq!(said.matches(": imports ").count(), 1, "{said}");
 
-    // A subpath the package does not export is not checked, and that fails: it is no file Node or tsc finds either
+    // A subpath the package does not export fails, and says what to do: it is no file Node or tsc finds either
     write_file(
         r,
         "packages/billing/src/domain/song.ts",
@@ -5020,9 +5020,11 @@ fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
     assert!(!out.status.success(), "{said}");
     for line in [
         "packages/billing/src/domain/song.ts:1: imports @acme/db/domain, which packages/db/package.json does not \
-         export, so it is not checked",
+         export, so Node and tsc fail it and its layer cannot be judged: export the subpath in \
+         packages/db/package.json, or import one that is exported",
         "packages/billing/src/domain/song.ts:2: imports @acme/db/internal/x, which packages/db/package.json does \
-         not export, so it is not checked",
+         not export, so Node and tsc fail it and its layer cannot be judged: export the subpath in \
+         packages/db/package.json, or import one that is exported",
     ] {
         assert!(said.contains(line), "{line}:\n{said}");
     }

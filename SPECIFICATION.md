@@ -674,17 +674,19 @@ changed is in the commits, what was measured and decided along the way in the ta
   with one `*`, a map of conditions, a list), only the subpaths it lists are the package's, each an exact key or the
   pattern with the longest prefix, and among conditions the first of `types`, `import` and `default` that leads to a
   path is taken. An import of a subpath a package with `exports` does not list (or lists as `null`) fails as `imports
-  @acme/db/domain, which packages/db/package.json does not export, so it is not checked`, which no approval covers,
-  since Node and tsc fail it too. So does an import of a subpath it lists whose target holds no file, such as
-  `@acme/db/domain/invoice.ts` through `"./*": "./src/*/index.ts"`, which leads to `src/domain/invoice.ts/index.ts`:
-  it fails as `imports @acme/db/domain/invoice.ts, which packages/db/package.json exports as
-  packages/db/src/domain/invoice.ts/index.ts, where no file is`, and is judged by where it leads all the same, so that
-  a rule it breaks is not hidden by the path being wrong. A file is there when the path is one, or has an extension of
-  source (`.ts`, `.tsx`, `.mts`, `.cts`, `.d.ts`, `.js`, ...) added, or holds an `index` of those, or is written `.js`,
-  `.jsx`, `.mjs` or `.cjs` beside the source it is built from; a target that lands outside every unit (build output
-  that is not there yet) says nothing. A package with no `exports`, which takes the subpath as a path, is held to the
-  same. A `package.json` that cannot be read as JSON, or whose `exports` is not a
-  string, a list or a map, fails too, and a package with no `name` is no package an import names. Limits: the `tsconfig` of a
+  @acme/db/domain, which packages/db/package.json does not export, so Node and tsc fail it and its layer cannot be
+  judged: export the subpath in packages/db/package.json, or import one that is exported`, which no approval covers:
+  it is a failure, not an import skipped, and nothing is judged of it until it names a subpath the package exports.
+  An import of a subpath it lists whose target holds no file fails too, such as `@acme/db/domain/invoice.ts` through
+  `"./*": "./src/*/index.ts"`, which leads to `src/domain/invoice.ts/index.ts`: it fails as `imports
+  @acme/db/domain/invoice.ts, which packages/db/package.json exports as packages/db/src/domain/invoice.ts/index.ts,
+  where no file is`, and is judged by where it leads all the same, so that a rule it breaks is not hidden by the path
+  being wrong. A file is there when the path is one, or has an extension of source (`.ts`, `.tsx`, `.mts`, `.cts`,
+  `.d.ts`, `.js`, ...) added, or holds an `index` of those, or is written `.js`, `.jsx`, `.mjs` or `.cjs` beside the
+  source it is built from; a target that lands outside every unit (build output that is not there yet) says nothing.
+  A package with no `exports`, which takes the subpath as a path, is held to the same. A `package.json` that cannot be
+  read as JSON, or whose `exports` is not a string, a list or a map, fails too, and a package with no `name` is no
+  package an import names. Limits: the `tsconfig` of a
   unit is not read (its `paths` are not applied; only those at the project's root are), `imports` (`#name`) and a
   condition other than the three are not read, and an import that lands outside every unit's path (a package
   whose `exports` point to build output such as `./dist/client.js`) is not judged.

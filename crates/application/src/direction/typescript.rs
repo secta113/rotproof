@@ -64,7 +64,8 @@ pub(super) fn typescript(
                 Reach::At(None) => continue,
                 Reach::Unlisted { config } => {
                     found.push(format!(
-                        "{path}:{line}: imports {specifier}, which {config} does not export, so it is not checked"
+                        "{path}:{line}: imports {specifier}, which {config} does not export, so Node and tsc fail it \
+                         and its layer cannot be judged: export the subpath in {config}, or import one that is exported"
                     ));
                     continue;
                 }
@@ -392,7 +393,8 @@ mod tests {
         let said = |line: usize, specifier: &str| {
             format!(
                 "packages/billing/src/domain/song.ts:{line}: imports {specifier}, which packages/db/package.json \
-                 does not export, so it is not checked"
+                 does not export, so Node and tsc fail it and its layer cannot be judged: export the subpath in \
+                 packages/db/package.json, or import one that is exported"
             )
         };
         assert_eq!(
