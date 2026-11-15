@@ -20,7 +20,8 @@
 //! each key an exact subpath or a pattern with one `*`, the longest prefix winning as in Node, and a target a path
 //! from the package's root, or conditions among which the first of `types`, `import` and `default` that leads to a
 //! path is taken. An import of a subpath it does not list names no file Node or tsc would find, so it is a finding of
-//! its own, never a path ([`Reach::Unlisted`]). Without `exports`, a subpath is a path in the package, and the
+//! its own, never a path ([`Reach::Unlisted`]); so does one it lists whose target holds no file, which the caller that
+//! asks the tree finds ([`Reach::Missing`]). Without `exports`, a subpath is a path in the package, and the
 //! package itself is its `types`, or its `main`, or its root. Not read: a `tsconfig` of the unit, `imports`
 //! (`#name`), and a condition other than the three.
 
@@ -196,6 +197,15 @@ pub enum Reach {
         /// The `package.json`, from the root
         config: String,
     },
+    /// The package exports the subpath, but the path it leads to holds no file: a pattern such as
+    /// `"./*": "./src/*/index.ts"` takes `domain/invoice.ts` to `src/domain/invoice.ts/index.ts`. The package never
+    /// gives this itself, as it does not look at the tree: the caller that does (`lands`) turns an `At` into it
+    Missing {
+        /// The `package.json`, from the root
+        config: String,
+        /// Where the export leads, from the root, where no file is
+        path: String,
+    },
 }
 
 impl Package {
@@ -301,6 +311,13 @@ impl Aliases {
     /// Where `specifier` lands through the package of a unit whose name it starts with (the longest, when two do), or
     /// `None` when it names no such package. It is tried after `paths` and `baseUrl`, as tsc does.
     pub fn package(&self, specifier: &str) -> Option<Reach> {
+        self.package_of(specifier)
+            .map(|(package, sub)| package.reach(sub))
+    }
+
+    /// The package of a unit whose name `specifier` starts with (the longest, when two do), and the subpath that is
+    /// left of it (`protocol/inbound`; "" for the package itself).
+    pub fn package_of<'a>(&'a self, specifier: &'a str) -> Option<(&'a Package, &'a str)> {
         let specifier = specifier.split('?').next().unwrap_or(specifier);
         self.packages
             .iter()
@@ -314,7 +331,6 @@ impl Aliases {
                 Some((package, sub))
             })
             .max_by_key(|(package, _)| package.name.len())
-            .map(|(package, sub)| package.reach(sub))
     }
 
     /// The target of the alias in `paths` that maps `specifier`: the one with the longest prefix, as in TypeScript.

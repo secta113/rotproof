@@ -3,9 +3,19 @@
 use domain::code::{Aliases, Landing, Reach, module_files};
 use protocol::outbound::Tree;
 
+/// The declaration and the TypeScript source an import of a `.js` file stands for, which a project that writes `.js` in
+/// its imports (as `nodenext` asks) has the source of beside it
+const SOURCE_OF: [(&str, &[&str]); 4] = [
+    (".js", &[".ts", ".tsx", ".d.ts"]),
+    (".jsx", &[".tsx"]),
+    (".mjs", &[".mts", ".d.mts"]),
+    (".cjs", &[".cts", ".d.cts"]),
+];
+
 /// Where `specifier`, imported by the file at `file` (from the root), lands: through `paths`, then a `baseUrl` where a
 /// module is, then the package of a unit, as tsc tries them. A path from the root, or `At(None)` for a package that is
-/// no unit's, or a path above the root; and `Unlisted` for a package of a unit that does not export what is imported.
+/// no unit's, or a path above the root; `Unlisted` for a package of a unit that does not export what is imported; and
+/// `Missing` for one that exports it as a path where no file is.
 pub fn lands(tree: &dyn Tree, aliases: &Aliases, file: &str, specifier: &str) -> Reach {
     match aliases.resolve(file, specifier) {
         Landing::At(path) => Reach::At(path),
@@ -17,10 +27,38 @@ pub fn lands(tree: &dyn Tree, aliases: &Aliases, file: &str, specifier: &str) ->
             });
             match found {
                 Some(path) => Reach::At(Some(path)),
-                None => aliases.package(specifier).unwrap_or(Reach::At(None)),
+                None => match aliases.package_of(specifier) {
+                    Some((package, sub)) => match package.reach(sub) {
+                        Reach::At(Some(path)) if !is_there(tree, &path) => Reach::Missing {
+                            config: package.config.clone(),
+                            path,
+                        },
+                        reached => reached,
+                    },
+                    None => Reach::At(None),
+                },
             }
         }
     }
+}
+
+/// Whether a module is at `path`: a file of that name, one with an extension of source (`.ts`, `.d.ts`, ...), an
+/// `index` in a directory of that name, or, for a path written with `.js`, the source it is built from.
+fn is_there(tree: &dyn Tree, path: &str) -> bool {
+    let file = |path: &str| tree.found(path) == Some(false);
+    if module_files(path).iter().any(|path| file(path))
+        || file(&format!("{path}.d.ts"))
+        || file(&format!("{path}/index.d.ts"))
+    {
+        return true;
+    }
+    SOURCE_OF.iter().any(|(extension, sources)| {
+        path.strip_suffix(extension).is_some_and(|stem| {
+            sources
+                .iter()
+                .any(|source| file(&format!("{stem}{source}")))
+        })
+    })
 }
 
 #[cfg(test)]
@@ -65,7 +103,11 @@ mod tests {
             ],
             ..Aliases::default()
         };
-        let tree = Fake::new(&[("src/@acme/billing/x.ts", "")]);
+        let tree = Fake::new(&[
+            ("src/@acme/billing/x.ts", ""),
+            ("packages/billing/src/domain/index.ts", ""),
+            ("packages/extra/src/x.ts", ""),
+        ]);
         let at = |s: &str| lands(&tree, &aliases, "src/a.ts", s);
         let path = |p: &str| Reach::At(Some(p.into()));
         assert_eq!(
@@ -78,5 +120,52 @@ mod tests {
         // The name ends at a `/`: `@acme/billing-extra` is another package
         assert_eq!(at("@acme/billing-extra/x"), path("packages/extra/src/x"));
         assert_eq!(at("@acme/other/x"), Reach::At(None));
+    }
+
+    #[test]
+    fn what_a_package_exports_as_a_path_with_no_file_is_missing_and_a_file_of_another_extension_is_one()
+     {
+        let aliases = Aliases {
+            packages: vec![Package {
+                name: "@acme/db".into(),
+                root: "packages/db".into(),
+                config: "packages/db/package.json".into(),
+                exports: Some(vec![
+                    ("./*".into(), Target::Path("./src/*/index.ts".into())),
+                    ("./esm/*".into(), Target::Path("./src/esm/*".into())),
+                ]),
+                types: None,
+                main: None,
+            }],
+            ..Aliases::default()
+        };
+        let tree = Fake::new(&[
+            ("packages/db/src/domain/index.ts", ""),
+            ("packages/db/src/esm/a.ts", ""),
+            ("packages/db/src/esm/b.d.ts", ""),
+            ("packages/db/src/esm/c/index.tsx", ""),
+        ]);
+        let at = |s: &str| lands(&tree, &aliases, "x.ts", s);
+        let path = |p: &str| Reach::At(Some(p.into()));
+        assert_eq!(
+            at("@acme/db/domain"),
+            path("packages/db/src/domain/index.ts")
+        );
+        // The `.js` a file is built to stands for its source, and a module is a file with a type declaration, or a
+        // directory with an `index`
+        for specifier in ["a.js", "a", "b", "c"] {
+            assert!(
+                matches!(at(&format!("@acme/db/esm/{specifier}")), Reach::At(Some(_))),
+                "{specifier}"
+            );
+        }
+        assert_eq!(
+            at("@acme/db/domain/invoice.ts"),
+            Reach::Missing {
+                config: "packages/db/package.json".into(),
+                path: "packages/db/src/domain/invoice.ts/index.ts".into()
+            }
+        );
+        assert!(matches!(at("@acme/db/esm/d.js"), Reach::Missing { .. }));
     }
 }

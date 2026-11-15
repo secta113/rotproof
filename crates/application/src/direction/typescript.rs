@@ -18,7 +18,8 @@ use protocol::outbound::Tree;
 /// The direction check of a TypeScript project: every import of a source file in a layer, resolved to a path
 /// (`typescript.rs`), judged by the place that path sits in, or by the unit it sits in outside the places. An import
 /// through the name of a unit's package resolves through its `package.json`, as `exports` says; one of a subpath the
-/// package does not export is a problem, since where it lands is not known.
+/// package does not export is a problem, since where it lands is not known, and so is one it exports as a path where no
+/// file is (`"./*": "./src/*/index.ts"` takes `domain/invoice.ts` to `src/domain/invoice.ts/index.ts`).
 pub(super) fn typescript(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -66,6 +67,24 @@ pub(super) fn typescript(
                         "{path}:{line}: imports {specifier}, which {config} does not export, so it is not checked"
                     ));
                     continue;
+                }
+                Reach::Missing {
+                    config,
+                    path: leads,
+                } => {
+                    let leads = resolved(tree, &leads);
+                    // Only where it would be judged: an export that leads to build output not there yet (`./dist/`)
+                    // lands in no unit, and is not judged. Where it is, the import is judged by where it leads all
+                    // the same, so that a rule it breaks is not hidden by the path being wrong
+                    if landing_of(&leads, places, units).is_none() {
+                        continue;
+                    }
+                    found.push(format!(
+                        "{path}:{line}: imports {specifier}, which {config} exports as {leads}, where no file is: \
+                         the import names no file the package exports. Fix that export in {config}, or import a \
+                         subpath that leads to a file"
+                    ));
+                    leads
                 }
             };
             let Some(to) = landing_of(&target, places, units) else {
@@ -169,6 +188,7 @@ mod tests {
             ),
             ("packages/billing/src/domain/index.ts", ""),
             ("packages/billing/src/application/index.ts", ""),
+            ("packages/billing/src/index.ts", ""),
             ("packages/db/src/index.ts", ""),
             ("packages/db/src/domain/index.ts", ""),
             ("packages/db/src/protocol/inbound/index.ts", ""),
@@ -381,6 +401,88 @@ mod tests {
                 said(1, "@acme/db/domain"),
                 said(2, "@acme/db/internal/x"),
                 said(3, "@acme/db/client/x")
+            ]
+        );
+    }
+
+    #[test]
+    fn an_export_that_leads_to_no_file_in_a_unit_is_a_problem_that_names_where_it_leads() {
+        let declared = Declared::new(parse_declaration(DECLARATION).unwrap()).unwrap();
+        let exports = "{ \"name\": \"@acme/db\", \"exports\": { \"./*\": \"./src/*/index.ts\", \
+            \"./built/*\": \"./dist/*.js\", \"./esm/*\": \"./src/esm/*\", \"./typed/*\": \"./src/typed/*\" } }";
+        let tree = Fake::new(&[
+            (
+                "packages/billing/package.json",
+                "{ \"name\": \"@acme/billing\", \"exports\": { \"./*\": \"./src/*/index.ts\" } }",
+            ),
+            ("packages/db/package.json", exports),
+            ("packages/billing/src/domain/index.ts", ""),
+            ("packages/db/src/domain/index.ts", ""),
+            ("packages/db/src/esm/x.ts", ""),
+            ("packages/db/src/typed/y.d.ts", ""),
+            // A rule the import breaks is still found where the path is wrong
+            (
+                "packages/db/src/domain/row.ts",
+                "import a from \"@acme/billing/domain/nothing\";\n",
+            ),
+            (
+                "packages/billing/src/domain/song.ts",
+                "import a from \"@acme/db/domain\";\n\
+                 import b from \"@acme/db/domain/invoice.ts\";\n\
+                 import c from \"@acme/db/built/client\";\n\
+                 import d from \"@acme/db/esm/x.js\";\n\
+                 import e from \"@acme/db/typed/y\";\n\
+                 import f from \"@acme/db/domain/invoice\";\n",
+            ),
+        ]);
+        let found = problems(&tree, &Readers, &declared).unwrap();
+        // `invoice.ts/index.ts` is no file, and `invoice/index.ts` is none either. What `./dist/` leads to is not in
+        // the tree and lands in no unit, so it is not judged; `x.js` is built from `x.ts`, and `y` is `y.d.ts`
+        let said = |file: &str, line: usize, specifier: &str, package: &str, leads: &str| {
+            format!(
+                "{file}:{line}: imports {specifier}, which packages/{package}/package.json exports as {leads}, where \
+                 no file is: the import names no file the package exports. Fix that export in \
+                 packages/{package}/package.json, or import a subpath that leads to a file"
+            )
+        };
+        let song = "packages/billing/src/domain/song.ts";
+        assert_eq!(
+            found.problems,
+            [
+                said(
+                    song,
+                    2,
+                    "@acme/db/domain/invoice.ts",
+                    "db",
+                    "packages/db/src/domain/invoice.ts/index.ts"
+                ),
+                said(
+                    song,
+                    6,
+                    "@acme/db/domain/invoice",
+                    "db",
+                    "packages/db/src/domain/invoice/index.ts"
+                ),
+                said(
+                    "packages/db/src/domain/row.ts",
+                    1,
+                    "@acme/billing/domain/nothing",
+                    "billing",
+                    "packages/billing/src/domain/nothing/index.ts"
+                ),
+            ]
+        );
+        // The rule between units is still judged, by where the export leads
+        let judged: Vec<&str> = details(&found)
+            .into_iter()
+            .filter(|detail| detail.starts_with("packages/db/"))
+            .collect();
+        assert_eq!(
+            judged,
+            [
+                "packages/db/src/domain/row.ts:1: imports @acme/billing/domain/nothing \
+                 (packages/billing/src/domain/nothing/index.ts), in domain of unit billing; the shared unit db \
+                 imports only shared units, and billing is not shared"
             ]
         );
     }

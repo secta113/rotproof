@@ -143,7 +143,7 @@ mod tests {
     fn at(package: &Package, sub: &str) -> Option<String> {
         match package.reach(sub) {
             Reach::At(path) => path,
-            Reach::Unlisted { .. } => None,
+            Reach::Unlisted { .. } | Reach::Missing { .. } => None,
         }
     }
 
