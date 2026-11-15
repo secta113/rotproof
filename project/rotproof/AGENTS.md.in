@@ -9,24 +9,8 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
 
 ## Running Rotproof
 
-- **`rotproof check` checks {checked}, and fails when one breaks a rule.**
-  It is the project's CI. It prints what it did not check, and why.
-- **`rotproof create` makes what `.config/rotproof.toml` declares and the tree lacks, and rewrites the files Rotproof
-  generates:** this file, `docs/index.md`, and `docs/knowledge/index.md` and `docs/knowledge/rules.md`. It never
-  changes another file, apart from adding the fields the declaration lacks, and never moves or deletes one. Nothing
-  runs it on its own.
-- **`rotproof index` rewrites `docs/index.md`, `docs/knowledge/index.md` and `docs/knowledge/rules.md`** after a
-  knowledge document changes. Never edit them by hand.
-- **`rotproof follows knowledge/<slug>.md <key>...` pins keys in a knowledge document's `follows`** at the hash of the
-  code as it is now. Run it once the document is reviewed against the code, when it
-  starts to follow something and when `rotproof check` names it, rather than editing the hashes by hand.
-- **Upgrade Rotproof in a commit of its own:** change the pinned version, install it, run `rotproof init`, then
-  `rotproof check`. `rotproof init` applies what the new version brings to the files `rotproof create` wrote once
-  (except the updates `declined` lists in `.config/rotproof.toml`), rewrites this file, and sets `files` there to the
-  new version. Until it has run, `rotproof check` fails. What an update cannot do without a person, it says: do it by
-  hand, or decline it by its name in `declined`. It never moves or rewrites a record. When the new version changes the
-  layer table (0.4.0 built it on the onion architecture), `rotproof init` says where the code of each layer that is
-  gone goes, and moves no code: move it by hand, as `rotproof check` names it until it is moved.
+- **Use the skill `rotproof` (`.agents/skills/rotproof/SKILL.md`) when you upgrade Rotproof or run one of its
+  commands.** It says when to run which command; a tool that does not load skills reads it as a file.
 {layers}
 ## The records
 

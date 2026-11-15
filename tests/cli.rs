@@ -938,6 +938,153 @@ areas = [\"a\"]
     );
 }
 
+const SKILLS: [&str; 2] = [
+    ".claude/skills/rotproof/SKILL.md",
+    ".agents/skills/rotproof/SKILL.md",
+];
+
+#[test]
+fn the_skill_is_written_twice_the_same_and_check_fails_for_a_copy_until_create_rewrites_it() {
+    for stack in ["python", "typescript", "rust", "none"] {
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
+            ui_line(stack)
+        ));
+        let r = root.path();
+        let arg = root_arg(r);
+        let out = create(&["--root", &arg, "create", "--yes"]);
+        assert!(out.status.success(), "{stack}: {}", stdout(&out));
+        for path in SKILLS {
+            assert!(
+                stdout(&out).contains(&format!("wrote {path}")),
+                "{stack}: {}",
+                stdout(&out)
+            );
+        }
+        let written = fs::read_to_string(r.join(SKILLS[0])).unwrap();
+        assert_eq!(
+            fs::read_to_string(r.join(SKILLS[1])).unwrap(),
+            written,
+            "{stack}"
+        );
+        // One text for every stack, and it carries no version, so an upgrade rewrites it only when it changed
+        assert!(written.starts_with("---\nname: rotproof\n"), "{stack}");
+        assert!(!written.contains(env!("CARGO_PKG_VERSION")), "{stack}");
+        assert!(run(&["--root", &arg, "check"]).status.success(), "{stack}");
+        // The second run writes nothing of it
+        let again = create(&["--root", &arg, "create"]);
+        assert!(!stdout(&again).contains("SKILL.md"), "{}", stdout(&again));
+        for (hurt, says) in [("edited by hand\n", "out of date"), ("", "missing")] {
+            for path in SKILLS {
+                if hurt.is_empty() {
+                    fs::remove_file(r.join(path)).unwrap();
+                } else {
+                    fs::write(r.join(path), hurt).unwrap();
+                }
+                let out = run(&["--root", &arg, "check"]);
+                assert_eq!(out.status.code(), Some(1), "{stack}: {}", stdout(&out));
+                assert!(
+                    stdout(&out).contains(&format!(
+                        "Rotproof's skill is up to date:\n  {says}, run `rotproof create`: {path}\n"
+                    )),
+                    "{stack}: {}",
+                    stdout(&out)
+                );
+                // The other copy is not named
+                let other = SKILLS.iter().find(|other| **other != path).unwrap();
+                assert!(!stdout(&out).contains(other), "{}", stdout(&out));
+                let out = create(&["--root", &arg, "create"]);
+                assert!(
+                    stdout(&out).contains(&format!("wrote {path}")),
+                    "{stack}: {}",
+                    stdout(&out)
+                );
+                assert_eq!(fs::read_to_string(r.join(path)).unwrap(), written);
+                assert!(run(&["--root", &arg, "check"]).status.success());
+            }
+        }
+    }
+}
+
+#[test]
+fn a_project_made_before_the_skill_gets_it_from_init_and_is_told_so_by_check() {
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\nfiles = \"1.0.0\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    for path in SKILLS {
+        assert!(
+            stdout(&out).contains(&format!("missing, run `rotproof init`: {path}")),
+            "{}",
+            stdout(&out)
+        );
+    }
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    for path in SKILLS {
+        assert!(
+            stdout(&out).contains(&format!("wrote {path}")),
+            "{}",
+            stdout(&out)
+        );
+        assert!(r.join(path).is_file());
+    }
+    assert!(run(&["--root", &arg, "check"]).status.success());
+}
+
+#[test]
+fn the_skill_names_only_commands_there_are() {
+    let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(create(&["--root", &arg, "create"]).status.success());
+    let skill = fs::read_to_string(r.join(SKILLS[0])).unwrap();
+    let mut named: Vec<&str> = skill
+        .split("`rotproof ")
+        .skip(1)
+        .filter_map(|rest| rest.split(|c: char| !c.is_ascii_alphabetic()).next())
+        .filter(|word| !word.is_empty())
+        .collect();
+    named.sort_unstable();
+    named.dedup();
+    assert!(named.len() >= 6, "{named:?}");
+    for command in named {
+        let out = run(&[command, "--help"]);
+        assert!(
+            out.status.success(),
+            "the skill says `rotproof {command}`, which is no command: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
+fn the_guide_sends_to_the_skill_and_does_not_say_what_the_skill_says() {
+    for stack in ["python", "none"] {
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
+            ui_line(stack)
+        ));
+        let r = root.path();
+        let arg = root_arg(r);
+        assert!(
+            create(&["--root", &arg, "create", "--yes"])
+                .status
+                .success()
+        );
+        let guide = fs::read_to_string(r.join(".rotproof/AGENTS.md")).unwrap();
+        assert!(
+            guide.contains("the skill `rotproof` (`.agents/skills/rotproof/SKILL.md`)"),
+            "{stack}"
+        );
+        assert!(r.join(".agents/skills/rotproof/SKILL.md").is_file());
+        // What moved to the skill is not said in the guide too
+        assert!(!guide.contains("commit of its own"), "{stack}: {guide}");
+        assert!(!guide.contains("rotproof follows knowledge/"), "{stack}");
+    }
+}
+
 #[test]
 fn guide_without_a_stack_prints_what_create_writes_for_the_declared_ui() {
     for (stack, ui) in [
@@ -3076,7 +3223,7 @@ fn init_writes_no_settings_and_asks_no_person_for_a_file_that_is_not_there() {
         stdout(&out)
     );
     assert!(!stdout(&out).contains("needs a person"), "{}", stdout(&out));
-    assert!(!r.join(".claude").exists());
+    assert!(!r.join(".claude/settings.json").exists());
     let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
     assert!(
         declaration.contains(&format!("files = \"{version}\"")),
@@ -3702,7 +3849,7 @@ fn create_writes_no_settings_for_claude_code_neither_a_hook_nor_a_deny_rule() {
     assert!(create(&["--root", &root_arg(r), "create"]).status.success());
     // It wrote them once, to run no hook and to deny editing the approvals file, which an agent may now approve
     // through; a project that has them is upgraded by `rotproof init`
-    assert!(!r.join(".claude").exists(), "{:?}", tree(r));
+    assert!(!r.join(".claude/settings.json").exists(), "{:?}", tree(r));
     assert!(!r.join(".gemini").exists());
 }
 

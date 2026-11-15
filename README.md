@@ -28,7 +28,8 @@ If LLM agents write the code of a repository, these are the things nobody has to
   `infrastructure` reads the environment variables.
 - **An agent that has only the binary finds its way.** `rotproof --help` gives the order to start in, and the rules
   are written for the project's stack in `.rotproof/AGENTS.md`, which the `AGENTS.md` and `CLAUDE.md` that
-  `rotproof create` writes point the agent at.
+  `rotproof create` writes point the agent at. How to upgrade Rotproof and when to run each command is in the skill
+  `rotproof`, which `rotproof create` writes to `.claude/skills/` and `.agents/skills/`.
 - **The rules are the ones you pinned.** A project pins one exact version of Rotproof, so the rules change only in a
   commit of the project's own (see "Compatibility").
 

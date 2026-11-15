@@ -1,7 +1,8 @@
 //! Rotproof's guide, `.rotproof/AGENTS.md`, which every `rotproof create` rewrites and `rotproof check` compares, as it
-//! does the generated files in `docs/`. It says the rules Rotproof keeps in the project's stack: how to run Rotproof,
-//! the layers (their table is written from `layers/table.toml`, so the two cannot disagree) and the records. It names
-//! the version that wrote it, so an upgrade fails `rotproof check` until `rotproof init` has run.
+//! does the generated files in `docs/`. It says the rules Rotproof keeps in the project's stack: the layers (their
+//! table is written from `layers/table.toml`, so the two cannot disagree) and the records, which every session needs,
+//! and where the skill is that says how to run Rotproof (`skill.rs`). It names the version that wrote it, so an
+//! upgrade fails `rotproof check` until `rotproof init` has run.
 //!
 //! The texts are in `project/rotproof/`, built into the binary. A rule that says something of its own in the section on
 //! the layers keeps its text beside it, and gives it for a language (`environment::guide`, `suppressions::guide`): this
@@ -50,19 +51,17 @@ pub fn guide_named(stack: &str, ui: Option<&str>) -> Result<String, String> {
 
 /// The guide for a project of `stack`, whose layout is `layout` (`None` for a repository of records only).
 pub fn guide(stack: &str, layout: Option<&Layout>) -> String {
-    let (kept, checked, layers) = match layout {
+    let (kept, layers) = match layout {
         None => (
             format!(
                 "Rotproof keeps the records in `docs/` in this project. It has no layers: its stack is \"{stack}\"."
             ),
-            "the records",
             String::new(),
         ),
         Some(layout) => (
             "Rotproof keeps two things in this project: the layers (where code lives and what it may import) and the\n\
              records in `docs/`."
                 .to_string(),
-            "the layers and the records",
             layers_section(layout),
         ),
     };
@@ -70,7 +69,6 @@ pub fn guide(stack: &str, layout: Option<&Layout>) -> String {
         .replace("{version}", env!("CARGO_PKG_VERSION"))
         .replace("{stack}", stack)
         .replace("{kept}", &kept)
-        .replace("{checked}", checked)
         .replace("{layers}", &layers)
 }
 
@@ -234,6 +232,7 @@ fn ui(layout: &Layout) -> String {
 mod tests {
     use super::*;
     use crate::layers::{NO_UI, STACKS, uis};
+    use crate::skill;
 
     #[test]
     fn every_stack_has_a_guide_with_every_placeholder_filled() {
@@ -252,7 +251,6 @@ mod tests {
                 "{version}",
                 "{stack}",
                 "{kept}",
-                "{checked}",
                 "{layers}",
                 "{not_layers}",
                 "{table}",
@@ -437,6 +435,24 @@ mod tests {
             text[start..start + 400].to_string()
         };
         assert_eq!(unit_section("atomic"), unit_section("none"));
+    }
+
+    #[test]
+    fn every_guide_sends_to_the_skill_in_one_place_that_is_written() {
+        let mut guides: Vec<String> = known_stacks()
+            .iter()
+            .filter(|stack| **stack != RECORDS_ONLY)
+            .map(|stack| guide(stack, layout(stack, &fullest_ui(stack)).as_ref()))
+            .collect();
+        guides.push(guide(RECORDS_ONLY, None));
+        for text in guides {
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let says = format!("the skill `{}` (`{}`)", skill::NAME, skill::PATHS[1]);
+            assert!(text.contains(&says), "{says}");
+            // How to upgrade, and when to run which command, are the skill's
+            assert!(!text.contains("Upgrade Rotproof in a commit"));
+            assert!(!text.contains("rotproof follows knowledge/<slug>.md"));
+        }
     }
 
     #[test]

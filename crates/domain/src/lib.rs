@@ -32,6 +32,7 @@ pub mod rust;
 pub mod schema;
 pub mod sentence;
 pub mod settings;
+pub mod skill;
 pub mod structure;
 pub mod suppressions;
 pub mod text;
