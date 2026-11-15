@@ -2,8 +2,9 @@
 
 use std::io;
 
+use super::moving::Moving;
 use super::{Direction, entry_files, layer_files, misread};
-use crate::code::lands;
+use crate::code::{lands, module_candidates};
 use crate::tree::{read_code, resolved};
 use domain::code::{Aliases, Reach, is_source, without_extension};
 use domain::direction::{Landing, Way, edge, judged_landing, landing_of};
@@ -20,13 +21,14 @@ use protocol::outbound::Tree;
 /// through the name of a unit's package resolves through its `package.json`, as `exports` says; one of a subpath the
 /// package does not export is a problem, since where it lands is not known, and so is one it exports as a path where no
 /// file is (`"./*": "./src/*/index.ts"` takes `domain/invoice.ts` to `src/domain/invoice.ts/index.ts`).
-pub(super) fn typescript(
+pub(super) fn typescript<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     layout: &Layout,
-    places: &[&Place],
-    entries: &[Place],
-    units: &[Unit],
+    places: &[&'a Place],
+    entries: &'a [Place],
+    units: &'a [Unit],
+    moving: &mut Moving<'a>,
 ) -> io::Result<Direction> {
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
@@ -88,6 +90,7 @@ pub(super) fn typescript(
                     leads
                 }
             };
+            moving.read_by(from, || module_candidates(&target));
             let Some(to) = landing_of(&target, places, units) else {
                 continue;
             };
@@ -112,13 +115,44 @@ pub(super) fn typescript(
             }
         }
     }
+    read_moving(tree, parsers, &aliases, places, units, moving)?;
     Ok(Direction {
         problems: found,
         forbidden,
         edges,
         reads,
         links,
+        moving: None,
     })
+}
+
+/// What each of the files that are moving imports, resolved as it is for the files in the layers: a file that is
+/// moving too, or else where it lands in the layers. An import that cannot be resolved, and a file that cannot be read,
+/// are no finding: the code that is moving is not checked.
+fn read_moving<'a>(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    aliases: &Aliases,
+    places: &[&'a Place],
+    units: &'a [Unit],
+    moving: &mut Moving<'a>,
+) -> io::Result<()> {
+    for path in moving.files() {
+        let Some(source) = read_code(tree, &path, "imports", &mut Vec::new())? else {
+            continue;
+        };
+        for (_, import) in parsers.typescript(&source, &path).imports {
+            if let Reach::At(Some(target)) = lands(tree, aliases, &path, &import.specifier) {
+                let at = resolved(tree, &target);
+                moving.imports(
+                    &path,
+                    module_candidates(&at),
+                    landing_of(&at, places, units),
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 /// How an import of a layer of the unit `to` is written from the file `from`, for the finding that says an import

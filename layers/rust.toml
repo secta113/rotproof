@@ -5,9 +5,9 @@
 # Code is a crate in `crates/` (a `Cargo.toml` at any depth, outside `.gitignore` and hidden directories), and a `.rs`
 # file in `src/` of the root package, which holds the entry file and nothing else: `src/lib.rs`, `src/bin/`, and a
 # module of the entry file (`src/pricing.rs`) are code outside every layer, however the package's manifest declares
-# them. Code outside every layer fails, unless the project lists it in `unchecked`. Nothing else is looked at, so
-# `xtask/`, the workspace's own `Cargo.toml`, and what Cargo keeps outside `src/` in the root package (`build.rs`,
-# `tests/`, `benches/`, `examples/`) are not layers
+# them. Code outside every layer fails, unless the project lists it in `unchecked` or `moving`. Nothing else is
+# looked at, so `xtask/`, the workspace's own `Cargo.toml`, and what Cargo keeps outside `src/` in the root package
+# (`build.rs`, `tests/`, `benches/`, `examples/`) are not layers
 scope = "crates"
 code = "Cargo.toml"
 also_code = [{ scope = "src", code = "*.rs" }]

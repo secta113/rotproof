@@ -1459,6 +1459,35 @@ fn each_difference_from_the_declaration_fails() {
                 )
             }),
         ),
+        // `moving` is judged as `unchecked` is: it cannot switch a layer off, and it names a path that is there
+        (
+            "moving lists domain, which holds or sits in the layer domain",
+            Box::new(|r| {
+                declare(
+                    r,
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"domain\"]\n",
+                )
+            }),
+        ),
+        (
+            "moving lists \"./legacy\": write a path from the root",
+            Box::new(|r| {
+                plant_file(r, "legacy/old.py");
+                declare(
+                    r,
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"./legacy\"]\n",
+                );
+            }),
+        ),
+        (
+            "moving lists legacy, which does not exist: remove it",
+            Box::new(|r| {
+                declare(
+                    r,
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"legacy\"]\n",
+                )
+            }),
+        ),
         // The floor: with every layer declared absent, nothing would be checked
         (
             "no layer is present",
@@ -2516,6 +2545,161 @@ fn code_that_is_not_the_projects_is_not_looked_at() {
     let out = run(&["--root", &root_arg(r), "check"]);
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     assert!(stdout(&out).contains("ci.py"), "{}", stdout(&out));
+}
+
+#[test]
+fn code_in_a_path_that_is_moving_is_kept_out_of_the_checks_of_the_layers_and_the_markers() {
+    let root = clean_repo();
+    let r = root.path();
+    let declare_moving = |moving: &str| {
+        declare(
+            r,
+            &format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [{moving}]\n"),
+        )
+    };
+    write_file(r, "legacy/order.py", "# TODO: split this\nimport domain\n");
+    write_file(r, "old.py", "# FIXME: and this\n");
+    // Not listed: code outside the layers, and its marker, fail
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("code outside the layers: legacy"),
+        "{}",
+        stdout(&out)
+    );
+    // Listed, a directory with a `/` at its end and a file: neither fails, and a layer's own marker still does
+    declare_moving("\"legacy/\", \"old.py\"");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    write_file(r, "domain/model.py", "# TODO: split this\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("domain/model.py:1"),
+        "{}",
+        stdout(&out)
+    );
+    // The code that is moving is named for what to move first, and by no finding
+    assert!(
+        !stdout(&out).contains("legacy/order.py:1"),
+        "{}",
+        stdout(&out)
+    );
+    // A repository of records only has no code to move
+    declare(
+        r,
+        "stack = \"none\"\nareas = [\"a\"]\nmoving = [\"legacy\"]\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("moving must be empty"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn check_counts_the_code_that_is_moving_and_names_the_files_to_move_first_and_fails_nothing() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let moving = |paths: &str| {
+        declare(
+            r,
+            &format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [{paths}]\n"),
+        )
+    };
+    let said = || {
+        let out = run(&["--root", &arg, "check"]);
+        // The code that is moving is counted, and the check passes all the same
+        assert!(out.status.success(), "{}", stdout(&out));
+        stdout(&out)
+            .lines()
+            .filter(|line| line.starts_with("moving") || line.starts_with("  "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    // A project that lists nothing hears nothing
+    assert_eq!(said(), "");
+    write_file(r, "legacy/money.py", "import os\n");
+    write_file(r, "legacy/order.py", "from legacy import money\n");
+    write_file(r, "legacy/a.py", "from legacy import b\n");
+    write_file(r, "legacy/b.py", "from legacy.a import x\n");
+    write_file(r, "legacy/report.py", "from legacy.order import total\n");
+    moving("\"legacy\"");
+    assert_eq!(
+        said(),
+        "moving: 5 files are not in a layer yet, and none is checked. Move these next (they import no other file \
+         still moving), each with the layers it could go in:\n  legacy/a.py, legacy/b.py import each other, so \
+         move them together:\n    legacy/a.py: any layer\n    legacy/b.py: any layer\n  legacy/money.py: any layer"
+    );
+    // The count falls when a file is moved, and what waited for it is next, with the layers that pass for its import
+    // of the layer it went to
+    fs::remove_file(r.join("legacy/money.py")).unwrap();
+    write_file(r, "domain/money.py", "import os\n");
+    write_file(r, "legacy/order.py", "from domain import money\n");
+    assert_eq!(
+        said(),
+        "moving: 4 files are not in a layer yet, and none is checked. Move these next (they import no other file \
+         still moving), each with the layers it could go in:\n  legacy/a.py, legacy/b.py import each other, so \
+         move them together:\n    legacy/a.py: any layer\n    legacy/b.py: any layer\n  legacy/order.py: domain, \
+         protocol.outbound, application, infrastructure.outbound, composition"
+    );
+    // More than the next few are counted, not named
+    for i in 0..6 {
+        write_file(r, &format!("legacy/leaf{i}.py"), "");
+    }
+    let said_now = said();
+    assert!(
+        said_now.starts_with("moving: 10 files are not in a layer yet"),
+        "{said_now}"
+    );
+    assert!(
+        said_now.ends_with("  and 3 more that import no other file still moving"),
+        "{said_now}"
+    );
+    // A path with no code left in it says to take it out
+    for entry in fs::read_dir(r.join("legacy")).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    fs::write(r.join("legacy/notes.txt"), "x\n").unwrap();
+    assert_eq!(
+        said(),
+        "moving: no code is left in the paths `moving` lists in .config/rotproof.toml: take them out"
+    );
+}
+
+#[test]
+fn check_counts_the_rust_code_that_is_moving_and_names_none_to_move_first() {
+    let root = declared("stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    write_file(
+        r,
+        "crates/legacy/Cargo.toml",
+        "[package]\nname = \"legacy\"\n",
+    );
+    write_file(r, "crates/legacy/src/lib.rs", "pub mod a;\n");
+    write_file(r, "crates/legacy/src/a.rs", "");
+    declare(
+        r,
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"crates/legacy\"]\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(
+        said.contains(
+            "moving: 2 files are not in a layer yet, and none is checked. Rotproof does not read what a Rust file \
+             imports, so it names none to move first\n"
+        ),
+        "{said}"
+    );
 }
 
 #[test]

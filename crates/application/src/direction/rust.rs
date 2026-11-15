@@ -104,6 +104,7 @@ pub(super) fn rust<'a>(
         edges,
         reads,
         links,
+        moving: None,
     })
 }
 

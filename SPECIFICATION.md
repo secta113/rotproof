@@ -254,6 +254,7 @@ areas = ["billing", "records"]  # the areas knowledge is grouped by, in this ord
 ui = "atomic"            # the layers of the screens: atomic | none (rust: none; none for a stack of none)
 absent = ["ui.templates"]  # layers or levels this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
+moving = ["legacy"]      # optional: paths of the project's own code that is not in a layer yet (see below)
 todo_link = "number"     # optional, number | key: a TODO may stay when it names its issue (see below)
 approved_max = 3         # optional, a count: the most approvals the project holds (see "Approving a forbidden import")
 ```
@@ -266,6 +267,16 @@ the two, and so does the key with `stack = "none"`, which has no code to read. T
 a field Rotproof does not know failing it, so a Rotproof older than the one that brought `todo_link` cannot read a
 declaration that holds it: a project pins an exact version of Rotproof, and moves it before it adds the key. Whether a
 project declares either is a person's decision, which an agent never makes to pass the check, and the guide says so.
+
+`moving` lists the paths of the project's own code that is not in a layer yet, in a project that adopts Rotproof in the
+middle of a refactoring. It is no `unchecked`: `unchecked` is for code that is never moved (generated or vendored
+files), and `moving` for code that is to go into the layers. It is written as `unchecked` is, from the root with `/`,
+and judged as it is: a path that holds or sits in a layer, that holds a unit, or that does not exist fails, and the code
+in it is judged by no check (not the direction, not the markers, not the structure). What `rotproof check` does with
+it is to count it and say which files to move first (see "The code that is moving"). `rotproof init` writes
+`moving = []` into a declaration it makes, `rotproof create` adds it to none, and a Rotproof older than the one that
+brought it cannot read a declaration that holds it, as for `todo_link`. A repository with `stack = "none"` has no code
+to move, so `moving` must be empty there.
 
 What the layers are is written once, in `layers/table.toml`, on the onion architecture:
 
@@ -355,7 +366,7 @@ A declaration that cannot be read as it is written fails every check, saying eve
 declaration and the layout alone, before the tree is looked at:
 
 - a name that is not `[a-z][a-z0-9_]*`, or two units with the same name;
-- a `path` or `root` that is not written from the root with `/` as `unchecked` is (`./a`, `/a`, `a/../b`, `C:/a`, a
+- a `path` or `root` that is not written from the root with `/` as `unchecked` and `moving` are (`./a`, `/a`, `a/../b`, `C:/a`, a
   `\`, an empty one), and two units with the same `path`;
 - a `root` that is neither the `path` nor a directory above it;
 - a unit inside a layer of another unit (a unit sits beside the layers of the unit around it, however deep, and nowhere
@@ -384,7 +395,7 @@ names it (`domain of unit billing is missing: ...`), which a project that declar
 - Every layer of the unit is present or in the `absent` of that unit, and no layer in it is there; the levels of a layer
   are judged by the layer of their own unit. Each unit holds at least one layer, so the floor is each unit's.
 - No code sits outside the layers of a unit: every code file in its `path` is in a layer, or is one of its own entry
-  files, or sits in a path the layout says is no layer (`tests/` in Python), or in a path `unchecked` keeps, or in the
+  files, or sits in a path the layout says is no layer (`tests/` in Python), or in a path `unchecked` or `moving` keeps, or in the
   `path` of a unit inside it, which is that unit's to judge. A Python unit whose `path` is not the root may hold an
   `__init__.py` directly in it, read as a place that imports no layer; no other file, and none in a TypeScript or a
   Rust unit (`index.ts` at the top of a unit is code outside its layers). What the layout says of where code goes
@@ -394,15 +405,15 @@ names it (`domain of unit billing is missing: ...`), which a project that declar
   a project of one unit (Python: the whole project, TypeScript: `src/`, Rust: `crates/` and the `src/` of the root
   package), and a code file there that is in no unit's `path`, is no unit's entry file, is not in a path that is no
   layer (`tests/` in the scope, and in the root of each unit, where a package keeps its own) and is not kept by
-  `unchecked` fails. A unit at the root of the project holds every path. A unit whose `path` is outside the scope (a
+  `unchecked` or `moving` fails. A unit at the root of the project holds every path. A unit whose `path` is outside the scope (a
   monorepo's `packages/billing/src/billing` in TypeScript) is walked all the same.
-- A path in `unchecked` neither holds nor sits in a layer, and does not hold a unit: `unchecked = ["packages/billing"]`
+- A path in `unchecked` or `moving` neither holds nor sits in a layer, and does not hold a unit: `unchecked = ["packages/billing"]`
   would switch the unit off. A path inside a unit's `path` and outside its layers is what `unchecked` is for.
 - A manifest (`pyproject.toml` in Python, `package.json` in TypeScript, `Cargo.toml` in Rust, in any case: the one
   kind of the stack) belongs to the unit whose `root` holds its directory, and a manifest elsewhere is a package no
   unit says it is: `apps/x/package.json is a manifest outside every unit's root: declare the unit whose root is apps/x
   (root = "apps/x"), or list apps/x in unchecked`. The manifest at the root of the project (a workspace's), one in a
-  layer (a Rust layer is a crate of its own), and one in a path `unchecked` keeps are not counted. A project that
+  layer (a Rust layer is a crate of its own), and one in a path `unchecked` or `moving` keeps are not counted. A project that
   declares no unit is not asked, so a project that is one package with others of tooling in it is read as before.
 
 A knowledge document that records why the code is divided so follows the table `.config/rotproof.toml::unit` (see
@@ -659,10 +670,10 @@ changed is in the commits, what was measured and decided along the way in the ta
   with `ui = "none"`, fails until it is taken out). Without a declaration nothing is checked, and `rotproof check`
   exits 2, not 1: CI tells a project that has not adopted Rotproof from one that breaks a rule. Every layer of the stack is present or declared
   absent, and no layer declared absent is present. No code sits outside the layers, the stack's own paths (`tests/`),
-  the entry file and `unchecked`. In Rust, the root package's `src/` holds the entry file and nothing else: a `.rs`
+  the entry file, `unchecked` and `moving`. In Rust, the root package's `src/` holds the entry file and nothing else: a `.rs`
   file there (`src/pricing.rs`, `src/lib.rs`, `src/bin/`, a module of `main.rs`) fails as code outside the layers,
   and the finding says where code goes, while what Cargo keeps outside `src/` in the root package (`build.rs`,
-  `tests/`, `benches/`, `examples/`) and `xtask/` are not looked at. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
+  `tests/`, `benches/`, `examples/`) and `xtask/` are not looked at. A path in `unchecked` or `moving` exists and neither holds nor sits in a layer, so a layer cannot be switched
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.
   A project that declares units (see "Units") is checked unit by unit: each unit's `path` and entry files are there, and
   each of its layers is present or in its own `absent`, with at least one present; its code outside the layers is
@@ -838,7 +849,7 @@ changed is in the commits, what was measured and decided along the way in the ta
   hand. The finding names the command that applies: `rotproof create` when `files` names the running version (the
   guide changed under it, as in a development build, or by hand), `rotproof init` otherwise.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
-  outside `unchecked` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
+  outside `unchecked` and `moving` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
   a crate's `tests/` and `build.rs` included, read by Rotproof's own scanner, which skips strings, raw strings and
   character literals as Rust's lexer does. The first four put off a finding: it is fixed now, written as one line in
@@ -937,6 +948,48 @@ zone of the machine that runs the check) is printed on every run from that day, 
 says of outside the code, which `follows` cannot watch, then write the day in `verified` and the next day in
 `stale_after`. Failing would turn CI red with no change, from the clock alone. A deprecated document is not read for
 it.
+
+### The code that is moving
+
+While `moving` lists a path, `rotproof check` prints, on every run and apart from the findings and the warnings,
+what is left to move and which files to move next with the layers each could go in, and fails nothing for it. No date
+is set: the count falls only when a file is moved, and a path is taken out of `moving` once its code is.
+
+```
+moving: 5 files are not in a layer yet, and none is checked. Move these next (they import no other file still moving), each with the layers it could go in:
+  legacy/a.py, legacy/b.py import each other, so move them together:
+    legacy/a.py: any layer
+    legacy/b.py: domain, protocol.outbound, application, infrastructure.outbound, composition
+  legacy/money.py: any layer
+  and 2 more that import no other file still moving
+```
+
+- **The count is the code files in the listed paths:** `.py` files in Python, source files in TypeScript (`.ts`,
+  `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`), `.rs` files in Rust. Outside `.gitignore` and the hidden
+  directories, as everywhere. A project that lists no path hears nothing; one whose listed paths hold no code says to
+  take them out.
+- **The order is the import graph's, from its leaves.** An import of a file that is moving too (a module or a package
+  of Python; in TypeScript, the file an import resolves to as it does for the files in a layer) is a wait: the file
+  goes into a layer after what it imports. The files named are those that wait for no file still moving, in the byte
+  order of their paths: the first five are named and the rest counted. An import of a file in a layer, of the standard
+  library, of a package outside the project or of a file that is not listed is no wait, and an import that cannot be
+  resolved is not said: no check reads this code. A file that cannot be read, or has a syntax error, is counted and
+  leaves out what it could not give.
+- **Files that import each other are one group,** named together: neither can go first, so they are moved together.
+  A group that imports a file outside it waits for that file.
+- **The layers a file could go in are the places where the direction check would pass it,** innermost first: every
+  layer, and every level of a layer that has levels (such a layer holds only its levels), of the unit whose directory
+  holds the file, or of every unit when none does. A place passes when each import the file makes of a layer, as an
+  import from that place, and each import of the file by a file in a layer or by an entry file, as an import of that
+  place, is allowed by the table and by the rules between units. `any layer` says that every place passes, as for a
+  file that imports nothing of a layer and that no layer imports; none passing is said as it is. A name says its unit
+  when the project declares units (`domain of unit billing`). Only the places that are there are offered, and a file's
+  imports of the other files that are moving are not counted: where those go is not known yet. Which of the layers
+  that pass is the one is decided by what the code is for, and Rotproof never says it: that a file belongs to `domain`
+  or to `application` is for the person who moves it. Nor does it say that a file that does I/O belongs in
+  `infrastructure`: it names no module that does.
+- **In Rust the files are counted and no order is given:** a layer is a crate, and what a crate imports is the
+  dependencies of its manifest, which are no files' to order.
 
 ### The map in `AGENTS.md`
 

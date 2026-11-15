@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use protocol::inbound::{Commands, Initialized, LinkedTodo, Made, Names, Warning};
+use protocol::inbound::{
+    Commands, Initialized, LinkedTodo, Made, Moving, MovingFile, Names, Warning,
+};
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -60,8 +62,10 @@ the check red. Warns, too, of every comment that may make a Python type checker 
 of a row for a layer declared absent, and fails nothing for it: the file is the project's. With todo_link in the declaration (\"number\" or \"key\"), a \
 comment that holds TODO(#123): what is left (\"number\") or TODO(ABC-123): what is left (\"key\"), on one line, with the \
 number or key of the issue that tracks the work, is not a finding: every one is printed on every run under `linked \
-TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. Writes \
-nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. With \
+paths in moving in the declaration (the project's code that is not in a layer yet, which no check reads), prints on \
+every run how many files are left and which to move next, those that import no other file still moving first, each \
+with the layers it could go in (where the direction check would pass it), and fails nothing for it. Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
 cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
@@ -468,6 +472,12 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
     }
     // A comment tied to an issue is listed apart, on every run, before the warnings and what fails, and fails nothing
     print_linked(&report.linked);
+    // The code that is moving is counted on every run, and nothing fails for it
+    if let Some(moving) = &report.moving {
+        for line in moving_lines(moving, names.declaration) {
+            println!("{line}");
+        }
+    }
     // A warning: printed on every run, under the heading of its kind, and failing nothing
     for (heading, details) in warnings(&report.warnings) {
         println!(
@@ -523,6 +533,68 @@ fn linked_lines(linked: &[LinkedTodo]) -> Vec<String> {
             .map(|(place, todo)| format!("  {place:<width$}  {}", todo.reference)),
     );
     lines
+}
+
+/// What `check` prints for the code that is moving: how much there is and that none of it is checked, then the files
+/// to move next, each group on a line of its own, and how many more wait for no other file. Nothing is said of a
+/// date: the count falls when a file is moved.
+fn moving_lines(moving: &Moving, declaration: &str) -> Vec<String> {
+    let total = moving.total;
+    if total == 0 {
+        return vec![format!(
+            "moving: no code is left in the paths `moving` lists in {declaration}: take them out"
+        )];
+    }
+    let count = match total {
+        1 => "1 file is".to_string(),
+        _ => format!("{total} files are"),
+    };
+    let head = format!("moving: {count} not in a layer yet, and none is checked");
+    if !moving.ordered {
+        return vec![format!(
+            "{head}. Rotproof does not read what a Rust file imports, so it names none to move first"
+        )];
+    }
+    let mut lines = vec![format!(
+        "{head}. Move these next (they import no other file still moving), each with the layers it could go in:"
+    )];
+    for group in &moving.next {
+        match group.as_slice() {
+            [file] => lines.push(format!("  {}", moving_file(file))),
+            files => {
+                let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+                lines.push(format!(
+                    "  {} import each other, so move them together:",
+                    paths.join(", ")
+                ));
+                lines.extend(
+                    files
+                        .iter()
+                        .map(|file| format!("    {}", moving_file(file))),
+                );
+            }
+        }
+    }
+    if moving.more > 0 {
+        lines.push(format!(
+            "  and {} more that import no other file still moving",
+            moving.more
+        ));
+    }
+    lines
+}
+
+/// A file to move with the layers it could go in: every one, or those named, or none.
+fn moving_file(file: &MovingFile) -> String {
+    let layers = match &file.candidates {
+        None => "any layer".to_string(),
+        Some(places) if places.is_empty() => {
+            "no layer passes the direction check, for what it imports and what imports it"
+                .to_string()
+        }
+        Some(places) => places.join(", "),
+    };
+    format!("{}: {layers}", file.path)
 }
 
 /// Print the comments tied to an issue under their heading, apart from the warnings and the findings.

@@ -45,20 +45,24 @@ pub fn lands(tree: &dyn Tree, aliases: &Aliases, file: &str, specifier: &str) ->
 /// Whether a module is at `path`: a file of that name, one with an extension of source (`.ts`, `.d.ts`, ...), an
 /// `index` in a directory of that name, or, for a path written with `.js`, the source it is built from.
 fn is_there(tree: &dyn Tree, path: &str) -> bool {
-    let file = |path: &str| tree.found(path) == Some(false);
-    if module_files(path).iter().any(|path| file(path))
-        || file(&format!("{path}.d.ts"))
-        || file(&format!("{path}/index.d.ts"))
-    {
-        return true;
+    module_candidates(path)
+        .iter()
+        .any(|file| tree.found(file) == Some(false))
+}
+
+/// The files a module at `path` can be, any one of them enough, which `is_there` looks for and the code that is moving
+/// is searched for: [`module_files`], the declarations (`.d.ts`) of the module and of its `index`, and, for a path
+/// written with `.js`, the TypeScript source it is built from.
+pub fn module_candidates(path: &str) -> Vec<String> {
+    let mut files = module_files(path);
+    files.push(format!("{path}.d.ts"));
+    files.push(format!("{path}/index.d.ts"));
+    for (extension, sources) in SOURCE_OF {
+        if let Some(stem) = path.strip_suffix(extension) {
+            files.extend(sources.iter().map(|source| format!("{stem}{source}")));
+        }
     }
-    SOURCE_OF.iter().any(|(extension, sources)| {
-        path.strip_suffix(extension).is_some_and(|stem| {
-            sources
-                .iter()
-                .any(|source| file(&format!("{stem}{source}")))
-        })
-    })
+    files
 }
 
 #[cfg(test)]
