@@ -439,6 +439,14 @@ mod tests {
         assert_eq!(now(&tree, "domain/units.toml::other"), other);
         assert_ne!(now(&tree, "domain/units.toml"), file);
 
+        // A comment, the quotes of a string and the blank lines are no change of a table, and the file is changed
+        let rewritten = source
+            .replace("name = \"x\"\n", "name = 'x' # the first\n")
+            .replace("\n\n", "\n\n\n");
+        tree.write("domain/units.toml", &rewritten).unwrap();
+        assert_eq!(now(&tree, "domain/units.toml::unit"), unit);
+        assert_ne!(now(&tree, "domain/units.toml"), file);
+
         // A unit changed fails `unit`, and the table beside it keeps its hash
         tree.write("domain/units.toml", &source.replace("\"y\"", "\"z\""))
             .unwrap();

@@ -553,13 +553,17 @@ enum, and `default` for an `export default` that has no name; in Rust, a `fn`, `
 (`tests.helper`). A Rust type's key covers its definition and every `impl` block for it in the file, `Type.method` is
 the method of that name in any of them, and a Rust definition starts at its first attribute or `///` doc comment, and one
 named by a raw identifier (`pub fn r#match`) is written without the `r#` (`src/lib.rs::match`). What
-a macro defines is not seen. A table is a heading, `[unit]` or `[[unit]]`, and a piece of it is the text from its
-heading to the next heading in the file, without the blank lines after it (a comment above the next heading is part of
-the piece above it). A name selects every table whose heading begins with it, as a class holds its methods: `unit` is
+a macro defines is not seen. A table is a heading, `[unit]` or `[[unit]]`, and a piece of it is that table as it is read, up to
+the next heading in the file. A name selects every table whose heading begins with it, as a class holds its methods: `unit` is
 each `[[unit]]` and each `[unit.x]` below one, `workspace` the `[workspace]` table and `[workspace.dependencies]`,
 and `workspace.dependencies` that table alone; the pieces are joined in the order they appear, as an overload's are.
 The keys above the first heading are in no table, so a document that follows `.config/rotproof.toml::unit` fails when
-a unit changes and not when `areas` or `files` does (the file as a key fails for both). A name is bare keys joined by
+a unit changes and not when `areas` or `files` does (the file as a key fails for both). A table is hashed as it is read,
+not as it is written: its heading and then each field on a line, `key = value`, in the byte order of the keys (a dotted
+key written out in full), strings in double quotes with `\`, `"` and the control characters escaped, arrays and inline
+tables on one line (an inline table's keys in order), so a comment, a blank line, the quotes of a string, how an array
+is wrapped, and the order of the keys leave the hash as it was, while a value written as another one (`entry = "x"` for
+`entry = ["x"]`) is another value. A name is bare keys joined by
 dots (letters, digits, `-` and `_`). A table with no heading of its own (a value, `unit = [{ ... }]`, or one made by a
 dotted key) is not named, so it is "not there"; a `.toml` file that is not TOML cannot be read, which the check says as
 it says it of a Python file that does not parse. A `.toml` file is no code of a directory: `src/` is hashed on the same
