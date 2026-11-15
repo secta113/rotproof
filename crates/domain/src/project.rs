@@ -380,7 +380,7 @@ mod tests {
 ui = \"none\"\n",
         );
         assert_eq!(one.len(), 2);
-        assert!(one[0].1.contains("name = \"my-app\"") && one[0].1.contains("composition = "));
+        assert!(one[0].1.contains("name = \"my-app\"") && !one[0].1.contains("[dependencies]"));
         assert!(
             one[0]
                 .1

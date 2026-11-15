@@ -7,6 +7,7 @@
 //! place only, Python's `.venv` (`venv.rs`), and only to word the hint of a message.
 
 mod python;
+mod rust;
 mod typescript;
 mod venv;
 
@@ -53,7 +54,9 @@ pub fn problems(
         Language::TypeScript => typescript::typescript(
             tree, parsers, declared, layout, &places, &entries, &mut found,
         )?,
-        Language::Rust => Read::default(),
+        Language::Rust => rust::rust(
+            tree, parsers, declared, layout, &places, &entries, &mut found,
+        )?,
     };
     if read.any {
         for name in

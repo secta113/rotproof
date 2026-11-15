@@ -99,7 +99,7 @@ The project's files are written once, as a starting point, and are the project's
 | `docs/log.md` | The log, with its title |
 | `requirements-dev.txt` | `python`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit. `typescript`: installs what `package.json` and its lockfile pin (`npm ci`) and runs `npx --no -- rotproof check`, which never downloads another Rotproof, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
-| `Cargo.toml` | `rust`: the workspace, whose members are the crates of the layers present, each named on a line of its own (no glob: see "Units"), so `cargo build` builds every layer present, and its root package, which depends on `composition`. A project that declares units has the workspace alone |
+| `Cargo.toml` | `rust`: the workspace, whose members are the crates of the layers present, each named on a line of its own (no glob: see "Units"), so `cargo build` builds every layer present, and its root package, which holds the entry file and lists no dependency until the entry file names one (`composition`, which it calls). A project that declares units has the workspace alone |
 | `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program. A project that declares units has none: an entry file is a unit's own |
 
 A project that does not write Python needs no Python for Rotproof: `rust` and `none` pin only the version, as
@@ -391,8 +391,8 @@ Cargo refuses two crates of one name; the unit's directory holds the crates and 
 `Cargo.toml` it writes then is a workspace with no package, naming each crate in `members` (a glob such as
 `crates/*` would match the directory of a unit and fail in Cargo), and `src/main.rs` is not written. The entry file
 of a unit is `<dir>/src/main.rs` in Rust, and `rotproof create` makes with it the package that holds it, `<dir>/Cargo.toml`
-(named for the unit, and for the unit and its directory from its second entry on), which depends on the unit's own
-`composition` by path and which `members` names; an entry file declared in another form, that is not there, fails the
+(named for the unit, and for the unit and its directory from its second entry on), which lists no dependency, since the
+dependencies check fails one the code does not name, and which `members` names; an entry file declared in another form, that is not there, fails the
 run before anything is written, and one that is there is the project's, with its package. When the root `Cargo.toml` is
 there already, `rotproof create` changes `members` and nothing else of it, only to add the crates and packages it made
 that no member names, and to replace the member `crates/*`, the glob Rotproof wrote before units, with the crates it
@@ -960,6 +960,23 @@ entry can be told, is one.
   layer (the tests of a TypeScript project are not read apart: see the layers). `imports` of the declaration is not
   used: an import and a dependency are one name. Not read: a file outside `src/` (`vite.config.ts`, a test beside it),
   so a package only that file imports is listed in `devDependencies`, or in `without_import`.
+- **The manifests list the dependencies the code imports, both ways** (Rust): Cargo stops a crate that names a crate its
+  `Cargo.toml` does not list, so the other half is judged: a dependency in `[dependencies]` (`[target.<cfg>.dependencies]`
+  too, from a registry, git or a path alike) that no code of the crate names fails. The crates are those the direction
+  check reads, the crate of each layer and the package of the entry files of each unit, and the code is the `.rs` files in
+  the crate's `src/`, `tests/`, `benches/` and `examples/`, where Cargo lets a crate use `[dependencies]` (not
+  `build.rs`). A dependency is named by a path that starts with it (`serde::Serialize`, in a `use`, an expression, an
+  attribute or the tokens of a macro, `serde_json::json!` too), by a name bound to it with `as`, by `extern crate`, and by
+  a `use` of the crate alone, in code with the comments and the literals taken out; `-` and `_` are one name, and a
+  dependency renamed with `package = ...` is named by the key it is listed under. `[dev-dependencies]` and
+  `[build-dependencies]` (the latter are used by a script that is not read) are never judged, and neither are the entries
+  of `[workspace.dependencies]`, which are no crate's dependency until one takes them with `workspace = true`. A
+  dependency the code uses without naming it (a `-sys` crate that is only linked) is listed in `without_import`, as the
+  manifest lists it (`openssl-sys` or `openssl_sys`); `imports` of the declaration is not used. This reads the `use` of
+  the crates of every layer, which the direction check does only for a crate that depends on a crate of a shared unit. A
+  manifest that cannot be read is the direction check's finding. Not read: a `[lib] path` or `[[bin]] path` that puts a
+  crate's code outside those directories, a file taken in with `include!` or `#[path]`, and a name a macro builds from
+  pieces.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,

@@ -196,11 +196,8 @@ fn entry_packages(tree: &dyn Tree, declared: &Declared) -> Result<Vec<Package>, 
     };
     let mut packages = Vec::new();
     for unit in declared.units.iter().filter(|unit| unit.declared) {
-        let composition = declared.places.iter().find(|p| {
-            p.unit.name == unit.name && p.name == "composition" && !declared.is_absent(p)
-        });
         for (nth, entry) in unit.entries.iter().enumerate() {
-            match entry_package(layout, &unit.name, nth, entry, composition) {
+            match entry_package(layout, &unit.name, nth, entry) {
                 Ok(Some(package)) => packages.push(package),
                 Ok(None) => {}
                 Err(why) if tree.found(entry).is_none() => {
@@ -617,8 +614,7 @@ mod tests {
         assert_eq!(
             tree.text("apps/cli/Cargo.toml").as_deref(),
             Some(
-                "[package]\nname = \"cli\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n[dependencies]\n\
-                 cli_composition = { path = \"crates/composition\" }\n"
+                "[package]\nname = \"cli\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n"
             )
         );
         let workspace = tree.text("Cargo.toml").unwrap();

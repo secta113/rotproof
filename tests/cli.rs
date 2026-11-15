@@ -2221,8 +2221,8 @@ fn the_levels_inside_a_rust_crate_and_its_entry_file_are_judged() {
     write(
         "Cargo.toml",
         &manifest.replace(
-            "[dependencies]\n",
-            "[dependencies]\napplication = { path = \"crates/application\" }\n",
+            "[workspace]",
+            "[dependencies]\napplication = { path = \"crates/application\" }\n\n[workspace]",
         ),
     );
     let out = run(&["--root", &arg, "check"]);
@@ -5545,14 +5545,11 @@ fn a_rust_project_that_declares_units_gets_the_crates_of_each_named_for_its_unit
     }
     // The levels are modules of their crate, in the unit's directory
     assert!(r.join("crates/core/protocol/src/inbound/mod.rs").is_file());
-    // The entry file of the app, in the package that holds it, which depends on the app's own `composition`
+    // The entry file of the app, in the package that holds it, which lists no dependency until its code names one
     assert!(r.join("apps/cli/src/main.rs").is_file());
     let package = fs::read_to_string(r.join("apps/cli/Cargo.toml")).unwrap();
     assert!(package.contains("name = \"cli\"\n"), "{package}");
-    assert!(
-        package.contains("cli_composition = { path = \"crates/composition\" }"),
-        "{package}"
-    );
+    assert!(!package.contains("[dependencies]"), "{package}");
     // The units replace the implicit one: no crate of the project's own, and no root package or entry file
     assert!(!r.join("crates/domain").exists() && !r.join("src/main.rs").exists());
     // The workspace names each crate, which a glob over `crates/` could not: it would match `crates/core`
@@ -6579,4 +6576,45 @@ fn a_typescript_manifest_is_compared_with_what_the_code_imports_either_way() {
         said.contains("without_import under [dependencies] lists gone, which no manifest lists as a dependency"),
         "{said}"
     );
+}
+
+#[test]
+fn a_rust_dependency_the_crate_does_not_name_is_unused_and_fails() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let arg = root_arg(r);
+    let manifest = "[package]\nname = \"domain\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\n\
+                    serde = \"1\"\nserde_json = \"1\"\nopenssl-sys = \"0.9\"\n";
+    write_file(r, "crates/domain/Cargo.toml", manifest);
+    write_file(
+        r,
+        "crates/domain/src/lib.rs",
+        "//! Doc\n\nuse serde::Serialize;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    for dependency in ["serde_json", "openssl-sys"] {
+        assert!(
+            said.contains(&format!(
+                "lists the dependency {dependency} in [dependencies], and no `use` or path in the crate names it"
+            )),
+            "{said}"
+        );
+    }
+    assert!(!said.contains("lists the dependency serde in"), "{said}");
+    // A path names a crate as a `use` does, and what is only linked is said in the declaration
+    write_file(
+        r,
+        "crates/domain/src/lib.rs",
+        "//! Doc\n\nuse serde::Serialize;\n\npub fn f() -> String {\n    serde_json::to_string(&1).unwrap()\n}\n",
+    );
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    write_file(
+        r,
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nwithout_import = [\"openssl_sys\"]\n"),
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
 }

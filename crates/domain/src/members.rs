@@ -14,8 +14,8 @@ use std::collections::BTreeSet;
 
 use toml_edit::{DocumentMut, Value};
 
-use crate::layers::{Layout, Place, package_of};
-use crate::paths::{file_name, parent, relative};
+use crate::layers::Layout;
+use crate::paths::{file_name, parent};
 
 /// The glob of `members` that Rotproof wrote before units, every directory in `crates/`.
 pub const GLOB: &str = "crates/*";
@@ -40,15 +40,15 @@ pub struct Package {
 /// The package for the entry file `entry` of the unit `unit`, which is its `nth` entry, made from the layout's
 /// `entry_package`: its manifest sits in the directory above `src/`, as Cargo reads a bin crate (`<dir>/src/main.rs`
 /// is the crate of `<dir>/Cargo.toml`), and it is named for the unit, or for the unit and its directory from the
-/// second entry on, so that two packages are never named alike. `composition` is the unit's own `composition` crate,
-/// which the package depends on by path; a unit that lacks it depends on nothing. `Ok(None)` when the layout has no
-/// such package. `Err` says why an entry has no place for one, which a person fixes in the declaration.
+/// second entry on, so that two packages are never named alike. It lists no dependency: the entry file calls the
+/// unit's own `composition` once it is written to, and a dependency the code does not name fails the check of the
+/// dependencies. `Ok(None)` when the layout has no such package. `Err` says why an entry has no place for one, which a
+/// person fixes in the declaration.
 pub fn entry_package(
     layout: &Layout,
     unit: &str,
     nth: usize,
     entry: &str,
-    composition: Option<&Place>,
 ) -> Result<Option<Package>, String> {
     let Some(template) = &layout.entry_package else {
         return Ok(None);
@@ -71,20 +71,10 @@ pub fn entry_package(
     } else {
         format!("{unit}_{}", file_name(dir))
     };
-    let dependencies = composition.map_or(String::new(), |place| {
-        format!(
-            "\n[dependencies]\n{} = {{ path = \"{}\" }}\n",
-            package_of(&place.unit, &place.name),
-            relative(dir, &place.path)
-        )
-    });
     Ok(Some(Package {
         dir: dir.to_string(),
         manifest: format!("{dir}/{}", layout.manifest),
-        text: template
-            .trim_start()
-            .replace("{package}", &name)
-            .replace("{dependencies}", &dependencies),
+        text: template.trim_start().replace("{package}", &name),
     }))
 }
 
@@ -321,57 +311,36 @@ mod tests {
         assert!(!matches("crates/a", "crates/ab") && !matches("crates", "crates/a"));
     }
 
-    fn composition_of(unit: &str, path: &str) -> Place {
-        use crate::layers::{UnitTag, layout, table};
-        let tag = UnitTag {
-            name: unit.into(),
-            ..UnitTag::default()
-        };
-        layout("rust", "none")
-            .unwrap()
-            .places_in(&table(), path, &tag)
-            .into_iter()
-            .find(|place| place.name == "composition")
-            .unwrap()
-    }
-
     #[test]
-    fn the_package_of_an_entry_file_sits_above_its_src_and_depends_on_the_composition_of_its_unit()
-    {
+    fn the_package_of_an_entry_file_sits_above_its_src_and_lists_no_dependency() {
         let layout = crate::layers::layout("rust", "none").unwrap();
-        let composition = composition_of("cli", "apps/cli/crates");
-        let package = entry_package(
-            &layout,
-            "cli",
-            0,
-            "apps/cli/src/main.rs",
-            Some(&composition),
-        )
-        .unwrap()
-        .unwrap();
+        let package = entry_package(&layout, "cli", 0, "apps/cli/src/main.rs")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             (package.dir.as_str(), package.manifest.as_str()),
             ("apps/cli", "apps/cli/Cargo.toml")
         );
         assert_eq!(
             package.text,
-            "[package]\nname = \"cli\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n[dependencies]\n\
-             cli_composition = { path = \"crates/composition\" }\n"
+            "[package]
+name = \"cli\"
+version = \"0.1.0\"
+edition = \"2024\"
+publish = false
+"
         );
-        // A second entry of the unit is named for its directory too, and a unit with no `composition` depends on none
-        let second = entry_package(&layout, "cli", 1, "apps/cli-web/src/main.rs", None)
+        // A second entry of the unit is named for its directory too
+        let second = entry_package(&layout, "cli", 1, "apps/cli-web/src/main.rs")
             .unwrap()
             .unwrap();
-        assert!(
-            second.text.contains("name = \"cli_cli-web\"\n")
-                && !second.text.contains("[dependencies]")
-        );
+        assert!(second.text.contains(
+            "name = \"cli_cli-web\"
+"
+        ));
         // Another stack has no package for an entry file
         let python = crate::layers::layout("python", "none").unwrap();
-        assert_eq!(
-            entry_package(&python, "cli", 0, "bin/run.py", None),
-            Ok(None)
-        );
+        assert_eq!(entry_package(&python, "cli", 0, "bin/run.py"), Ok(None));
     }
 
     #[test]
@@ -388,7 +357,7 @@ mod tests {
                 "so that its package is <dir>/Cargo.toml",
             ),
         ] {
-            let why = entry_package(&layout, "cli", 0, entry, None).unwrap_err();
+            let why = entry_package(&layout, "cli", 0, entry).unwrap_err();
             assert!(
                 why.starts_with(&format!("unit \"cli\" declares entry {entry:?}")),
                 "{why}"
