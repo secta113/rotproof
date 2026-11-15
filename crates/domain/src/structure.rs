@@ -2,9 +2,10 @@
 //!
 //! - Every layer of the stack's layout is present or declared absent, and no layer declared absent is present.
 //!   `absent` names no layer the declared UI leaves out.
-//! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`) and the paths the
-//!   project lists in `unchecked`. A path in `unchecked` exists and holds no layer, so a layer cannot be switched
-//!   off by listing it.
+//! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`), the entry file and
+//!   the paths the project lists in `unchecked`. Where code is looked for is the layout's `scope`, and its `also_code`
+//!   (the root package's `src/` in Rust). A path in `unchecked` exists and holds no layer, so a layer cannot be
+//!   switched off by listing it.
 //! - A layer with levels (`ui`) holds only its levels: code in it beside them fails, except the files the layout
 //!   makes for the layer itself. A part there would have no place among the levels, and an import through it
 //!   (`atoms → ui/helpers.py → domain`) would pass every direct check of the direction.
@@ -68,6 +69,7 @@ pub fn named(declared: &Declared) -> Vec<String> {
 /// scope, then each present layer that has levels.
 pub fn listed(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> {
     let mut dirs = vec![layout.scope.clone()];
+    dirs.extend(layout.also_code.iter().map(|also| also.scope.clone()));
     dirs.extend(
         with_levels(declared, seen)
             .into_iter()
@@ -197,8 +199,9 @@ fn unchecked_paths<'a>(declared: &'a Declared, seen: &Seen) -> (Vec<String>, Vec
     (found, kept)
 }
 
-/// The code outside the layers, one finding for each entry of the layout's scope that holds some: the paths that are
-/// not layers (`tests/`), the entry file and `unchecked_paths`, the ones `unchecked` keeps, are not counted.
+/// The code outside the layers, one finding for each entry of the layout's scope, and of each directory it also looks
+/// in, that holds some: the paths that are not layers (`tests/`), the entry file and `unchecked_paths`, the ones
+/// `unchecked` keeps, are not counted.
 fn outside_layers(
     declared: &Declared,
     layout: &Layout,
@@ -218,7 +221,10 @@ fn outside_layers(
         .as_ref()
         .map_or(",".to_string(), |goes| format!(": {goes};"));
     let retired = retired(layout);
-    for outside in outside(seen.code(&layout.scope), &layout.scope, &places, &skipped) {
+    let scopes =
+        std::iter::once(&layout.scope).chain(layout.also_code.iter().map(|also| &also.scope));
+    let outsides = scopes.flat_map(|scope| outside(seen.code(scope), scope, &places, &skipped));
+    for outside in outsides {
         // A layer of the table before 0.4.0 says where its code goes, on every run until it is moved
         if let Some((name, _, where_it_goes)) = retired.iter().find(|(_, path, _)| *path == outside)
         {

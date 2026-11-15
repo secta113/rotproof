@@ -108,6 +108,16 @@ pub struct NoView {
     pub goes: String,
 }
 
+/// A directory besides a layout's `scope` where code is looked for, as code outside the layers when no layer holds it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AlsoCode {
+    /// The directory, from the root
+    pub scope: String,
+    /// What a code file in it is named, as [`Layout::code`] says
+    pub code: String,
+}
+
 /// Where the layers live in one stack.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -116,6 +126,10 @@ pub struct Layout {
     pub scope: String,
     /// What a code file is named: `*`, `*.<extension>` or an exact name
     pub code: String,
+    /// Directories besides `scope` where code is looked for, each with the name of its code files: the root package's
+    /// `src/` in a Rust layout, whose code is looked for as crates in `crates/`
+    #[serde(default)]
+    pub also_code: Vec<AlsoCode>,
     /// Paths that are not layers and hold code all the same, as `tests/`
     pub not_layers: Vec<String>,
     /// Each line of a layer's documentation starts with this
@@ -360,11 +374,14 @@ impl Layout {
     /// Case does not count: Windows runs `stray.PY` with Python and reads `cargo.toml` as `Cargo.toml`, so either is
     /// code that has to sit in a layer.
     pub fn is_code(&self, file_name: &str) -> bool {
-        let name = file_name.to_ascii_lowercase();
-        match self.code.strip_prefix('*') {
-            Some("") => true,
-            Some(suffix) => name.ends_with(&suffix.to_ascii_lowercase()),
-            None => name == self.code.to_ascii_lowercase(),
+        named_by(&self.code, file_name)
+    }
+
+    /// Whether a file name is code in the directory `dir`, one of `also_code`'s, or in any other this layout reads.
+    pub fn is_code_in(&self, dir: &str, file_name: &str) -> bool {
+        match self.also_code.iter().find(|also| also.scope == dir) {
+            Some(also) => named_by(&also.code, file_name),
+            None => self.is_code(file_name),
         }
     }
 
@@ -380,6 +397,16 @@ impl Layout {
             // them
             Language::Rust => crate::rust::is_source(name),
         }
+    }
+}
+
+/// Whether `file_name` is named by `code`: `*`, `*.<extension>` or an exact name, in any case.
+fn named_by(code: &str, file_name: &str) -> bool {
+    let name = file_name.to_ascii_lowercase();
+    match code.strip_prefix('*') {
+        Some("") => true,
+        Some(suffix) => name.ends_with(&suffix.to_ascii_lowercase()),
+        None => name == code.to_ascii_lowercase(),
     }
 }
 
@@ -556,6 +583,25 @@ mod tests {
                     "{stack}: code a Rust layout reads"
                 );
             }
+            // A directory besides the scope holds no layer, so the code in it is outside every layer, and the entry
+            // file in it is the one code there that is not
+            for also in &layout.also_code {
+                assert!(
+                    !also.scope.is_empty()
+                        && !within(&also.scope, &layout.scope)
+                        && !within(&layout.scope, &also.scope),
+                    "{stack}: {} overlaps the scope {}",
+                    also.scope,
+                    layout.scope
+                );
+                if let Some(entry) = &layout.entry {
+                    assert!(
+                        !within(entry, &also.scope) || layout.is_code_in(&also.scope, entry),
+                        "{stack}: the entry file {entry} is not code in {}",
+                        also.scope
+                    );
+                }
+            }
             let places = layout.places(&table);
             assert!(places.len() >= 5, "{stack} makes {} places", places.len());
             // The entry file sits outside every layer, as code in the scope where code is looked for
@@ -721,6 +767,11 @@ mod tests {
         layout.code = "Cargo.toml".into();
         assert!(layout.is_code("Cargo.toml") && !layout.is_code("Cargo.lock"));
         assert!(layout.is_code("cargo.toml") && layout.is_code("CARGO.TOML"));
+        // The root package's `src/` of a Rust layout has its own code files
+        let rust = super::layout("rust", NO_UI).unwrap();
+        assert!(rust.is_code_in("src", "pricing.rs") && rust.is_code_in("src", "PRICING.RS"));
+        assert!(!rust.is_code_in("src", "Cargo.toml") && !rust.is_code_in("src", "data.json"));
+        assert!(rust.is_code_in("crates", "Cargo.toml") && !rust.is_code_in("crates", "a.rs"));
     }
 
     #[test]

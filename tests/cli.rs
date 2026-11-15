@@ -1829,6 +1829,86 @@ fn the_levels_inside_a_rust_crate_and_its_entry_file_are_judged() {
     assert_eq!(said.matches(": depends on ").count(), 1, "{said}");
 }
 
+#[test]
+fn the_root_package_of_a_rust_project_holds_its_entry_file_and_no_other_code() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let arg = root_arg(r);
+    let plant = |path: &str| {
+        fs::create_dir_all(r.join(path).parent().unwrap()).unwrap();
+        fs::write(r.join(path), "pub fn f() {}\n").unwrap();
+    };
+    let check = || run(&["--root", &arg, "check"]);
+    let declaration = |unchecked: &str| {
+        declare(
+            r,
+            &format!(
+                "stack = \"rust\"\nareas = [\"a\"]\n{}unchecked = [{unchecked}]\n",
+                ui_line("rust")
+            ),
+        )
+    };
+    // What Cargo keeps outside `src/` in the root package, and what is outside the root package, is not looked at
+    for path in [
+        "build.rs",
+        "tests/it.rs",
+        "benches/b.rs",
+        "examples/e.rs",
+        "xtask/src/main.rs",
+        "src/data.json",
+    ] {
+        plant(path);
+    }
+    let out = check();
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // Every other `.rs` file of `src/` is code outside the layers, a directory by its name, and in any case
+    for path in [
+        "src/pricing.rs",
+        "src/lib.rs",
+        "src/bin/tool.rs",
+        "src/util/mod.rs",
+        "src/BIG.RS",
+    ] {
+        plant(path);
+    }
+    let out = check();
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    for outside in [
+        "src/pricing.rs",
+        "src/lib.rs",
+        "src/bin",
+        "src/util",
+        "src/BIG.RS",
+    ] {
+        let line = format!(
+            "code outside the layers: {outside} (move it into a layer: a rule of the program goes in crates/domain, a \
+             use case in crates/application, what wires them in crates/composition; src/main.rs is the one file of \
+             the root package's src/ that is no layer; or list it in unchecked in .config/rotproof.toml)"
+        );
+        assert!(said.contains(&line), "{line}:\n{said}");
+    }
+    assert_eq!(
+        said.matches("code outside the layers: ").count(),
+        5,
+        "{said}"
+    );
+
+    // A path the project lists is exempt, a file or a directory, and the entry file needs no listing
+    declaration("\"src/pricing.rs\", \"src/lib.rs\", \"src/bin\", \"src/util\", \"src/BIG.RS\"");
+    let out = check();
+    assert!(out.status.success(), "{}", stdout(&out));
+    declaration("\"src/pricing.rs\"");
+    let said = stdout(&check());
+    assert!(!said.contains("src/pricing.rs"), "{said}");
+    assert_eq!(
+        said.matches("code outside the layers: ").count(),
+        4,
+        "{said}"
+    );
+}
+
 /// Make the domain crate of the Rust project at `r` depend on each of `paths`, one line each from line 7, as `d0`,
 /// `d1` and so on, and say what check says.
 fn check_depending_on(r: &Path, paths: &[String]) -> String {

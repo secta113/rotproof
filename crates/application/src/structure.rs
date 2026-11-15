@@ -62,7 +62,7 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
         seen.named.insert(path, exact);
     }
     for dir in listed(&declared, layout, &seen) {
-        let code = code_files(tree, &dir, |name| layout.is_code(name))?;
+        let code = code_files(tree, &dir, |name| layout.is_code_in(&dir, name))?;
         seen.code.insert(dir, code);
     }
     Ok(Structure {

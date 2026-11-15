@@ -2,11 +2,15 @@
 #
 # A layer is a crate in `crates/`: a library with the role as its `//!` documentation.
 
-# Code is a crate in `crates/` (a `Cargo.toml` at any depth, outside `.gitignore` and hidden directories). A crate
-# outside every layer fails, unless the project lists it in `unchecked`. Nothing outside `crates/` is looked at, so
-# `xtask/` and the workspace's own `Cargo.toml` are not layers.
+# Code is a crate in `crates/` (a `Cargo.toml` at any depth, outside `.gitignore` and hidden directories), and a `.rs`
+# file in `src/` of the root package, which holds the entry file and nothing else: `src/lib.rs`, `src/bin/`, and a
+# module of the entry file (`src/pricing.rs`) are code outside every layer, however the package's manifest declares
+# them. Code outside every layer fails, unless the project lists it in `unchecked`. Nothing else is looked at, so
+# `xtask/`, the workspace's own `Cargo.toml`, and what Cargo keeps outside `src/` in the root package (`build.rs`,
+# `tests/`, `benches/`, `examples/`) are not layers
 scope = "crates"
 code = "Cargo.toml"
+also_code = [{ scope = "src", code = "*.rs" }]
 not_layers = []
 doc_prefix = "//! "
 # The UIs a project may declare besides "none": none yet. Rust UI is written with very different tools (Leptos,
@@ -20,6 +24,9 @@ language = "rust"
 # The entry file, of the root package. Cargo compiles it against what the package's `Cargo.toml` declares, so that
 # manifest is what the direction check reads for it
 entry = "src/main.rs"
+# Where the rest of the root package's `src/` goes, said in the finding for code outside the layers (a crate in
+# `crates/` that no layer is, too)
+where_code_goes = "a rule of the program goes in crates/domain, a use case in crates/application, what wires them in crates/composition; src/main.rs is the one file of the root package's src/ that is no layer"
 # Written once at the root with the project's files: the root package, which holds the entry file, and the workspace,
 # so `cargo build` builds every crate in `crates/`. `{package}` is the project's name as a package name
 files = [
