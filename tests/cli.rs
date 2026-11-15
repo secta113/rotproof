@@ -1060,6 +1060,32 @@ fn the_skill_names_only_commands_there_are() {
 }
 
 #[test]
+fn the_guide_sends_to_the_skill_and_does_not_say_what_the_skill_says() {
+    for stack in ["python", "none"] {
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
+            ui_line(stack)
+        ));
+        let r = root.path();
+        let arg = root_arg(r);
+        assert!(
+            create(&["--root", &arg, "create", "--yes"])
+                .status
+                .success()
+        );
+        let guide = fs::read_to_string(r.join(".rotproof/AGENTS.md")).unwrap();
+        assert!(
+            guide.contains("the skill `rotproof` (`.agents/skills/rotproof/SKILL.md`)"),
+            "{stack}"
+        );
+        assert!(r.join(".agents/skills/rotproof/SKILL.md").is_file());
+        // What moved to the skill is not said in the guide too
+        assert!(!guide.contains("commit of its own"), "{stack}: {guide}");
+        assert!(!guide.contains("rotproof follows knowledge/"), "{stack}");
+    }
+}
+
+#[test]
 fn guide_without_a_stack_prints_what_create_writes_for_the_declared_ui() {
     for (stack, ui) in [
         ("typescript", "none"),

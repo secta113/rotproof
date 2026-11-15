@@ -159,9 +159,10 @@ the rule the last one takes out. A declaration that still names one of them in `
 check` as naming no update: take the name out. `rotproof create` writes no `.claude/settings.json` any more.
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
-stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
-`layers/table.toml`), gives the rules of units, and gives the rules of the records, starting with reading the knowledge index before work, and
-where open work is kept (an issue). It names
+stack. It lists the layers with where each lives and what it may import (from `layers/table.toml`), gives the rules of
+units, and gives the rules of the records, starting with reading the knowledge index before work, and where open work
+is kept (an issue); the rules every session needs are in it. For how to run Rotproof it says one thing, to use the
+skill `rotproof`. It names
 the Rotproof version that wrote it, so after an upgrade `rotproof check` fails until `rotproof init` (or
 `rotproof create`) has rewritten it. Edited by hand, it fails too: a project's own rules go in its own `AGENTS.md`.
 
@@ -171,8 +172,9 @@ copies hold the same text, whatever the stack, with the two fields every agent t
 `description`. It holds what an agent needs only when it upgrades Rotproof or runs a command: when to run `check`,
 `create`, `index` and `follows`, and how to upgrade (in a commit of its own, `rotproof init`, and how to read each line it
 prints, with `declined`). It says how to judge, and never which command comes next: `rotproof check` and `rotproof init`
-say that, so a second place that did could drift from them. A link from one place to the other would not be made on
-every system, so `rotproof create` writes both and neither is a link. It carries no version, so an upgrade rewrites it only when its
+say that, so a second place that did could drift from them. A skill is loaded when the agent finds it fits, which is not
+certain, and so the guide names it. A link from one place to the other would not be made on every system, so
+`rotproof create` writes both and neither is a link. It carries no version, so an upgrade rewrites it only when its
 text changed; when `files` is behind, `rotproof check` names `rotproof init` for it, as for the guide.
 
 The guide only helps if your agent reads it. The `AGENTS.md` and `CLAUDE.md` that `rotproof create` writes point at it;

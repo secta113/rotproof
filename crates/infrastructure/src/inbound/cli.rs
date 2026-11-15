@@ -143,11 +143,11 @@ enum Command {
     /// Print the rules Rotproof keeps for a stack, the text of .rotproof/AGENTS.md, writing nothing
     ///
     /// Prints the guide of the stack and the UI the project declares, or of the stack named with --stack, which needs
-    /// no project: how to run Rotproof, the layers of the stack with where each lives and what it may import, and the
-    /// rules of the records. The same text `rotproof create` writes to .rotproof/AGENTS.md. With --stack, --ui picks
-    /// the UI, as for `rotproof init` (with python and typescript, atomic or none; the layers of the fullest UI the
-    /// stack offers without it). Exits 2 for an unknown stack or UI, or when no stack is named and the declaration
-    /// cannot be read.
+    /// no project: the layers of the stack with where each lives and what it may import, the rules of the records and
+    /// where the skill for running Rotproof is. The same text `rotproof create` writes to .rotproof/AGENTS.md. With
+    /// --stack, --ui picks the UI, as for `rotproof init` (with python and typescript, atomic or none; the layers of
+    /// the fullest UI the stack offers without it). Exits 2 for an unknown stack or UI, or when no stack is named and
+    /// the declaration cannot be read.
     Guide {
         /// python, typescript, rust, or none (records only). Without it, the stack in .config/rotproof.toml
         #[arg(long)]
