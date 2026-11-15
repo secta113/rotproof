@@ -88,6 +88,7 @@ pub fn in_rust(source: &str) -> Vec<(usize, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layers::UnitTag;
 
     fn names(source: &str) -> Vec<(usize, String)> {
         in_rust(source)
@@ -173,6 +174,7 @@ fn b() { env::var(); }
             imports: Vec::new(),
             below: Vec::new(),
             files: Vec::new(),
+            unit: UnitTag::default(),
         };
         assert!(!is_judged(&place("infrastructure", None)));
         assert!(!is_judged(&place(

@@ -12,9 +12,10 @@
 use serde::Deserialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
-use crate::layers::{Layout, Place, RECORDS_ONLY, known_stacks, layout, table, uis};
+use crate::layers::{Layout, Place, RECORDS_ONLY, Table, known_stacks, layout, table, uis};
 use crate::markers::TodoLink;
 use crate::paths::within;
+use crate::units::Unit;
 use crate::version::VERSION;
 
 /// Where a project declares its structure, from the root
@@ -261,6 +262,10 @@ pub struct Declared {
     pub declaration: Declaration,
     /// `None` for a repository that keeps records only (`stack = "none"`)
     pub layout: Option<Layout>,
+    /// The units of the project, in the order it declares them: the one implicit unit when it declares none, and none
+    /// for a repository of records only
+    pub units: Vec<Unit>,
+    /// The places of every unit, a unit's together, in the order of `units`
     pub places: Vec<Place>,
     /// What `absent` names in a layer the declared UI leaves out (`ui` with `ui = "none"`): it says nothing, and the
     /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs
@@ -299,6 +304,7 @@ impl Declared {
             return Ok(Declared {
                 declaration,
                 layout: None,
+                units: Vec::new(),
                 places: Vec::new(),
                 left_out: Vec::new(),
                 todo_link: None,
@@ -321,7 +327,12 @@ impl Declared {
                 offered.join(", ")
             )]);
         };
-        let places = layout.places(&table());
+        let table = table();
+        let units = vec![Unit::implicit(&layout, &declaration.absent)];
+        let places: Vec<Place> = units
+            .iter()
+            .flat_map(|unit| unit.places(&layout, &table))
+            .collect();
         let (left_out, unknown): (Vec<String>, Vec<String>) = declaration
             .absent
             .iter()
@@ -353,10 +364,41 @@ impl Declared {
         Ok(Declared {
             declaration,
             layout: Some(layout),
+            units,
             places,
             left_out,
             todo_link,
         })
+    }
+
+    /// The entry files of every unit, each as a place of its own: what the checks that read code outside the layers
+    /// start from. Empty for a repository of records only, and for a stack without an entry file.
+    pub fn entries(&self, table: &Table) -> Vec<Place> {
+        let Some(layout) = &self.layout else {
+            return Vec::new();
+        };
+        self.units
+            .iter()
+            .flat_map(|unit| unit.entry_places(layout, table))
+            .collect()
+    }
+
+    /// The directories, from the root, where code is looked for: the layout's `scope`, then the root of each unit that
+    /// is not inside one before it, so a file is read once.
+    pub fn scopes(&self) -> Vec<String> {
+        let Some(layout) = &self.layout else {
+            return Vec::new();
+        };
+        let mut scopes = vec![layout.scope.clone()];
+        for unit in &self.units {
+            if !scopes
+                .iter()
+                .any(|scope| scope.is_empty() || within(&unit.root, scope))
+            {
+                scopes.push(unit.root.clone());
+            }
+        }
+        scopes
     }
 
     /// Declared absent itself, or inside a layer declared absent.
@@ -688,6 +730,94 @@ mod tests {
         .unwrap();
         assert!(!declared.is_unchecked("domain/song.py"));
         assert!(!declared.is_unchecked("ui/atoms/gen/x.py"));
+    }
+
+    #[test]
+    fn a_project_that_declares_no_unit_is_one_implicit_unit() {
+        for (stack, ui) in [
+            ("python", "atomic"),
+            ("typescript", "none"),
+            ("rust", "none"),
+        ] {
+            let declared = Declared::new(
+                parse_declaration(&format!(
+                    "stack = \"{stack}\"\nareas = []\nui = \"{ui}\"\nabsent = []\n"
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+            let layout = declared.layout.as_ref().unwrap();
+            let [unit] = &declared.units[..] else {
+                panic!("{stack}: {:?}", declared.units);
+            };
+            assert_eq!(unit.path, layout.scope);
+            assert!(!unit.declared && unit.name.is_empty());
+            // The places are those of the unit, and so those of the layout
+            assert_eq!(declared.places, unit.places(layout, &table()));
+            assert_eq!(declared.places.len(), layout.places(&table()).len());
+            assert!(declared.places.iter().all(|p| p.unit == unit.tag()));
+            // The entry is the layout's, and the code is looked for where the layout says
+            let entries = declared.entries(&table());
+            assert_eq!(
+                entries.iter().map(|e| &e.path).collect::<Vec<_>>(),
+                layout.entry.iter().collect::<Vec<_>>()
+            );
+            assert_eq!(declared.scopes(), std::slice::from_ref(&layout.scope));
+        }
+        let none =
+            Declared::new(parse_declaration("stack = \"none\"\nareas = []\n").unwrap()).unwrap();
+        assert!(
+            none.units.is_empty() && none.entries(&table()).is_empty() && none.scopes().is_empty()
+        );
+    }
+
+    #[test]
+    fn the_places_of_every_unit_are_kept_apart() {
+        let mut declared = Declared::new(
+            parse_declaration(
+                "stack = \"typescript\"
+areas = []
+ui = \"none\"
+",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let layout = declared.layout.clone().unwrap();
+        let table = table();
+        let one = declared.places.len();
+        let mut billing = declared.units[0].clone();
+        billing.name = "billing".into();
+        billing.path = "packages/billing/src".into();
+        billing.root = "packages/billing".into();
+        billing.entries = vec!["apps/cli/main.ts".into()];
+        let mut inside = billing.clone();
+        inside.name = "inside".into();
+        inside.path = "src/inside".into();
+        inside.root = "src/inside".into();
+        inside.entries = Vec::new();
+        for unit in [&billing, &inside] {
+            declared.places.extend(unit.places(&layout, &table));
+        }
+        declared.units.extend([billing, inside]);
+        assert_eq!(declared.places.len(), 3 * one);
+        // The same name in each unit
+        let domains: Vec<&Place> = declared
+            .places
+            .iter()
+            .filter(|p| p.name == "domain")
+            .collect();
+        assert_eq!(domains.len(), 3);
+        assert!(!domains[0].is_same(domains[1]) && !domains[1].is_same(domains[2]));
+        assert_eq!(domains[1].path, "packages/billing/src/domain");
+        // Every unit's entries, and where code is looked for: the root of a unit that the scope holds adds nothing
+        let entries = declared.entries(&table);
+        assert_eq!(
+            entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            ["src/main.tsx", "apps/cli/main.ts"]
+        );
+        assert!(entries[1].unit.app && entries[1].unit.name == "billing");
+        assert_eq!(declared.scopes(), ["src", "packages/billing"]);
     }
 
     #[test]

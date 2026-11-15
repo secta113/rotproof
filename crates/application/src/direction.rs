@@ -42,10 +42,11 @@ pub fn problems(
         .iter()
         .filter(|p| !declared.is_absent(p) && exactly(tree, &p.path).is_ok())
         .collect();
+    let entries = declared.entries(&table());
     match layout.language {
-        Language::Python => python(tree, parsers, layout, &places),
-        Language::TypeScript => typescript(tree, parsers, layout, &places),
-        Language::Rust => rust(tree, parsers, layout, &places),
+        Language::Python => python(tree, parsers, layout, &places, &entries),
+        Language::TypeScript => typescript(tree, parsers, layout, &places, &entries),
+        Language::Rust => rust(tree, parsers, layout, &places, &entries),
     }
 }
 
@@ -69,11 +70,14 @@ fn layer_files<'a>(
     Ok(files)
 }
 
-/// The entry file with itself as its place, when it is there as a file. It is code outside the layers, so the walk of
-/// the layers does not find it.
-fn entry_file<'a>(tree: &dyn Tree, entry: Option<&'a Place>) -> Option<(String, &'a Place)> {
-    let entry = entry?;
-    is_file(tree, &entry.path).then(|| (entry.path.clone(), entry))
+/// The entry files that are there as files, each with itself as its place. They are code outside the layers, so the
+/// walk of the layers does not find them.
+fn entry_files<'a>(tree: &dyn Tree, entries: &'a [Place]) -> Vec<(String, &'a Place)> {
+    entries
+        .iter()
+        .filter(|entry| is_file(tree, &entry.path))
+        .map(|entry| (entry.path.clone(), entry))
+        .collect()
 }
 
 /// The finding for a file a reader gave up on at `line`: what it read before is judged, and the rest may be misread.
@@ -90,6 +94,7 @@ fn rust(
     parsers: &dyn Parsers,
     layout: &Layout,
     places: &[&Place],
+    entries: &[Place],
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
@@ -97,8 +102,11 @@ fn rust(
     // Each manifest's dependencies that land in a place, by the name the crate's code uses
     let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
     let mut crates = layer_files(tree, layout, places, str::to_string)?;
-    let entry = layout.entry(&table());
-    crates.extend(entry_manifest(tree, entry.as_ref()));
+    crates.extend(
+        entries
+            .iter()
+            .filter_map(|entry| entry_manifest(tree, entry)),
+    );
     for (path, from) in crates {
         let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
             continue;
@@ -136,8 +144,7 @@ fn rust(
 
 /// The manifest of the package of the entry file, with the entry as its place, when it is there as a file. Cargo
 /// compiles the entry file against what that manifest declares.
-fn entry_manifest<'a>(tree: &dyn Tree, entry: Option<&'a Place>) -> Option<(String, &'a Place)> {
-    let entry = entry?;
+fn entry_manifest<'a>(tree: &dyn Tree, entry: &'a Place) -> Option<(String, &'a Place)> {
     let manifest = join(parent(parent(&entry.path)), "Cargo.toml");
     is_file(tree, &manifest).then_some((manifest, entry))
 }
@@ -186,7 +193,7 @@ fn dependencies_of<'a>(
         .get(&join(&layer.path, "Cargo.toml"))
         .into_iter()
         .flatten()
-        .filter(|(_, to)| to.name != layer.name)
+        .filter(|(_, to)| !to.is_same(layer))
         .map(|(name, to)| Dependency {
             name: name.replace('-', "_"),
             layer: to,
@@ -327,6 +334,7 @@ fn typescript(
     parsers: &dyn Parsers,
     layout: &Layout,
     places: &[&Place],
+    entries: &[Place],
 ) -> io::Result<Direction> {
     let mut forbidden = Vec::new();
     let aliases = parsers.typescript_aliases(tree)?;
@@ -335,9 +343,8 @@ fn typescript(
         .iter()
         .map(|why| format!("{why}; imports through it are not checked"))
         .collect();
-    let entry = layout.entry(&table());
     let mut files = layer_files(tree, layout, places, str::to_string)?;
-    files.extend(entry_file(tree, entry.as_ref()));
+    files.extend(entry_files(tree, entries));
     for (path, from) in files {
         if !is_source(&path) {
             continue;
@@ -380,12 +387,12 @@ fn python(
     parsers: &dyn Parsers,
     layout: &Layout,
     places: &[&Place],
+    entries: &[Place],
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
-    let entry = layout.entry(&table());
     let mut files = layer_files(tree, layout, places, |path| module_parts(path).join("/"))?;
-    files.extend(entry_file(tree, entry.as_ref()));
+    files.extend(entry_files(tree, entries));
     for (path, from) in files {
         let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
             continue;
@@ -413,4 +420,42 @@ fn python(
         problems: found,
         forbidden,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::layers::{UnitTag, layout};
+
+    #[test]
+    fn a_crate_depends_on_the_layer_of_another_unit_that_has_its_name() {
+        let table = table();
+        let layout = layout("rust", "none").unwrap();
+        let unit = |name: &str| UnitTag {
+            name: name.into(),
+            shared: false,
+            app: false,
+        };
+        let here = layout.places_in(&table, "crates", &unit("a"));
+        let there = layout.places_in(&table, "packages/b", &unit("b"));
+        let places: Vec<&Place> = here.iter().chain(&there).collect();
+        let named = |places: &[Place], name: &str| places.iter().position(|p| p.name == name);
+        let layer = &here[named(&here, "infrastructure").unwrap()];
+        let manifest = join(&layer.path, "Cargo.toml");
+        let own = &here[named(&here, "domain").unwrap()];
+        let same_name = &there[named(&there, "infrastructure").unwrap()];
+        let depends = BTreeMap::from([(
+            manifest,
+            vec![
+                ("domain".to_string(), own),
+                ("b-infrastructure".to_string(), same_name),
+            ],
+        )]);
+        let dependencies = dependencies_of(layer, &places, &depends);
+        let names: Vec<&str> = dependencies.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["domain", "b_infrastructure"]);
+        // The levels are those of the unit the dependency is in
+        assert!(dependencies[1].levels.iter().all(|l| l.unit.name == "b"));
+        assert!(!dependencies[1].levels.is_empty());
+    }
 }

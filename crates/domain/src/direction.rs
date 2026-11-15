@@ -86,7 +86,7 @@ fn covers(import: &str, to: &Place) -> bool {
 
 /// Whether the place `from` may import the place `to`.
 fn allowed(from: &Place, to: &Place) -> bool {
-    if from.name == to.name {
+    if from.is_same(to) {
         return true;
     }
     let imported = |to: &Place| from.imports.iter().any(|i| covers(i, to));
@@ -234,6 +234,26 @@ mod tests {
         assert_eq!(name("domains.song"), None);
         assert_eq!(name("ui_kit"), None);
         assert_eq!(name("os.path"), None);
+    }
+
+    #[test]
+    fn a_path_sits_in_the_place_of_the_unit_it_is_in_and_a_place_is_itself_in_its_own_unit() {
+        let layout = layout("python", "atomic").unwrap();
+        let tag = |name: &str| crate::layers::UnitTag {
+            name: name.into(),
+            ..Default::default()
+        };
+        let a = layout.places_in(&table(), "a/a", &tag("a"));
+        let b = layout.places_in(&table(), "b/b", &tag("b"));
+        let places: Vec<&Place> = a.iter().chain(&b).collect();
+        let at =
+            |path: &str| place_of(path, &places).map(|p| (p.unit.name.clone(), p.name.clone()));
+        assert_eq!(at("b/b/domain/song"), Some(("b".into(), "domain".into())));
+        assert_eq!(at("a/a/ui/atoms/x"), Some(("a".into(), "ui.atoms".into())));
+        assert_eq!(at("domain/song"), None);
+        let domain = |places: &[Place]| places.iter().find(|p| p.name == "domain").unwrap().clone();
+        assert!(allowed(&domain(&a), &domain(&a)));
+        assert!(domain(&a).is_same(&domain(&a)) && !domain(&a).is_same(&domain(&b)));
     }
 
     #[test]

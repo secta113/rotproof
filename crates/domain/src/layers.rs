@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use crate::paths::join;
+
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
 /// The UI of a project with no screens: none of the layers that name a UI in the table
@@ -182,6 +184,18 @@ pub enum Language {
     Rust,
 }
 
+/// The unit a place belongs to, as much of it as a rule on places needs (`units.rs` has the rest). A project that
+/// declares no unit has the one implicit unit, whose tag is the default but for `app`: no name, not shared.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnitTag {
+    /// The unit's name, "" for the implicit unit
+    pub name: String,
+    /// Whether any unit may import it
+    pub shared: bool,
+    /// Whether it has an entry file: the unit that wires the others
+    pub app: bool,
+}
+
 /// One place in the tree a layout makes: a layer (`domain`) or a level of a layer (`ui.pages`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Place {
@@ -201,6 +215,8 @@ pub struct Place {
     pub below: Vec<String>,
     /// Path from the root -> text
     pub files: Vec<(String, String)>,
+    /// The unit it sits in. Two places of one name in two units are two places
+    pub unit: UnitTag,
 }
 
 impl Place {
@@ -209,9 +225,14 @@ impl Place {
         self.parent.is_none()
     }
 
+    /// Whether `other` is this very place: the same name, in the same unit.
+    pub fn is_same(&self, other: &Place) -> bool {
+        self.name == other.name && self.unit.name == other.unit.name
+    }
+
     /// Whether this is a level of `layer`.
     pub fn is_level_of(&self, layer: &Place) -> bool {
-        self.parent.as_ref() == Some(&layer.name)
+        self.parent.as_ref() == Some(&layer.name) && self.unit.name == layer.unit.name
     }
 
     /// The layer this place is, or sits in: the name of a layer, or of the layer of a level.
@@ -267,6 +288,13 @@ impl Layout {
     /// what the table says it may import. The checks, the documentation of each layer and Rotproof's guide all read
     /// this, so they cannot disagree.
     pub fn places(&self, table: &Table) -> Vec<Place> {
+        self.places_in(table, &self.scope, &UnitTag::default())
+    }
+
+    /// The places of the unit `unit` whose layers sit in the directory `base`, from the root: every place of
+    /// [`Layout::places`] moved from the layout's `scope` to `base` and tagged with `unit`. With `base` the scope
+    /// itself, it is the very same places.
+    pub fn places_in(&self, table: &Table, base: &str, unit: &UnitTag) -> Vec<Place> {
         let mut out = Vec::new();
         // A place imports only the layers this stack has, and their levels: a Rust crate cannot import `ui`
         let has = |name: &str| !self.leaves_out(name);
@@ -280,12 +308,13 @@ impl Layout {
                 .map_or(&self.layer.files, |o| &o.files);
             let mut place = Place {
                 name: layer.name.clone(),
-                path: self.layer_path(&layer.name),
+                path: self.moved(&self.layer_path(&layer.name), base),
                 parent: None,
                 role: layer.role.clone(),
                 imports: imports(&layer.imports),
                 below: Vec::new(),
                 files: Vec::new(),
+                unit: unit.clone(),
             };
             place.files = render(
                 files,
@@ -313,15 +342,19 @@ impl Layout {
                 };
                 let mut place = Place {
                     name: format!("{}.{}", layer.name, level.name),
-                    path: shape
-                        .path
-                        .replace("{layer}", &layer.name)
-                        .replace("{name}", &level.name),
+                    path: self.moved(
+                        &shape
+                            .path
+                            .replace("{layer}", &layer.name)
+                            .replace("{name}", &level.name),
+                        base,
+                    ),
                     parent: Some(layer.name.clone()),
                     role: level.role.clone(),
                     imports: imports(&level.imports),
                     below,
                     files: Vec::new(),
+                    unit: unit.clone(),
                 };
                 place.files = render(
                     &shape.files,
@@ -340,9 +373,14 @@ impl Layout {
     /// what the table's `entry` lists. No place's imports take it in, and no check asks for it to be there.
     pub fn entry(&self, table: &Table) -> Option<Place> {
         let path = self.entry.as_ref()?;
-        Some(Place {
-            name: path.clone(),
-            path: path.clone(),
+        Some(self.entry_at(table, path, &UnitTag::default()))
+    }
+
+    /// The entry file `path` of the unit `unit`, as a place of its own: what [`Layout::entry`] says of the layout's.
+    pub fn entry_at(&self, table: &Table, path: &str, unit: &UnitTag) -> Place {
+        Place {
+            name: path.to_string(),
+            path: path.to_string(),
             parent: None,
             role: table.entry.role.clone(),
             imports: table
@@ -354,7 +392,20 @@ impl Layout {
                 .collect(),
             below: Vec::new(),
             files: Vec::new(),
-        })
+            unit: unit.clone(),
+        }
+    }
+
+    /// A path of this layout, which every layout writes from the root and inside its `scope`, moved to the directory
+    /// `base` in place of the scope.
+    fn moved(&self, path: &str, base: &str) -> String {
+        let inside = if self.scope.is_empty() {
+            path
+        } else {
+            path.strip_prefix(&format!("{}/", self.scope))
+                .expect("a layout's layers sit in its scope: a test reads every layout")
+        };
+        join(base, inside)
     }
 
     /// Where the layer `name` lives in this stack, from the root.
