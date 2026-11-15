@@ -78,15 +78,17 @@ pub fn tokens(code: &str) -> Vec<(usize, Token)> {
 
 /// Every path the code alone ([`code`]) names from one of the words `starts` (such as `crate`, `super`, `self` or the
 /// name of a dependency), as its segments, with the offset where it starts: in `use`, in an expression or a type, and
-/// in the tokens of a macro alike. A `use` group is spread into a path per item (`crate::{a, b::c}` is `crate::a` and
-/// `crate::b::c`), `self` in a group stays a segment of its own, a glob ends in `*`, and a rename (`as x`) is dropped.
+/// in the tokens of a macro alike. A `::` before the first word (`::protocol::x`) names the crate as the bare path
+/// does, and is read as it, so `::std::env::var` is `std::env::var`. A `use` group is spread into a path per item
+/// (`crate::{a, b::c}` is `crate::a` and `crate::b::c`), `self` in a group stays a segment of its own, a glob ends in
+/// `*`, and a rename (`as x`) is dropped (what it binds is read by [`renames`]).
 pub fn paths(code: &str, starts: &[&str]) -> Vec<(usize, Vec<String>)> {
     let tokens = tokens(code);
     let mut out = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
         let starts = matches!(&tokens[i].1, Token::Word(w) if starts.contains(&w.as_str()))
-            && (i == 0 || tokens[i - 1].1 != Token::PathSep)
+            && (i == 0 || tokens[i - 1].1 != Token::PathSep || is_leading(&tokens, i - 1))
             && tokens.get(i + 1).map(|(_, t)| t) == Some(&Token::PathSep);
         if !starts {
             i += 1;
@@ -95,18 +97,131 @@ pub fn paths(code: &str, starts: &[&str]) -> Vec<(usize, Vec<String>)> {
         let at = tokens[i].0;
         let mut found = Vec::new();
         i = path_tree(&tokens, i, Vec::new(), &mut found);
-        out.extend(found.into_iter().map(|segments| (at, segments)));
+        out.extend(found.into_iter().map(|(segments, _)| (at, segments)));
     }
     out
 }
 
-/// The paths of one path, or of one item of a `use` group, that starts at token `i` after `prefix`, into `out`.
-/// Where the tokens after it start.
+/// Whether the `::` at token `at` starts a path (`::protocol::x`) and is not one inside a path. It is inside one when
+/// a name stands before it (`a::b`, `crate::b`, `Self::B`), or the `>` that closes generics (`Vec<u8>::new`,
+/// `<T as Tr>::X`). Anything else before it makes it a start: a keyword (`as`, `impl`, `dyn`, `return`, `in`), the
+/// name of a lifetime (`&'a ::x::T`), a `->` or `=>`, or a token that ends no path (`(`, `,`, `=`, `<`, `;`, `}`).
+fn is_leading(tokens: &[(usize, Token)], at: usize) -> bool {
+    let Some(before) = at.checked_sub(1) else {
+        return true;
+    };
+    let (offset, token) = &tokens[before];
+    match token {
+        Token::Word(word) => {
+            let lifetime = before
+                .checked_sub(1)
+                .is_some_and(|b| tokens[b].1 == Token::Punct('\'') && tokens[b].0 + 1 == *offset);
+            // Only a word that names a place can be followed by `::` inside a path
+            lifetime || is_keyword(word)
+        }
+        // `->` and `=>` are no generics closed; any other `>` is
+        Token::Punct('>') => before.checked_sub(1).is_some_and(|b| {
+            matches!(tokens[b].1, Token::Punct('-' | '=')) && tokens[b].0 + 1 == *offset
+        }),
+        _ => true,
+    }
+}
+
+/// Whether a word is a keyword of Rust (2024, strict and reserved) that names no place in a path: `crate`, `self`,
+/// `super` and `Self` do, and are not in it.
+fn is_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "as" | "async"
+            | "await"
+            | "break"
+            | "const"
+            | "continue"
+            | "dyn"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "gen"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "static"
+            | "struct"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "try"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+    )
+}
+
+/// Every name the code alone ([`code`]) binds to a path with `as`, in a `use` (`use protocol as p;`, `use a::{b as c,
+/// self as d};`) or an `extern crate` (`extern crate protocol as p;`): the offset of the statement, the name, and the
+/// path it renames, with a `self` that ends it dropped (`use a::{self as d}` renames `a`). `as _` binds no name. A path
+/// that starts with `::` is read as if it did not.
+pub fn renames(code: &str) -> Vec<(usize, String, Vec<String>)> {
+    let tokens = tokens(code);
+    let word = |i: usize, w: &str| matches!(tokens.get(i), Some((_, Token::Word(x))) if x == w);
+    let mut out = Vec::new();
+    for (i, (at, _)) in tokens.iter().enumerate() {
+        let mut start = if word(i, "use") {
+            i + 1
+        } else if word(i, "extern") && word(i + 1, "crate") {
+            i + 2
+        } else {
+            continue;
+        };
+        if tokens.get(start).map(|(_, t)| t) == Some(&Token::PathSep) {
+            start += 1;
+        }
+        let mut found = Vec::new();
+        path_tree(&tokens, start, Vec::new(), &mut found);
+        for (mut segments, alias) in found {
+            if segments.len() > 1 && segments.last().map(String::as_str) == Some("self") {
+                segments.pop();
+            }
+            if let Some(name) = alias {
+                out.push((*at, name, segments));
+            }
+        }
+    }
+    out
+}
+
+/// The paths of one path, or of one item of a `use` group, that starts at token `i` after `prefix`, into `out`, each
+/// with the name a rename (`as x`) gives it. Where the tokens after it start.
 fn path_tree(
     t: &[(usize, Token)],
     mut i: usize,
     prefix: Vec<String>,
-    out: &mut Vec<Vec<String>>,
+    out: &mut Vec<(Vec<String>, Option<String>)>,
 ) -> usize {
     let mut segments = prefix;
     loop {
@@ -115,19 +230,23 @@ fn path_tree(
                 segments.push(word.clone());
                 i += 1;
                 if t.get(i).map(|(_, token)| token) != Some(&Token::PathSep) {
-                    out.push(segments);
-                    // A rename names nothing more
+                    // A rename names nothing more, and binds a name unless it is `_`
+                    let mut alias = None;
                     if matches!(t.get(i).map(|(_, token)| token), Some(Token::Word(w)) if w == "as")
                     {
+                        if let Some((_, Token::Word(name))) = t.get(i + 1) {
+                            alias = (name != "_").then(|| name.clone());
+                        }
                         i += 2;
                     }
+                    out.push((segments, alias));
                     return i;
                 }
                 i += 1;
             }
             Some(Token::Punct('*')) => {
                 segments.push("*".into());
-                out.push(segments);
+                out.push((segments, None));
                 return i + 1;
             }
             Some(Token::Punct('{')) => {
@@ -151,7 +270,7 @@ fn path_tree(
             // `crate::` before a generic or nothing names what is read so far
             _ => {
                 if !segments.is_empty() {
-                    out.push(segments);
+                    out.push((segments, None));
                 }
                 return i;
             }
@@ -557,6 +676,57 @@ let k = '/'; let l = 'é'; let m = '\u{2F}'; // four
                 &["domain"]
             ),
             [(4, vec!["domain".to_string(), "x".to_string()])]
+        );
+    }
+
+    #[test]
+    fn a_path_from_a_leading_colons_is_read_as_the_path_without_them() {
+        let source = "use ::protocol::outbound::Port;\nuse ::{protocol::outbound, other::x};\n\
+                      fn f(_: ::protocol::a::A) -> ::protocol::b::B { ::protocol::c(); }\n\
+                      let x: &'a ::protocol::d::D = <T as ::protocol::E>::f();\n\
+                      impl ::protocol::F for X { fn g() { match v { _ => ::protocol::h() } } }\n\
+                      let y = Vec::<u8>::new(); let z = a::protocol::i::I; let w = <T as Tr>::protocol::j();\n\
+                      let s = \"::protocol::k\"; // ::protocol::l\n";
+        let read: Vec<String> = paths(&code(source), &["protocol"])
+            .into_iter()
+            .map(|(_, segments)| segments.join("::"))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                "protocol::outbound::Port",
+                "protocol::outbound",
+                "protocol::a::A",
+                "protocol::b::B",
+                "protocol::c",
+                "protocol::d::D",
+                "protocol::E",
+                "protocol::F",
+                "protocol::h",
+            ]
+        );
+        // Where it starts is the word, not the colons
+        assert_eq!(paths(&code("f(::a::b);"), &["a"])[0].0, 4);
+    }
+
+    #[test]
+    fn a_name_bound_with_as_is_read_from_a_use_or_an_extern_crate_alone() {
+        let source = "use a as b;\npub use ::c::{self as d, e::f as _, g::{h as i}};\nextern crate j as k;\n\
+                      use {l::m as n};\nlet x = o::P as u8;\nuse q::r;\n// use s as t;\n";
+        let bound: Vec<(String, String)> = renames(&code(source))
+            .into_iter()
+            .map(|(_, name, target)| (name, target.join("::")))
+            .collect();
+        let expected = [
+            ("b", "a"),
+            ("d", "c"),
+            ("i", "c::g::h"),
+            ("k", "j"),
+            ("n", "l::m"),
+        ];
+        assert_eq!(
+            bound,
+            expected.map(|(name, target)| (name.to_string(), target.to_string()))
         );
     }
 

@@ -275,7 +275,7 @@ Where they live is written once per stack:
 |---|---|---|---|---|
 | `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/` |
 | `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
-| `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no UI yet: `ui = "none"`) | `src/main.rs` of the root package | every crate in `crates/`, and the root `Cargo.toml` |
+| `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no UI yet: `ui = "none"`) | `src/main.rs` of the root package | every crate in `crates/`, and every `.rs` file in `src/` of the root package but the entry file |
 
 `stack = "none"` declares a repository that keeps records only: `rotproof create` makes no layer, only `docs/`, the
 guide and the project's files, and `rotproof check` checks only the records and prints that it did not check the
@@ -386,8 +386,11 @@ changed is in the commits, what was measured and decided along the way in the ta
   and only layers that stack and UI have in `absent` (a misspelled field fails; a layer the UI leaves out, as `ui`
   with `ui = "none"`, fails until it is taken out). Without a declaration nothing is checked, and `rotproof check`
   exits 2, not 1: CI tells a project that has not adopted Rotproof from one that breaks a rule. Every layer of the stack is present or declared
-  absent, and no layer declared absent is present. No code sits outside the layers, the stack's own paths (`tests/`)
-  and `unchecked`. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
+  absent, and no layer declared absent is present. No code sits outside the layers, the stack's own paths (`tests/`),
+  the entry file and `unchecked`. In Rust, the root package's `src/` holds the entry file and nothing else: a `.rs`
+  file there (`src/pricing.rs`, `src/lib.rs`, `src/bin/`, a module of `main.rs`) fails as code outside the layers,
+  and the finding says where code goes, while what Cargo keeps outside `src/` in the root package (`build.rs`,
+  `tests/`, `benches/`, `examples/`) and `xtask/` are not looked at. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.
   A layer with levels holds only its levels: code beside them fails, apart from the layer's own file
   (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
@@ -439,14 +442,19 @@ changed is in the commits, what was measured and decided along the way in the ta
   dependency on another layer, in a `use`, an expression or the tokens of a macro, is judged by the level it lands in
   (`crate::outbound::Db` from `src/inbound/` fails, and so does `domain::Song` there). The crate's `src/lib.rs` only
   declares its levels' modules, so no re-export lets one level reach another; every other file of `src/` sits in a
-  level, and `#[path]` fails. Not seen: a path a macro builds from pieces.
+  level, and `#[path]` fails. A path that starts with `::` (`::protocol::outbound::Port`) is the path without them.
+  A name bound with `as` is the path it renames (`use protocol as p;`,
+  `extern crate protocol as p;` or `use crate as c;`, then `p::outbound::Port` from `src/inbound/` fails as
+  `protocol::outbound::Port` does), and so is a name bound to such a name; the file is read as one scope, so a name
+  bound twice stands for both. Not seen: a path a macro builds from pieces, and a name bound in one file and used
+  through another.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,
   `os.getenvb`, `os.putenv` and `os.unsetenv` in Python, `process.env` and `import.meta.env` in TypeScript, and
   `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var` and `remove_var` in Rust, each through an alias the file
   binds too (`import os as o`, `from os import getenv as g`, `import { env } from "node:process"`,
-  `const { env } = process`, `use std::env;` then `env::var`). Not judged: the command line (`sys.argv`,
+  `const { env } = process`, `use std::env;` then `env::var`, `::std::env::var`). Not judged: the command line (`sys.argv`,
   `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of
   `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
   (`getattr(os, "environ")`, `from os import *`), and the code outside the layers (`tests/` in Python).
