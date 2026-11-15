@@ -41,7 +41,7 @@
 //! it import that place in its own unit, and the one place that may reach into another unit's `composition` is an
 //! app's own (a test runs every chain of places across units and names the exception). `import billing` followed by
 //! `billing.protocol.x` is not seen, as a module reached through an attribute never is: rule 1 fails the first,
-//! which names no layer.
+//! which names no layer. The finding for the first says how to import a layer in the stack of the reader (`Way`).
 //!
 //! A forbidden import between units is approved as any other, by its file and the import (`approvals.rs`). A cycle of
 //! shared units is not an import but a shape (`cycles`), and cannot be approved.
@@ -92,6 +92,46 @@ impl Landing<'_> {
     }
 }
 
+/// How a stack writes the import of a layer of another unit, which the finding for rule 1 gives as an example: what
+/// the verb and the example are depends on what the language imports (a module, a package's subpath, a path, a crate).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Way {
+    /// Python: a module by its dotted name (`billing.protocol.inbound`). `bare` says that the import names a place by
+    /// its own name alone (`domain.song`), which Python looks up from where the program starts, not from the unit
+    Module { bare: bool },
+    /// TypeScript, a unit that has a package: the specifier through it (`@acme/billing/protocol/inbound`)
+    Package(String),
+    /// TypeScript, a unit that has none: the path from the importing file (`../billing/src/protocol/inbound`)
+    Path(String),
+    /// Rust: a dependency on the crate of the layer (`billing_protocol`), since a Cargo dependency is no import of a
+    /// module
+    Crate,
+}
+
+impl Default for Way {
+    /// Python's, with no bare name: what is said when an import lands in a place, where rule 1 is not in question
+    fn default() -> Self {
+        Way::Module { bare: false }
+    }
+}
+
+impl Way {
+    /// What rule 1 says to do instead, for an import that lands in the code of `unit` outside its layers.
+    fn advice(&self, unit: &Unit) -> String {
+        let name = &unit.name;
+        match self {
+            Way::Module { .. } => {
+                format!("import the module of a layer, such as {name}.protocol.inbound")
+            }
+            Way::Package(specifier) => {
+                format!("import a layer through the package of the unit, such as {specifier}")
+            }
+            Way::Path(path) => format!("import a layer by its path, such as {path}"),
+            Way::Crate => format!("depend on the crate of a layer, such as {name}_protocol"),
+        }
+    }
+}
+
 /// What the rules say of an import from a place to where it lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
@@ -135,12 +175,13 @@ pub fn judged(
     from: &Place,
     to: &Place,
 ) -> Option<Forbidden> {
-    judged_landing(file, line, import, what, from, to, false)
+    judged_landing(file, line, import, what, from, to, &Way::default())
 }
 
-/// [`judged`] for an import that lands in a place or in a unit's code outside its layers. `bare` says that the import
-/// names the place by its own name alone (`domain.song`), which Python looks up from where the program starts, not
-/// from the unit: when such an import lands in another unit and fails, the finding says where the unit's own is.
+/// [`judged`] for an import that lands in a place or in a unit's code outside its layers. `way` says how the stack
+/// writes an import of a layer, for the finding of the second; for a Python import that names a place by its own name
+/// alone (`domain.song`), which Python looks up from where the program starts, not from the unit, a finding for another
+/// unit says where the unit's own is.
 pub fn judged_landing<'a>(
     file: &str,
     line: usize,
@@ -148,17 +189,21 @@ pub fn judged_landing<'a>(
     what: &str,
     from: &Place,
     to: impl Into<Landing<'a>>,
-    bare: bool,
+    way: &Way,
 ) -> Option<Forbidden> {
     let to = to.into();
-    let Verdict::Forbidden { described, reason } = verdict(from, to) else {
+    let Verdict::Forbidden { described, reason } = verdict(from, to, way) else {
         return None;
     };
     let hint = match to {
-        Landing::Place(to) if bare && from.unit.name != to.unit.name => format!(
-            " (Python finds {} from where the program starts; the unit's own layer is {}.{})",
-            to.name, from.unit.name, to.name
-        ),
+        Landing::Place(to)
+            if matches!(way, Way::Module { bare: true }) && from.unit.name != to.unit.name =>
+        {
+            format!(
+                " (Python finds {} from where the program starts; the unit's own layer is {}.{})",
+                to.name, from.unit.name, to.name
+            )
+        }
         _ => String::new(),
     };
     Some(Forbidden {
@@ -187,8 +232,8 @@ pub fn edge<'a>(
     })
 }
 
-/// What the rules say of an import from `from` that lands in `to`.
-pub fn verdict(from: &Place, to: Landing) -> Verdict {
+/// What the rules say of an import from `from` that lands in `to`, with the words of `way` for rule 1.
+pub fn verdict(from: &Place, to: Landing, way: &Way) -> Verdict {
     if from.unit.name == to.unit_name() {
         // The same unit: the table decides, as in a project with one unit. Its code outside its layers is not judged
         return match to {
@@ -205,10 +250,7 @@ pub fn verdict(from: &Place, to: Landing) -> Verdict {
         Landing::InUnit(unit) => {
             return Verdict::Forbidden {
                 described: format!("in the unit {t} outside its layers"),
-                reason: format!(
-                    "import the module of a layer, such as {}.protocol.inbound",
-                    unit.name
-                ),
+                reason: way.advice(unit),
             };
         }
     };
@@ -658,7 +700,7 @@ mod tests {
                 Some(unit) => Landing::InUnit(self.unit(unit)),
                 None => Landing::Place(self.place(to)),
             };
-            match judged_landing("f.py", 3, "x", "imports x", from, landing, false) {
+            match judged_landing("f.py", 3, "x", "imports x", from, landing, &Way::default()) {
                 Some(forbidden) => Err(forbidden.detail),
                 None => Ok(()),
             }
@@ -906,7 +948,7 @@ mod tests {
                     let was = judged("f.py", 1, "x", "imports x", from, to);
                     assert_eq!(was.is_none(), allowed(from, to));
                     assert_eq!(
-                        verdict(from, landing) == Verdict::Allowed,
+                        verdict(from, landing, &Way::default()) == Verdict::Allowed,
                         allowed(from, to)
                     );
                     if let Some(was) = was {
@@ -921,7 +963,7 @@ mod tests {
                     }
                     continue;
                 }
-                if verdict(from, landing) != Verdict::Allowed {
+                if verdict(from, landing, &Way::default()) != Verdict::Allowed {
                     continue;
                 }
                 crossing += 1;
@@ -947,7 +989,7 @@ mod tests {
             // The code of another unit outside its layers is judged allowed in the unit's own alone
             for unit in &world.units {
                 assert_eq!(
-                    verdict(from, Landing::InUnit(unit)) == Verdict::Allowed,
+                    verdict(from, Landing::InUnit(unit), &Way::default()) == Verdict::Allowed,
                     unit.name == from.unit.name,
                     "{} -> {}",
                     from.name,
@@ -967,7 +1009,9 @@ mod tests {
         // either): it imports its composition and, through it, what that composition wires, which is what an entry
         // file is for
         let world = World::new();
-        let may = |from: &Place, to: &Place| verdict(from, Landing::Place(to)) == Verdict::Allowed;
+        let may = |from: &Place, to: &Place| {
+            verdict(from, Landing::Place(to), &Way::default()) == Verdict::Allowed
+        };
         let entry = |p: &Place| p.name.ends_with("__main__.py");
         let (mut chains, mut through_the_entry) = (0, 0);
         for a in &world.places {
@@ -1027,7 +1071,7 @@ mod tests {
                 &format!("imports {import}"),
                 from,
                 Landing::Place(to),
-                bare,
+                &Way::Module { bare },
             )
         };
         let found = say("domain.song", &domain, true).unwrap();
@@ -1053,10 +1097,63 @@ mod tests {
             "imports domain.song",
             world.place("billing.domain"),
             Landing::Place(world.place("billing.application")),
-            true,
+            &Way::Module { bare: true },
         )
         .unwrap();
         assert!(!inside.detail.contains("Python finds"));
+    }
+
+    #[test]
+    fn the_finding_for_the_code_outside_the_layers_says_how_the_stack_imports_a_layer() {
+        let world = World::new();
+        let from = world.place("billing.application");
+        let words = |way: Way| {
+            judged_landing(
+                "f",
+                2,
+                "core",
+                "imports core",
+                from,
+                Landing::InUnit(world.unit("core")),
+                &way,
+            )
+            .unwrap()
+            .detail
+        };
+        let said = |reason: &str| {
+            format!("f:2: imports core, in the unit core outside its layers; {reason}")
+        };
+        assert_eq!(
+            words(Way::Module { bare: false }),
+            said("import the module of a layer, such as core.protocol.inbound")
+        );
+        assert_eq!(words(Way::Module { bare: true }), words(Way::default()));
+        assert_eq!(
+            words(Way::Package("@acme/core/protocol/inbound".into())),
+            said(
+                "import a layer through the package of the unit, such as @acme/core/protocol/inbound"
+            )
+        );
+        assert_eq!(
+            words(Way::Path("../core/src/protocol/inbound".into())),
+            said("import a layer by its path, such as ../core/src/protocol/inbound")
+        );
+        assert_eq!(
+            words(Way::Crate),
+            said("depend on the crate of a layer, such as core_protocol")
+        );
+        // The words are those of rule 1 alone: a place of another unit fails by its own rule, whatever the stack
+        let place = judged_landing(
+            "f",
+            2,
+            "x",
+            "imports x",
+            world.place("core.application"),
+            Landing::Place(world.place("billing.domain")),
+            &Way::Crate,
+        )
+        .unwrap();
+        assert!(!place.detail.contains("such as"), "{}", place.detail);
     }
 
     #[test]

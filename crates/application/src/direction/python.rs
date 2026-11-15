@@ -14,7 +14,7 @@ use std::io;
 use super::{Direction, entry_files, layer_files, misread};
 use crate::tree::{exactly, read_code, resolved};
 use domain::code::module_parts;
-use domain::direction::{Landing, edge, judged_landing, landing_of};
+use domain::direction::{Landing, Way, edge, judged_landing, landing_of};
 use domain::layers::{Layout, Place, Table, table};
 use domain::paths::join;
 use domain::units::Unit;
@@ -67,7 +67,7 @@ pub(super) fn python(
                 &format!("imports {dotted}"),
                 from,
                 to,
-                bare,
+                &Way::Module { bare },
             ));
             edges.extend(edge(&path, line, &dotted, from, to));
         }

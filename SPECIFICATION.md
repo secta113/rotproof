@@ -393,7 +393,10 @@ A unit imports the layers of its own unit as the table says. Only direct imports
 units, the rules are these, applied to an import from one unit's layer into another unit's, from the top:
 
 1. An import that lands in the directory of another unit outside its layers fails: what is read from it afterwards
-   cannot be seen. The module of a layer is named (`billing.protocol.inbound`), never the unit as a whole.
+   cannot be seen. A layer is named, never the unit as a whole: the finding says how the stack imports one (a Python
+   module, `billing.protocol.inbound`; a TypeScript subpath of the unit's package, `@acme/billing/protocol/inbound`, or
+   its path from the importing file when the unit has no package; a Rust dependency on the crate of the layer,
+   `billing_protocol`).
 2. A unit that is not shared is imported by no other, except that the `composition` of an app wires the units: it
    imports every layer of the units it wires, as it imports its own, and never another app's.
 3. A shared unit imports shared units only.
@@ -612,7 +615,10 @@ changed is in the commits, what was measured and decided along the way in the ta
   hold the layers (see Units); a project that declares none is one unit, and none of this applies. An import inside a
   unit is judged as above. An import into another unit is judged by what each is, first:
   1. the code of another unit outside its layers fails (`imports billing, in the unit billing outside its layers`):
-     import the module of a layer, such as `billing.protocol.inbound`;
+     import the module of a layer, such as `billing.protocol.inbound` (in TypeScript, a layer through the package of
+     the unit, such as `@acme/billing/protocol/inbound`, or by its path from the importing file when the unit has no
+     package; in Rust, depend on the crate of a layer, such as `billing_protocol`, since a dependency of Cargo is no
+     import of a module);
   2. a shared unit imports only shared units (`the shared unit core imports only shared units, and billing is not
      shared`);
   3. a unit that is not shared is imported by the `composition` of an app, which is a unit with an entry, and by no

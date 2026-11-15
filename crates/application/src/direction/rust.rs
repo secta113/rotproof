@@ -6,7 +6,9 @@ use std::io;
 use super::{Direction, layer_files};
 use crate::tree::{code_files, is_file, read_code};
 use domain::code::{Dependency as ManifestDependency, Manifest, Origin};
-use domain::direction::{Forbidden, Landing, edge, judged_landing, landing_of, workspace_dirs};
+use domain::direction::{
+    Forbidden, Landing, Way, edge, judged_landing, landing_of, workspace_dirs,
+};
 use domain::layers::{Layout, Place};
 use domain::modules::{Dependency, judged_crate};
 use domain::paths::{join, parent};
@@ -75,7 +77,7 @@ pub(super) fn rust<'a>(
                 &format!("depends on {name} ({target}{through})"),
                 from,
                 to,
-                false,
+                &Way::Crate,
             ));
             edges.extend(edge(&path, dependency.line, name, from, to));
         }
@@ -496,6 +498,36 @@ mod tests {
                 // A name bound with `as` to the crate of another unit, through a path with a leading `::`, is judged
                 "packages/billing/infrastructure/src/inbound/mod.rs:4: uses core_protocol::outbound::Q through \
                  `p`, in protocol.outbound of unit core; infrastructure.inbound may import `protocol.inbound`",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_crate_of_a_unit_outside_its_layers_is_told_to_depend_on_the_crate_of_a_layer() {
+        let (tree, declared) = project(
+            UNITS,
+            &[
+                (
+                    "packages/billing/application/Cargo.toml",
+                    &package(
+                        "billing_application",
+                        &[("core_extras", "../../core/extras")],
+                    ),
+                ),
+                (
+                    "packages/core/extras/Cargo.toml",
+                    &package("core_extras", &[]),
+                ),
+            ],
+        );
+        let (problems, forbidden) = details(&tree, &declared);
+        assert!(problems.is_empty(), "{problems:?}");
+        // A dependency of Cargo is no import of a module, so the finding says to depend on a crate
+        assert_eq!(
+            forbidden,
+            [
+                "packages/billing/application/Cargo.toml:6: depends on core_extras (packages/core/extras), in the \
+                 unit core outside its layers; depend on the crate of a layer, such as core_protocol"
             ]
         );
     }

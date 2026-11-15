@@ -5,9 +5,10 @@ use std::io;
 use super::{Direction, entry_files, layer_files, misread};
 use crate::code::lands;
 use crate::tree::{read_code, resolved};
-use domain::code::{Reach, is_source};
-use domain::direction::{edge, judged_landing, landing_of};
+use domain::code::{Aliases, Reach, is_source};
+use domain::direction::{Landing, Way, edge, judged_landing, landing_of};
 use domain::layers::{Layout, Place};
+use domain::paths::{join, parent, relative};
 use domain::units::Unit;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -72,7 +73,7 @@ pub(super) fn typescript(
                 &format!("imports {specifier} ({target})"),
                 from,
                 to,
-                false,
+                &way_of(to, &aliases, &path),
             ));
             edges.extend(edge(&path, line, &specifier, from, to));
         }
@@ -82,6 +83,39 @@ pub(super) fn typescript(
         forbidden,
         edges,
     })
+}
+
+/// How an import of a layer of the unit `to` is written from the file `from`, for the finding that says an import
+/// landed in the unit outside its layers (an import that lands in a place needs no words). Through the unit's package
+/// when it has one: `<name>/protocol/inbound` where its `exports` lists subpaths (a pattern such as `./protocol/*`
+/// makes it so), else the path of the layer in the package, as Node reads a package with no `exports`
+/// (`@acme/billing/src/protocol/inbound`); a unit with no package by the relative path from the importing file.
+fn way_of(to: Landing, aliases: &Aliases, from: &str) -> Way {
+    let Landing::InUnit(unit) = to else {
+        return Way::default();
+    };
+    let layer = |dir: &str| join(dir, "protocol/inbound");
+    match aliases.packages.iter().find(|p| p.root == unit.root) {
+        Some(package) => {
+            let dir = if package.exports.is_some() {
+                String::new()
+            } else {
+                match relative(&package.root, &unit.path).as_str() {
+                    "." => String::new(),
+                    inside => inside.to_string(),
+                }
+            };
+            Way::Package(format!("{}/{}", package.name, layer(&dir)))
+        }
+        None => {
+            let path = relative(parent(from), &layer(&unit.path));
+            Way::Path(if path.starts_with('.') {
+                path
+            } else {
+                format!("./{path}")
+            })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -185,11 +219,65 @@ mod tests {
             "import { x } from \"@acme/db\";\n",
         )]);
         assert_eq!(found.problems, Vec::<String>::new());
+        // A package with `exports`, which the pattern `./protocol/*` makes reach the layer
         assert_eq!(
             details(&found),
             [
                 "packages/billing/src/application/play.ts:1: imports @acme/db (packages/db/src/index.ts), in the \
-                 unit db outside its layers; import the module of a layer, such as db.protocol.inbound"
+                 unit db outside its layers; import a layer through the package of the unit, such as \
+                 @acme/db/protocol/inbound"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_package_with_no_exports_is_told_to_import_a_layer_by_the_path_of_its_files() {
+        let found = read(&[(
+            "apps/web/src/composition/wire.ts",
+            "import { x } from \"@acme/billing/src/index\";\n",
+        )]);
+        assert_eq!(found.problems, Vec::<String>::new());
+        assert_eq!(
+            details(&found),
+            [
+                "apps/web/src/composition/wire.ts:1: imports @acme/billing/src/index (packages/billing/src/index), \
+                 in the unit billing outside its layers; import a layer through the package of the unit, such as \
+                 @acme/billing/src/protocol/inbound"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_unit_with_no_package_is_told_to_import_a_layer_by_its_path_from_the_importing_file() {
+        let declared = Declared::new(parse_declaration(DECLARATION).unwrap()).unwrap();
+        let tree = Fake::new(&[
+            ("packages/billing/src/domain/index.ts", ""),
+            ("packages/billing/src/application/index.ts", ""),
+            ("packages/billing/src/index.ts", ""),
+            ("packages/db/src/domain/index.ts", ""),
+            ("packages/db/src/index.ts", ""),
+            ("apps/web/src/composition/index.ts", ""),
+            ("apps/web/src/main.ts", ""),
+            (
+                "apps/web/src/composition/wire.ts",
+                "import { y } from \"../../../../packages/billing/src/index\";\n",
+            ),
+            (
+                "packages/billing/src/application/play.ts",
+                "import { x } from \"../../../db/src/index\";\n",
+            ),
+        ]);
+        let found = problems(&tree, &Readers, &declared).unwrap();
+        assert_eq!(found.problems, Vec::<String>::new());
+        assert_eq!(
+            details(&found),
+            [
+                "packages/billing/src/application/play.ts:1: imports ../../../db/src/index \
+                 (packages/db/src/index), in the unit db outside its layers; import a layer by its path, such as \
+                 ../../../db/src/protocol/inbound",
+                "apps/web/src/composition/wire.ts:1: imports ../../../../packages/billing/src/index \
+                 (packages/billing/src/index), in the unit billing outside its layers; import a layer by its path, \
+                 such as ../../../../packages/billing/src/protocol/inbound"
             ]
         );
     }
