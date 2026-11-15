@@ -20,6 +20,7 @@ use domain::guide::{GUIDE, guide};
 use domain::layers::{Language, NO_UI, Place, layout, table, uis};
 use domain::members::{Package, entry_package, extended};
 use domain::project::project_files;
+use domain::skill::{PATHS as SKILL_PATHS, SKILL};
 use domain::tree::{Written, with_lf};
 use protocol::inbound::Made;
 use protocol::outbound::{Tree, Writer};
@@ -58,8 +59,8 @@ pub fn refresh(tree: &dyn Tree, out: &dyn Writer, name: &str) -> Result<Made, St
 }
 
 /// Make what is missing, in the order a project is built: the declaration completed and the layers it declares, the
-/// records skeleton, the guide, the project's files written once, and the index files. Nothing is written before the
-/// declaration reads and fits its stack, and before the layers to make are known to be wanted.
+/// records skeleton, the guide and the skill, the project's files written once, and the index files. Nothing is
+/// written before the declaration reads and fits its stack, and before the layers to make are known to be wanted.
 fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<Made, String> {
     let mut made = Made::default();
     let (declared, completed) = read_declared(tree)?;
@@ -81,6 +82,7 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
     let new_packages = write_packages(tree, out, &packages, &mut made)?;
     write_records(tree, out, &mut made)?;
     write_guide(tree, out, &declared, &mut made)?;
+    write_skill(tree, out, &mut made)?;
     let crates = Crates {
         layers: &layers,
         packages: &packages,
@@ -250,6 +252,16 @@ fn write_guide(
     let guide = guide(&declared.declaration.stack, declared.layout.as_ref());
     if read_text(tree, GUIDE).ok().as_ref() != Some(&guide) {
         write(out, GUIDE, &guide, made)?;
+    }
+    Ok(())
+}
+
+/// The skill, in each place it is written, where it is not what Rotproof writes. It is the same for every project.
+fn write_skill(tree: &dyn Tree, out: &dyn Writer, made: &mut Made) -> Result<(), String> {
+    for path in SKILL_PATHS {
+        if read_text(tree, path).ok().as_deref() != Some(SKILL) {
+            write(out, path, SKILL, made)?;
+        }
     }
     Ok(())
 }

@@ -50,7 +50,7 @@ infrastructure reads or writes the environment variables (os.environ and os.gete
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
-updates them), that .rotproof/AGENTS.md is up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
+updates them), that .rotproof/AGENTS.md and the two copies of the skill rotproof (.claude/skills/rotproof/SKILL.md and .agents/skills/rotproof/SKILL.md) are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
 would write it (there with a shared unit, not there without), that every knowledge document in docs/knowledge/ keeps its \
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
 follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \
@@ -119,7 +119,9 @@ enum Command {
     /// the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
     /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
-    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), .rotproof/readers.md (who reads
+    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), the skill rotproof (how to
+    /// upgrade Rotproof and when to run each command; the same text in .claude/skills/rotproof/SKILL.md and
+    /// .agents/skills/rotproof/SKILL.md), .rotproof/readers.md (who reads
     /// each shared unit, when a unit is shared), and docs/index.md and the
     /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
     /// Never overwrites another file, and never moves or deletes one, except that in a rust project it adds the

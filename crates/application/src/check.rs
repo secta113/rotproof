@@ -16,6 +16,7 @@ use domain::markers::KNOWLEDGE_HEADING;
 use domain::moving::Candidates;
 use domain::project::MAP_HEADING;
 use domain::schema::Time;
+use domain::skill::{PATHS as SKILL_PATHS, SKILL};
 use domain::suppressions::WEAKENS_HEADING;
 use domain::upgrade::guide_command;
 use domain::version::VERSION;
@@ -145,7 +146,7 @@ fn code(
 }
 
 /// Every broken rule of the files Rotproof writes into the project of `declared`: they are up to this version
-/// (`files` in the declaration), and the guide is the one this version writes.
+/// (`files` in the declaration), and the guide and the skill are the ones this version writes.
 fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
     let mut found: Vec<Finding> = under(
         "the project's files are up to this version of Rotproof",
@@ -174,5 +175,26 @@ fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
             )],
         ));
     }
+    // Each copy on a line of its own, so that one missing is not read as both
+    found.extend(under(
+        "Rotproof's skill is up to date",
+        SKILL_PATHS.iter().filter_map(|path| {
+            let written = exactly(tree, path)
+                .ok()
+                .and_then(|(found, _)| read_text(tree, &found).ok());
+            if written.as_deref() == Some(SKILL) {
+                return None;
+            }
+            let state = if written.is_some() {
+                "out of date"
+            } else {
+                "missing"
+            };
+            Some(format!(
+                "{state}, {}: {path}",
+                guide_command(declared.declaration.files.as_deref(), VERSION)
+            ))
+        }),
+    ));
     found
 }
