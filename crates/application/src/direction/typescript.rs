@@ -5,10 +5,11 @@ use std::io;
 use super::{Direction, entry_files, layer_files, misread};
 use crate::code::lands;
 use crate::tree::{read_code, resolved};
-use domain::code::{Aliases, Reach, is_source};
+use domain::code::{Aliases, Reach, is_source, without_extension};
 use domain::direction::{Landing, Way, edge, judged_landing, landing_of};
 use domain::layers::{Layout, Place};
 use domain::paths::{join, parent, relative};
+use domain::readers::read_of;
 use domain::units::Unit;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -27,6 +28,7 @@ pub(super) fn typescript(
 ) -> io::Result<Direction> {
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
+    let mut reads = Vec::new();
     // The packages are the declared units': the implicit unit of a project that declares none is no package
     let roots: Vec<String> = units
         .iter()
@@ -52,7 +54,8 @@ pub(super) fn typescript(
         if let Some((line, why)) = read.error {
             found.push(misread(&path, "TypeScript", line, &why));
         }
-        for (line, specifier) in read.imports {
+        for (line, import) in read.imports {
+            let specifier = import.specifier;
             let target = match lands(tree, &aliases, &path, &specifier) {
                 Reach::At(Some(target)) => resolved(tree, &target),
                 Reach::At(None) => continue,
@@ -76,12 +79,21 @@ pub(super) fn typescript(
                 &way_of(to, &aliases, &path),
             ));
             edges.extend(edge(&path, line, &specifier, from, to));
+            // A name is the module the import lands in and each name it takes from it, or the module alone
+            let module = without_extension(&target);
+            if import.names.is_empty() {
+                reads.extend(read_of(from, to, module));
+            }
+            for name in &import.names {
+                reads.extend(read_of(from, to, &format!("{module}: {name}")));
+            }
         }
     }
     Ok(Direction {
         problems: found,
         forbidden,
         edges,
+        reads,
     })
 }
 
@@ -226,6 +238,56 @@ mod tests {
                 "packages/billing/src/application/play.ts:1: imports @acme/db (packages/db/src/index.ts), in the \
                  unit db outside its layers; import a layer through the package of the unit, such as \
                  @acme/db/protocol/inbound"
+            ]
+        );
+    }
+
+    /// What the units read of the shared ones, as (name, unit that reads it), in order.
+    fn reads(direction: &super::Direction) -> Vec<(String, String)> {
+        let mut reads: Vec<_> = direction
+            .reads
+            .iter()
+            .map(|read| (read.name.clone(), read.by.clone()))
+            .collect();
+        reads.sort();
+        reads
+    }
+
+    #[test]
+    fn what_is_read_of_a_shared_unit_is_the_path_it_lands_in_and_each_name_the_import_takes() {
+        let found = read(&[
+            (
+                "packages/billing/src/application/play.ts",
+                "import type { In, Out as O } from \"@acme/db/protocol/inbound\";\n\
+                 import * as all from \"@acme/db/protocol/inbound\";\n\
+                 import client from \"@acme/db/client\";\n\
+                 import \"@acme/db/client\";\n\
+                 import { own } from \"../domain\";\n",
+            ),
+            (
+                "apps/web/src/composition/wire.ts",
+                "import { In } from \"@acme/db/protocol/inbound\";\n\
+                 export * from \"@acme/db/client\";\n",
+            ),
+            // The package itself lands in the unit outside its layers, which is no name of a layer
+            (
+                "packages/billing/src/domain/song.ts",
+                "import { x } from \"@acme/db\";\n",
+            ),
+        ]);
+        let said = |name: &str, by: &str| (name.to_string(), by.to_string());
+        let inbound = "packages/db/src/protocol/inbound/index";
+        let client = "packages/db/src/infrastructure/outbound/client";
+        assert_eq!(
+            reads(&found),
+            [
+                said(client, "billing"),
+                said(&format!("{client}: *"), "web"),
+                said(&format!("{client}: default"), "billing"),
+                said(&format!("{inbound}: *"), "billing"),
+                said(&format!("{inbound}: In"), "billing"),
+                said(&format!("{inbound}: In"), "web"),
+                said(&format!("{inbound}: Out"), "billing"),
             ]
         );
     }

@@ -12,7 +12,8 @@ use domain::direction::{
 use domain::layers::{Layout, Place};
 use domain::modules::{Dependency, judged_crate};
 use domain::paths::{join, parent};
-use domain::rust::is_source as is_rust;
+use domain::readers::{Read, read_of};
+use domain::rust::{code, is_source as is_rust, paths, renames};
 use domain::units::Unit;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -31,6 +32,7 @@ pub(super) fn rust<'a>(
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
+    let mut reads = Vec::new();
     let mut manifests = Manifests::new(parsers);
     // Each manifest's dependencies that land in a place, by the name the crate's code uses
     let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
@@ -53,6 +55,8 @@ pub(super) fn rust<'a>(
         let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
             continue;
         };
+        // The crates of other shared units this crate depends on, by the name its code uses, and where each lands
+        let mut shared: Vec<(String, &Place)> = Vec::new();
         for dependency in &manifest.dependencies {
             let Some((target, through)) =
                 manifests.lands(tree, &path, &manifest, dependency, &mut found)?
@@ -80,6 +84,14 @@ pub(super) fn rust<'a>(
                 &Way::Crate,
             ));
             edges.extend(edge(&path, dependency.line, name, from, to));
+            if let Landing::Place(to) = to
+                && read_of(from, to, name).is_some()
+            {
+                shared.push((name.replace('-', "_"), to));
+            }
+        }
+        if !shared.is_empty() {
+            reads.extend(read_of_crate(tree, &path, from, &shared, &mut found)?);
         }
     }
     forbidden.extend(levels(tree, places, &depends, &mut found)?);
@@ -87,7 +99,64 @@ pub(super) fn rust<'a>(
         problems: found,
         forbidden,
         edges,
+        reads,
     })
+}
+
+/// The names the crate whose manifest is `manifest` reads of the crates of shared units it depends on (`shared`: the
+/// name its code uses for each, and the place it lands in), in the `.rs` files of its `src/`: every path that starts
+/// with one of those names, or with a name bound to one with `as`, written from the crate
+/// (`core_domain::score::count`).
+/// A module imported whole (`use core_domain::score;`) is the module, and a crate bound to a name (`use core_domain as
+/// cd;`) is the crate. Every file that could not be read goes into `found`.
+fn read_of_crate(
+    tree: &dyn Tree,
+    manifest: &str,
+    from: &Place,
+    shared: &[(String, &Place)],
+    found: &mut Vec<String>,
+) -> io::Result<Vec<Read>> {
+    let mut reads = Vec::new();
+    let crates: Vec<&str> = shared.iter().map(|(name, _)| name.as_str()).collect();
+    let landing = |name: &str| {
+        shared
+            .iter()
+            .find(|(known, _)| known == name)
+            .map(|(_, to)| *to)
+    };
+    for file in code_files(tree, &join(parent(manifest), "src"), is_rust)? {
+        let Some(source) = read_code(tree, &file, "paths", found)? else {
+            continue;
+        };
+        let code = code(&source);
+        // The names this file binds to a path in one of those crates
+        let bound: BTreeMap<String, Vec<String>> = renames(&code)
+            .into_iter()
+            .filter(|(_, _, path)| {
+                path.first()
+                    .is_some_and(|name| crates.contains(&name.as_str()))
+            })
+            .map(|(_, name, path)| (name, path))
+            .collect();
+        let mut starts = crates.clone();
+        starts.extend(bound.keys().map(String::as_str));
+        let mut named: Vec<Vec<String>> = bound.values().cloned().collect();
+        for (_, segments) in paths(&code, &starts) {
+            named.push(match bound.get(&segments[0]) {
+                Some(renamed) => renamed.iter().chain(&segments[1..]).cloned().collect(),
+                None => segments,
+            });
+        }
+        for mut segments in named {
+            if segments.len() > 1 && segments.last().map(String::as_str) == Some("self") {
+                segments.pop();
+            }
+            if let Some(to) = landing(&segments[0]) {
+                reads.extend(read_of(from, to, &segments.join("::")));
+            }
+        }
+    }
+    Ok(reads)
 }
 
 /// The finding for an entry file that is there and has no package to be compiled in: what it imports is not read.
@@ -498,6 +567,84 @@ mod tests {
                 // A name bound with `as` to the crate of another unit, through a path with a leading `::`, is judged
                 "packages/billing/infrastructure/src/inbound/mod.rs:4: uses core_protocol::outbound::Q through \
                  `p`, in protocol.outbound of unit core; infrastructure.inbound may import `protocol.inbound`",
+            ]
+        );
+    }
+
+    #[test]
+    fn what_is_read_of_a_shared_unit_is_the_path_a_crate_writes_through_its_dependency_on_it() {
+        let (tree, declared) = project(
+            &[
+                ("core", "packages/core", true, &[]),
+                ("billing", "packages/billing", false, &[]),
+                ("steps", "packages/steps", false, &[]),
+            ],
+            &[
+                (
+                    "packages/billing/application/Cargo.toml",
+                    &package(
+                        "billing_application",
+                        &[("core-domain", "../../core/domain")],
+                    ),
+                ),
+                (
+                    "packages/billing/application/src/lib.rs",
+                    "use core_domain::score::count;\nuse core_domain::{rank, tally::{a, self}};\n\
+                     use core_domain::score;\nfn f() -> u8 { core_domain::score::other() }\n\
+                     // core_domain::in::comment\nuse std::fmt;\n",
+                ),
+                (
+                    "packages/steps/application/Cargo.toml",
+                    &package("steps_application", &[("core_domain", "../../core/domain")]),
+                ),
+                (
+                    "packages/steps/application/src/lib.rs",
+                    "use core_domain as cd;\nuse core_domain::score as s;\nfn f() { cd::tally::b(); s::count(); }\n",
+                ),
+                (
+                    "packages/steps/application/src/more.rs",
+                    "use crate::lib_item;\n",
+                ),
+                (
+                    "packages/core/domain/Cargo.toml",
+                    &package("core_domain", &[]),
+                ),
+                // A crate that depends on no other unit is not read
+                (
+                    "packages/core/application/Cargo.toml",
+                    &package("core_application", &[("core_domain", "../domain")]),
+                ),
+                (
+                    "packages/core/application/src/lib.rs",
+                    "use core_domain::inside;\n",
+                ),
+            ],
+        );
+        let found = problems(&tree, &Readers, &declared).unwrap();
+        let mut reads: Vec<(String, String)> = found
+            .reads
+            .iter()
+            .map(|read| (read.name.clone(), read.by.clone()))
+            .collect();
+        // A name read twice, as `use a::b as c;` is a path and a rename, is listed once in the file
+        reads.sort();
+        reads.dedup();
+        let said = |name: &str, by: &str| (name.to_string(), by.to_string());
+        // A module imported whole is the module, a crate bound to a name is the crate, and what is reached through a
+        // name bound with `as` is written from the crate
+        assert_eq!(
+            reads,
+            [
+                said("core_domain", "steps"),
+                said("core_domain::rank", "billing"),
+                said("core_domain::score", "billing"),
+                said("core_domain::score", "steps"),
+                said("core_domain::score::count", "billing"),
+                said("core_domain::score::count", "steps"),
+                said("core_domain::score::other", "billing"),
+                said("core_domain::tally", "billing"),
+                said("core_domain::tally::a", "billing"),
+                said("core_domain::tally::b", "steps"),
             ]
         );
     }

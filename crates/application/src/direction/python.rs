@@ -17,6 +17,7 @@ use domain::code::module_parts;
 use domain::direction::{Landing, Way, edge, judged_landing, landing_of};
 use domain::layers::{Layout, Place, Table, table};
 use domain::paths::join;
+use domain::readers::read_of;
 use domain::units::Unit;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -34,6 +35,7 @@ pub(super) fn python(
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
+    let mut reads = Vec::new();
     let package_files = package_files(tree, layout, &table(), units)?;
     let mut files = layer_files(tree, layout, places, |path| module_parts(path).join("/"))?;
     files.extend(entry_files(tree, entries));
@@ -70,12 +72,14 @@ pub(super) fn python(
                 &Way::Module { bare },
             ));
             edges.extend(edge(&path, line, &dotted, from, to));
+            reads.extend(read_of(from, to, &dotted));
         }
     }
     Ok(Direction {
         problems: found,
         forbidden,
         edges,
+        reads,
     })
 }
 

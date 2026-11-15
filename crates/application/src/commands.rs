@@ -7,11 +7,14 @@ use domain::approvals::{APPROVALS, Approved, Kept};
 use domain::declaration::{DECLARATION, MISSING};
 use domain::layers::RECORDS_ONLY;
 use domain::markers::{MARKERS, either};
+use domain::readers::FILE;
 use domain::version::VERSION;
 use protocol::inbound::{
     Commands, Drift, Indexed, Initialized, Made, Names, Pinned, Removed, Report,
 };
-use protocol::outbound::Machine;
+use protocol::outbound::{Files, Machine};
+
+use crate::readers::Change;
 
 /// Every command of Rotproof, on `machine`.
 pub struct Rotproof<'a> {
@@ -21,6 +24,23 @@ pub struct Rotproof<'a> {
 impl<'a> Rotproof<'a> {
     pub fn new(machine: &'a dyn Machine) -> Self {
         Rotproof { machine }
+    }
+}
+
+impl Rotproof<'_> {
+    /// Write the list of who reads the shared units, or take it away, and say which into `written` or `removed`.
+    fn list_readers(
+        &self,
+        files: &dyn Files,
+        written: &mut Vec<String>,
+        removed: &mut Vec<String>,
+    ) -> Result<(), String> {
+        match crate::readers::refresh(files, self.machine.parsers(), files)? {
+            Some(Change::Written) => written.push(FILE.to_string()),
+            Some(Change::Removed) => removed.push(FILE.to_string()),
+            None => {}
+        }
+        Ok(())
     }
 }
 
@@ -42,12 +62,21 @@ impl Commands for Rotproof<'_> {
         ui: Option<&str>,
     ) -> Result<Initialized, String> {
         let files = self.machine.files(root);
-        crate::init::init(&*files, &*files, stack, ui, &files.name()?, VERSION)
+        let mut initialized =
+            crate::init::init(&*files, &*files, stack, ui, &files.name()?, VERSION)?;
+        // An upgrade makes what the project lacks as `rotproof create` does, so it writes the list too
+        if let Initialized::Upgraded(upgraded) = &mut initialized {
+            let made = &mut upgraded.made;
+            self.list_readers(&*files, &mut made.written, &mut made.removed)?;
+        }
+        Ok(initialized)
     }
 
     fn create(&self, root: &Path, yes: bool) -> Result<Made, String> {
         let files = self.machine.files(root);
-        crate::create::create(&*files, &*files, &files.name()?, yes)
+        let mut made = crate::create::create(&*files, &*files, &files.name()?, yes)?;
+        self.list_readers(&*files, &mut made.written, &mut made.removed)?;
+        Ok(made)
     }
 
     fn check(&self, root: &Path) -> Result<Report, String> {
@@ -70,7 +99,9 @@ impl Commands for Rotproof<'_> {
 
     fn index(&self, root: &Path) -> Result<Indexed, String> {
         let files = self.machine.files(root);
-        crate::index::index(&*files, &*files)
+        let mut indexed = crate::index::index(&*files, &*files)?;
+        self.list_readers(&*files, &mut indexed.written, &mut indexed.removed)?;
+        Ok(indexed)
     }
 
     fn pending(&self, root: &Path, file: &str, import: &str) -> Result<Vec<String>, String> {

@@ -12,6 +12,7 @@ use crate::tree::{code_files, exactly, is_file};
 use domain::declaration::Declared;
 use domain::direction::{Edge, Forbidden, cycles, place_of};
 use domain::layers::{Language, Layout, Place, table};
+use domain::readers::Read;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -25,6 +26,8 @@ pub struct Direction {
     /// Every import from a shared unit to another, forbidden or not, which the cycles among shared units are read
     /// from
     pub edges: Vec<Edge>,
+    /// Every name a unit reads of a shared unit other than its own, which `.rotproof/readers.md` is written from
+    pub reads: Vec<Read>,
 }
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An

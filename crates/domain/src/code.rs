@@ -55,6 +55,18 @@ impl<I> Default for Source<I> {
     }
 }
 
+/// What one import of a TypeScript or JavaScript file names: the module, and the names it takes from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    /// The specifier, as written
+    pub specifier: String,
+    /// The names it takes, as the module exports them: `default`, `*` for the whole module (`import * as ns`,
+    /// `export * from`), and each name of `import { a as b }` or `export { a as b } from` as `a`. Empty for an import
+    /// that takes none (`import "x"`, `import("x")`, `require("x")`, `import x = require("x")`, `import("x")` in a
+    /// type), which is read as the module
+    pub names: Vec<String>,
+}
+
 /// The module a file is, as parts: `ui/pages/home.py` is `ui.pages.home`, and `ui/pages/__init__.py` is `ui.pages`.
 pub fn module_parts(path: &str) -> Vec<String> {
     let mut parts: Vec<String> = path.split('/').map(String::from).collect();
@@ -74,6 +86,16 @@ pub const EXTENSIONS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs"
 pub fn is_source(path: &str) -> bool {
     path.rsplit_once('.')
         .is_some_and(|(_, extension)| EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
+}
+
+/// `path` without the extension that makes it source (`a/b.ts` is `a/b`, `a/b.d.ts` is `a/b`), which an import leaves
+/// off as often as not: the name of the module an import lands in.
+pub fn without_extension(path: &str) -> &str {
+    if !is_source(path) {
+        return path;
+    }
+    let stem = path.rsplit_once('.').map_or(path, |(stem, _)| stem);
+    stem.strip_suffix(".d").unwrap_or(stem)
 }
 
 /// One entry of `compilerOptions.paths`: a pattern with at most one `*`, and the first of its targets.

@@ -31,7 +31,8 @@ pub use outline::outline;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     CallExpression, ExportAllDeclaration, ExportFromDeclaration, Expression, ImportDeclaration,
-    ImportExpression, TSImportEqualsDeclaration, TSImportType, TSModuleReference,
+    ImportDeclarationSpecifier, ImportExpression, TSImportEqualsDeclaration, TSImportType,
+    TSModuleReference,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::{Parser, ParserReturn};
@@ -39,7 +40,7 @@ use oxc_span::SourceType;
 
 use std::io;
 
-use domain::code::{Aliases, Source};
+use domain::code::{Aliases, Import, Source};
 use domain::text::line_of;
 use protocol::outbound::Tree;
 
@@ -57,7 +58,7 @@ pub fn aliases(tree: &dyn Tree, roots: &[String]) -> io::Result<Aliases> {
 }
 
 /// Read one file, whose path from the root says how: `.tsx` with JSX, `.d.ts` as declarations.
-pub fn read(source: &str, path: &str) -> Source<String> {
+pub fn read(source: &str, path: &str) -> Source<Import> {
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, source, source_type(path)).parse();
     let mut imports = Imports {
@@ -84,29 +85,59 @@ pub fn read(source: &str, path: &str) -> Source<String> {
 
 struct Imports<'s> {
     source: &'s str,
-    found: Vec<(usize, String)>,
+    found: Vec<(usize, Import)>,
 }
 
 impl Imports<'_> {
+    /// An import of `specifier` at `at` that takes the `names`.
+    fn add_names(&mut self, at: u32, specifier: &str, names: Vec<String>) {
+        let import = Import {
+            specifier: specifier.to_string(),
+            names,
+        };
+        self.found.push((line_of(self.source, at as usize), import));
+    }
+
+    /// An import of `specifier` at `at` that takes no name: the module.
     fn add(&mut self, at: u32, specifier: &str) {
-        self.found
-            .push((line_of(self.source, at as usize), specifier.to_string()));
+        self.add_names(at, specifier, Vec::new());
     }
 }
 
 impl<'a> Visit<'a> for Imports<'_> {
     fn visit_import_declaration(&mut self, it: &ImportDeclaration<'a>) {
-        self.add(it.source.span.start, &it.source.value);
+        let names = it
+            .specifiers
+            .iter()
+            .flatten()
+            .map(|specifier| match specifier {
+                ImportDeclarationSpecifier::ImportSpecifier(named) => {
+                    named.imported.name().to_string()
+                }
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => "default".to_string(),
+                ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => "*".to_string(),
+            })
+            .collect();
+        self.add_names(it.source.span.start, &it.source.value, names);
         walk::walk_import_declaration(self, it);
     }
 
     fn visit_export_all_declaration(&mut self, it: &ExportAllDeclaration<'a>) {
-        self.add(it.source.span.start, &it.source.value);
+        self.add_names(
+            it.source.span.start,
+            &it.source.value,
+            vec!["*".to_string()],
+        );
         walk::walk_export_all_declaration(self, it);
     }
 
     fn visit_export_from_declaration(&mut self, it: &ExportFromDeclaration<'a>) {
-        self.add(it.source.span.start, &it.source.value);
+        let names = it
+            .specifiers
+            .iter()
+            .map(|specifier| specifier.local.name().to_string())
+            .collect();
+        self.add_names(it.source.span.start, &it.source.value, names);
         walk::walk_export_from_declaration(self, it);
     }
 
@@ -188,8 +219,11 @@ export const k = 1;
 ";
         let read = read(source, "src/ui/atoms/x.ts");
         assert_eq!(read.error, None);
-        let found: Vec<(usize, &str)> =
-            read.imports.iter().map(|(l, s)| (*l, s.as_str())).collect();
+        let found: Vec<(usize, &str)> = read
+            .imports
+            .iter()
+            .map(|(l, s)| (*l, s.specifier.as_str()))
+            .collect();
         assert_eq!(
             found,
             [
@@ -201,6 +235,52 @@ export const k = 1;
                 (6, "../utils/f"),
                 (7, "../handler/g"),
                 (8, "../ui/h"),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_names_an_import_takes_are_read_with_it() {
+        let source = "\
+import a, { b, c as d, type E } from './one';
+import * as f from './two';
+import './three';
+import {} from './four';
+import type { G } from './five';
+export * from './six';
+export * as h from './seven';
+export { i, j as k } from './eight';
+const l = await import('./nine');
+const m = require('./ten');
+import n = require('./eleven');
+";
+        let read = read(source, "src/ui/atoms/x.ts");
+        assert_eq!(read.error, None);
+        let found: Vec<(&str, Vec<&str>)> = read
+            .imports
+            .iter()
+            .map(|(_, import)| {
+                (
+                    import.specifier.as_str(),
+                    import.names.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("./one", vec!["default", "b", "c", "E"]),
+                ("./two", vec!["*"]),
+                ("./three", vec![]),
+                ("./four", vec![]),
+                ("./five", vec!["G"]),
+                ("./six", vec!["*"]),
+                ("./seven", vec!["*"]),
+                ("./eight", vec!["i", "j"]),
+                // No name is taken by what is built at run time or required: the module
+                ("./nine", vec![]),
+                ("./ten", vec![]),
+                ("./eleven", vec![]),
             ]
         );
     }

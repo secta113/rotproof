@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
 
-use domain::code::{Aliases, Manifest, Source};
+use domain::code::{Aliases, Import, Manifest, Source};
 use domain::definitions::Definition;
 use domain::layers::Language;
 use domain::schema::Time;
@@ -45,7 +45,8 @@ pub trait Writer {
     fn write(&self, path: &str, text: &str) -> io::Result<()>;
     /// Make the directory `dir`, and the ones it sits in.
     fn make_dir(&self, dir: &str) -> io::Result<()>;
-    /// Remove the file at `path`. Only `rotproof init` removes, when it moves a project's records.
+    /// Remove the file at `path`. Only `rotproof init` removes, when it moves a project's records, and `rotproof index`
+    /// and `rotproof create`, the list of who reads the shared units once no unit is shared.
     fn remove(&self, path: &str) -> io::Result<()>;
     /// Remove the directory `dir`, which is empty: an error when it is not, so nothing is removed unseen.
     fn remove_dir(&self, dir: &str) -> io::Result<()>;
@@ -69,8 +70,9 @@ pub trait Parsers {
         source: &str,
         path: &str,
     ) -> Result<Vec<Definition>, (usize, String)>;
-    /// A TypeScript or JavaScript file, whose path from the root says how to read it: every specifier it imports.
-    fn typescript(&self, source: &str, path: &str) -> Source<String>;
+    /// A TypeScript or JavaScript file, whose path from the root says how to read it: every specifier it imports, with
+    /// the names it takes from each.
+    fn typescript(&self, source: &str, path: &str) -> Source<Import>;
     /// The aliases of the TypeScript project in `tree`, from its `tsconfig*.json` files, and the packages of its units,
     /// from the `package.json` in each of `roots` (directories from the root). An error is a file that cannot be read
     /// at all.

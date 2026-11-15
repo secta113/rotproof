@@ -24,6 +24,8 @@ pub struct Names {
 pub struct Made {
     /// The files written, from the root, with `/`: made new or rewritten with a change
     pub written: Vec<String>,
+    /// The files taken away, from the root: the list of who reads the shared units, once no unit is shared
+    pub removed: Vec<String>,
     /// Documents left out of the index files: name -> why
     pub left_out: Vec<(String, String)>,
     /// The fields added to the declaration, as `name = value`
@@ -117,6 +119,8 @@ pub struct Report {
 pub struct Indexed {
     /// The files written, from the root
     pub written: Vec<String>,
+    /// The files taken away, from the root: the list of who reads the shared units, once no unit is shared
+    pub removed: Vec<String>,
     /// Documents left out of the index files: name -> why
     pub left_out: Vec<(String, String)>,
 }

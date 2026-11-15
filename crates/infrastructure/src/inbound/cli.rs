@@ -49,7 +49,8 @@ infrastructure reads or writes the environment variables (os.environ and os.gete
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
-updates them), that .rotproof/AGENTS.md is up to date, that every knowledge document in docs/knowledge/ keeps its \
+updates them), that .rotproof/AGENTS.md is up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
+would write it (there with a shared unit, not there without), that every knowledge document in docs/knowledge/ keeps its \
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
 follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \
 than today. The rest of docs/ is the project's, and is not read. \
@@ -115,7 +116,8 @@ enum Command {
     /// the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
     /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
-    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), and docs/index.md and the
+    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), .rotproof/readers.md (who reads
+    /// each shared unit, when a unit is shared), and docs/index.md and the
     /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
     /// Never overwrites another file, and never moves or deletes one, except that in a rust project it adds the
     /// crates it makes to the members of the workspace in Cargo.toml when none names them, and replaces the member
@@ -188,7 +190,9 @@ enum Command {
     /// docs/knowledge/rules.md, each only when it differs from what it would write, and names each it wrote (when none
     /// differs, it says so). Run it after a knowledge document changes; never edit these by hand. Writes nothing
     /// in docs/work/, which Rotproof no longer reads. Lists the documents it left out and why, also under `# Left out`
-    /// in the index. Exits 2 when the declaration or a document cannot be read.
+    /// in the index. In a project that declares a shared unit it writes, too, .rotproof/readers.md, the names the other
+    /// units read of each shared unit with the units that read them (run it after the imports between units change),
+    /// and takes it away once no unit is shared. Exits 2 when the declaration or a document cannot be read.
     Index,
     /// Pin keys in a knowledge document's follows, at the hash of the code as it is now
     ///
@@ -395,6 +399,9 @@ fn report_made(names: &Names, made: &Made) {
     for path in &made.written {
         println!("wrote {path}");
     }
+    for path in &made.removed {
+        println!("removed {path}");
+    }
     for field in &made.added {
         println!("added to {}: {field}", names.declaration);
     }
@@ -414,7 +421,7 @@ fn create(commands: &dyn Commands, names: &Names, root: &Path, yes: bool) -> Res
     let made = commands.create(root, yes)?;
     report_made(names, &made);
     // A changed file is written too, and told of above
-    let wrote = !made.written.is_empty() || !made.changed.is_empty();
+    let wrote = !made.written.is_empty() || !made.removed.is_empty() || !made.changed.is_empty();
     if !wrote {
         println!(
             "nothing to make: the tree has what {} declares",
@@ -691,11 +698,14 @@ fn follows(
 /// Write each index file that is out of date, or say that none is, then list what was left out of them.
 fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     let indexed = commands.index(root)?;
-    if indexed.written.is_empty() {
+    if indexed.written.is_empty() && indexed.removed.is_empty() {
         println!("nothing written: every index file is up to date");
     }
     for path in indexed.written {
         println!("wrote {path}");
+    }
+    for path in indexed.removed {
+        println!("removed {path}");
     }
     for (name, why) in indexed.left_out {
         println!("left out of the index, fix it: {name}: {why}");

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use domain::code::{Aliases, Manifest, Source};
+use domain::code::{Aliases, Import, Manifest, Source};
 use domain::definitions::Definition;
 use domain::layers::Language;
 use protocol::outbound::Parsers;
@@ -35,7 +35,7 @@ impl Parsers for Readers {
         }
     }
 
-    fn typescript(&self, source: &str, path: &str) -> Source<String> {
+    fn typescript(&self, source: &str, path: &str) -> Source<Import> {
         crate::outbound::typescript::read(source, path)
     }
 

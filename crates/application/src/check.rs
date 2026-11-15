@@ -56,6 +56,7 @@ fn code(
     report: &mut Report,
 ) -> io::Result<Vec<Warning>> {
     let direction = crate::direction::problems(tree, parsers, declared)?;
+    let listed = crate::readers::problems(tree, declared, &direction.reads);
     let approvals = crate::approvals::read(tree)?;
     let sorted = sort(&direction.forbidden, &approvals.entries);
     report.findings.extend(under(
@@ -72,6 +73,9 @@ fn code(
             .into_iter()
             .chain(sorted.stale.iter().map(|entry| stale(entry))),
     ));
+    report
+        .findings
+        .extend(under(domain::readers::HEADING, listed));
     report.approved = sorted
         .approved
         .iter()

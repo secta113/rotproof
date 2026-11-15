@@ -4260,13 +4260,19 @@ fn follows_pins_the_units_of_the_declaration_and_the_check_fails_when_a_unit_cha
         )),
         "{said}"
     );
-    // Reviewing it pins the new units, and the check passes again
+    // Reviewing it pins the new units, and the check passes again once the list of who reads the shared unit is written
     let out = run(&["--root", &arg, "follows", "knowledge/units.md", key]);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+    assert!(
+        said.contains("out of date, run `rotproof index`: .rotproof/readers.md"),
+        "{said}"
+    );
+    let out = run(&["--root", &arg, "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
@@ -4851,6 +4857,29 @@ fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
         r,
         "packages/db/src/protocol/inbound/index.ts",
         "export type Run = number;\n",
+    );
+    // What billing reads of the shared unit is listed, which the check keeps in step with the code
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("out of date, run `rotproof index`: .rotproof/readers.md"),
+        "{}",
+        stdout(&out)
+    );
+    let out = run(&["--root", &arg, "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("wrote .rotproof/readers.md"),
+        "{}",
+        stdout(&out)
+    );
+    let listed = fs::read_to_string(r.join(".rotproof/readers.md")).unwrap();
+    assert!(
+        listed.ends_with(
+            "## db\n\n`packages/db/src`\n\n### Read by one unit\n\n| Name | Read by |\n|---|---|\n\
+             | `packages/db/src/protocol/inbound/index: Run` | billing |\n"
+        ),
+        "{listed}"
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
