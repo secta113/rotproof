@@ -4355,6 +4355,15 @@ fn a_declaration_of_units_that_cannot_be_read_says_every_reason() {
                 "unit \"billing\" names \"domainx\" in absent, which the python layout does not have",
             ],
         ),
+        (
+            two_units("false")
+                + "absent = [\"infrastructure.inbound\", \"infrastructure.outbound\"]\n",
+            vec![
+                "unit \"billing\" names every level of infrastructure in absent, but not infrastructure itself, \
+                 which holds only its levels: list infrastructure, so that it is not made as a directory with \
+                 nothing in it",
+            ],
+        ),
     ] {
         let root = declared(&declaration);
         let arg = root_arg(root.path());

@@ -292,7 +292,10 @@ guide and the project's files, and `rotproof check` checks only the records and 
 layers. It is a line in the declaration, not a flag, so the structure check is never switched off where the
 declaration still declares layers.
 
-A level is declared absent by its dotted name (`absent = ["ui.templates"]`). Files `.gitignore` excludes and
+A level is declared absent by its dotted name (`absent = ["ui.templates"]`). A layer holds only its levels, so one
+whose every level is in `absent` is not there either, and is declared absent as a layer: `absent = ["infrastructure"]`,
+not both of its levels, which fails the declaration (it would otherwise make a directory with nothing in it, and
+there would be two ways to write one thing). Files `.gitignore` excludes and
 hidden files are not looked at, so a virtual environment or a build directory is not code. A code file is matched in any
 case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 
@@ -359,6 +362,7 @@ declaration and the layout alone, before the tree is looked at:
   the one that declares it (the innermost unit that holds an entry is its own, or none), or is declared by two units;
 - a unit that is `shared` and has an `entry`: an app is imported by none, and a shared unit by all;
 - a name in a unit's `absent` the layout does not have, as at the top for a project of one unit;
+- a unit whose `absent` names every level of a layer but not the layer, as at the top for a project of one unit;
 - an `absent` at the top, once units are declared.
 
 What `rotproof check` checks of the tree holds in each unit as it does in a project of one, and a finding about a unit

@@ -172,6 +172,33 @@ fn missing_field(why: &str) -> String {
     format!("{why}: {INIT_OR_CREATE}; either adds it")
 }
 
+/// A layer that holds only its levels, with every one of them in the `absent` of a unit and the layer itself not: the
+/// layer would be made as a directory with nothing in it, and `rotproof create` would list it as missing. The layer is
+/// what is absent, and one way to say so, as `rotproof check` pins a unit's table on what it says, so the declaration
+/// is refused and says which to write.
+fn levels_without_their_layer(units: &[Unit], places: &[Place]) -> Vec<String> {
+    let mut found = Vec::new();
+    for unit in units {
+        let own = || places.iter().filter(|p| p.unit.name == unit.name);
+        for layer in own().filter(|p| p.is_layer() && !unit.absent.contains(&p.name)) {
+            let mut levels = own().filter(|p| p.parent.as_ref() == Some(&layer.name));
+            if levels.clone().next().is_some() && levels.all(|p| unit.absent.contains(&p.name)) {
+                let name = &layer.name;
+                let whose = if unit.declared {
+                    format!("unit {:?} names", unit.name)
+                } else {
+                    "absent names".to_string()
+                };
+                found.push(format!(
+                    "{DECLARATION}: {whose} every level of {name} in absent, but not {name} itself, which holds only \
+                     its levels: list {name}, so that it is not made as a directory with nothing in it"
+                ));
+            }
+        }
+    }
+    found
+}
+
 /// What `areas` is, as the declaration says it above the field.
 const AREAS_COMMENT: &str = "# The areas the knowledge documents are grouped by, in this order, such as \"billing\" or \"records\".\n\
                              # Every knowledge document has exactly one of them in tags, and its index groups by them\n";
@@ -478,6 +505,7 @@ impl Declared {
                 }
             }
         }
+        found.extend(levels_without_their_layer(&units, &places));
         let todo_link = declaration.todo_link.as_deref().and_then(|value| {
             let link = TodoLink::parse(value);
             if link.is_none() {
@@ -1112,6 +1140,77 @@ absent = [\"domain\", \"application\"]
                 ".config/rotproof.toml: absent names \"nowhere\", which the python layout does not have"
             ]
         );
+    }
+
+    #[test]
+    fn every_level_of_a_layer_in_absent_without_the_layer_is_refused_in_a_unit_and_in_a_project_of_one()
+     {
+        let refused = |text: String| Declared::new(parse_declaration(&text).unwrap()).unwrap_err();
+        let one = |absent: &str| {
+            format!(
+                "stack = \"python\"
+areas = []
+ui = \"none\"
+absent = {absent}
+"
+            )
+        };
+        let unit = |absent: &str| {
+            with_units(
+                "python",
+                &format!(
+                    "[[unit]]
+name = \"app\"
+path = \"app\"
+absent = {absent}
+"
+                ),
+            )
+        };
+        let both = r#"["infrastructure.inbound", "infrastructure.outbound"]"#;
+        let said = |who: &str| {
+            format!(
+                "{DECLARATION}: {who} every level of infrastructure in absent, but not infrastructure itself, which holds only its levels: list infrastructure, so that it is not made as a directory with nothing in it"
+            )
+        };
+        assert_eq!(refused(one(both)), [said("absent names")]);
+        assert_eq!(refused(unit(both)), [said("unit \"app\" names")]);
+        // The layer itself, with or without its levels, a level but not the other, and the layer's own levels of
+        // another unit: each reads, and the layer is absent in the first two
+        for ok in [
+            r#"["infrastructure"]"#,
+            r#"["infrastructure", "infrastructure.inbound", "infrastructure.outbound"]"#,
+            r#"["infrastructure.inbound"]"#,
+            r#"["protocol.inbound", "domain"]"#,
+        ] {
+            assert!(
+                Declared::new(parse_declaration(&one(ok)).unwrap()).is_ok(),
+                "{ok}"
+            );
+            assert!(
+                Declared::new(parse_declaration(&unit(ok)).unwrap()).is_ok(),
+                "{ok}"
+            );
+        }
+        // A unit is judged by its own absent: another that lists the layer does not excuse it
+        let two = with_units(
+            "python",
+            &format!(
+                "[[unit]]
+name = \"a\"
+path = \"a\"
+absent = [\"infrastructure\"]
+
+[[unit]]
+name = \"b\"
+path = \"b\"
+absent = {both}
+"
+            ),
+        );
+        let said = refused(two);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("unit \"b\" names every level of infrastructure"));
     }
 
     #[test]
