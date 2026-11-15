@@ -231,6 +231,11 @@ approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
 - **An approval follows the code.** An entry that matches no forbidden import fails: the import moved away, was
   fixed, or became allowed. `rotproof approve --prune` removes those entries. It needs no terminal, since it only
   takes approvals away and never lets anything pass that failed before.
+- **The number of approvals can have a limit.** `approved_max = 3` in `.config/rotproof.toml` is the most entries the
+  approvals file may hold, an entry that matches nothing counted too; `rotproof check` fails above it, naming both
+  files. `0` allows none. Without the key there is no limit, and the check prints every approval all the same.
+  The limit is not a barrier but a count that cannot grow in silence: raising it is a change of the declaration, which
+  the diff shows, and the guide tells an agent that raising it to pass the check is not its decision.
 - **This does not prevent an exception; it makes one visible.** Nothing stops a run of `rotproof approve` that nobody
   asked for, or a script that writes the file. What stays is that an approval is a named line with its reason, printed
   on every run, which fails once it matches nothing, and which a reviewer sees in the diff.
@@ -249,15 +254,17 @@ ui = "atomic"            # the layers of the screens: atomic | none (rust: none;
 absent = ["ui.templates"]  # layers or levels this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
 todo_link = "number"     # optional, number | key: a TODO may stay when it names its issue (see below)
+approved_max = 3         # optional, a count: the most approvals the project holds (see "Approving a forbidden import")
 ```
 
-`todo_link` is the one key of the declaration that `rotproof init` and `rotproof create` never write: a project that
-wants it adds it by hand, and everything else is as without it (the marker check below fails on every `TODO`). It is
+`todo_link` and `approved_max` are the two keys of the declaration that `rotproof init` and `rotproof create` never
+write: a project that wants one adds it by hand, and everything else is as without it. Without `todo_link` the marker
+check below fails on every `TODO`; without `approved_max` the number of approvals has no limit. `todo_link` is
 `"number"` for `TODO(#123): what is left`, or `"key"` for `TODO(ABC-123): what is left`; any other value fails, naming
 the two, and so does the key with `stack = "none"`, which has no code to read. The declaration is read strictly, with
 a field Rotproof does not know failing it, so a Rotproof older than the one that brought `todo_link` cannot read a
 declaration that holds it: a project pins an exact version of Rotproof, and moves it before it adds the key. Whether a
-project declares it is a person's decision, which an agent never makes to pass the check, and the guide says so.
+project declares either is a person's decision, which an agent never makes to pass the check, and the guide says so.
 
 What the layers are is written once, in `layers/table.toml`, on the onion architecture:
 
@@ -820,7 +827,8 @@ changed is in the commits, what was measured and decided along the way in the ta
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
   `approved.at` that is not a datetime with a time zone, and two entries for one import. A file named otherwise
-  (`Rotproof-Approved.toml`) approves nothing, and fails.
+  (`Rotproof-Approved.toml`) approves nothing, and fails. With `approved_max` in the declaration, **the approvals stay
+  within it**: more entries than it lets fails, as one finding that names both files.
 - **The project's files are up to this version of Rotproof** (see "Upgrading Rotproof"): `files` in the declaration
   (0.1.0 when it is missing) is a version as `major.minor.patch`, neither older nor newer than the running Rotproof,
   and every name in `declined` is an update.

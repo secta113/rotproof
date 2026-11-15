@@ -20,6 +20,8 @@
   forbidden import. Run `rotproof approve <file> <import> --reason "<why>"` only when the user asked you to keep it
   (a framework forces it, a fix cannot wait for the refactoring), and say so in your report, with the reason: it adds
   the import to `.config/rotproof-approved.toml`, signed with git's `user.name`, and asks for nothing else.
-  `rotproof check` prints every approval on every run, and fails on one that matches no forbidden import any more:
-  after fixing an approved import, run `rotproof approve --prune`, which removes such entries.
+  `rotproof check` prints every approval on every run, fails on one that matches no forbidden import any more (after
+  fixing an approved import, run `rotproof approve --prune`, which removes such entries), and fails when the
+  approvals are more than `approved_max` in `.config/rotproof.toml` lets the project hold, if it has one. Raising
+  `approved_max` is the user's decision: never add, raise or remove it to pass the check.
 {units}{rules}{ui}

@@ -16,6 +16,7 @@ use chrono::DateTime;
 use serde::Deserialize;
 use toml_edit::{ArrayOfTables, DocumentMut, InlineTable, Item, Table, value};
 
+use crate::declaration::DECLARATION;
 use crate::direction::Forbidden;
 
 /// The approvals file, from the root.
@@ -135,6 +136,20 @@ pub fn sort<'a>(found: &'a [Forbidden], entries: &'a [Kept]) -> Sorted<'a> {
         })
         .collect();
     sorted
+}
+
+/// What `rotproof check` finds when the project holds more approvals than `approved_max` of the declaration lets it
+/// (`None`: no limit). Every entry counts, an entry that matches nothing too, which fails on its own as well. Only the
+/// project raises the limit, in the declaration, where the diff shows it.
+pub fn over_limit(count: usize, max: Option<u32>) -> Option<String> {
+    let max = max?;
+    (count > usize::try_from(max).unwrap_or(usize::MAX)).then(|| {
+        format!(
+            "{APPROVALS}: {count} approvals, and approved_max in {DECLARATION} is {max}: fix an approved import and run \
+             `rotproof approve --prune`, or let the user decide to raise approved_max, which is never raised to pass \
+             the check"
+        )
+    })
 }
 
 /// How an approved import is printed on every run.
@@ -331,6 +346,19 @@ mod tests {
                 .unwrap_err()
                 .contains("because")
         );
+    }
+
+    #[test]
+    fn more_approvals_than_the_limit_is_a_finding_and_no_limit_is_none() {
+        assert_eq!(over_limit(1000, None), None);
+        assert_eq!(over_limit(0, Some(0)), None);
+        assert_eq!(over_limit(3, Some(3)), None);
+        let found = over_limit(4, Some(3)).unwrap();
+        assert!(
+            found.starts_with(".config/rotproof-approved.toml: 4 approvals, and approved_max in .config/rotproof.toml is 3:"),
+            "{found}"
+        );
+        assert!(over_limit(1, Some(0)).is_some());
     }
 
     #[test]

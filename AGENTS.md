@@ -82,7 +82,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/domain/src/` | Content |
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
-| `approvals.rs` | The approvals file, `.config/rotproof-approved.toml`: the imports the layer table forbids that were approved with a reason, each keyed by its file and what it imports, matched against what the direction check found, and the file with an entry added or removed |
+| `approvals.rs` | The approvals file, `.config/rotproof-approved.toml`: the imports the layer table forbids that were approved with a reason, each keyed by its file and what it imports, matched against what the direction check found, the file with an entry added or removed, and the finding for more entries than `approved_max` of the declaration lets the project hold |
 | `bundle.rs` | The part of `docs/` Rotproof keeps, as one OKF bundle: the knowledge documents sorted out once they are read, the files Rotproof generates (the index files and the rules), and the tags the knowledge documents use |
 | `schema.rs` | The frontmatter of a knowledge document and of a guide |
 | `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory of code, a definition in a file of a language Rotproof reads, a table of a `.toml` file, read with `toml_edit`), the language of a file, the hash a key is pinned at and the hash of a directory, what fails when one changed or is gone, the document `rotproof follows` names, and a hash replaced or a key added in the frontmatter |

@@ -3731,6 +3731,67 @@ fn an_approved_import_passes_and_is_printed_and_a_stale_approval_fails() {
     assert!(said.contains("every approval matches a forbidden import:\n  .config/rotproof-approved.toml: missing field"), "{said}");
 }
 
+#[test]
+fn more_approvals_than_approved_max_fail_the_check_and_no_limit_means_none() {
+    let root = clean_repo();
+    let r = root.path();
+    fs::write(
+        r.join("domain/model.py"),
+        "import infrastructure.db\nimport application\n",
+    )
+    .unwrap();
+    fs::write(
+        r.join(".config/rotproof-approved.toml"),
+        approvals(&[
+            ("domain/model.py", "infrastructure.db"),
+            ("domain/model.py", "application"),
+        ]),
+    )
+    .unwrap();
+    let own = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    let declare = |max: &str| {
+        fs::write(r.join(".config/rotproof.toml"), format!("{own}{max}")).unwrap();
+        let out = run(&["--root", &root_arg(r), "check"]);
+        (out.status.code(), stdout(&out))
+    };
+    // No approved_max: two approvals, and no limit
+    let (code, said) = declare("");
+    assert_eq!(code, Some(0), "{said}");
+    // At the limit, and under it, the check passes
+    for max in ["approved_max = 2\n", "approved_max = 5\n"] {
+        let (code, said) = declare(max);
+        assert_eq!(code, Some(0), "{max}: {said}");
+    }
+    // Over it, the check fails and says which file holds the limit; the approvals are still printed
+    let (code, said) = declare("approved_max = 1\n");
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "the approvals stay within approved_max:\n  .config/rotproof-approved.toml: 2 approvals, and approved_max \
+             in .config/rotproof.toml is 1:"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains("approved in .config/rotproof-approved.toml (2):"),
+        "{said}"
+    );
+    // Zero allows none
+    let (code, said) = declare("approved_max = 0\n");
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("2 approvals, and approved_max in .config/rotproof.toml is 0"),
+        "{said}"
+    );
+    // A limit that is no count is a declaration that cannot be read
+    let (code, said) = declare("approved_max = -1\n");
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(".config/rotproof.toml: invalid value: integer `-1`, expected u32"),
+        "{said}"
+    );
+}
+
 /// `rotproof approve ...` in `root`, with git's configuration as `config` says it (the text of a global config file, or
 /// none): neither the machine's own nor the user's decides who an approval is signed by.
 fn approve_with_git(root: &Path, config: Option<&str>, args: &[&str]) -> Output {
