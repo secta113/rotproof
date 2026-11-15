@@ -439,7 +439,11 @@ changed is in the commits, what was measured and decided along the way in the ta
   dependency on another layer, in a `use`, an expression or the tokens of a macro, is judged by the level it lands in
   (`crate::outbound::Db` from `src/inbound/` fails, and so does `domain::Song` there). The crate's `src/lib.rs` only
   declares its levels' modules, so no re-export lets one level reach another; every other file of `src/` sits in a
-  level, and `#[path]` fails. Not seen: a path a macro builds from pieces.
+  level, and `#[path]` fails. A name bound with `as` is the path it renames (`use protocol as p;`,
+  `extern crate protocol as p;` or `use crate as c;`, then `p::outbound::Port` from `src/inbound/` fails as
+  `protocol::outbound::Port` does), and so is a name bound to such a name; the file is read as one scope, so a name
+  bound twice stands for both. Not seen: a path a macro builds from pieces, and a name bound in one file and used
+  through another.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,
