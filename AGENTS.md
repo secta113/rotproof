@@ -148,7 +148,8 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 
 | Module of `crates/application/src/init/` | Content |
 |---|---|
-| `mod.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version, and, for a project that declares units, drafting once the knowledge document that follows them (with the links the direction check read, and the index written again) |
+| `mod.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version, and what the upgrade says of the map of the project's own `AGENTS.md` |
+| `draft.rs` | The knowledge document of the units, drafted once for a project that declares units: the links the direction check read, the units and the area it is tagged with, and the index written again |
 | `crossing.rs` | What an upgrade tells a project that crosses a table that changed what the layers are (the onion table, the split of the screens into `ui` and `presentation`): where the code of each retired layer goes and what the screens move, read from the tree to say which applies. Nothing moves |
 
 | Module of `crates/application/src/direction/` | Content |
