@@ -1,10 +1,9 @@
-//! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from
-//! one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and how it exits are
-//! decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's
-//! Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
+//! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which keeps a
+//! forbidden import for a reason it is given), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help
+//! that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and
+//! how it exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a
+//! project's Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
 
-use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -34,7 +33,7 @@ Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotp
 .config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
 its --root is not a directory, `rotproof create` would make layers
 without --yes, `rotproof init` leaves an update of the project's files to a person,
-or `rotproof approve` is not run on a terminal or not answered y.";
+or `rotproof approve` is given no reason, or an import that is not forbidden.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -44,7 +43,7 @@ Check the layers and the records, and exit non-zero when one breaks the rules
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
 layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view; in each unit, when the \
 declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
-what the layer table allows or a person approved in .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that only \
+what the layer table allows or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that only \
 infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
@@ -85,14 +84,14 @@ enum Command {
     /// Without a declaration, writes only the declaration, with every field and what it means, so the layers the
     /// project does not want are listed in absent before anything is made; then edit it and run `rotproof create`.
     /// With one, it is the whole upgrade of Rotproof: it applies every update a newer Rotproof brings to the files
-    /// `rotproof create` wrote once (such as a rule added to .claude/settings.json), except the ones the declaration
-    /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
-    /// the declaration to this version, adding declined = [] when the declaration lacks it. It names every field it
-    /// adds to the declaration, as `rotproof create` does, and never changes its other values. What an update cannot do
-    /// without a person, it says, leaves files as it was, and exits 2. It never moves or rewrites a record. Crossing
-    /// 0.4.0, which builds the layer table on the onion architecture, it says where the code of the layers that are
-    /// gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left until it is
-    /// moved. Crossing 1.0.0-rc.3, which splits the UI into the view (ui) and the state of the screens
+    /// `rotproof create` wrote once (such as a hook or a rule taken out of .claude/settings.json), except the ones the
+    /// declaration lists in declined, does what `rotproof create` does after an upgrade without making a layer, and
+    /// sets files in the declaration to this version, adding declined = [] when the declaration lacks it. It names
+    /// every field it adds to the declaration, as `rotproof create` does, and never changes its other values. What an
+    /// update cannot do without a person, it says, leaves files as it was, and exits 2. It never moves or rewrites a
+    /// record. Crossing 0.4.0, which builds the layer table on the onion architecture, it says where the code of the
+    /// layers that are gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left
+    /// until it is moved. Crossing 1.0.0-rc.3, which splits the UI into the view (ui) and the state of the screens
     /// (presentation) and declares the UI, the refresh adds ui to the declaration ("atomic" when ui/ is there, "none"
     /// otherwise), and it says to make presentation, what moves out of ui, and to take ui out of absent once ui is
     /// "none", and moves no code either. Exits 2 too for an unknown stack or UI, a stack or UI other than the declared
@@ -111,8 +110,7 @@ enum Command {
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, docs/knowledge/, docs/log.md, and
     /// the project's files
-    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the rule that denies
-    /// editing the approvals file,
+    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes,
     /// a CI workflow that installs the pinned Rotproof (from PyPI with requirements-dev.txt for python, from npm with
     /// the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
@@ -153,43 +151,36 @@ enum Command {
         #[arg(long, requires = "stack")]
         ui: Option<String>,
     },
-    /// Approve on a terminal a forbidden import, or the knowledge documents whose followed code changed (--reviewed);
-    /// or remove the approvals that match nothing (--prune)
+    /// Keep a forbidden import for a reason (--reason), or remove the approvals that match nothing (--prune)
     ///
-    /// `rotproof approve <file> <import>` keeps an import the layer table forbids, as `rotproof check` names it: the
-    /// file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each name of
-    /// `from m import n`; a TypeScript specifier; a crate's dependency). It shows the forbidden import, asks why it is
-    /// kept and for a y, signs with git's user.name (or a name it asks for), and adds the entry to
-    /// .config/rotproof-approved.toml, which keeps a byte order mark and its line endings (CRLF on every line when one
-    /// line had it), as does --prune. `rotproof approve --reviewed`, after a refactoring that kept what the code does,
-    /// lists every knowledge document whose followed code changed and what changed under it, says to read the changes
-    /// first, asks for one y, writes the new hashes in their follows (each document keeps a byte order mark and its
-    /// line endings, as with rotproof follows), and names each document it wrote; what is gone is left to edit by
-    /// hand. Both run only when stdin is a terminal, so an agent's shell cannot approve: a person does. `rotproof
-    /// approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden import, needs
-    /// no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not a terminal, the import
-    /// is not forbidden or is approved already, the answer is not y, something followed is gone, or a file cannot be
-    /// read or written.
+    /// `rotproof approve <file> <import> --reason "<why>"` keeps an import the layer table forbids, as `rotproof check`
+    /// names it: the file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each
+    /// name of `from m import n`; a TypeScript specifier; a crate's dependency). It shows the forbidden import, signs
+    /// with git's user.name, and adds the entry, with the reason, to .config/rotproof-approved.toml, which keeps a byte
+    /// order mark and its line endings (CRLF on every line when one line had it), as does --prune. It asks nothing and
+    /// needs no terminal, but it takes no approval without a reason, and `rotproof check` prints every approval on
+    /// every run. Run it only when the user asked for the exception, and say that you ran it.
+    /// `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden
+    /// import, and never lets anything pass that failed before. Exits 2 when --reason is empty, git's user.name is not
+    /// set, the import is not forbidden or is approved already, or a file cannot be read or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
-        #[arg(
-            required_unless_present_any = ["prune", "reviewed"],
-            conflicts_with_all = ["prune", "reviewed"]
-        )]
+        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
         file: Option<String>,
         /// What it imports, as `rotproof check` names it
-        #[arg(
-            required_unless_present_any = ["prune", "reviewed"],
-            conflicts_with_all = ["prune", "reviewed"]
-        )]
+        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
         import: Option<String>,
+        /// Why the import is kept: it is written in the entry and printed on every run
+        #[arg(
+            long,
+            value_name = "WHY",
+            required_unless_present = "prune",
+            conflicts_with = "prune"
+        )]
+        reason: Option<String>,
         /// Remove the entries that match no forbidden import
-        #[arg(long, conflicts_with = "reviewed")]
-        prune: bool,
-        /// Re-pin, in one act on a terminal, every knowledge document whose followed code changed (after a
-        /// refactoring that kept what the code does): each hash in follows set to what the code is now
         #[arg(long)]
-        reviewed: bool,
+        prune: bool,
     },
     /// Write docs/index.md and docs/knowledge/index.md from the frontmatter, and the rules.md Rotproof keeps
     ///
@@ -215,12 +206,11 @@ enum Command {
     /// added at its end, with the hash quoted (follows is made at the end of the frontmatter when the document has
     /// none); nothing else in the document changes, and it keeps a byte order mark and its line endings (CRLF on every
     /// line when one line had it). Prints each key with what was done, then whether the document was written. Writes
-    /// all the keys or none, and only the keys named: re-pinning every changed document in one act is `rotproof approve
-    /// --reviewed`, which a person runs. Needs no terminal: pinning one document is an edit of it, which git records. A
-    /// key gone from the code is left to edit by hand. Exits 2, writing nothing, when the first argument is not a
-    /// knowledge document (as before 0.4.0, when follows took the keys alone), the document is not there, cannot be
-    /// read, is a guide or is deprecated, or a key is not a form follows takes, names what is not there, or cannot be
-    /// read.
+    /// all the keys or none, and only the keys named. Needs no terminal: pinning one document is an edit of it, which
+    /// git records. A key gone from the code is left to edit by hand. Exits 2, writing nothing, when the first
+    /// argument is not a knowledge document (as before 0.4.0, when follows took the keys alone), the document is not
+    /// there, cannot be read, is a guide or is deprecated, or a key is not a form follows takes, names what is not
+    /// there, or cannot be read.
     Follows {
         /// The knowledge document: knowledge/<slug>.md, or docs/knowledge/<slug>.md
         document: String,
@@ -271,16 +261,17 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Command::Approve {
             file,
             import,
+            reason,
             prune,
-            reviewed,
-        } => match (prune, reviewed, file, import) {
+        } => match (prune, file, import, reason) {
             (true, _, _, _) => approve_prune(commands, &names, root).map(|()| true),
-            (_, true, _, _) => approve_reviewed(commands, root).map(|()| true),
-            (false, false, Some(file), Some(import)) => {
-                approve(commands, &names, root, &file, &import).map(|()| true)
+            (false, Some(file), Some(import), Some(reason)) => {
+                approve(commands, root, &file, &import, &reason).map(|()| true)
             }
             _ => {
-                unreachable!("clap requires the file and the import without --prune or --reviewed")
+                unreachable!(
+                    "clap requires the file and the import when --prune is not given, and no more"
+                )
             }
         },
         Command::Follows { document, keys } => {
@@ -467,7 +458,7 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
     // An approval never hides: every one is printed, on every run, before what fails
     if !report.approved.is_empty() {
         println!(
-            "approved by a person in {} ({}):",
+            "approved in {} ({}):",
             names.approvals,
             report.approved.len()
         );
@@ -556,123 +547,41 @@ fn warnings(all: &[Warning]) -> Vec<(&str, Vec<&str>)> {
     kinds
 }
 
-/// Ask a person on the terminal to approve the forbidden import of `import` by `file`, and add the entry. Every answer
-/// is read from stdin, which must be a terminal: an agent's shell tool has none.
+/// Keep the forbidden import of `import` by `file` for `reason`, signed with git's `user.name`, and say what was
+/// written. Nothing is asked: the reason is what the entry holds, and it is printed on every run of `rotproof check`.
 fn approve(
     commands: &dyn Commands,
-    names: &Names,
     root: &Path,
     file: &str,
     import: &str,
+    reason: &str,
 ) -> Result<(), String> {
-    if !std::io::stdin().is_terminal() {
-        return Err(
-            "rotproof approve asks a person, and stdin is not a terminal (an agent's shell has none): run it in your \
-             own terminal"
-                .into(),
-        );
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Err(format!(
+            "--reason is empty: say why {import} in {file} is kept"
+        ));
     }
     let pending = commands.pending(root, file, import)?;
+    let by = signer(commands, root)?;
     println!("forbidden by the layer table:");
     for detail in &pending {
         println!("  {detail}");
     }
-    let by = match commands.user_name(root) {
-        Some(name) => name,
-        None => ask("git's user.name is not set; the name to sign with: ")?,
-    };
-    let reason = ask(&format!("why is {import} in {file} kept? "))?;
-    let answer = ask(&format!(
-        "approve it as {by}, in {}, printed on every run? [y/N] ",
-        names.approvals
-    ))?;
-    if !answer.eq_ignore_ascii_case("y") {
-        return Err("not approved: nothing written".into());
-    }
-    let path = commands.approve(root, file, import, &reason, &by)?;
-    println!("wrote {path}");
+    let path = commands.approve(root, file, import, reason, &by)?;
+    println!(
+        "wrote {path}: {import} in {file} kept by {by}; `rotproof check` prints it on every run"
+    );
     Ok(())
 }
 
-/// Print `question` and read one line of answer from stdin, trimmed. An empty answer is asked again; the end of the
-/// input is an error.
-fn ask(question: &str) -> Result<String, String> {
-    loop {
-        print!("{question}");
-        std::io::stdout()
-            .flush()
-            .map_err(|e| format!("the question could not be shown: {e}"))?;
-        let mut line = String::new();
-        let read = std::io::stdin()
-            .read_line(&mut line)
-            .map_err(|e| format!("the answer could not be read: {e}"))?;
-        if read == 0 {
-            return Err("no answer: nothing written".into());
-        }
-        let line = line.trim();
-        if !line.is_empty() {
-            return Ok(line.to_string());
-        }
-    }
-}
-
-/// Ask a person on the terminal, once, to re-pin every knowledge document whose followed code changed, and write the
-/// new hashes. What is gone, or cannot be read, is left for the person to edit.
-fn approve_reviewed(commands: &dyn Commands, root: &Path) -> Result<(), String> {
-    if !std::io::stdin().is_terminal() {
-        return Err(
-            "rotproof approve --reviewed asks a person, and stdin is not a terminal (an agent's shell has none): run \
-             it in your own terminal, or review each document and pin it with the `rotproof follows` that `rotproof \
-             check` names"
-                .into(),
-        );
-    }
-    let drifts = commands.changed(root)?;
-    if drifts.is_empty() {
-        println!("nothing to re-pin: every knowledge document matches the code it follows");
-        return Ok(());
-    }
-    let mut left = Vec::new();
-    println!("the code changed under these knowledge documents since they were last reviewed:");
-    for d in &drifts {
-        match &d.now {
-            Ok(Some(now)) => println!(
-                "  knowledge/{} follows {}: {} -> {now}",
-                d.doc, d.key, d.pinned
-            ),
-            Ok(None) => left.push(format!(
-                "knowledge/{} follows {}, which is not there",
-                d.doc, d.key
-            )),
-            Err(why) => left.push(format!("knowledge/{} follows {}: {why}", d.doc, d.key)),
-        }
-    }
-    let changed = drifts.len() - left.len();
-    if changed > 0 {
-        // A hash says only that the code changed; the refactoring may be committed already, so no diff is named
-        println!(
-            "the hashes do not say what changed: read the changes first (git diff, or the commits since each document \
-             was last reviewed)"
-        );
-        let answer = ask(&format!(
-            "re-pin these {changed} as reviewed, as if each document was read against its code? [y/N] "
-        ))?;
-        if !answer.eq_ignore_ascii_case("y") {
-            return Err("not re-pinned: nothing written".into());
-        }
-        for doc in commands.repin(root, &drifts)? {
-            println!("wrote docs/knowledge/{doc}");
-        }
-    }
-    if !left.is_empty() {
-        for why in &left {
-            println!("needs a person: {why}");
-        }
-        return Err(
-            "what is gone was not re-pinned: edit follows in those documents by hand".into(),
-        );
-    }
-    Ok(())
+/// The name an approval is signed with: git's `user.name`.
+fn signer(commands: &dyn Commands, root: &Path) -> Result<String, String> {
+    commands.user_name(root).ok_or_else(|| {
+        "git's user.name is not set, so the approval would carry no name: set it (git config user.name <name>) and \
+         run the command again"
+            .to_string()
+    })
 }
 
 /// Remove the approvals that match no forbidden import, and say which.

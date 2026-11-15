@@ -80,8 +80,7 @@ The body is free, except that a deprecated document opens with `# Resolution`: w
   getter and its setter, a Python `@property` and its `@x.setter`, the `impl` blocks of a type) is hashed on all of
   them, in the order they appear. What a document follows must exist: a file, directory or definition that is gone
   fails. Writing the new hash changes the document, so its commit records the review. A document about a decision
-  follows nothing. After a refactoring that kept what the code does, a person re-pins every changed hash in one act
-  with `rotproof approve --reviewed`, on a terminal.
+  follows nothing.
 
 # Alarms
 

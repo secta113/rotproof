@@ -9,7 +9,7 @@ use std::io;
 
 use crate::finding::{under, warn};
 use crate::tree::{exactly, read_text};
-use domain::approvals::{shown, sort, stale};
+use domain::approvals::{over_limit, shown, sort, stale};
 use domain::declaration::Declared;
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
@@ -79,6 +79,10 @@ fn code(
             .problems
             .into_iter()
             .chain(sorted.stale.iter().map(|entry| stale(entry))),
+    ));
+    report.findings.extend(under(
+        "the approvals stay within approved_max",
+        over_limit(approvals.entries.len(), declared.declaration.approved_max),
     ));
     report
         .findings

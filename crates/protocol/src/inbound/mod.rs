@@ -112,7 +112,7 @@ pub struct Report {
     pub skipped: Option<String>,
     /// Whether the tree was checked against a stack's layers (not for `stack = "none"`)
     pub layers_checked: bool,
-    /// Every forbidden import a person approved, as printed on every run: one line per entry that approves something
+    /// Every forbidden import that was approved, as printed on every run: one line per entry that approves something
     pub approved: Vec<String>,
     /// Every comment that keeps the first marker with the reference of an issue, sorted by path and then by
     /// line: printed on every run apart from the findings and the warnings, and failing nothing. Empty unless the
@@ -200,10 +200,6 @@ pub trait Commands {
     ) -> Result<String, String>;
     /// Remove every approval that matches no forbidden import.
     fn prune(&self, root: &Path) -> Result<Vec<Removed>, String>;
-    /// Every key of the knowledge documents whose code is not as pinned.
-    fn changed(&self, root: &Path) -> Result<Vec<Drift>, String>;
-    /// Pin each of `drifts` as reviewed: the file name of each document written.
-    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<String>, String>;
     /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
 }

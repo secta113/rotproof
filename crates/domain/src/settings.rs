@@ -2,8 +2,9 @@
 //! `rotproof create` writes and the commands of the hooks Rotproof wrote are in `hook.rs`; which update asks for which
 //! edit, and what a person is told when one cannot be made, is in `upgrade.rs`.
 //!
-//! - **An edit only adds the rule Rotproof writes, or takes out the hooks Rotproof wrote,** matched exactly, and keeps
-//!   every other key and value of the project's, and the order of the keys.
+//! - **An edit only takes out what Rotproof wrote and no longer keeps (the hooks, the rule that denied editing the
+//!   approvals file),** matched exactly, and keeps every other key and value of the project's, and the order of the
+//!   keys.
 //! - **An edit says what it came to and nothing about the update that asked for it.** It gives the settings' new text,
 //!   `None` when they have it already, or why a person has to make the edit.
 
@@ -16,34 +17,37 @@ use crate::hook;
 /// person can make it.
 pub type Edited = Result<Option<String>, String>;
 
-/// The rule that denies Claude Code editing the approvals file.
+/// The rule that denied Claude Code editing the approvals file, which `rotproof create` wrote until 2.0.0-rc.1.
 pub fn deny_rule() -> String {
     format!("Edit(/{APPROVALS})")
 }
 
-/// Add the rule that denies editing the approvals file to Claude Code's settings, `text`. The keys keep their order.
-pub fn deny_approvals(text: Option<&str>) -> Edited {
-    let rule = deny_rule();
+/// Take the rule that denied editing the approvals file ([`deny_rule`]) out of Claude Code's settings, `text`: each
+/// copy of it in `permissions.deny`, `deny` when no rule is left, and `permissions` when no key is left. A rule the
+/// project wrote itself (another text) stays, and so does everything else, in its order.
+pub fn remove_deny_approvals(text: Option<&str>) -> Edited {
     let Some(text) = text else {
-        return Err("there is no such file".to_string());
+        return Ok(None);
     };
     let mut settings = object(text)?;
-    let permissions = settings
-        .entry("permissions")
-        .or_insert_with(|| Value::Object(Map::new()));
-    let Value::Object(permissions) = permissions else {
-        return Err("permissions is not an object".to_string());
+    let rule = deny_rule();
+    let Some(Value::Object(permissions)) = settings.get_mut("permissions") else {
+        return Ok(None);
     };
-    let deny = permissions
-        .entry("deny")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let Value::Array(deny) = deny else {
-        return Err("permissions.deny is not a list".to_string());
+    let Some(Value::Array(deny)) = permissions.get_mut("deny") else {
+        return Ok(None);
     };
-    if deny.iter().any(|r| r.as_str() == Some(rule.as_str())) {
+    let before = deny.len();
+    deny.retain(|r| r.as_str() != Some(rule.as_str()));
+    if deny.len() == before {
         return Ok(None);
     }
-    deny.push(Value::String(rule));
+    if deny.is_empty() {
+        permissions.shift_remove("deny");
+    }
+    if permissions.is_empty() {
+        settings.shift_remove("permissions");
+    }
     Ok(Some(written(settings)))
 }
 
@@ -153,7 +157,7 @@ mod tests {
     #[test]
     fn settings_that_are_no_object_are_left_to_a_person_by_every_edit() {
         let edits: [fn(Option<&str>) -> Edited; 3] =
-            [deny_approvals, remove_stop_hook, remove_time_hook];
+            [remove_deny_approvals, remove_stop_hook, remove_time_hook];
         for edit in edits {
             for text in ["not json", "[]", "\"x\""] {
                 assert_eq!(
@@ -165,16 +169,55 @@ mod tests {
         }
     }
 
-    /// A project with no settings has nothing to add a hook to or take out of, and the rule is the one edit that
-    /// says so.
+    /// A project with no settings has nothing to take out of.
     #[test]
-    fn no_settings_are_said_by_the_rule_alone() {
-        assert_eq!(
-            deny_approvals(None),
-            Err("there is no such file".to_string())
-        );
-        for edit in [remove_stop_hook, remove_time_hook] {
+    fn no_settings_have_nothing_to_take_out() {
+        for edit in [remove_deny_approvals, remove_stop_hook, remove_time_hook] {
             assert_eq!(edit(None), Ok(None));
+        }
+    }
+
+    /// The rule goes alone and exactly: what else the project denies, allows or runs stays in its order, and a key left
+    /// empty by the rule going goes with it, while one the project left empty is not touched.
+    #[test]
+    fn the_deny_rule_is_taken_out_and_only_it() {
+        let rule = deny_rule();
+        // What `rotproof create` wrote until 2.0.0-rc.1: the rule alone, which leaves the file empty
+        let written = format!(
+            "{{\n  \"permissions\": {{\n    \"deny\": [\n      \"{rule}\"\n    ]\n  }}\n}}\n"
+        );
+        assert_eq!(
+            remove_deny_approvals(Some(&written)),
+            Ok(Some("{}\n".to_string()))
+        );
+        assert_eq!(remove_deny_approvals(Some("{}\n")), Ok(None));
+        let mixed = format!(
+            r#"{{"env": {{"A": "1"}}, "permissions": {{"allow": ["Bash(ls)"], "deny": ["Read(x)", "{rule}", "{rule}"]}}, "hooks": {{}}}}"#
+        );
+        let Ok(Some(kept)) = remove_deny_approvals(Some(&mixed)) else {
+            panic!("the rule is taken out");
+        };
+        let read: Value = serde_json::from_str(&kept).unwrap();
+        assert_eq!(read["permissions"]["deny"], json!(["Read(x)"]));
+        assert_eq!(read["permissions"]["allow"], json!(["Bash(ls)"]));
+        let keys: Vec<&String> = read.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["env", "permissions", "hooks"]);
+        // Only the rule in the list goes: a `deny` left with nothing else goes, `permissions` stays while a key is left
+        let only = format!(r#"{{"permissions": {{"allow": ["a"], "deny": ["{rule}"]}}}}"#);
+        let Ok(Some(without)) = remove_deny_approvals(Some(&only)) else {
+            panic!("the rule is taken out");
+        };
+        let read: Value = serde_json::from_str(&without).unwrap();
+        assert_eq!(read, json!({"permissions": {"allow": ["a"]}}));
+        // Nothing of Rotproof's to take out: another text, no list, no permissions
+        for text in [
+            r#"{"permissions": {"deny": ["Edit(/other.toml)"]}}"#,
+            r#"{"permissions": {"deny": []}}"#,
+            r#"{"permissions": {"deny": "x"}}"#,
+            r#"{"permissions": []}"#,
+            r#"{"hooks": {}}"#,
+        ] {
+            assert_eq!(remove_deny_approvals(Some(text)), Ok(None), "{text}");
         }
     }
 

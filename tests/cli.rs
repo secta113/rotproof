@@ -2781,7 +2781,8 @@ fn init_needs_a_known_stack() {
 
 #[test]
 fn init_upgrades_a_project_made_by_the_first_release() {
-    // As `rotproof create` of 0.1.0 left a project: no files in the declaration, and settings without the deny rule
+    // As `rotproof create` of 0.1.0 left a project: no files in the declaration, and settings without the deny rule,
+    // which nothing adds any more
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     let arg = root_arg(r);
@@ -2791,7 +2792,9 @@ fn init_upgrades_a_project_made_by_the_first_release() {
     )
     .unwrap();
     assert!(create(&["--root", &arg, "create"]).status.success());
-    fs::write(r.join(".claude/settings.json"), "{\n  \"hooks\": {}\n}\n").unwrap();
+    fs::create_dir_all(r.join(".claude")).unwrap();
+    let settings = "{\n  \"hooks\": {}\n}\n";
+    fs::write(r.join(".claude/settings.json"), settings).unwrap();
     fs::write(
         r.join("docs/log.md"),
         "# Log\n\n## 2026-10-02\n\n* Something\n",
@@ -2812,7 +2815,16 @@ fn init_upgrades_a_project_made_by_the_first_release() {
     );
     let out = run(&["--root", &arg, "init"]);
     assert!(out.status.success(), "{}", stdout(&out));
-    assert!(stdout(&out).contains("updated .claude/settings.json: claude-deny-approvals"));
+    // Nothing in the settings is Rotproof's to take out: it says nothing of them and leaves them as they are
+    assert!(
+        !stdout(&out).contains("updated .claude/settings.json"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(
+        fs::read_to_string(r.join(".claude/settings.json")).unwrap(),
+        settings
+    );
     // Every field it adds to the declaration is named, as `rotproof create` names those it adds
     for field in [format!("files = \"{version}\""), "declined = []".into()] {
         assert!(
@@ -2821,11 +2833,6 @@ fn init_upgrades_a_project_made_by_the_first_release() {
             stdout(&out)
         );
     }
-    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
-    assert!(
-        settings.contains("Edit(/.config/rotproof-approved.toml)"),
-        "{settings}"
-    );
     let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
     assert!(
         declaration.starts_with("stack = \"none\"\nareas = [\"a\"]\n"),
@@ -2862,9 +2869,9 @@ fn init_upgrades_a_project_made_by_the_first_release() {
 }
 
 #[test]
-fn init_asks_no_person_for_the_settings_it_writes_itself() {
-    // A project of the first release without .claude/settings.json: the deny rule's update finds no file, and the
-    // refresh of the same run writes one that has the rule
+fn init_writes_no_settings_and_asks_no_person_for_a_file_that_is_not_there() {
+    // A project of the first release without .claude/settings.json: no update has a file to change, and the refresh of
+    // the same run writes none, as `rotproof create` has no settings of its own
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     let arg = root_arg(r);
@@ -2880,16 +2887,12 @@ fn init_asks_no_person_for_the_settings_it_writes_itself() {
     let out = run(&["--root", &arg, "init"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(
-        stdout(&out).contains("wrote .claude/settings.json"),
+        !stdout(&out).contains(".claude/settings.json"),
         "{}",
         stdout(&out)
     );
     assert!(!stdout(&out).contains("needs a person"), "{}", stdout(&out));
-    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
-    assert!(
-        settings.contains("Edit(/.config/rotproof-approved.toml)"),
-        "{settings}"
-    );
+    assert!(!r.join(".claude").exists());
     let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
     assert!(
         declaration.contains(&format!("files = \"{version}\"")),
@@ -3509,20 +3512,13 @@ fn run_with_input(args: &[&str], input: &str) -> Output {
 }
 
 #[test]
-fn create_writes_no_hook_and_the_settings_deny_only_the_approvals_file() {
+fn create_writes_no_settings_for_claude_code_neither_a_hook_nor_a_deny_rule() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     assert!(create(&["--root", &root_arg(r), "create"]).status.success());
-    // create wrote the settings that run no hook, for Claude Code only
-    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
-    assert!(!settings.contains("\"hooks\""), "{settings}");
-    assert!(!settings.contains("stop-hook"), "{settings}");
-    assert!(!settings.contains("time-hook"), "{settings}");
-    // and that deny Claude Code editing the approvals file, which only a person adds to
-    assert!(
-        settings.contains("\"deny\": [\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]"),
-        "{settings}"
-    );
+    // It wrote them once, to run no hook and to deny editing the approvals file, which an agent may now approve
+    // through; a project that has them is upgraded by `rotproof init`
+    assert!(!r.join(".claude").exists(), "{:?}", tree(r));
     assert!(!r.join(".gemini").exists());
 }
 
@@ -3673,7 +3669,7 @@ fn an_approved_import_passes_and_is_printed_and_a_stale_approval_fails() {
     let (code, said) = check();
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains(
-        "approved by a person in .config/rotproof-approved.toml (1):\n  infrastructure.db in domain/model.py: \
+        "approved in .config/rotproof-approved.toml (1):\n  infrastructure.db in domain/model.py: \
          the framework loads it (someone, 2026-10-06T09:00:00+09:00)\n"
     ), "{said}");
     assert!(!said.contains("domain/model.py:1:"), "{said}");
@@ -3732,30 +3728,153 @@ fn an_approved_import_passes_and_is_printed_and_a_stale_approval_fails() {
 }
 
 #[test]
-fn approve_refuses_without_a_terminal_and_prune_removes_only_what_matches_nothing() {
+fn more_approvals_than_approved_max_fail_the_check_and_no_limit_means_none() {
+    let root = clean_repo();
+    let r = root.path();
+    fs::write(
+        r.join("domain/model.py"),
+        "import infrastructure.db\nimport application\n",
+    )
+    .unwrap();
+    fs::write(
+        r.join(".config/rotproof-approved.toml"),
+        approvals(&[
+            ("domain/model.py", "infrastructure.db"),
+            ("domain/model.py", "application"),
+        ]),
+    )
+    .unwrap();
+    let own = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    let declare = |max: &str| {
+        fs::write(r.join(".config/rotproof.toml"), format!("{own}{max}")).unwrap();
+        let out = run(&["--root", &root_arg(r), "check"]);
+        (out.status.code(), stdout(&out))
+    };
+    // No approved_max: two approvals, and no limit
+    let (code, said) = declare("");
+    assert_eq!(code, Some(0), "{said}");
+    // At the limit, and under it, the check passes
+    for max in ["approved_max = 2\n", "approved_max = 5\n"] {
+        let (code, said) = declare(max);
+        assert_eq!(code, Some(0), "{max}: {said}");
+    }
+    // Over it, the check fails and says which file holds the limit; the approvals are still printed
+    let (code, said) = declare("approved_max = 1\n");
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "the approvals stay within approved_max:\n  .config/rotproof-approved.toml: 2 approvals, and approved_max \
+             in .config/rotproof.toml is 1:"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains("approved in .config/rotproof-approved.toml (2):"),
+        "{said}"
+    );
+    // Zero allows none
+    let (code, said) = declare("approved_max = 0\n");
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("2 approvals, and approved_max in .config/rotproof.toml is 0"),
+        "{said}"
+    );
+    // A limit that is no count is a declaration that cannot be read
+    let (code, said) = declare("approved_max = -1\n");
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(".config/rotproof.toml: invalid value: integer `-1`, expected u32"),
+        "{said}"
+    );
+}
+
+/// `rotproof approve ...` in `root`, with git's configuration as `config` says it (the text of a global config file, or
+/// none): neither the machine's own nor the user's decides who an approval is signed by.
+fn approve_with_git(root: &Path, config: Option<&str>, args: &[&str]) -> Output {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("gitconfig");
+    if let Some(text) = config {
+        fs::write(&global, text).unwrap();
+    }
+    Command::new(env!("CARGO_BIN_EXE_rotproof"))
+        .args(["--root", &root_arg(root), "approve"])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", &global)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .expect("the binary runs")
+}
+
+#[test]
+fn approve_needs_a_reason_and_asks_nothing_and_prune_removes_only_what_matches_nothing() {
     let root = clean_repo();
     let r = root.path();
     fs::write(r.join("domain/model.py"), "import infrastructure.db\n").unwrap();
     let path = r.join(".config/rotproof-approved.toml");
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let args = ["domain/model.py", "infrastructure.db"];
+    let with_reason = |reason: &'static str| [args[0], args[1], "--reason", reason];
+    let said = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
 
-    // The test's stdin is no terminal, as an agent's shell has none: nothing is asked, nothing written
-    let out = run(&[
-        "--root",
-        &root_arg(r),
-        "approve",
-        "domain/model.py",
-        "infrastructure.db",
-    ]);
+    // The reason is required: no reason, and an empty one, write nothing and ask nothing
+    let out = approve_with_git(r, named, &args);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("--reason"), "{}", said(&out));
+    let out = approve_with_git(r, named, &with_reason("  "));
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("--reason is empty"), "{}", said(&out));
+    // The file and the import are both needed, unless pruning, and a reason is no part of pruning
+    let out = approve_with_git(r, named, &["domain/model.py", "--reason", "why"]);
+    assert_eq!(out.status.code(), Some(2));
+    let out = approve_with_git(r, named, &["--prune", "--reason", "why"]);
+    assert_eq!(out.status.code(), Some(2));
+    // Only what the check forbids is approved
+    let out = approve_with_git(
+        r,
+        named,
+        &["domain/model.py", "application", "--reason", "why"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("no forbidden import"), "{}", said(&out));
+    // The approval is signed with git's user.name, and without one it is not written
+    let out = approve_with_git(r, None, &with_reason("the ORM's session"));
     assert_eq!(out.status.code(), Some(2));
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("stdin is not a terminal"),
+        said(&out).contains("user.name is not set"),
         "{}",
-        String::from_utf8_lossy(&out.stderr)
+        said(&out)
     );
     assert!(!path.exists());
-    // The file and the import are both needed, unless pruning
-    let out = run(&["--root", &root_arg(r), "approve", "domain/model.py"]);
+
+    // Given a reason and a name it asks nothing, though stdin is no terminal, and the entry is what was given
+    let out = approve_with_git(
+        r,
+        named,
+        &with_reason("the \"ORM\" builds its session here"),
+    );
+    assert_eq!(out.status.code(), Some(0), "{}{}", stdout(&out), said(&out));
+    assert!(
+        stdout(&out).contains("wrote .config/rotproof-approved.toml"),
+        "{}",
+        stdout(&out)
+    );
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.contains("by = \"Someone Else\""), "{written}");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "approved in .config/rotproof-approved.toml (1):\n  infrastructure.db in domain/model.py: the \"ORM\" \
+             builds its session here (Someone Else, "
+        ),
+        "{}",
+        stdout(&out)
+    );
+    // Once: it is approved already
+    let out = approve_with_git(r, named, &with_reason("again"));
     assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("approved already"), "{}", said(&out));
+    fs::remove_file(&path).unwrap();
 
     // Nothing to prune without a file
     let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
@@ -4044,29 +4163,30 @@ fn a_records_only_repository_follows_definitions_and_directories_of_any_language
 }
 
 #[test]
-fn the_re_pin_of_followed_code_refuses_without_a_terminal() {
+fn approve_has_no_reviewed_flag_and_follows_is_the_one_way_to_re_pin() {
     let root = clean_repo();
     let r = root.path();
     let arg = root_arg(r);
     let doc = "---\ntype: Knowledge\ntitle: M\ndescription: D.\ntags: [a]\nstatus: stable\nfollows:\n  \
                domain/__init__.py: \"00000000\"\n---\n\n# Shape\n\nText.\n";
     fs::write(r.join("docs/knowledge/model.md"), doc).unwrap();
+    // The flag is gone: clap refuses it, and nothing is written
     let out = run(&["--root", &arg, "approve", "--reviewed"]);
     assert_eq!(out.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("stdin is not a terminal"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains("unexpected argument '--reviewed'"), "{said}");
     assert_eq!(
         fs::read_to_string(r.join("docs/knowledge/model.md")).unwrap(),
         doc
     );
-    // One act at a time
-    let out = run(&["--root", &arg, "approve", "--reviewed", "--prune"]);
-    assert_eq!(out.status.code(), Some(2));
-    let out = run(&["--root", &arg, "approve", "--reviewed", "a.py", "b"]);
-    assert_eq!(out.status.code(), Some(2));
+    assert!(!stdout(&run(&["approve", "--help"])).contains("--reviewed"));
+    // The check names the command that pins the key, and it is `rotproof follows`
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(
+        said.contains("`rotproof follows knowledge/model.md domain/__init__.py`"),
+        "{said}"
+    );
 }
 
 #[test]

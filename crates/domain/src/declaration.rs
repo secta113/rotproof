@@ -58,6 +58,11 @@ pub struct Declaration {
     /// key fails to read in a Rotproof that lacks it, as it does for any field it does not know
     #[serde(default)]
     pub todo_link: Option<String>,
+    /// The most approvals, entries of the approvals file (`approvals.rs`), the project holds: `rotproof check` fails
+    /// above it. Optional, and never written by `rotproof init` or `rotproof create`: absent, there is no limit.
+    /// Raising it is the project's decision, which shows in the diff of this file
+    #[serde(default)]
+    pub approved_max: Option<u32>,
     /// The version of Rotproof the project's files are up to (`upgrade.rs`). `None` is the first release; only
     /// `rotproof init` writes it
     #[serde(default)]
@@ -212,7 +217,7 @@ const FILES_COMMENT: &str = "# The version of Rotproof the project's files are u
                              # Rotproof, run it again, and it updates them\n";
 
 /// What `declined` is, as the declaration says it above the field.
-const DECLINED_COMMENT: &str = "# Updates of the project's files this project declines, by name, such as \"claude-deny-approvals\".\n\
+const DECLINED_COMMENT: &str = "# Updates of the project's files this project declines, by name, such as \"claude-remove-deny-approvals\".\n\
                                 # `rotproof init` says when one cannot be applied without a person\n";
 
 /// What `[[unit]]` is, as the declaration says it, commented out. It is the last thing in the file, so that a project
@@ -811,6 +816,26 @@ mod tests {
         // The declaration init writes does not hold it: it is documented in the specification alone
         for stack in known_stacks() {
             assert!(!declaration_text(stack, "none").contains("todo_link"));
+        }
+    }
+
+    #[test]
+    fn approved_max_is_a_count_that_nothing_writes() {
+        let python = "stack = \"python\"\nareas = []\nui = \"none\"\n";
+        let max = |text: &str| parse_declaration(text).map(|declaration| declaration.approved_max);
+        assert_eq!(max(python), Ok(None));
+        assert_eq!(max(&format!("{python}approved_max = 3\n")), Ok(Some(3)));
+        assert_eq!(max(&format!("{python}approved_max = 0\n")), Ok(Some(0)));
+        // Not a count: a negative number, a string, a fraction
+        for value in ["-1", "\"3\"", "1.5"] {
+            assert!(
+                max(&format!("{python}approved_max = {value}\n")).is_err(),
+                "{value}"
+            );
+        }
+        // The declaration init writes does not hold it: it is documented in the specification alone
+        for stack in known_stacks() {
+            assert!(!declaration_text(stack, "none").contains("approved_max"));
         }
     }
 

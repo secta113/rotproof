@@ -35,9 +35,8 @@ rotproof --root <repository> create  # list the layers it would make, writing no
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write the generated files that are out of date (docs/'s index files and the knowledge rules, and who reads the shared units)
-rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
+rotproof --root <repository> approve <file> <import> --reason "<why>"  # keep a forbidden import (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
-rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof guide                       # print the guide `rotproof create` writes for the stack and the UI the declaration has
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
@@ -93,7 +92,6 @@ The project's files are written once, as a starting point, and are the project's
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
-| `.claude/settings.json` | The rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit. `typescript`: installs what `package.json` and its lockfile pin (`npm ci`) and runs `npx --no -- rotproof check`, which never downloads another Rotproof, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates of the layers present, each named on a line of its own (no glob: see "Units"), so `cargo build` builds every layer present, and its root package, which depends on `composition`. A project that declares units has the workspace alone |
@@ -149,13 +147,14 @@ that has a declaration:
 
 | Update | Version | File | What it does |
 |---|---|---|---|
-| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
-| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook`, or the hook beside it that 0.4.0 added (it said when `rotproof` was not on the `PATH`), a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above: an untouched file ends as `rotproof create` writes it now |
-| `claude-remove-time-hook` | 1.0.0-rc.4 | `.claude/settings.json` | Takes out each hook on `SessionStart` and `UserPromptSubmit` whose command is exactly `rotproof time-hook`, a group left with no hook, an event left with no group, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). A hook with another command that runs it, such as a path to the binary, stays. Written again as above: an untouched file ends as `rotproof create` writes it now |
+| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook`, or the hook beside it that 0.4.0 added (it said when `rotproof` was not on the `PATH`), a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above |
+| `claude-remove-time-hook` | 1.0.0-rc.4 | `.claude/settings.json` | Takes out each hook on `SessionStart` and `UserPromptSubmit` whose command is exactly `rotproof time-hook`, a group left with no hook, an event left with no group, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). A hook with another command that runs it, such as a path to the binary, stays. Written again as above |
+| `claude-remove-deny-approvals` | 2.0.0-rc.2 | `.claude/settings.json` | Takes out each `"Edit(/.config/rotproof-approved.toml)"` of `permissions.deny`, which `rotproof create` wrote until 2.0.0-rc.1 so that an agent could not write the approvals file, `deny` when no rule is left, and `permissions` when no key is left (see "Approving a forbidden import"). A rule with another text stays. Written again as above: a file with nothing else in it ends as `{}` and is not deleted |
 
-The two updates 0.4.0 brought, `claude-stop-hook-on-path` and `claude-time-hook`, which added the hooks the two updates
-above take out again, are gone, as nothing adds those hooks now. A declaration that still names either in `declined` is
-reported by `rotproof check` as naming no update: take the name out.
+The two updates 0.4.0 brought, `claude-stop-hook-on-path` and `claude-time-hook`, which added the hooks the first two
+updates above take out again, are gone, as nothing adds those hooks now, and so is `claude-deny-approvals`, which added
+the rule the last one takes out. A declaration that still names one of them in `declined` is reported by `rotproof
+check` as naming no update: take the name out. `rotproof create` writes no `.claude/settings.json` any more.
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
@@ -197,19 +196,20 @@ code 1 is an error that is only shown. The hook input on stdin is not read.
 ## Approving a forbidden import
 
 Sometimes a project means to break the layer table: a framework forces an import, or a fix cannot wait for the
-refactoring. Such an import passes only as an entry in `.config/rotproof-approved.toml`, which a person adds on a
-terminal:
+refactoring. Such an import passes only as an entry in `.config/rotproof-approved.toml`, which `rotproof approve`
+adds, with the reason it is given:
 
 ```sh
-rotproof approve domain/model.py infrastructure.db
+rotproof approve domain/model.py infrastructure.db --reason "the ORM's session factory must be built where the model is"
 ```
 
 The file and the import are named as `rotproof check` names them: the file from the root, and the import as the check
 writes it (a Python dotted name, a TypeScript specifier, a crate's dependency). In Python, each name of
 `from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them.
-`rotproof approve` shows the forbidden import, asks why it is kept and for a `y`, signs with git's `user.name` (or a
-name it asks for when that is not set), and adds the entry (the file keeps a byte order mark and its line endings,
-CRLF on every line when one line had it, and so it does when `--prune` removes entries):
+`rotproof approve` shows the forbidden import, signs with git's `user.name`, and adds the entry (the file keeps a byte
+order mark and its line endings, CRLF on every line when one line had it, and so it does when `--prune` removes
+entries). It asks nothing, so an agent's shell can run it, but it takes no approval without `--reason` (an empty one
+fails), and it fails when `user.name` is not set, as the entry would carry no name:
 
 ```toml
 [[kept]]
@@ -219,20 +219,27 @@ reason = "the ORM's session factory must be built where the model is"
 approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
 ```
 
-- **It runs only when stdin is a terminal,** so an agent's shell cannot approve: a person does. There is no comment
-  that silences the check on the import's line: it would be the easiest thing for an agent to write.
-- **Claude Code is denied editing the file.** The `.claude/settings.json` that `rotproof create` writes holds
-  `"permissions": { "deny": ["Edit(/.config/rotproof-approved.toml)"] }`, which refuses Claude Code's edit tools and
-  its shell's file commands and redirects (`>>`, `sed -i`) on the file, with no prompt. A person edits it in an
-  editor, or through `rotproof approve`.
+- **Run it only when the user asked for the exception, and say that you ran it.** The guide in `.rotproof/AGENTS.md`
+  says so. There is no comment that silences the check on the import's line: it would be the easiest thing for an
+  agent to write.
+- **Claude Code is not denied editing the file.** Until 2.0.0-rc.1 the `.claude/settings.json` that `rotproof create`
+  wrote held `"permissions": { "deny": ["Edit(/.config/rotproof-approved.toml)"] }`, which refused Claude Code's edit
+  tools and its shell's file commands and redirects on the file. It is not written now, and `rotproof init` takes it
+  out of a project's settings (see "Upgrading Rotproof"): an approval is kept in view by the check, which prints it on
+  every run and counts it, and not by keeping the agent from the file.
 - **An approval never hides.** `rotproof check` passes the approved import on every line of its file, and prints every
   approval on every run.
 - **An approval follows the code.** An entry that matches no forbidden import fails: the import moved away, was
   fixed, or became allowed. `rotproof approve --prune` removes those entries. It needs no terminal, since it only
   takes approvals away and never lets anything pass that failed before.
-- **This raises the cost of an exception; it does not prevent everything.** A script that writes the file passes. The
-  point is that an exception is a deliberate act that a reviewer sees in the diff, never a side effect of fixing a
-  failure.
+- **The number of approvals can have a limit.** `approved_max = 3` in `.config/rotproof.toml` is the most entries the
+  approvals file may hold, an entry that matches nothing counted too; `rotproof check` fails above it, naming both
+  files. `0` allows none. Without the key there is no limit, and the check prints every approval all the same.
+  The limit is not a barrier but a count that cannot grow in silence: raising it is a change of the declaration, which
+  the diff shows, and the guide tells an agent that raising it to pass the check is not its decision.
+- **This does not prevent an exception; it makes one visible.** Nothing stops a run of `rotproof approve` that nobody
+  asked for, or a script that writes the file. What stays is that an approval is a named line with its reason, printed
+  on every run, which fails once it matches nothing, and which a reviewer sees in the diff.
 
 ## The layers
 
@@ -248,15 +255,17 @@ ui = "atomic"            # the layers of the screens: atomic | none (rust: none;
 absent = ["ui.templates"]  # layers or levels this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
 todo_link = "number"     # optional, number | key: a TODO may stay when it names its issue (see below)
+approved_max = 3         # optional, a count: the most approvals the project holds (see "Approving a forbidden import")
 ```
 
-`todo_link` is the one key of the declaration that `rotproof init` and `rotproof create` never write: a project that
-wants it adds it by hand, and everything else is as without it (the marker check below fails on every `TODO`). It is
+`todo_link` and `approved_max` are the two keys of the declaration that `rotproof init` and `rotproof create` never
+write: a project that wants one adds it by hand, and everything else is as without it. Without `todo_link` the marker
+check below fails on every `TODO`; without `approved_max` the number of approvals has no limit. `todo_link` is
 `"number"` for `TODO(#123): what is left`, or `"key"` for `TODO(ABC-123): what is left`; any other value fails, naming
 the two, and so does the key with `stack = "none"`, which has no code to read. The declaration is read strictly, with
 a field Rotproof does not know failing it, so a Rotproof older than the one that brought `todo_link` cannot read a
 declaration that holds it: a project pins an exact version of Rotproof, and moves it before it adds the key. Whether a
-project declares it is a person's decision, which an agent never makes to pass the check, and the guide says so.
+project declares either is a person's decision, which an agent never makes to pass the check, and the guide says so.
 
 What the layers are is written once, in `layers/table.toml`, on the onion architecture:
 
@@ -587,7 +596,7 @@ person reads as the same table may be written in another order, and the hash doe
 it is written in, so a document that follows `.config/rotproof.toml::unit` fails when the strings of a unit's `absent`
 change places, and the pieces of a name are joined in the order they appear, so it fails too when the `[[unit]]`
 tables of the declaration change places, though what the project declares is the same. Read the table, and pin it
-again (`rotproof follows`, or `rotproof approve --reviewed`). To avoid it, write `absent` in one order, and add a
+again with `rotproof follows`. To avoid it, write `absent` in one order, and add a
 unit at the end of the declaration. A name is bare keys joined by dots (letters, digits, `-` and `_`). A table with no heading of its own (a value, `unit = [{ ... }]`, or one made by a
 dotted key) is not named, so it is "not there"; a `.toml` file that is not TOML cannot be read, which the check says as
 it says it of a Python file that does not parse. A `.toml` file is no code of a directory: `src/` is hashed on the same
@@ -597,12 +606,8 @@ its hash quoted, and writes all the keys or none: pinning changes the document, 
 Nothing else in the document changes: it keeps a byte order mark and its line endings (CRLF on every line when one
 line had it). Run it when a document starts to follow something, and when `rotproof check` fails because what it
 follows changed since: the check names the command to run. It pins only the keys named, needs no terminal, and leaves
-a key gone from the code to edit by hand. After a refactoring that moved code without changing what it does, a person
-can re-pin every changed hash in one act: `rotproof approve --reviewed` lists each document and what changed under it,
-says to read the changes first (a hash says only that the code changed), asks for one `y` on a terminal (an agent's
-shell has none), writes the new hashes (each document keeping a byte order mark and its line endings, as `rotproof
-follows` does), and names the documents it wrote. What is gone is left for the person to edit. No LLM judges whether
-the meaning changed: the agent that refactors is usually one.
+a key gone from the code to edit by hand. There is no command that re-pins every changed hash in one act: a hash says
+only that the code changed, so each document is read against its code and pinned with the keys named.
 
 Some knowledge matters only when something is seen: a service refuses an upload, a CI image moves. Such a document is
 an alarm, with `# When` (what is seen and where, in the words of the output) and `# Do` (what to do then, usually
@@ -823,7 +828,8 @@ changed is in the commits, what was measured and decided along the way in the ta
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
   `approved.at` that is not a datetime with a time zone, and two entries for one import. A file named otherwise
-  (`Rotproof-Approved.toml`) approves nothing, and fails.
+  (`Rotproof-Approved.toml`) approves nothing, and fails. With `approved_max` in the declaration, **the approvals stay
+  within it**: more entries than it lets fails, as one finding that names both files.
 - **The project's files are up to this version of Rotproof** (see "Upgrading Rotproof"): `files` in the declaration
   (0.1.0 when it is missing) is a version as `major.minor.patch`, neither older nor newer than the running Rotproof,
   and every name in `declined` is an update.

@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 36265ca8. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at db76a54c. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -20,7 +20,7 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
 - **エージェントが層をまたぐと、ビルドが落ちます。** すべての import を層の表に照らします。表はオニオンアーキテクチャで、
   `composition`、`infrastructure`、`application`、`protocol`、`domain` と、画面のための `ui`、`presentation` です。
   Python、TypeScript、Rust を検査します。この層に分けられないコードは責務が混ざっているので、表はエージェントに
-  コードを分けさせる手段でもあります。例外は、人が端末で承認したエントリだけで、レビューする人は差分でそれを見ます。
+  コードを分けさせる手段でもあります。例外は、承認のファイルにある、理由つきのエントリだけで、レビューする人は差分でそれを見ます。
 - **モノレポの各部分が、自分の層を守ります。** モノレポのパッケージやモジュラーモノリスのモジュールをユニットとして
   宣言すると、そのあいだの import がすべて検査されます。ある部分が別の部分に届くのは、届いてよい層を通るときだけです。
   誰も必要としないものを集めてしまう共有ユニットは、差分に出る一覧で見つかります（「ユニット」を参照）。
@@ -367,18 +367,17 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
 - **宣言が正であり、Rotproof は直さない。** プロジェクトが宣言した構造が、その構造です。それと違う木は、どちら向きの
   違いでも失敗し、木と宣言のどちらが間違っているかは誰かが決めます。`rotproof check` は報告するだけです。書くのは、
   人やエージェントが実行するコマンドで、何をしたかを言います。そういうコマンドは、足りないものを足し、人が書いた値は
-  そのままにします。足すのは、無い層やプロジェクトのファイル、宣言に無い欄、人が承認したエントリ、`rotproof init` の
+  そのままにします。足すのは、無い層やプロジェクトのファイル、宣言に無い欄、承認、`rotproof init` の
   名前の付いた更新が持ち込むもの
   （[Upgrading Rotproof](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#upgrading-rotproof) を参照）、
   そして誰も手で書かない、Rotproof が生成するファイルです。宣言に無い欄は、最初の値を一度だけ木から取ります
   （`areas` には knowledge の文書が使っているタグが入るので、規則を守っていた文書は守ったままになります）。それ以降、
   宣言に無いタグを持つ文書は失敗します。`.claude/settings.json` の更新は、キーとその順番と値を保ちますが
-  （取り除くのは、Rotproof が書いた stop hook と time hook に厳密に一致するものだけです）、ファイル全体を Rotproof の
+  （取り除くのは、Rotproof が書いた stop hook と time hook と deny の規則に厳密に一致するものだけです）、ファイル全体を Rotproof の
   体裁（インデントは空白 2 つ）で書き直します。行末と byte order mark は保ちます。これらは人が書いたものを変えますが、
   どれもそのために実行するコマンドの中でのことです。Rotproof は記録を動かしたり書き換えたりしません。1.0 からは
   作業の記録を読まず、古いプロジェクトの記録は、あった場所にそのまま残ります。knowledge の文書をコードに照らして
-  読み直したら、`rotproof follows`（キーを名指す）と `rotproof approve --reviewed`（人が端末で）が、その `follows` に
-  ハッシュを書きます。読み直すのは人かエージェントで、固定はそれを記録するだけです。`rotproof approve --prune` は、
+  読み直したら、`rotproof follows`（キーを名指す）が、その `follows` にハッシュを書きます。読み直すのは人かエージェントで、固定はそれを記録するだけです。`rotproof approve --prune` は、
   どの禁じられた import にも合わない承認を取り除きます。`rotproof check` はそういう承認があると失敗します。
   取り除くだけなので、前に落ちていたものが通ることはありません。Rotproof はコードを動かしません。層の表が変わるとき
   （0.4.0、1.0.0-rc.3）、`rotproof init` は各層のコードの行き先を言い、動かすのは人です。

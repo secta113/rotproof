@@ -17,7 +17,6 @@ use domain::declaration::{
     unreadable,
 };
 use domain::guide::{GUIDE, guide};
-use domain::hook::SETTINGS;
 use domain::layers::{Language, NO_UI, Place, layout, table, uis};
 use domain::members::{Package, entry_package, extended};
 use domain::project::project_files;
@@ -281,11 +280,7 @@ fn write_project(
         .collect();
     crates.extend(made_crates.packages.iter().map(|p| p.dir.clone()));
     let (files, not_written) = project_files(declared, name, &crates);
-    let once = SETTINGS
-        .iter()
-        .map(|(path, text)| (*path, text.to_string()))
-        .chain(files);
-    for (path, text) in once {
+    for (path, text) in files {
         if tree.found(path).is_none() {
             write(out, path, &text, made)?;
         }
