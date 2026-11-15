@@ -19,7 +19,8 @@ If LLM agents write the code of a repository, these are the things nobody has to
   code they describe, each pinned to it by a hash. When that code changes, `rotproof check` fails until someone reads
   the document against it and pins it again.
 - **Put-off work does not hide in a comment.** A `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE` in a code comment fails the
-  check: the finding is fixed now, written in an issue, or let go. No comment switches the type checker off, and only
+  check: the finding is fixed now, written in an issue, or let go. A project that declares `todo_link` may keep a
+  `TODO` that names the issue tracking it, which every run lists. No comment switches the type checker off, and only
   `infrastructure` reads the environment variables.
 - **An agent that has only the binary finds its way.** `rotproof --help` gives the order to start in, and the rules
   are written for the project's stack in `.rotproof/AGENTS.md`, which the `AGENTS.md` and `CLAUDE.md` that
@@ -36,14 +37,14 @@ Rotproof is released for Windows x86_64, Linux x86_64 (glibc 2.17 or newer) and 
 newer). Pin the exact version, so that an upgrade, which can bring new rules, is a commit of its own:
 
 ```sh
-pip install rotproof==1.0.0
+pip install rotproof==2.0.0-rc.1
 ```
 
 In a Node project, pin it with npm, which installs the binary for your platform with it (the package `rotproof` and
 one of `@rotproof/linux-x64`, `@rotproof/win32-x64` and `@rotproof/darwin-arm64`):
 
 ```sh
-npm install -D -E rotproof@1.0.0
+npm install -D -E rotproof@2.0.0-rc.1
 ```
 
 The wheel carries only the binary; no Python code runs. Without Python or Node, take the archive for your platform from
@@ -283,7 +284,8 @@ It keeps two structures:
 - **The records:** how things are now, and why, as far as the code cannot tell it, in knowledge documents that
   follow the code they describe, so that `rotproof check` fails once the code changes under them (and alarms, for what
   matters only when it is seen); and a log of what each task left behind. Open work is kept in issues, not here.
-  Knowledge does not stay outside them, nor does a finding: a `TODO` or `NOTE` in a code comment fails the check.
+  Knowledge does not stay outside them, nor does a finding: a `TODO` or `NOTE` in a code comment fails the check,
+  unless it is a `TODO` that names its issue in a project that declares `todo_link`.
 
 ## Principles
 

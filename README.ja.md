@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at d04f9361. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at ff6d33c5. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -25,8 +25,9 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
   自分が説明するコードを名指して、ハッシュで固定します。そのコードが変わると、誰かが文書をコードに照らして読み、
   固定し直すまで `rotproof check` が失敗します。
 - **先送りした作業が、コメントに隠れません。** コードのコメントの `TODO`、`FIXME`、`XXX`、`HACK`、`NOTE` は検査を
-  失敗させます。見つけたことは、いま直すか、Issue に書くか、手放すかのどれかです。型検査を止めるコメントも通りません。
-  環境変数を読めるのは `infrastructure` だけです。
+  失敗させます。見つけたことは、いま直すか、Issue に書くか、手放すかのどれかです。`todo_link` を宣言したプロジェクト
+  では、追っている Issue を名指す `TODO` は残せて、毎回の検査がそれを一覧に出します。型検査を止めるコメントも
+  通りません。環境変数を読めるのは `infrastructure` だけです。
 - **バイナリしか持たないエージェントも、迷いません。** `rotproof --help` が始める順番を示します。規則はプロジェクトの
   スタックに合わせて `.rotproof/AGENTS.md` に書かれ、`rotproof create` が書く `AGENTS.md` と `CLAUDE.md` が
   エージェントをそこへ案内します。
@@ -42,14 +43,14 @@ Rotproof は Windows x86_64、Linux x86_64（glibc 2.17 以上）、macOS arm64�
 出しています。版は厳密に固定してください。アップグレードは新しい規則を持ち込みうるので、それだけのコミットにするためです。
 
 ```sh
-pip install rotproof==1.0.0
+pip install rotproof==2.0.0-rc.1
 ```
 
 Node のプロジェクトでは npm で固定します。プラットフォームに合ったバイナリも一緒に入ります（パッケージ `rotproof` と、
 `@rotproof/linux-x64`、`@rotproof/win32-x64`、`@rotproof/darwin-arm64` のいずれか）。
 
 ```sh
-npm install -D -E rotproof@1.0.0
+npm install -D -E rotproof@2.0.0-rc.1
 ```
 
 wheel に入っているのはバイナリだけで、Python のコードは動きません。Python も Node も無い場合は、
@@ -293,7 +294,7 @@ Rotproof のアップグレードで何が変わりうるかは「互換性」�
   knowledge の文書に書き、その下のコードが変わると `rotproof check` が失敗します（目にしたときだけ意味を持つ
   ことのための alarm もあります）。もう 1 つは、各タスクが残したものの log です。未完了の作業は、ここではなく
   Issue に置きます。知識も、見つけたことも、記録の外には残しません。コードのコメントの `TODO` や `NOTE` は検査を
-  失敗させます。
+  失敗させます。ただし、`todo_link` を宣言したプロジェクトで、Issue を名指す `TODO` は別です。
 
 ## 原則
 
