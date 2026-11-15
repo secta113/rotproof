@@ -12,9 +12,10 @@
 use serde::Deserialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
-use crate::layers::{Layout, Place, RECORDS_ONLY, known_stacks, layout, table, uis};
+use crate::layers::{Layout, Place, RECORDS_ONLY, Table, known_stacks, layout, table, uis};
 use crate::markers::TodoLink;
 use crate::paths::within;
+use crate::units::{self, Unit};
 use crate::version::VERSION;
 
 /// Where a project declares its structure, from the root
@@ -64,6 +65,59 @@ pub struct Declaration {
     /// The updates of the project's files it declines, by name (`upgrade.rs`)
     #[serde(default)]
     pub declined: Vec<String>,
+    /// The units the code is made of, each a `[[unit]]` table. None: the whole project is one unit. Read as the file
+    /// says, and checked against the layout in [`Declared::new`]
+    #[serde(default, rename = "unit")]
+    pub units: Vec<UnitDeclaration>,
+}
+
+/// One `[[unit]]` of the declaration: a part of the code that holds the layers.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnitDeclaration {
+    /// What the unit is called: the prefix of a crate's name in Rust, and in Python the name its package is imported as
+    pub name: String,
+    /// The directory, from the root, where its layers sit: `.` for the root
+    pub path: String,
+    /// Whether any unit may import it
+    #[serde(default)]
+    pub shared: bool,
+    /// The files the program starts from, when the unit is an app: an array of paths, even for one
+    #[serde(default)]
+    pub entry: Entries,
+    /// The directory, from the root, where the unit's manifest is: its `path` when it says none
+    #[serde(default)]
+    pub root: Option<String>,
+    /// The layers and levels the unit does not have, as the top-level `absent` names them for a project of one unit
+    #[serde(default)]
+    pub absent: Vec<String>,
+}
+
+/// The `entry` of a unit: an array of paths, which is the one way to write it. A string reads as `One` only so that the
+/// declaration can be refused with how to write it (`entry = ["x"]`), naming the unit, as `Unit` does; a project
+/// would otherwise hold two ways to write one thing, and a document that follows the units would fail when one was
+/// changed for the other.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Entries {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Default for Entries {
+    fn default() -> Self {
+        Entries::Many(Vec::new())
+    }
+}
+
+impl Entries {
+    /// The paths, in the order they are written.
+    pub fn to_vec(&self) -> Vec<String> {
+        match self {
+            Entries::One(path) => vec![path.clone()],
+            Entries::Many(paths) => paths.clone(),
+        }
+    }
 }
 
 /// What is wrong with a list of areas. An area becomes a heading, so it has text, no space at either end, and no other
@@ -118,6 +172,33 @@ fn missing_field(why: &str) -> String {
     format!("{why}: {INIT_OR_CREATE}; either adds it")
 }
 
+/// A layer that holds only its levels, with every one of them in the `absent` of a unit and the layer itself not: the
+/// layer would be made as a directory with nothing in it, and `rotproof create` would list it as missing. The layer is
+/// what is absent, and one way to say so, as `rotproof check` pins a unit's table on what it says, so the declaration
+/// is refused and says which to write.
+fn levels_without_their_layer(units: &[Unit], places: &[Place]) -> Vec<String> {
+    let mut found = Vec::new();
+    for unit in units {
+        let own = || places.iter().filter(|p| p.unit.name == unit.name);
+        for layer in own().filter(|p| p.is_layer() && !unit.absent.contains(&p.name)) {
+            let mut levels = own().filter(|p| p.parent.as_ref() == Some(&layer.name));
+            if levels.clone().next().is_some() && levels.all(|p| unit.absent.contains(&p.name)) {
+                let name = &layer.name;
+                let whose = if unit.declared {
+                    format!("unit {:?} names", unit.name)
+                } else {
+                    "absent names".to_string()
+                };
+                found.push(format!(
+                    "{DECLARATION}: {whose} every level of {name} in absent, but not {name} itself, which holds only \
+                     its levels: list {name}, so that it is not made as a directory with nothing in it"
+                ));
+            }
+        }
+    }
+    found
+}
+
 /// What `areas` is, as the declaration says it above the field.
 const AREAS_COMMENT: &str = "# The areas the knowledge documents are grouped by, in this order, such as \"billing\" or \"records\".\n\
                              # Every knowledge document has exactly one of them in tags, and its index groups by them\n";
@@ -133,6 +214,53 @@ const FILES_COMMENT: &str = "# The version of Rotproof the project's files are u
 /// What `declined` is, as the declaration says it above the field.
 const DECLINED_COMMENT: &str = "# Updates of the project's files this project declines, by name, such as \"claude-deny-approvals\".\n\
                                 # `rotproof init` says when one cannot be applied without a person\n";
+
+/// What `[[unit]]` is, as the declaration says it, commented out. It is the last thing in the file, so that a project
+/// that uncomments it leaves `files` and `declined` above, in no unit's table. `{path}`, `{root}`, `{cli}` and
+/// `{entry}` are where a unit sits in the stack ([`units_comment`]).
+const UNITS_COMMENT: &str = "\n\
+# Units: parts of the code that each hold the layers (a package of a monorepo, a module of a modular monolith).\n\
+# Without [[unit]], the whole project is one unit. With units, absent above must stay empty: each unit says what it\n\
+# lacks in its own absent. A unit that is not shared imports no other unit; the composition of an app wires them.\n\
+# [[unit]]\n\
+# name = \"billing\"\n\
+# path = \"{path}\"   # where its layers sit\n\
+# shared = true   # any unit may import it\n\
+# root = \"{root}\"   # where its manifest is (default: path)\n\
+#\n\
+# [[unit]]\n\
+# name = \"cli\"\n\
+# path = \"{cli}\"\n\
+# entry = [\"{entry}\"]   # an app: its composition wires the units\n";
+
+/// [`UNITS_COMMENT`] for `stack`: where a unit's layers and manifest sit, and its entry, depend on it.
+fn units_comment(stack: &str) -> String {
+    let (billing, root, cli, entry) = match stack {
+        "typescript" => (
+            "packages/billing/src",
+            "packages/billing",
+            "apps/cli/src",
+            "apps/cli/src/main.tsx",
+        ),
+        "rust" => (
+            "packages/billing",
+            "packages/billing",
+            "apps/cli",
+            "apps/cli/src/main.rs",
+        ),
+        _ => (
+            "packages/billing/src/billing",
+            "packages/billing",
+            "apps/cli/src/cli",
+            "apps/cli/__main__.py",
+        ),
+    };
+    UNITS_COMMENT
+        .replace("{path}", billing)
+        .replace("{root}", root)
+        .replace("{cli}", cli)
+        .replace("{entry}", entry)
+}
 
 /// A field the declaration requires that `rotproof create` adds when it is missing, so a declaration written by an
 /// older Rotproof fails only until the upgrade runs `rotproof init` (or `rotproof create`), never on its shape.
@@ -251,7 +379,8 @@ pub fn declaration_text(stack: &str, ui: &str) -> String {
          absent = []\n\n\
          # Paths outside the layers that Rotproof does not look into, such as \"scripts\" (helper scripts, generated\n\
          # or vendored code). A path that holds a layer, or does not exist, fails\n\
-         unchecked = []\n{upgrades}"
+         unchecked = []\n{upgrades}{}",
+        units_comment(stack)
     )
 }
 
@@ -261,10 +390,15 @@ pub struct Declared {
     pub declaration: Declaration,
     /// `None` for a repository that keeps records only (`stack = "none"`)
     pub layout: Option<Layout>,
+    /// The units of the project, in the order it declares them: the one implicit unit when it declares none, and none
+    /// for a repository of records only
+    pub units: Vec<Unit>,
+    /// The places of every unit, a unit's together, in the order of `units`
     pub places: Vec<Place>,
     /// What `absent` names in a layer the declared UI leaves out (`ui` with `ui = "none"`): it says nothing, and the
-    /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs
-    pub left_out: Vec<String>,
+    /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs. Each
+    /// is the name of the unit that lists it ("" for the implicit unit) and the name it lists
+    pub left_out: Vec<(String, String)>,
     /// How a comment that keeps the first marker names its issue, from `todo_link`: `None` when it is not declared
     pub todo_link: Option<TodoLink>,
 }
@@ -293,12 +427,18 @@ impl Declared {
                     "{DECLARATION}: stack = \"none\" has no layers, so it has no code to read and no todo_link: take out todo_link = {link:?}"
                 ));
             }
+            if !declaration.units.is_empty() {
+                found.push(format!(
+                    "{DECLARATION}: stack = \"none\" has no layers, so it has no units: take out [[unit]]"
+                ));
+            }
             if !found.is_empty() {
                 return Err(found);
             }
             return Ok(Declared {
                 declaration,
                 layout: None,
+                units: Vec::new(),
                 places: Vec::new(),
                 left_out: Vec::new(),
                 todo_link: None,
@@ -321,22 +461,51 @@ impl Declared {
                 offered.join(", ")
             )]);
         };
-        let places = layout.places(&table());
-        let (left_out, unknown): (Vec<String>, Vec<String>) = declaration
-            .absent
+        let table = table();
+        let mut found = Vec::new();
+        let units = if declaration.units.is_empty() {
+            vec![Unit::implicit(&layout, &declaration.absent)]
+        } else {
+            if !declaration.absent.is_empty() {
+                found.push(format!(
+                    "{DECLARATION}: absent lists {:?}, and the project declares units: name what each unit lacks in its own absent, and take this one out",
+                    declaration.absent
+                ));
+            }
+            let (units, problems) =
+                units::declared(&declaration.stack, &layout, &table, &declaration.units);
+            found.extend(problems);
+            units
+        };
+        let places: Vec<Place> = units
             .iter()
-            .filter(|name| !places.iter().any(|p| &p.name == *name))
-            .cloned()
-            .partition(|name| layout.leaves_out(name));
-        let mut found: Vec<String> = unknown
-            .iter()
-            .map(|name| {
-                format!(
-                    "{DECLARATION}: absent names {name:?}, which the {} layout does not have",
-                    declaration.stack
-                )
-            })
+            .flat_map(|unit| unit.places(&layout, &table))
             .collect();
+        let mut left_out: Vec<(String, String)> = Vec::new();
+        for unit in &units {
+            for name in unit
+                .absent
+                .iter()
+                .filter(|name| !places.iter().any(|p| &p.name == *name))
+            {
+                if !layout.leaves_out(name) {
+                    found.push(if unit.declared {
+                        format!(
+                            "{DECLARATION}: unit {:?} names {name:?} in absent, which the {} layout does not have",
+                            unit.name, declaration.stack
+                        )
+                    } else {
+                        format!(
+                            "{DECLARATION}: absent names {name:?}, which the {} layout does not have",
+                            declaration.stack
+                        )
+                    });
+                } else if !left_out.contains(&(unit.name.clone(), name.clone())) {
+                    left_out.push((unit.name.clone(), name.clone()));
+                }
+            }
+        }
+        found.extend(levels_without_their_layer(&units, &places));
         let todo_link = declaration.todo_link.as_deref().and_then(|value| {
             let link = TodoLink::parse(value);
             if link.is_none() {
@@ -353,15 +522,53 @@ impl Declared {
         Ok(Declared {
             declaration,
             layout: Some(layout),
+            units,
             places,
             left_out,
             todo_link,
         })
     }
 
-    /// Declared absent itself, or inside a layer declared absent.
+    /// The entry files of every unit, each as a place of its own: what the checks that read code outside the layers
+    /// start from. Empty for a repository of records only, and for a stack without an entry file.
+    pub fn entries(&self, table: &Table) -> Vec<Place> {
+        let Some(layout) = &self.layout else {
+            return Vec::new();
+        };
+        self.units
+            .iter()
+            .flat_map(|unit| unit.entry_places(layout, table))
+            .collect()
+    }
+
+    /// The directories, from the root, where code is looked for: the layout's `scope`, then the root of each unit that
+    /// is not inside one before it, so a file is read once.
+    pub fn scopes(&self) -> Vec<String> {
+        let Some(layout) = &self.layout else {
+            return Vec::new();
+        };
+        let mut scopes = vec![layout.scope.clone()];
+        for unit in &self.units {
+            if !scopes
+                .iter()
+                .any(|scope| scope.is_empty() || within(&unit.root, scope))
+            {
+                scopes.push(unit.root.clone());
+            }
+        }
+        scopes
+    }
+
+    /// The unit a place sits in.
+    pub fn unit_of(&self, place: &Place) -> Option<&Unit> {
+        self.units.iter().find(|unit| unit.name == place.unit.name)
+    }
+
+    /// Declared absent itself, or inside a layer declared absent, by the unit it sits in.
     pub fn is_absent(&self, place: &Place) -> bool {
-        let absent = &self.declaration.absent;
+        let absent = self
+            .unit_of(place)
+            .map_or(&self.declaration.absent, |unit| &unit.absent);
         absent.contains(&place.name) || place.parent.as_ref().is_some_and(|p| absent.contains(p))
     }
 
@@ -528,7 +735,14 @@ mod tests {
         // absent naming a layer the UI leaves out reads, so an upgrade still runs, and is kept for the check to name
         let left = declared("stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"ui\", \"presentation.display\"]\n")
             .unwrap();
-        assert_eq!(left.left_out, ["ui", "presentation.display"]);
+        let names = |declared: &Declared| -> Vec<String> {
+            declared
+                .left_out
+                .iter()
+                .map(|(_, name)| name.clone())
+                .collect()
+        };
+        assert_eq!(names(&left), ["ui", "presentation.display"]);
         assert_eq!(
             declared("stack = \"python\"\nareas = []\n").unwrap_err(),
             [
@@ -691,6 +905,94 @@ mod tests {
     }
 
     #[test]
+    fn a_project_that_declares_no_unit_is_one_implicit_unit() {
+        for (stack, ui) in [
+            ("python", "atomic"),
+            ("typescript", "none"),
+            ("rust", "none"),
+        ] {
+            let declared = Declared::new(
+                parse_declaration(&format!(
+                    "stack = \"{stack}\"\nareas = []\nui = \"{ui}\"\nabsent = []\n"
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+            let layout = declared.layout.as_ref().unwrap();
+            let [unit] = &declared.units[..] else {
+                panic!("{stack}: {:?}", declared.units);
+            };
+            assert_eq!(unit.path, layout.scope);
+            assert!(!unit.declared && unit.name.is_empty());
+            // The places are those of the unit, and so those of the layout
+            assert_eq!(declared.places, unit.places(layout, &table()));
+            assert_eq!(declared.places.len(), layout.places(&table()).len());
+            assert!(declared.places.iter().all(|p| p.unit == unit.tag()));
+            // The entry is the layout's, and the code is looked for where the layout says
+            let entries = declared.entries(&table());
+            assert_eq!(
+                entries.iter().map(|e| &e.path).collect::<Vec<_>>(),
+                layout.entry.iter().collect::<Vec<_>>()
+            );
+            assert_eq!(declared.scopes(), std::slice::from_ref(&layout.scope));
+        }
+        let none =
+            Declared::new(parse_declaration("stack = \"none\"\nareas = []\n").unwrap()).unwrap();
+        assert!(
+            none.units.is_empty() && none.entries(&table()).is_empty() && none.scopes().is_empty()
+        );
+    }
+
+    #[test]
+    fn the_places_of_every_unit_are_kept_apart() {
+        let mut declared = Declared::new(
+            parse_declaration(
+                "stack = \"typescript\"
+areas = []
+ui = \"none\"
+",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let layout = declared.layout.clone().unwrap();
+        let table = table();
+        let one = declared.places.len();
+        let mut billing = declared.units[0].clone();
+        billing.name = "billing".into();
+        billing.path = "packages/billing/src".into();
+        billing.root = "packages/billing".into();
+        billing.entries = vec!["apps/cli/main.ts".into()];
+        let mut inside = billing.clone();
+        inside.name = "inside".into();
+        inside.path = "src/inside".into();
+        inside.root = "src/inside".into();
+        inside.entries = Vec::new();
+        for unit in [&billing, &inside] {
+            declared.places.extend(unit.places(&layout, &table));
+        }
+        declared.units.extend([billing, inside]);
+        assert_eq!(declared.places.len(), 3 * one);
+        // The same name in each unit
+        let domains: Vec<&Place> = declared
+            .places
+            .iter()
+            .filter(|p| p.name == "domain")
+            .collect();
+        assert_eq!(domains.len(), 3);
+        assert!(!domains[0].is_same(domains[1]) && !domains[1].is_same(domains[2]));
+        assert_eq!(domains[1].path, "packages/billing/src/domain");
+        // Every unit's entries, and where code is looked for: the root of a unit that the scope holds adds nothing
+        let entries = declared.entries(&table);
+        assert_eq!(
+            entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            ["src/main.tsx", "apps/cli/main.ts"]
+        );
+        assert!(entries[1].unit.app && entries[1].unit.name == "billing");
+        assert_eq!(declared.scopes(), ["src", "packages/billing"]);
+    }
+
+    #[test]
     fn setting_files_names_every_field_it_adds() {
         let (text, added) = with_files("stack = \"none\"\n", "0.5.0").unwrap();
         assert_eq!(added, ["files = \"0.5.0\"", "declined = []"]);
@@ -703,5 +1005,265 @@ mod tests {
         // Both there: nothing added
         let (_, added) = with_files(&text, "0.5.0").unwrap();
         assert!(added.is_empty(), "{added:?}");
+    }
+
+    /// A declaration of a stack with `ui = "none"` and the `[[unit]]` tables `units`, its fields above them.
+    fn with_units(stack: &str, units: &str) -> String {
+        format!("stack = \"{stack}\"\nareas = []\nui = \"none\"\nfiles = \"2.0.0\"\n{units}")
+    }
+
+    const MONOREPO: &str = "[[unit]]
+name = \"core\"
+path = \"packages/core/src/core\"
+shared = true
+
+[[unit]]
+name = \"billing\"
+path = \"packages/billing/src/billing\"
+root = \"packages/billing\"
+absent = [\"application\"]
+
+[[unit]]
+name = \"cli\"
+path = \"apps/cli/src/cli\"
+entry = [\"apps/cli/__main__.py\"]
+absent = [\"domain\", \"application\"]
+";
+
+    #[test]
+    fn declared_units_replace_the_implicit_one_and_their_places_and_entries_flow_through_declared()
+    {
+        let declared =
+            Declared::new(parse_declaration(&with_units("python", MONOREPO)).unwrap()).unwrap();
+        let layout = declared.layout.as_ref().unwrap();
+        let table = table();
+        let names: Vec<&str> = declared.units.iter().map(|u| u.name.as_str()).collect();
+        assert_eq!(names, ["core", "billing", "cli"]);
+        // Every unit's places, a unit's together, each in its own directory and tagged with it
+        assert_eq!(declared.places.len(), 3 * layout.places(&table).len());
+        for unit in &declared.units {
+            let own: Vec<&Place> = declared
+                .places
+                .iter()
+                .filter(|p| p.unit.name == unit.name)
+                .collect();
+            assert_eq!(own.len(), layout.places(&table).len(), "{}", unit.name);
+            assert!(
+                own.iter()
+                    .all(|p| p.path.starts_with(&format!("{}/", unit.path)))
+            );
+            assert!(own.iter().all(|p| p.unit == unit.tag()));
+        }
+        let domains: Vec<&str> = declared
+            .places
+            .iter()
+            .filter(|p| p.name == "domain")
+            .map(|p| p.path.as_str())
+            .collect();
+        assert_eq!(
+            domains,
+            [
+                "packages/core/src/core/domain",
+                "packages/billing/src/billing/domain",
+                "apps/cli/src/cli/domain"
+            ]
+        );
+        assert!(declared.places.iter().any(|p| p.unit.shared));
+        // The entry of the app is the only one: a unit that declares none has none, and no implicit entry is added
+        let entries = declared.entries(&table);
+        assert_eq!(
+            entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            ["apps/cli/__main__.py"]
+        );
+        assert!(entries[0].unit.app && entries[0].unit.name == "cli");
+        // Code is looked for in the scope of the layout, which a Python project has at its root
+        assert_eq!(declared.scopes(), [""]);
+        // What each lacks is its own: the unit that says so lacks it, and the others do not
+        let absent = |unit: &str, layer: &str| {
+            let place = declared
+                .places
+                .iter()
+                .find(|p| p.unit.name == unit && p.name == layer)
+                .unwrap();
+            declared.is_absent(place)
+        };
+        assert!(
+            absent("billing", "application")
+                && absent("cli", "application")
+                && absent("cli", "domain")
+        );
+        assert!(!absent("core", "application") && !absent("billing", "domain"));
+        // A level is as absent as its layer
+        let mut declared = declared;
+        declared.units[2].absent.push("infrastructure".into());
+        let level = declared
+            .places
+            .iter()
+            .find(|p| p.unit.name == "cli" && p.name == "infrastructure.inbound")
+            .unwrap();
+        assert!(declared.is_absent(level));
+    }
+
+    #[test]
+    fn what_a_unit_lacks_that_the_ui_leaves_out_is_kept_with_the_unit_that_lists_it() {
+        let text = with_units(
+            "python",
+            "[[unit]]\nname = \"a\"\npath = \"a\"\nabsent = [\"ui\"]\n\n[[unit]]\nname = \"b\"\npath = \"b\"\nabsent = [\"ui\", \"presentation\"]\n",
+        );
+        let declared = Declared::new(parse_declaration(&text).unwrap()).unwrap();
+        let kept: Vec<(&str, &str)> = declared
+            .left_out
+            .iter()
+            .map(|(unit, name)| (unit.as_str(), name.as_str()))
+            .collect();
+        assert_eq!(kept, [("a", "ui"), ("b", "ui"), ("b", "presentation")]);
+    }
+
+    #[test]
+    fn units_are_for_a_stack_with_layers_and_the_top_level_absent_is_for_no_unit_of_its_own() {
+        let none = "stack = \"none\"\nareas = []\n[[unit]]\nname = \"a\"\npath = \"a\"\n";
+        assert_eq!(
+            Declared::new(parse_declaration(none).unwrap()).unwrap_err(),
+            [
+                ".config/rotproof.toml: stack = \"none\" has no layers, so it has no units: take out [[unit]]"
+            ]
+        );
+        // Empty, as `rotproof init` writes it, it names nothing
+        let empty = with_units("python", "[[unit]]\nname = \"a\"\npath = \"a\"\n")
+            .replace("ui = \"none\"\n", "ui = \"none\"\nabsent = []\n");
+        assert!(Declared::new(parse_declaration(&empty).unwrap()).is_ok());
+        // Without units it is the one unit's, as it was: the failure is the same line
+        let one = "stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"nowhere\"]\n";
+        assert_eq!(
+            Declared::new(parse_declaration(one).unwrap()).unwrap_err(),
+            [
+                ".config/rotproof.toml: absent names \"nowhere\", which the python layout does not have"
+            ]
+        );
+    }
+
+    #[test]
+    fn every_level_of_a_layer_in_absent_without_the_layer_is_refused_in_a_unit_and_in_a_project_of_one()
+     {
+        let refused = |text: String| Declared::new(parse_declaration(&text).unwrap()).unwrap_err();
+        let one = |absent: &str| {
+            format!(
+                "stack = \"python\"
+areas = []
+ui = \"none\"
+absent = {absent}
+"
+            )
+        };
+        let unit = |absent: &str| {
+            with_units(
+                "python",
+                &format!(
+                    "[[unit]]
+name = \"app\"
+path = \"app\"
+absent = {absent}
+"
+                ),
+            )
+        };
+        let both = r#"["infrastructure.inbound", "infrastructure.outbound"]"#;
+        let said = |who: &str| {
+            format!(
+                "{DECLARATION}: {who} every level of infrastructure in absent, but not infrastructure itself, which holds only its levels: list infrastructure, so that it is not made as a directory with nothing in it"
+            )
+        };
+        assert_eq!(refused(one(both)), [said("absent names")]);
+        assert_eq!(refused(unit(both)), [said("unit \"app\" names")]);
+        // The layer itself, with or without its levels, a level but not the other, and the layer's own levels of
+        // another unit: each reads, and the layer is absent in the first two
+        for ok in [
+            r#"["infrastructure"]"#,
+            r#"["infrastructure", "infrastructure.inbound", "infrastructure.outbound"]"#,
+            r#"["infrastructure.inbound"]"#,
+            r#"["protocol.inbound", "domain"]"#,
+        ] {
+            assert!(
+                Declared::new(parse_declaration(&one(ok)).unwrap()).is_ok(),
+                "{ok}"
+            );
+            assert!(
+                Declared::new(parse_declaration(&unit(ok)).unwrap()).is_ok(),
+                "{ok}"
+            );
+        }
+        // A unit is judged by its own absent: another that lists the layer does not excuse it
+        let two = with_units(
+            "python",
+            &format!(
+                "[[unit]]
+name = \"a\"
+path = \"a\"
+absent = [\"infrastructure\"]
+
+[[unit]]
+name = \"b\"
+path = \"b\"
+absent = {both}
+"
+            ),
+        );
+        let said = refused(two);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("unit \"b\" names every level of infrastructure"));
+    }
+
+    #[test]
+    fn the_declaration_init_writes_reads_back_with_its_example_of_units_taken_out_of_the_comment() {
+        for stack in known_stacks().into_iter().filter(|s| *s != RECORDS_ONLY) {
+            let text = declaration_text(stack, "none");
+            // Last in the file: what is added to the end of the file by hand goes to the last unit, which is no mistake
+            // of Rotproof's, but the upgrade's `files` and `declined` are above it
+            let at = text.find("# Units:").unwrap();
+            assert!(text.find("files = ").unwrap() < at && text.find("declined = ").unwrap() < at);
+            // The example is comments alone, so the declaration is as without it
+            assert!(
+                parse_declaration(&text).unwrap().units.is_empty(),
+                "{stack}"
+            );
+            // Taken out of the comment, the example is two units that read
+            let example: String = text[at..]
+                .lines()
+                .skip(3)
+                .map(|line| format!("{}\n", line.strip_prefix("# ").unwrap_or("")))
+                .collect();
+            let uncommented = format!("{}{example}", &text[..at]);
+            let declared = Declared::new(
+                parse_declaration(&uncommented)
+                    .unwrap_or_else(|e| panic!("{stack}: {e}\n{uncommented}")),
+            )
+            .unwrap_or_else(|e| panic!("{stack}: {e:?}\n{uncommented}"));
+            let [billing, cli] = &declared.units[..] else {
+                panic!("{stack}: {:?}", declared.units);
+            };
+            assert!(billing.shared && !cli.shared, "{stack}");
+            assert_eq!(cli.entries.len(), 1, "{stack}");
+            assert_eq!(billing.root, "packages/billing", "{stack}");
+        }
+        // A repository of records only has no units to say
+        assert!(!declaration_text(RECORDS_ONLY, "").contains("[[unit]]"));
+    }
+
+    #[test]
+    fn fields_added_to_a_declaration_with_units_go_above_them() {
+        let text = format!("stack = \"python\"\nui = \"none\"\n\n{MONOREPO}");
+        assert_eq!(lacking(&text), Some(vec!["areas"]));
+        let (text, added) = completed(&text, &[("areas", First::List(vec!["a".into()]))]);
+        assert_eq!(added, ["areas = [\"a\"]"]);
+        let declaration = parse_declaration(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        assert_eq!(declaration.areas, ["a"]);
+        assert_eq!(declaration.units.len(), 3);
+        let (text, added) = with_files(&text, "2.0.0").unwrap();
+        assert_eq!(added, ["files = \"2.0.0\"", "declined = []"]);
+        let declaration = parse_declaration(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        assert_eq!(declaration.files.as_deref(), Some("2.0.0"));
+        assert_eq!(declaration.units.len(), 3);
+        // A unit is not read by the upgrade, which reads the fields above them
+        assert_eq!(fields(&text).unwrap().absent, Vec::<String>::new());
     }
 }

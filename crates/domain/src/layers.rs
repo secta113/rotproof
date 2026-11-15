@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use crate::paths::join;
+
 /// The stack of a repository that keeps records only: no layers, and no structure to check
 pub const RECORDS_ONLY: &str = "none";
 /// The UI of a project with no screens: none of the layers that name a UI in the table
@@ -155,6 +157,24 @@ pub struct Layout {
     /// `entry` allows. `None` while this stack has none
     #[serde(default)]
     pub entry: Option<String>,
+    /// What `rotproof create` writes into an entry file that a unit declares and the tree lacks, whatever the file is
+    /// named: the layout's entry file has no code of its own to copy (Python and TypeScript write none at the root),
+    /// so the text is here. `None` while this stack has no entry file
+    #[serde(default)]
+    pub entry_text: Option<String>,
+    /// The manifest of the package that holds an entry file a unit declares, which `rotproof create` writes beside
+    /// its `src/` when it is not there (a Rust bin crate: a file with no manifest above it is no crate). `{package}` is
+    /// the package's name, and `{dependencies}` its dependency on the unit's own `composition`, or nothing. `None`
+    /// while an entry file of this stack needs no package
+    #[serde(default)]
+    pub entry_package: Option<String>,
+    /// What a package's manifest is named: `pyproject.toml`, `package.json`, `Cargo.toml`, as [`Layout::code`] says
+    /// one. A project that declares units keeps one to the root of each
+    pub manifest: String,
+    /// The code files a unit's own directory holds besides its layers, the nested units and its entry files, by name:
+    /// a Python package's `__init__.py`, which imports no layer. Empty while this stack has none
+    #[serde(default)]
+    pub unit_files: Vec<String>,
     /// Where code outside the layers goes in this stack, said in the finding for it
     #[serde(default)]
     pub where_code_goes: Option<String>,
@@ -167,6 +187,10 @@ pub struct Layout {
     /// Files the stack's toolchain needs at the root, written once with the project's files (`project.rs`)
     #[serde(default)]
     pub files: Vec<File>,
+    /// What is written in place of `files` when the project declares units, when the layout has any: a stack whose
+    /// root differs with units (a workspace of crates, and no root package whose entry file depends on one of them)
+    #[serde(default)]
+    pub unit_root_files: Vec<File>,
 }
 
 /// A language Rotproof reads: the imports for the direction check, and the comments for the marker check.
@@ -180,6 +204,18 @@ pub enum Language {
     /// The dependencies each crate declares in its `Cargo.toml` (`cargo.rs`), and the comments of `.rs` files with
     /// Rotproof's own scanner (`rust.rs`)
     Rust,
+}
+
+/// The unit a place belongs to, as much of it as a rule on places needs (`units.rs` has the rest). A project that
+/// declares no unit has the one implicit unit, whose tag is the default but for `app`: no name, not shared.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnitTag {
+    /// The unit's name, "" for the implicit unit
+    pub name: String,
+    /// Whether any unit may import it
+    pub shared: bool,
+    /// Whether it has an entry file: the unit that wires the others
+    pub app: bool,
 }
 
 /// One place in the tree a layout makes: a layer (`domain`) or a level of a layer (`ui.pages`).
@@ -201,6 +237,8 @@ pub struct Place {
     pub below: Vec<String>,
     /// Path from the root -> text
     pub files: Vec<(String, String)>,
+    /// The unit it sits in. Two places of one name in two units are two places
+    pub unit: UnitTag,
 }
 
 impl Place {
@@ -209,9 +247,14 @@ impl Place {
         self.parent.is_none()
     }
 
+    /// Whether `other` is this very place: the same name, in the same unit.
+    pub fn is_same(&self, other: &Place) -> bool {
+        self.name == other.name && self.unit.name == other.unit.name
+    }
+
     /// Whether this is a level of `layer`.
     pub fn is_level_of(&self, layer: &Place) -> bool {
-        self.parent.as_ref() == Some(&layer.name)
+        self.parent.as_ref() == Some(&layer.name) && self.unit.name == layer.unit.name
     }
 
     /// The layer this place is, or sits in: the name of a layer, or of the layer of a level.
@@ -262,11 +305,45 @@ pub fn fullest_ui(stack: &str) -> String {
         .unwrap_or_else(|| NO_UI.to_string())
 }
 
+/// The UI a new declaration for `stack` gets from `--ui`, and the one `rotproof guide --stack` shows when it is named.
+/// Named, it is one the stack offers; not named, it is [`NO_UI`] where the stack offers nothing else, and asked for
+/// where it does: a project with screens and one without both start from the same command, and a default would make
+/// the layers of one of them. A repository of records only has no UI.
+pub fn chosen_ui(stack: &str, ui: Option<&str>) -> Result<String, String> {
+    let Some(offered) = uis(stack) else {
+        if let Some(ui) = ui {
+            return Err(format!(
+                "stack {stack:?} has no layers, so it has no UI: run it without --ui {ui}"
+            ));
+        }
+        return Ok(String::new());
+    };
+    match ui {
+        Some(ui) if offered.iter().any(|u| u == ui) => Ok(ui.to_string()),
+        Some(ui) => Err(format!(
+            "unknown UI {ui:?} for the {stack} stack (known: {})",
+            offered.join(", ")
+        )),
+        None if offered == [NO_UI] => Ok(NO_UI.to_string()),
+        None => Err(format!(
+            "name the UI with --ui ({}): \"none\" for a project with no screens",
+            offered.join(", ")
+        )),
+    }
+}
+
 impl Layout {
     /// Every place of this layout, layers first in the table's order, each followed by its levels: where it lives, and
     /// what the table says it may import. The checks, the documentation of each layer and Rotproof's guide all read
     /// this, so they cannot disagree.
     pub fn places(&self, table: &Table) -> Vec<Place> {
+        self.places_in(table, &self.scope, &UnitTag::default())
+    }
+
+    /// The places of the unit `unit` whose layers sit in the directory `base`, from the root: every place of
+    /// [`Layout::places`] moved from the layout's `scope` to `base` and tagged with `unit`. With `base` the scope
+    /// itself, it is the very same places.
+    pub fn places_in(&self, table: &Table, base: &str, unit: &UnitTag) -> Vec<Place> {
         let mut out = Vec::new();
         // A place imports only the layers this stack has, and their levels: a Rust crate cannot import `ui`
         let has = |name: &str| !self.leaves_out(name);
@@ -280,17 +357,20 @@ impl Layout {
                 .map_or(&self.layer.files, |o| &o.files);
             let mut place = Place {
                 name: layer.name.clone(),
-                path: self.layer_path(&layer.name),
+                path: self.moved(&self.layer_path(&layer.name), base),
                 parent: None,
                 role: layer.role.clone(),
                 imports: imports(&layer.imports),
                 below: Vec::new(),
                 files: Vec::new(),
+                unit: unit.clone(),
             };
+            let package = package_of(unit, &layer.name);
             place.files = render(
                 files,
                 &place.path,
                 &layer.name,
+                &package,
                 &self.doc_prefix,
                 &doc(&place),
             );
@@ -313,20 +393,25 @@ impl Layout {
                 };
                 let mut place = Place {
                     name: format!("{}.{}", layer.name, level.name),
-                    path: shape
-                        .path
-                        .replace("{layer}", &layer.name)
-                        .replace("{name}", &level.name),
+                    path: self.moved(
+                        &shape
+                            .path
+                            .replace("{layer}", &layer.name)
+                            .replace("{name}", &level.name),
+                        base,
+                    ),
                     parent: Some(layer.name.clone()),
                     role: level.role.clone(),
                     imports: imports(&level.imports),
                     below,
                     files: Vec::new(),
+                    unit: unit.clone(),
                 };
                 place.files = render(
                     &shape.files,
                     &place.path,
                     &level.name,
+                    &package,
                     &self.doc_prefix,
                     &doc(&place),
                 );
@@ -340,9 +425,14 @@ impl Layout {
     /// what the table's `entry` lists. No place's imports take it in, and no check asks for it to be there.
     pub fn entry(&self, table: &Table) -> Option<Place> {
         let path = self.entry.as_ref()?;
-        Some(Place {
-            name: path.clone(),
-            path: path.clone(),
+        Some(self.entry_at(table, path, &UnitTag::default()))
+    }
+
+    /// The entry file `path` of the unit `unit`, as a place of its own: what [`Layout::entry`] says of the layout's.
+    pub fn entry_at(&self, table: &Table, path: &str, unit: &UnitTag) -> Place {
+        Place {
+            name: path.to_string(),
+            path: path.to_string(),
             parent: None,
             role: table.entry.role.clone(),
             imports: table
@@ -354,7 +444,30 @@ impl Layout {
                 .collect(),
             below: Vec::new(),
             files: Vec::new(),
-        })
+            unit: unit.clone(),
+        }
+    }
+
+    /// A path of this layout, which every layout writes from the root and inside its `scope`, moved to the directory
+    /// `base` in place of the scope.
+    pub fn moved(&self, path: &str, base: &str) -> String {
+        let inside = if self.scope.is_empty() {
+            path
+        } else {
+            path.strip_prefix(&format!("{}/", self.scope))
+                .expect("a layout's layers sit in its scope: a test reads every layout")
+        };
+        join(base, inside)
+    }
+
+    /// The files this stack's toolchain needs at the root, written once: those of `unit_root_files` for a project that
+    /// declares units, when the layout has any, and `files` otherwise.
+    pub fn root_files(&self, units: bool) -> &[File] {
+        if units && !self.unit_root_files.is_empty() {
+            &self.unit_root_files
+        } else {
+            &self.files
+        }
     }
 
     /// Where the layer `name` lives in this stack, from the root.
@@ -383,6 +496,31 @@ impl Layout {
             Some(also) => named_by(&also.code, file_name),
             None => self.is_code(file_name),
         }
+    }
+
+    /// The text of an entry file `rotproof create` makes, with no leading blank line.
+    pub fn entry_file(&self) -> Option<&str> {
+        self.entry_text.as_deref().map(str::trim_start)
+    }
+
+    /// Whether a file name is a package's manifest in this stack, in any case.
+    pub fn is_manifest(&self, file_name: &str) -> bool {
+        named_by(&self.manifest, file_name)
+    }
+
+    /// Whether a code file of this name may sit in a unit's own directory, in any case ([`Layout::unit_files`]).
+    pub fn is_unit_file(&self, file_name: &str) -> bool {
+        self.unit_files
+            .iter()
+            .any(|own| own.eq_ignore_ascii_case(file_name))
+    }
+
+    /// The paths that are not layers ([`Layout::not_layers`]) of a unit whose layers sit in `base`.
+    pub fn not_layers_in(&self, base: &str) -> Vec<String> {
+        self.not_layers
+            .iter()
+            .map(|path| self.moved(path, base))
+            .collect()
     }
 
     /// Whether the file named `name`, in a project of this layout, has comments to read. Not every code file has them,
@@ -452,9 +590,26 @@ fn doc(place: &Place) -> String {
     format!("{}\n\n{imports}", place.role.trim())
 }
 
-/// The files of one place, from the root: `{name}` and `{doc}` filled in, each line of the documentation with the
-/// stack's prefix.
-fn render(files: &[File], at: &str, name: &str, prefix: &str, doc: &str) -> Vec<(String, String)> {
+/// The name of the package a layer is in `unit`, where a layer is one (a Rust crate): its own name, or, in a declared
+/// unit, behind the unit's (`billing_domain`), which is what keeps the crates of two units from being named alike.
+pub fn package_of(unit: &UnitTag, layer: &str) -> String {
+    if unit.name.is_empty() {
+        layer.to_string()
+    } else {
+        format!("{}_{layer}", unit.name)
+    }
+}
+
+/// The files of one place, from the root: `{name}`, `{package}` and `{doc}` filled in, each line of the documentation
+/// with the stack's prefix.
+fn render(
+    files: &[File],
+    at: &str,
+    name: &str,
+    package: &str,
+    prefix: &str,
+    doc: &str,
+) -> Vec<(String, String)> {
     let doc: Vec<String> = doc
         .lines()
         .map(|line| {
@@ -471,7 +626,10 @@ fn render(files: &[File], at: &str, name: &str, prefix: &str, doc: &str) -> Vec<
         .map(|file| {
             (
                 format!("{at}/{}", file.path),
-                file.text.replace("{name}", name).replace("{doc}", &doc),
+                file.text
+                    .replace("{name}", name)
+                    .replace("{package}", package)
+                    .replace("{doc}", &doc),
             )
         })
         .collect()
@@ -583,6 +741,45 @@ mod tests {
                     "{stack}: code a Rust layout reads"
                 );
             }
+            // What a unit moves from the scope to its own directory is in the scope, and the files a unit's directory
+            // holds are code that the unit's own check would otherwise find outside the layers
+            for path in &layout.not_layers {
+                assert!(
+                    layout.scope.is_empty() || within(path, &layout.scope),
+                    "{stack}: {path} is not in the scope {}",
+                    layout.scope
+                );
+            }
+            assert!(!layout.manifest.is_empty(), "{stack}: no manifest");
+            assert_eq!(
+                layout.entry.is_some(),
+                layout.entry_file().is_some(),
+                "{stack}: an entry file and its text go together"
+            );
+            // An entry file's package, where it needs one, is a manifest with its name and its dependencies to fill in
+            if let Some(package) = &layout.entry_package {
+                assert!(
+                    layout.language == Language::Rust
+                        && package.contains("[package]")
+                        && package.contains("name = \"{package}\"")
+                        && package.contains("{dependencies}"),
+                    "{stack}: {package}"
+                );
+            }
+            if let Some(file) = layout
+                .files
+                .iter()
+                .find(|f| Some(&f.path) == layout.entry.as_ref())
+            {
+                assert_eq!(
+                    layout.entry_file(),
+                    Some(file.text.trim_start()),
+                    "{stack}: the text of the entry file it writes with the project"
+                );
+            }
+            for file in &layout.unit_files {
+                assert!(layout.is_code(file), "{stack}: {file} is no code");
+            }
             // A directory besides the scope holds no layer, so the code in it is outside every layer, and the entry
             // file in it is the one code there that is not
             for also in &layout.also_code {
@@ -642,7 +839,9 @@ mod tests {
                 for (path, text) in &place.files {
                     assert!(path.starts_with(&format!("{}/", place.path)), "{path}");
                     assert!(
-                        !text.contains("{name}") && !text.contains("{doc}"),
+                        !text.contains("{name}")
+                            && !text.contains("{package}")
+                            && !text.contains("{doc}"),
                         "{stack}: {path} has a placeholder left: {text}"
                     );
                     // A crate that cannot import `ui` is not told it may
@@ -735,6 +934,66 @@ mod tests {
             "May import the levels below it, and `presentation.models`, `presentation.display` and \
                      `protocol.inbound`"
         ));
+    }
+
+    #[test]
+    fn a_rust_crate_is_named_for_its_unit_and_the_root_lists_the_crates() {
+        let table = table();
+        let rust = layout("rust", "none").unwrap();
+        // The implicit unit names a crate as its layer; a declared unit puts its own name before it
+        let unit = UnitTag {
+            name: "billing".into(),
+            ..UnitTag::default()
+        };
+        let named = |places: &[Place], name: &str| -> Vec<String> {
+            places
+                .iter()
+                .filter(|p| p.name == name)
+                .flat_map(|p| {
+                    p.files
+                        .iter()
+                        .filter(|(path, _)| path.ends_with("Cargo.toml"))
+                })
+                .map(|(path, text)| {
+                    let name = text.lines().find(|l| l.starts_with("name = ")).unwrap();
+                    format!("{path} {name}")
+                })
+                .collect()
+        };
+        let implicit = rust.places(&table);
+        let inside = rust.places_in(&table, "crates/billing", &unit);
+        for layer in ["domain", "protocol", "infrastructure"] {
+            assert_eq!(
+                named(&implicit, layer),
+                [format!("crates/{layer}/Cargo.toml name = \"{layer}\"")]
+            );
+            assert_eq!(
+                named(&inside, layer),
+                [format!(
+                    "crates/billing/{layer}/Cargo.toml name = \"billing_{layer}\""
+                )]
+            );
+        }
+        // A level is a module of its crate, and says nothing of the crate's name
+        let level = inside
+            .iter()
+            .find(|p| p.name == "protocol.inbound")
+            .unwrap();
+        assert_eq!(level.path, "crates/billing/protocol/src/inbound");
+        // The root lists each crate on a line of its own, with and without units, and holds no package with units
+        assert!(
+            rust.files
+                .iter()
+                .all(|f| f.path != "Cargo.toml" || f.text.contains("members = [{members}]"))
+        );
+        let root = &rust.root_files(true);
+        assert_eq!(root.len(), 1);
+        assert!(root[0].text.contains("members = [{members}]"));
+        assert!(!root[0].text.contains("[package]") && !root[0].text.contains("composition"));
+        assert_eq!(rust.root_files(false).len(), 2);
+        // Another stack that has no files of its own for units writes what it writes
+        let typescript = layout("typescript", "atomic").unwrap();
+        assert!(typescript.root_files(true).is_empty());
     }
 
     #[test]

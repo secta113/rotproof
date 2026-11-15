@@ -7,11 +7,13 @@
 //!   src/api/routes.py::create_user: "0b7d21e4"
 //!   src/api/routes.py::Router.add: "9a01c3ff"
 //!   src/api/: "51c0d2aa"
+//!   .config/rotproof.toml::unit: "7c0e4b19"
 //! ```
 //!
 //! A key is a file, in any stack, a definition in a file of a language Rotproof reads (`::create_user`, or a method
-//! after its type's name: `::Router.add`), or a directory, for every file under it that Rotproof reads as code. The
-//! frontmatter holds no comment (`frontmatter.rs`).
+//! after its type's name: `::Router.add`), a table of a `.toml` file (`::unit`, or a table in another: `::a.b`), or a
+//! directory, for every file under it that Rotproof reads as code. The frontmatter holds no comment
+//! (`frontmatter.rs`).
 //!
 //! - **The review is pinned in the document.** `rotproof follows` (the keys it names) and `rotproof approve --reviewed`
 //!   (every changed key) write the new hash into the frontmatter. That changes the document, so the commit that holds
@@ -24,14 +26,28 @@
 //!   key is matched and its pieces joined, so the hash of a name does not depend on the language it was read in. A
 //!   name that is more than one piece in its file (an overload and its implementation, a getter and its setter, the
 //!   `impl` blocks of a type) is hashed on all of them, in the order they appear.
-//! - **What a document follows must exist.** A file, directory or definition that is gone fails, as a dangling link
-//!   does.
+//! - **A table of a TOML file is a definition too, and its fields are not the table.** A table is a heading, `[unit]`
+//!   or `[[unit]]` (one written as a value, `unit = [{ ... }]`, has none and is not named), and a piece of it is the
+//!   table as it is read, not as it is written: its heading, then each of its fields on a line, `key = value`, in the
+//!   order of the keys and one form of every value (`canonical`), so a comment, a blank line, the quotes of a string,
+//!   how an array is wrapped and the order of the keys leave the hash as it was. A name selects every table whose
+//!   heading begins with it (`a` the `[a]` table and the `[a.b]` below it, as a class holds its methods), so an array
+//!   of tables is one piece for each `[[unit]]`, hashed on all of them in the order they appear, as an overload is. The
+//!   keys above the first heading are in no table: a document that follows `.config/rotproof.toml::unit` fails when a
+//!   unit changes, not when `areas` or `files` does. A directory's hash still reads no `.toml` file: [`language_of`]
+//!   decides that, and it names none.
+//! - **What a document follows must exist.** A file, directory, definition or table that is gone fails, as a dangling
+//!   link does.
 //!
 //! The hash is [`content_hash`]: the first 8 hex digits of SHA-256 of the text, with every line ending as `\n`.
 
 use sha2::{Digest, Sha256};
 
+use toml_edit::{Document, Item, Table, Value};
+
+use crate::definitions::{Definition, selected};
 use crate::layers::Language;
+use crate::text::line_of;
 
 /// The hash a key of `follows` is pinned at: the first 8 hex digits of SHA-256 of the text, as `read_text` reads it
 /// (every line ending as `\n` and no byte order mark, so a checkout with CRLF has the same hash).
@@ -58,6 +74,8 @@ pub enum Followed {
         language: Language,
         name: String,
     },
+    /// A table of a `.toml` file: the file and the dotted name of the table (`unit`, `workspace.dependencies`)
+    Table { file: String, name: String },
 }
 
 /// The language a file is read as, by its extension in any case (Windows runs `Api.PY` and compiles `LIB.RS`), or
@@ -84,6 +102,20 @@ pub fn is_name(language: Language, part: &str) -> bool {
         && part.chars().all(|c| letter(c) || c.is_alphanumeric())
 }
 
+/// Whether `path` is a TOML file, by its extension in any case.
+fn is_toml(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".toml")
+}
+
+/// Whether `part` can be one name of a table after `::` in a `.toml` file: a bare key of a heading, which is letters,
+/// digits, `-` and `_`. A quoted key (`[a."b.c"]`) is named by no key, so a name never splits on a dot inside one.
+fn is_table_name(part: &str) -> bool {
+    !part.is_empty()
+        && part
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// What the key `key` of `follows` names, or why it names nothing Rotproof can follow.
 pub fn followed(key: &str) -> Result<Followed, String> {
     let (path, name) = match key.split_once("::") {
@@ -105,11 +137,23 @@ pub fn followed(key: &str) -> Result<Followed, String> {
     match name {
         None if path.ends_with('/') => Ok(Followed::Directory(bare.to_string())),
         None => Ok(Followed::File(path.to_string())),
+        Some(name) if is_toml(path) => {
+            if !name.split('.').all(is_table_name) {
+                return Err(format!(
+                    "{key:?} names no table after ::, which is a name, or names joined by dots (workspace.dependencies), \
+                     each written as in a heading without quotes: letters, digits, - and _"
+                ));
+            }
+            Ok(Followed::Table {
+                file: path.to_string(),
+                name: name.to_string(),
+            })
+        }
         Some(name) => {
             let Some(language) = language_of(path) else {
                 return Err(format!(
                     "{key:?} names a definition outside the files whose definitions are read: .py, .rs, and \
-                     TypeScript and JavaScript source"
+                     TypeScript and JavaScript source, and a table in a .toml file"
                 ));
             };
             if !name.split('.').all(|part| is_name(language, part)) {
@@ -124,6 +168,169 @@ pub fn followed(key: &str) -> Result<Followed, String> {
             })
         }
     }
+}
+
+/// One heading of a TOML text: the names of the table it opens, the byte it starts at, and the table as it is hashed.
+struct Heading {
+    path: Vec<String>,
+    start: usize,
+    text: String,
+}
+
+/// Where each heading of the TOML text `source` is, in the order it appears: the names of the table it opens (`unit`
+/// for `[[unit]]`, `a` and `b` for `[a.b]`), the byte its heading starts at, and the table written in a form that
+/// does not depend on how it was written ([`canonical`]). A table made by a dotted key (`a.b = 1`), or only implied by
+/// a heading below it, is implicit and has no heading of its own (its span is not one).
+fn headings(source: &str) -> Result<Vec<Heading>, String> {
+    fn collect(table: &Table, path: &mut Vec<String>, found: &mut Vec<Heading>) {
+        for (key, item) in table {
+            path.push(key.to_string());
+            let (opened, array): (Vec<&Table>, bool) = match item {
+                Item::Table(inner) => (vec![inner], false),
+                Item::ArrayOfTables(array) => (array.iter().collect(), true),
+                _ => (Vec::new(), false),
+            };
+            for inner in opened {
+                if let (Some(span), false) = (inner.span(), inner.is_implicit()) {
+                    found.push(Heading {
+                        path: path.clone(),
+                        start: span.start,
+                        text: canonical(path, array, inner),
+                    });
+                }
+                collect(inner, path, found);
+            }
+            path.pop();
+        }
+    }
+    let document = Document::parse(source).map_err(|e| {
+        let line = e.span().map_or(1, |span| line_of(source, span.start));
+        format!("line {line}: {}", e.message())
+    })?;
+    let mut found = Vec::new();
+    collect(document.as_table(), &mut Vec::new(), &mut found);
+    found.sort_by_key(|heading| heading.start);
+    Ok(found)
+}
+
+/// A table as it is hashed: its heading (`[unit]`, or `[[unit]]` for an element of an array of tables), then each of
+/// its own fields on a line, `key = value`, in the byte order of the keys, with what a dotted key makes written out
+/// in full (`a.b = 1`). The values are written in one form: strings in double quotes with `\`, `"` and control
+/// characters escaped, arrays and inline tables on a line, an inline table's keys in order. Comments, blank lines,
+/// indentation, the quotes a key or string was written in and the order of the keys are not in it, so a change that
+/// leaves every key with the value it had (a comment, a reflow, `'x'` for `"x"`, `[ "a" ]` for `["a"]`) leaves the
+/// hash. A value written as another one is another value, even where a reader of the file takes both for the same
+/// (`a = "x"` and `a = ["x"]`). The tables below it are their own headings.
+fn canonical(path: &[String], array: bool, table: &Table) -> String {
+    let name: Vec<String> = path.iter().map(|key| canonical_key(key)).collect();
+    let name = name.join(".");
+    let mut text = if array {
+        format!("[[{name}]]")
+    } else {
+        format!("[{name}]")
+    };
+    let mut fields = Vec::new();
+    own_fields(table, &mut Vec::new(), &mut fields);
+    fields.sort();
+    for field in fields {
+        text.push('\n');
+        text.push_str(&field);
+    }
+    text
+}
+
+/// The fields of `table` that are values, or made by a dotted key, each as `key = value` with the dotted keys of
+/// `above` before its own.
+fn own_fields(table: &Table, above: &mut Vec<String>, found: &mut Vec<String>) {
+    for (key, item) in table {
+        above.push(canonical_key(key));
+        match item {
+            Item::Value(value) => {
+                found.push(format!("{} = {}", above.join("."), canonical_value(value)))
+            }
+            // A table below is a heading; one made by a dotted key is a field of this one
+            Item::Table(inner) if inner.is_dotted() => own_fields(inner, above, found),
+            _ => {}
+        }
+        above.pop();
+    }
+}
+
+/// A key as it is written when it is bare (letters, digits, `-` and `_`), else in double quotes.
+fn canonical_key(key: &str) -> String {
+    if !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        key.to_string()
+    } else {
+        quoted(key)
+    }
+}
+
+/// A string in double quotes, with `\`, `"` and every control character escaped, and nothing else.
+fn quoted(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A value in one form, whatever its quotes, spacing and comments were.
+fn canonical_value(value: &Value) -> String {
+    match value {
+        Value::String(text) => quoted(text.value()),
+        Value::Integer(number) => number.value().to_string(),
+        Value::Float(number) => format!("{:?}", number.value()),
+        Value::Boolean(flag) => flag.value().to_string(),
+        Value::Datetime(date) => date.value().to_string(),
+        Value::Array(array) => {
+            let items: Vec<String> = array.iter().map(canonical_value).collect();
+            format!("[{}]", items.join(", "))
+        }
+        Value::InlineTable(table) => {
+            let mut fields: Vec<String> = table
+                .iter()
+                .map(|(key, value)| format!("{} = {}", canonical_key(key), canonical_value(value)))
+                .collect();
+            fields.sort();
+            format!("{{{}}}", fields.join(", "))
+        }
+    }
+}
+
+/// The text of the table `name` (`unit`, `workspace.dependencies`) of the TOML text `source`, which the key
+/// `file.toml::name` is hashed on: `None` when it has no table of that name, and `Err` (with the line and why) when
+/// `source` is not TOML. Each heading is a [`Definition`] of its own names, and of each name above it, over the text of
+/// the table written as [`canonical`] gives it, so [`selected`] reads a table as it reads any definition.
+pub fn table_text(source: &str, name: &str) -> Result<Option<String>, String> {
+    let headings = headings(source)?;
+    let mut written = String::new();
+    let mut outline = Vec::new();
+    for heading in &headings {
+        let (start, end) = (written.len(), written.len() + heading.text.len());
+        written.push_str(&heading.text);
+        written.push('\n');
+        for depth in 1..=heading.path.len() {
+            outline.push(Definition {
+                names: heading.path[..depth].to_vec(),
+                start,
+                end,
+            });
+        }
+    }
+    Ok(selected(&written, &outline, name))
 }
 
 /// The hash of a directory: of its code files, each as its path from the root and its text, in the order of their
@@ -421,6 +628,186 @@ mod tests {
         ] {
             assert!(followed(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_key_names_a_table_of_a_toml_file() {
+        for (key, file, name) in [
+            (
+                ".config/rotproof.toml::unit",
+                ".config/rotproof.toml",
+                "unit",
+            ),
+            (
+                "Cargo.TOML::workspace.dependencies",
+                "Cargo.TOML",
+                "workspace.dependencies",
+            ),
+            ("x/a.toml::my-table_2.k", "x/a.toml", "my-table_2.k"),
+        ] {
+            assert_eq!(
+                followed(key),
+                Ok(Followed::Table {
+                    file: file.into(),
+                    name: name.into()
+                }),
+                "{key}"
+            );
+        }
+        // The file alone is a file, as before
+        assert_eq!(followed("a.toml"), Ok(Followed::File("a.toml".into())));
+        for bad in [
+            "a.toml::",
+            "a.toml::a..b",
+            "a.toml::.a",
+            "a.toml::a.",
+            "a.toml::\"a.b\"",
+            "a.toml::a b",
+            "a.toml::a()",
+            "a.toml/::a",
+        ] {
+            assert!(followed(bad).is_err(), "{bad:?}");
+        }
+        // A table is named in a .toml file alone
+        let why = followed("a.json::unit").unwrap_err();
+        assert!(why.contains("a table in a .toml file"), "{why}");
+    }
+
+    const CONFIG: &str = "stack = \"python\"\nareas = [\"a\", \"b\"]\nfiles = \"2.0.0\"\n\n# The first\n\
+                          [[unit]]\nname = \"x\"\nareas = [\n  [\"not a heading\"],\n]\n\n[[unit]]\nname = \"y\"\n\n\
+                          [other]\nk = 1\n\n[unit.sub]\nz = 1\n";
+
+    #[test]
+    fn a_table_is_hashed_on_its_headings_and_the_fields_above_them_are_no_table() {
+        let text = |source: &str, name: &str| table_text(source, name).unwrap();
+        // Every piece of an array of tables, and the table below one, in the order they appear
+        assert_eq!(
+            text(CONFIG, "unit").as_deref(),
+            Some(
+                "[[unit]]\nareas = [[\"not a heading\"]]\nname = \"x\"\n[[unit]]\nname = \"y\"\n[unit.sub]\nz = 1"
+            )
+        );
+        assert_eq!(text(CONFIG, "other").as_deref(), Some("[other]\nk = 1"));
+        assert_eq!(
+            text(CONFIG, "unit.sub").as_deref(),
+            Some("[unit.sub]\nz = 1")
+        );
+        // A field, a table that is not there, and a name only half of which is
+        for name in [
+            "areas",
+            "files",
+            "name",
+            "units",
+            "unit.x",
+            "unit.sub.z",
+            "other.k",
+        ] {
+            assert_eq!(text(CONFIG, name), None, "{name}");
+        }
+
+        // What is above the first heading, and what is in another table, is not the table
+        let areas = CONFIG
+            .replace("[\"a\", \"b\"]", "[\"a\"]")
+            .replace("2.0.0", "2.0.1");
+        assert_eq!(text(&areas, "unit"), text(CONFIG, "unit"));
+        assert_eq!(text(&areas, "other"), text(CONFIG, "other"));
+        // A field, a value or a unit added in the table is
+        for changed in [
+            CONFIG.replace("name = \"y\"", "name = \"z\""),
+            CONFIG.replace("name = \"y\"\n", "name = \"y\"\nareas = []\n"),
+            CONFIG.replace("z = 1", "z = 2"),
+            CONFIG.replace("[\"not a heading\"]", "[\"not a heading\", \"or\"]"),
+            format!("{CONFIG}\n[[unit]]\nname = \"w\"\n"),
+        ] {
+            assert_ne!(text(&changed, "unit"), text(CONFIG, "unit"), "{changed}");
+            assert_eq!(text(&changed, "other"), text(CONFIG, "other"), "{changed}");
+        }
+        // The blank lines between tables are no part of one
+        assert_eq!(
+            text(&CONFIG.replace("\n\n", "\n\n\n\n"), "unit"),
+            text(CONFIG, "unit")
+        );
+    }
+
+    #[test]
+    fn a_table_is_hashed_on_what_it_says_and_not_on_how_it_is_written() {
+        let text = |source: &str| table_text(source, "unit").unwrap();
+        let said = "[[unit]]\nname = \"x\"\nentry = [\"a\", \"b\"]\nshared = true\n";
+        // Comments, blank lines, indentation, the spacing and the quotes of a string, the way an array is wrapped, the
+        // order of the keys and a key written in quotes
+        for same in [
+            "[[unit]] # the first\n# about it\nname = \"x\" # a name\nentry = [\"a\", \"b\"]\nshared = true\n",
+            "[[unit]]\n\n  name   =   'x'\n\n  entry = [\n    \"a\",   # one\n    'b',\n  ]\n  shared = true\n\n\n",
+            "[[unit]]\nshared = true\n\"entry\" = [ \"a\" , \"b\" ]\n'name' = \"x\"\n",
+            "[[unit]]\nname = \"\\u0078\"\nentry = [\"a\", \"b\"]\nshared = true",
+            "[[unit]]\nname = \"x\"\nentry = [\"a\", \"b\"]\nshared = true\n\n[other]\nk = 1\n",
+        ] {
+            assert_eq!(text(same), text(said), "{same:?}");
+        }
+        // A value written another way is another value, and so is a table written as another kind
+        for other in [
+            "[[unit]]\nname = \"x\"\nentry = \"a\"\nshared = true\n",
+            "[[unit]]\nname = \"x\"\nentry = [\"b\", \"a\"]\nshared = true\n",
+            "[[unit]]\nname = \"x\"\nentry = [\"a\", \"b\"]\nshared = false\n",
+            "[[unit]]\nname = \"X\"\nentry = [\"a\", \"b\"]\nshared = true\n",
+            "[unit]\nname = \"x\"\nentry = [\"a\", \"b\"]\nshared = true\n",
+            "[[unit]]\nname = \"x\"\nentry = [\"a\", \"b\"]\nshared = true\nroot = \"\"\n",
+        ] {
+            assert_ne!(text(other), text(said), "{other:?}");
+        }
+        // What it is written as: keys in order, dotted keys in full, inline tables on a line, strings escaped
+        assert_eq!(
+            text("[[unit]]\nz = { b = 1, a = 2.5 }\na.c = \"q\\\"\\\\\"\nb = 2026-11-15\nn = -3\nu = \"\\t\\u0001é\"\n")
+                .as_deref(),
+            Some(
+                "[[unit]]\na.c = \"q\\\"\\\\\"\nb = 2026-11-15\nn = -3\nu = \"\\t\\u0001é\"\nz = {a = 2.5, b = 1}"
+            )
+        );
+    }
+
+    #[test]
+    fn a_table_inside_another_is_named_by_its_dots_and_an_implied_one_is_there() {
+        let source = "[a.b]\nx = 1\n[a.b.c]\ny = 1\n\n[a.d]\nz = 1\n";
+        let text = |name: &str| table_text(source, name).unwrap();
+        // `a` has no heading of its own, and holds both of its tables
+        assert_eq!(
+            text("a").as_deref(),
+            Some("[a.b]\nx = 1\n[a.b.c]\ny = 1\n[a.d]\nz = 1")
+        );
+        assert_eq!(text("a.b").as_deref(), Some("[a.b]\nx = 1\n[a.b.c]\ny = 1"));
+        assert_eq!(text("a.b.c").as_deref(), Some("[a.b.c]\ny = 1"));
+        assert_eq!(text("a.d").as_deref(), Some("[a.d]\nz = 1"));
+        assert_eq!(text("b"), None);
+        // `[a]` after `[a.b]` is the same table `a`, and each of its headings a piece
+        assert_eq!(
+            table_text("[a.b]\nx = 1\n[a]\ny = 1\n", "a")
+                .unwrap()
+                .as_deref(),
+            Some("[a.b]\nx = 1\n[a]\ny = 1")
+        );
+        // A quoted key is one name, which no key can write: it is not cut at its dot
+        assert_eq!(table_text("[a.\"b.c\"]\nx = 1\n", "a.b").unwrap(), None);
+        assert_eq!(
+            table_text("[a.\"b.c\"]\nx = 1\n", "a").unwrap().as_deref(),
+            Some("[a.\"b.c\"]\nx = 1")
+        );
+    }
+
+    #[test]
+    fn a_table_with_no_heading_is_not_named_and_a_file_that_is_no_toml_is_an_error() {
+        // A value that holds tables, and a table made by a dotted key, have no heading to start a piece at
+        for source in [
+            "unit = [{ name = \"x\" }]\n",
+            "unit = { name = \"x\" }\n",
+            "[a]\nunit.name = \"x\"\n",
+            "",
+            "# nothing\n",
+        ] {
+            assert_eq!(table_text(source, "unit").unwrap(), None, "{source:?}");
+            assert_eq!(table_text(source, "a.unit").unwrap(), None, "{source:?}");
+        }
+        let why = table_text("a = 1\n[[unit]\nname = 1\n", "unit").unwrap_err();
+        assert!(why.starts_with("line 2: "), "{why}");
     }
 
     #[test]

@@ -20,6 +20,7 @@ pub mod layers;
 pub mod links;
 pub mod markers;
 pub mod project;
+pub mod readers;
 pub mod records;
 pub mod structure;
 pub mod tree;

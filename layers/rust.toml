@@ -24,11 +24,33 @@ language = "rust"
 # The entry file, of the root package. Cargo compiles it against what the package's `Cargo.toml` declares, so that
 # manifest is what the direction check reads for it
 entry = "src/main.rs"
+# What `rotproof create` writes into an entry file a unit declares that is not there: the text of `src/main.rs` below,
+# whatever the entry is named
+entry_text = '''
+//! The entry file: it calls `composition` to build the program, and starts it. No layer.
+
+fn main() {}
+'''
+# What `rotproof create` writes beside the `src/` of an entry file a unit declares, when it is not there: Cargo compiles
+# a file as a crate only through a manifest above it. `{package}` is its name, the unit's, and `{dependencies}` is the
+# `[dependencies]` table that names the unit's own `composition` by path, which an entry file calls
+entry_package = '''
+[package]
+name = "{package}"
+version = "0.1.0"
+edition = "2024"
+publish = false
+{dependencies}'''
+# The one manifest of a package, which a project that declares units keeps to the root of a unit (or a layer, which is a
+# crate of its own)
+manifest = "Cargo.toml"
 # Where the rest of the root package's `src/` goes, said in the finding for code outside the layers (a crate in
 # `crates/` that no layer is, too)
 where_code_goes = "a rule of the program goes in crates/domain, a use case in crates/application, what wires them in crates/composition; src/main.rs is the one file of the root package's src/ that is no layer"
 # Written once at the root with the project's files: the root package, which holds the entry file, and the workspace,
-# so `cargo build` builds every crate in `crates/`. `{package}` is the project's name as a package name
+# so `cargo build` builds every crate of a layer. `{package}` is the project's name as a package name, and `{members}`
+# the crates of the layers it makes, one to a line: a glob such as `crates/*` would also match the directory of a unit
+# (`crates/billing`), which has no manifest, and Cargo fails on it
 files = [
     { path = "Cargo.toml", text = '''
 [package]
@@ -41,7 +63,7 @@ publish = false
 composition = { path = "crates/composition" }
 
 [workspace]
-members = ["crates/*"]
+members = [{members}]
 resolver = "3"
 ''' },
     { path = "src/main.rs", text = '''
@@ -50,13 +72,24 @@ resolver = "3"
 fn main() {}
 ''' },
 ]
+# What is written in place of `files` when the project declares units: a workspace and nothing else. A unit's entry
+# file is declared by the unit, in a package of its own, so the root holds no package and no entry file
+unit_root_files = [
+    { path = "Cargo.toml", text = '''
+[workspace]
+members = [{members}]
+resolver = "3"
+''' },
+]
 
+# `{package}` is the crate's name: the layer's, or the layer's behind its unit's (`billing_domain`) in a unit, so that
+# two units never name two crates alike, which Cargo refuses
 [layer]
 path = "crates/{name}"
 files = [
     { path = "Cargo.toml", text = '''
 [package]
-name = "{name}"
+name = "{package}"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -77,7 +110,7 @@ files = [{ path = "mod.rs", text = '''
 files = [
     { path = "Cargo.toml", text = '''
 [package]
-name = "protocol"
+name = "{package}"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -94,7 +127,7 @@ pub mod outbound;
 files = [
     { path = "Cargo.toml", text = '''
 [package]
-name = "infrastructure"
+name = "{package}"
 version = "0.1.0"
 edition = "2024"
 publish = false

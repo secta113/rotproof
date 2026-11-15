@@ -61,6 +61,7 @@ The body is free, except that a deprecated document opens with `# Resolution`: w
 
   A key is a file, in any language (`src/api/routes.py`); a definition in a Python, TypeScript, JavaScript or Rust file,
   written `<file>::<Name>.<Name>` in all of them (`::create_user`, a method `::Router.add`, `cli.rs::Command.Before`);
+  a table of a `.toml` file (`.config/rotproof.toml::unit`: every `[[unit]]` in it, and not its `areas` or `files`);
   or a directory, for every file under it that Rotproof reads as code (`.py`, `.rs`, `.ts`, `.tsx`, `.js` and the other
   TypeScript and JavaScript extensions), whatever the stack (`src/api/`). Every definition counts, exported or not: in
   Python a function or class and its methods; in TypeScript and JavaScript a function, class, interface, type, enum,

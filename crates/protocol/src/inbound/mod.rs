@@ -24,10 +24,15 @@ pub struct Names {
 pub struct Made {
     /// The files written, from the root, with `/`: made new or rewritten with a change
     pub written: Vec<String>,
+    /// The files taken away, from the root: the list of who reads the shared units, once no unit is shared
+    pub removed: Vec<String>,
     /// Documents left out of the index files: name -> why
     pub left_out: Vec<(String, String)>,
     /// The fields added to the declaration, as `name = value`
     pub added: Vec<String>,
+    /// What was changed in a file that was there, from the root: the one change
+    /// `rotproof create` makes to a file it wrote once (the members of a Rust workspace), as a line to tell
+    pub changed: Vec<(String, String)>,
     /// What the stack does not have Rotproof write yet, and why
     pub not_written: Option<String>,
 }
@@ -37,7 +42,8 @@ pub struct Made {
 pub enum Initialized {
     /// The declaration was written, at this path
     Declared(&'static str),
-    Upgraded(Upgraded),
+    /// Boxed: it holds what `rotproof create` made too, and is far the larger of the two
+    Upgraded(Box<Upgraded>),
 }
 
 /// What an upgrade of the project's files did.
@@ -57,6 +63,16 @@ pub struct Upgraded {
     pub made: Made,
     /// Whether `files` was set to the running version
     pub files_set: bool,
+    /// The knowledge document of the units, from the root, written as a draft: the project declares units, and no
+    /// document follows them
+    pub drafted: Option<String>,
+    /// Why that document was not drafted, when it would have been: it cannot be written without an area to tag it
+    /// with, or the units cannot be followed
+    pub not_drafted: Option<String>,
+    /// What is out of date in the map of the project's own `AGENTS.md` against the layers the declaration has: a layer
+    /// with no row, a row for a layer declared absent. Said on every run until it is fixed, and it fails nothing: the
+    /// file is the project's
+    pub stale_map: Vec<String>,
 }
 
 /// One broken rule: which check found it, and what is wrong.
@@ -113,6 +129,8 @@ pub struct Report {
 pub struct Indexed {
     /// The files written, from the root
     pub written: Vec<String>,
+    /// The files taken away, from the root: the list of who reads the shared units, once no unit is shared
+    pub removed: Vec<String>,
     /// Documents left out of the index files: name -> why
     pub left_out: Vec<(String, String)>,
 }
@@ -162,8 +180,8 @@ pub trait Commands {
     fn create(&self, root: &Path, yes: bool) -> Result<Made, String>;
     /// Every broken rule.
     fn check(&self, root: &Path) -> Result<Report, String>;
-    /// The guide of `stack`, or of the stack the project declares.
-    fn guide(&self, root: &Path, stack: Option<&str>) -> Result<String, String>;
+    /// The guide of `stack`, with the layers of `ui` when it is named too, or of the stack the project declares.
+    fn guide(&self, root: &Path, stack: Option<&str>, ui: Option<&str>) -> Result<String, String>;
     /// Write every index file, and find the items to measure again now.
     fn index(&self, root: &Path) -> Result<Indexed, String>;
     /// The findings an approval of `import` by `file` would keep, as `rotproof check` says them. `Err` when the import

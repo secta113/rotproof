@@ -8,7 +8,8 @@
 //! module puts the section together, and knows no rule but the layers'.
 
 use crate::layers::{
-    Language, Layout, RECORDS_ONLY, fullest_ui, importable, known_stacks, layout, listed, table,
+    Language, Layout, RECORDS_ONLY, chosen_ui, fullest_ui, importable, known_stacks, layout,
+    listed, table,
 };
 
 /// Rotproof's guide, from the root
@@ -16,17 +17,29 @@ pub const GUIDE: &str = ".rotproof/AGENTS.md";
 
 const GUIDE_TEXT: &str = include_str!("../../../project/rotproof/AGENTS.md.in");
 const LAYERS_TEXT: &str = include_str!("../../../project/rotproof/layers.md.in");
+const UNITS_TEXT: &str = include_str!("../../../project/rotproof/units.md.in");
 const UI_TEXT: &str = include_str!("../../../project/rotproof/ui.md.in");
 /// How the direction is read: the imports of a source file, or the dependencies of a crate
 const DIRECTION_IMPORTS: &str = include_str!("../../../project/rotproof/direction-imports.md.in");
 const DIRECTION_CARGO: &str = include_str!("../../../project/rotproof/direction-cargo.md.in");
 
-/// The guide for the stack named `stack`. `Err` when the stack is unknown.
-pub fn guide_named(stack: &str) -> Result<String, String> {
+/// The guide for the stack named `stack`, with the layers of the UI `ui` when it is named, and of the fullest one the
+/// stack offers when it is not. `Err` when the stack is unknown, or the UI is one `rotproof init` would refuse for it.
+pub fn guide_named(stack: &str, ui: Option<&str>) -> Result<String, String> {
+    if !known_stacks().contains(&stack) {
+        return Err(format!(
+            "unknown stack {stack:?} (known: {})",
+            known_stacks().join(", ")
+        ));
+    }
+    let ui = match ui {
+        Some(_) => chosen_ui(stack, ui)?,
+        None => fullest_ui(stack),
+    };
     if stack == RECORDS_ONLY {
         return Ok(guide(stack, None));
     }
-    match layout(stack, &fullest_ui(stack)) {
+    match layout(stack, &ui) {
         Some(layout) => Ok(guide(stack, Some(&layout))),
         None => Err(format!(
             "unknown stack {stack:?} (known: {})",
@@ -75,10 +88,57 @@ fn layers_section(layout: &Layout) -> String {
     .concat();
     LAYERS_TEXT
         .replace("{direction}\n", direction)
+        .replace("{units}", &units(layout))
         .replace("{rules}", &rules)
         .replace("{not_layers}", &not_layers(layout))
         .replace("{table}", &rows(layout))
         .replace("{ui}", &ui(layout))
+}
+
+/// The rules of the units, which a project that declares `[[unit]]` is held to: the same in every stack but for where
+/// a unit sits and how one unit names another's layer, which are said in the stack's language. The guide is the same
+/// for every project of a stack, so no unit of the project is named.
+fn units(layout: &Layout) -> String {
+    let (at, names) = match layout.language {
+        Language::Python => (
+            "Put the layers in `packages/<unit>/src/<unit>` in a monorepo, or in `<unit>` at the root in a modular\n  \
+             monolith. Python imports a unit as the name of its directory, so the directory is named as the unit is,\n  \
+             and no two units have a directory of one name, nor one named as a module of Python's standard library\n  \
+             (`queue`, `string`).",
+            "Write `billing.protocol.inbound`, not `billing`. Python finds a bare `domain` from where the program\n  \
+             starts, which is the layer of the root and not the unit's own: a unit imports its own layers as\n  \
+             `billing.domain`, or relatively.",
+        ),
+        Language::TypeScript => (
+            "Put the layers in `packages/<unit>/src` in a monorepo, with the unit's `package.json` in\n  \
+             `packages/<unit>`, which is its `root`.",
+            "Write `@acme/billing/protocol/inbound`, not `@acme/billing`, the name its `package.json` gives, and\n  \
+             export the layers there.",
+        ),
+        Language::Rust => (
+            "Put the layers in `packages/<unit>` or `crates/<unit>`, each layer a crate in it. A crate's name starts\n  \
+             with its unit's (`billing_domain`, `billing_protocol`), so that cargo takes the crates of two units for\n  \
+             what they are.",
+            "A crate depends on the crate of the layer it imports, and that is a layer of the unit.",
+        ),
+    };
+    // What the top of a unit may hold besides its entry files is the layout's `unit_files`
+    let own = match layout.unit_files.as_slice() {
+        [] => String::new(),
+        files => format!(
+            " and its own {}, which imports no layer",
+            files
+                .iter()
+                .map(|file| format!("`{file}`"))
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ),
+    };
+    UNITS_TEXT
+        .replace("{where}", at)
+        .replace("{names}", names)
+        .replace("{own}", &own)
+        .replace("{manifest}", &layout.manifest)
 }
 
 /// The table of the layers: each place of the layout, where it lives and what it may import, and the entry file.
@@ -200,6 +260,11 @@ mod tests {
                 "{direction}",
                 "{rules}",
                 "{reads}",
+                "{units}",
+                "{where}",
+                "{names}",
+                "{own}",
+                "{manifest}",
             ] {
                 assert!(
                     !text.contains(placeholder),
@@ -208,6 +273,33 @@ mod tests {
             }
             assert!(text.contains(env!("CARGO_PKG_VERSION")));
         }
+    }
+
+    #[test]
+    fn a_named_stack_gets_the_guide_of_the_ui_named_or_of_the_fullest_and_the_ui_is_judged_as_init_does()
+     {
+        let of = |ui: &str| guide("typescript", layout("typescript", ui).as_ref());
+        assert_eq!(guide_named("typescript", Some("none")), Ok(of("none")));
+        assert_eq!(guide_named("typescript", Some("atomic")), Ok(of("atomic")));
+        assert_eq!(guide_named("typescript", None), Ok(of("atomic")));
+        assert_ne!(of("none"), of("atomic"));
+        assert_eq!(guide_named("rust", Some("none")), guide_named("rust", None));
+        assert_eq!(guide_named("none", None), Ok(guide(RECORDS_ONLY, None)));
+        // The checks of `rotproof init --ui`, in its words
+        for (stack, ui) in [("typescript", "x"), ("python", ""), ("rust", "atomic")] {
+            let said = guide_named(stack, Some(ui)).unwrap_err();
+            assert!(said.starts_with("unknown UI"), "{stack} {ui}: {said}");
+        }
+        assert!(
+            guide_named("none", Some("none"))
+                .unwrap_err()
+                .contains("has no layers")
+        );
+        assert!(
+            guide_named("cobol", Some("none"))
+                .unwrap_err()
+                .starts_with("unknown stack")
+        );
     }
 
     #[test]
@@ -277,6 +369,74 @@ mod tests {
         ] {
             assert!(text.contains(row), "no row {row}:\n{text}");
         }
+    }
+
+    #[test]
+    fn the_guide_of_a_stack_with_layers_says_what_a_unit_is_and_a_repository_of_records_only_does_not()
+     {
+        let section = "declares them as units: one `[[unit]]` in `.config/rotproof.toml` for each";
+        // The guide is of the stack alone, the same for every project in it, so no unit of the project is named
+        for (stack, ui, where_it_sits, names) in [
+            (
+                "python",
+                "atomic",
+                "`packages/<unit>/src/<unit>`",
+                "`billing.protocol.inbound`",
+            ),
+            (
+                "typescript",
+                "none",
+                "`packages/<unit>/src`",
+                "`@acme/billing/protocol/inbound`",
+            ),
+            (
+                "rust",
+                "none",
+                "`packages/<unit>` or `crates/<unit>`",
+                "`billing_domain`",
+            ),
+        ] {
+            let text = guide(stack, layout(stack, ui).as_ref());
+            // The text is wrapped
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(text.contains(section), "{stack}");
+            assert!(
+                text.contains(where_it_sits) && text.contains(names),
+                "{stack}"
+            );
+            for rule in [
+                "no other unit unless it is shared",
+                "never in a cycle",
+                "`application` never imports another unit's",
+                "never the unit as a whole",
+            ] {
+                assert!(
+                    text.to_lowercase().contains(&rule.to_lowercase()),
+                    "{stack}: {rule}"
+                );
+            }
+            // The other stacks' words stay with theirs
+            for other in [
+                "billing.protocol.inbound",
+                "@acme/billing",
+                "billing_domain",
+            ] {
+                assert_eq!(
+                    text.contains(other),
+                    names.contains(other),
+                    "{stack}: {other}"
+                );
+            }
+        }
+        assert!(!guide(RECORDS_ONLY, None).contains("[[unit]]"));
+        // The ui makes no difference to the section
+        let unit_section = |ui: &str| {
+            let text = guide("python", layout("python", ui).as_ref());
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let start = text.find(section).unwrap();
+            text[start..start + 400].to_string()
+        };
+        assert_eq!(unit_section("atomic"), unit_section("none"));
     }
 
     #[test]

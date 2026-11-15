@@ -36,7 +36,11 @@ pub fn problems(
     };
     let mut found = Comments::default();
     let mut read = 0;
-    for path in code_files(tree, &layout.scope, |name| layout.has_comments(name))? {
+    let mut paths = Vec::new();
+    for scope in declared.scopes() {
+        paths.extend(code_files(tree, &scope, |name| layout.has_comments(name))?);
+    }
+    for path in paths {
         if declared.is_unchecked(&path) {
             continue;
         }

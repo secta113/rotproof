@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at ff6d33c5. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 36265ca8. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -21,6 +21,9 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
   `composition`、`infrastructure`、`application`、`protocol`、`domain` と、画面のための `ui`、`presentation` です。
   Python、TypeScript、Rust を検査します。この層に分けられないコードは責務が混ざっているので、表はエージェントに
   コードを分けさせる手段でもあります。例外は、人が端末で承認したエントリだけで、レビューする人は差分でそれを見ます。
+- **モノレポの各部分が、自分の層を守ります。** モノレポのパッケージやモジュラーモノリスのモジュールをユニットとして
+  宣言すると、そのあいだの import がすべて検査されます。ある部分が別の部分に届くのは、届いてよい層を通るときだけです。
+  誰も必要としないものを集めてしまう共有ユニットは、差分に出る一覧で見つかります（「ユニット」を参照）。
 - **コードからは読み取れないことが、正しいまま残ります。** コードの背後にある理由は knowledge の文書に書き、文書は
   自分が説明するコードを名指して、ハッシュで固定します。そのコードが変わると、誰かが文書をコードに照らして読み、
   固定し直すまで `rotproof check` が失敗します。
@@ -289,12 +292,75 @@ Rotproof のアップグレードで何が変わりうるかは「互換性」�
   `infrastructure`、`application`、`protocol`、`domain` と、画面のための `ui`、`presentation`）。この層に
   分けられないコードは責務が混ざっているので、層は LLM や人にコードを分けさせる手段です。どのコードも、役割と
   許される import が書かれた層のどれかに収まらなければなりません。Rotproof はプロジェクトの開始時に層を作り、
-  実行のたびに検査するので、依存の向きは意図したとおりに保たれます。
+  実行のたびに検査するので、依存の向きは意図したとおりに保たれます。層をそれぞれ持つ複数の部分からなるプロジェクトは、
+  それらをユニットとして宣言します（「ユニット」を参照）。
 - **記録:** いまどうなっているか、なぜそうなのかのうち、コードからは読み取れないこと。これは、説明するコードを追う
   knowledge の文書に書き、その下のコードが変わると `rotproof check` が失敗します（目にしたときだけ意味を持つ
   ことのための alarm もあります）。もう 1 つは、各タスクが残したものの log です。未完了の作業は、ここではなく
   Issue に置きます。知識も、見つけたことも、記録の外には残しません。コードのコメントの `TODO` や `NOTE` は検査を
   失敗させます。ただし、`todo_link` を宣言したプロジェクトで、Issue を名指す `TODO` は別です。
+
+## ユニット
+
+プロジェクトは、何も言わなければ 1 つのユニットで、層はスタックが置く場所にある 1 組です。モノレポのパッケージや
+モジュラーモノリスのモジュールのように、層をそれぞれ持つ複数の部分からなるプロジェクトは、各部分をユニットとして、
+`.config/rotproof.toml` に `[[unit]]` テーブルを 1 つずつ宣言します。すると Rotproof は、各ユニットの中で層を保ち、
+ユニットのあいだの import も判定します。各ユニットは持たない層を自分の `absent` に書くので、先頭の `absent` は空の
+ままです。`rotproof init` は宣言の末尾に、コメントにした例を書きます。共有ユニット 1 つ、共有でないユニット 2 つ、
+アプリ 1 つの Python のモノレポは、次のようになります。
+
+```toml
+[[unit]]
+name = "core"
+path = "packages/core/src/core"       # where its layers sit directly
+shared = true                         # any unit may import it
+
+[[unit]]
+name = "billing"
+path = "packages/billing/src/billing"
+root = "packages/billing"             # where its manifest is (`path` when left out)
+
+[[unit]]
+name = "shipping"
+path = "packages/shipping/src/shipping"
+root = "packages/shipping"
+
+[[unit]]
+name = "cli"
+path = "apps/cli/cli"
+entry = ["apps/cli/__main__.py"]        # an app: its composition wires the other units
+absent = ["application", "protocol", "domain"]   # an app holds only composition and infrastructure
+```
+
+`rotproof create --yes` は、各ユニットの層と、足りない entry ファイルを作ります。同じ検査が各ユニットの中で働き、
+指摘にはユニットの名前が付きます。ユニットのあいだの規則は少数です。
+
+- ユニットは、自分のユニットの層を表のとおりに import し、共有でない限り、ほかのユニットは import しません。
+- 共有ユニットが import するのは共有ユニットだけで、循環はしません。層は、共有ユニットの層のうち、自分の層が表で
+  import してよいものを import します（`infrastructure.inbound` は共有ユニットの `protocol.inbound` を import します）。
+  ただし `application` は、ほかのユニットの `application` を import しません。ユースケースは渡されます。追加は 1 つで、
+  `protocol.inbound` は共有ユニットの `domain` も import します。ユニットをまたいで使う値の型はそこにあるので、入力
+  ポートはその形を写さずに、名前で指せます。
+- `composition` は、ほかのユニットをそのユニットの `protocol` を通して import し、共有ユニットなら `domain`（ポートが
+  取る値の型）も import します。共有ユニットも含め、各ユニットは自分の中身を自分の `composition` で組み立てるから
+  です。アプリの `composition` はユニットを組み合わせるので、ユニットの `composition` も import しますが、別の
+  アプリのものは import しません。entry ファイルが import するのは、自分のユニットの `composition` だけです。
+- ほかのユニットの import は、その層のモジュールを名指し、ユニット全体は名指しません。層の外のコードから何を読むかは
+  見えないからです。
+
+共有ユニットはどのユニットからも import できるので、誰も必要としないものを集めても止められません。共有ユニットを
+宣言したプロジェクトは `.rotproof/readers.md` を持ちます。各ユニットが各共有ユニットの何を読むかを名前で並べ、
+読むユニットが 1 つだけの名前は別にしてあります。`rotproof index` が import から書き、古くなっている間は
+`rotproof check` が失敗します。一覧に出たことで失敗する規則はありません。1 つのユニットだけが使うライブラリを、
+わざと共有にすることもあるからです。一覧は読む人のためにあり、名前が現れたり読み手が変わったりしたことを差分で
+見せます。
+
+コードがなぜこのユニットに分かれているかは、人が言うことです。ユニットを宣言していて、タグにする area があり、
+ユニットを追う文書がまだ無いプロジェクトで `rotproof init` を実行すると、`docs/knowledge/units.md` を一度だけ下書きします。
+ユニットと、コードにあるとおりのユニット間の import を Mermaid の図にし、各ユニットの節には責務を書く欄が残して
+あります。この文書は `.config/rotproof.toml::unit` を追うので、ユニットを足す、消す、変えると、文書を宣言に照らして
+読み直し、固定し直すまで `rotproof check` が失敗します。すべての規則と、スタックごとのユニットの import の
+仕方は、[Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units) にあります。
 
 ## 原則
 
@@ -328,7 +394,7 @@ Rotproof のアップグレードで何が変わりうるかは「互換性」�
 ## 仕様、開発、ライセンス
 
 - **仕様:** [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md)（英語）。コマンド、
-  アップグレード、禁じられた import の承認、層、記録、`rotproof check` が検査するすべての規則があります。
+  アップグレード、禁じられた import の承認、層、ユニット、記録、`rotproof check` が検査するすべての規則があります。
 - **開発とリリース:** 英語版の
   [Development](https://github.com/secta113/rotproof/blob/main/README.md#development) を参照してください。
 - **ライセンス:** [MIT](https://github.com/secta113/rotproof/blob/main/LICENSE-MIT) または

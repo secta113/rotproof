@@ -183,6 +183,18 @@ pub fn problems(files: Option<&str>, declined: &[String], running: &str) -> Vec<
     found
 }
 
+/// Which command brings the guide `.rotproof/AGENTS.md` into line, when it is missing or is not what this version
+/// writes. When `files` names the running version, the project's files are up to it and the guide changed under the
+/// same version (a development build, or an edit by hand), so `rotproof create` writes it; otherwise the version moved
+/// and `rotproof init`, which also sets `files` and says what to do by hand, is the upgrade. A missing `files` is the
+/// first release's, and a `files` that cannot be read is another version.
+pub fn guide_command(files: Option<&str>, running: &str) -> &'static str {
+    match (version(files.unwrap_or(FIRST)), version(running)) {
+        (Some(files), Some(running)) if files == running => "run `rotproof create`",
+        _ => "run `rotproof init`",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +212,31 @@ mod tests {
         assert!(problems(Some("0.4.0"), &[], "1.0.0-rc.1")[0].contains("run `rotproof init`"));
         assert!(problems(Some("1.0.0-rc.1"), &[], "1.0.0")[0].contains("run `rotproof init`"));
         assert!(problems(Some("1.0.0"), &[], "1.0.0-rc.1")[0].contains("newer than this Rotproof"));
+    }
+
+    #[test]
+    fn the_guide_is_written_by_create_under_the_same_version_and_by_init_otherwise() {
+        assert_eq!(
+            guide_command(Some("1.0.0-rc.1"), "1.0.0-rc.1"),
+            "run `rotproof create`"
+        );
+        for files in [
+            Some("1.0.0-rc.1"),
+            Some("1.0.1"),
+            Some("not a version"),
+            None,
+        ] {
+            assert_eq!(
+                guide_command(files, "1.0.0"),
+                "run `rotproof init`",
+                "{files:?}"
+            );
+        }
+        // Newer than the running one is no upgrade either: init says so
+        assert_eq!(
+            guide_command(Some("1.0.0"), "1.0.0-rc.1"),
+            "run `rotproof init`"
+        );
     }
 
     #[test]

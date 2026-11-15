@@ -37,11 +37,13 @@ pub fn problems(
                 .filter(|path| layout.language != Language::Rust || *path != build_script),
         );
     }
-    if let Some(entry) = layout.entry(&table())
-        && is_file(tree, &entry.path)
-    {
-        files.push(entry.path);
-    }
+    files.extend(
+        declared
+            .entries(&table())
+            .into_iter()
+            .filter(|entry| is_file(tree, &entry.path))
+            .map(|entry| entry.path),
+    );
     let mut found = Vec::new();
     for path in files {
         let Some(source) = read_code(tree, &path, "reads of the environment", &mut found)? else {

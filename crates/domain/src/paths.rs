@@ -8,6 +8,11 @@ pub fn within(path: &str, prefix: &str) -> bool {
     path == prefix || path.starts_with(&format!("{prefix}/"))
 }
 
+/// Whether `path` is `dir` or inside it, the root ("") holding every path.
+pub fn inside(path: &str, dir: &str) -> bool {
+    dir.is_empty() || within(path, dir)
+}
+
 /// The directory of a path from the root: "" for one at the root.
 pub fn parent(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
@@ -24,6 +29,46 @@ pub fn join(dir: &str, path: &str) -> String {
         path.to_string()
     } else {
         format!("{dir}/{path}")
+    }
+}
+
+/// The path to `to` from the directory `from`, both from the root ("" is the root): `..` up to the directory they
+/// share, then down. `.` when they are the same.
+pub fn relative(from: &str, to: &str) -> String {
+    let from: Vec<&str> = from.split('/').filter(|part| !part.is_empty()).collect();
+    let to: Vec<&str> = to.split('/').filter(|part| !part.is_empty()).collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut path = vec![".."; from.len() - shared];
+    path.extend(&to[shared..]);
+    if path.is_empty() {
+        ".".to_string()
+    } else {
+        path.join("/")
+    }
+}
+
+/// Why a path written in the declaration is not fit to be read as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Miswritten {
+    /// It holds a `\`
+    Backslash,
+    /// It is not from the root with `/`: it starts with `/`, holds a `:`, or has an empty, `.` or `..` part, so it
+    /// would never equal the paths Rotproof compares it with
+    NotFromRoot,
+}
+
+/// Whether `path`, as the declaration writes it (`unchecked`, a unit's `path`), is fit to be compared with the paths
+/// Rotproof reads, and if not, why.
+pub fn miswritten(path: &str) -> Option<Miswritten> {
+    if path.contains('\\') {
+        Some(Miswritten::Backslash)
+    } else if path.starts_with('/')
+        || path.contains(':')
+        || path.split('/').any(|part| matches!(part, "" | "." | ".."))
+    {
+        Some(Miswritten::NotFromRoot)
+    } else {
+        None
     }
 }
 
@@ -64,6 +109,31 @@ mod tests {
     }
 
     #[test]
+    fn a_path_is_named_from_a_directory_by_climbing_to_the_one_they_share() {
+        assert_eq!(
+            relative("apps/cli", "apps/cli/crates/composition"),
+            "crates/composition"
+        );
+        assert_eq!(
+            relative("apps/cli", "crates/core/domain"),
+            "../../crates/core/domain"
+        );
+        assert_eq!(relative("apps/cli", "apps/web"), "../web");
+        assert_eq!(relative("", "crates/a"), "crates/a");
+        assert_eq!(relative("a/b", ""), "../..");
+        assert_eq!(relative("a", "a"), ".");
+    }
+
+    #[test]
+    fn the_root_holds_every_path() {
+        assert!(inside("a/b.py", ""));
+        assert!(inside("", ""));
+        assert!(inside("a/b.py", "a"));
+        assert!(!inside("ab/c.py", "a"));
+        assert!(!inside("", "a"));
+    }
+
+    #[test]
     fn a_path_at_the_root_has_the_root_as_its_parent_and_itself_as_its_name() {
         assert_eq!(parent("src/domain/x.py"), "src/domain");
         assert_eq!(parent("x.py"), "");
@@ -76,6 +146,15 @@ mod tests {
         assert_eq!(join("src", "x.py"), "src/x.py");
         assert_eq!(join("", "x.py"), "x.py");
         assert_eq!(join("src", "../x.py"), "src/../x.py");
+    }
+
+    #[test]
+    fn a_path_is_written_from_the_root_with_slashes() {
+        assert_eq!(miswritten("packages/billing/src"), None);
+        assert_eq!(miswritten("a\\b"), Some(Miswritten::Backslash));
+        for path in ["./a", "a/./b", "../a", "/a", "a//b", "C:/a", "", "a/.."] {
+            assert_eq!(miswritten(path), Some(Miswritten::NotFromRoot), "{path:?}");
+        }
     }
 
     #[test]

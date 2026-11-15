@@ -42,20 +42,23 @@ const CHECK_HELP: &str = "\
 Check the layers and the records, and exit non-zero when one breaks the rules
 
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
-layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view), that each layer imports only \
+layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view; in each unit, when the \
+declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
 what the layer table allows or a person approved in .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that only \
 infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
-updates them), that .rotproof/AGENTS.md is up to date, that every knowledge document in docs/knowledge/ keeps its \
+updates them), that .rotproof/AGENTS.md is up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
+would write it (there with a shared unit, not there without), that every knowledge document in docs/knowledge/ keeps its \
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
 follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \
 than today. The rest of docs/ is the project's, and is not read. \
 Prints every broken rule under the check that found it, and what was not checked and why. Warns of every knowledge \
 document whose stale_after has come, on every run from that day, and fails nothing for it: time alone never turns \
 the check red. Warns, too, of every comment that may make a Python type checker check less (# pyright: basic, \
-# mypy: allow-untyped-defs), and fails nothing for it. With todo_link in the declaration (\"number\" or \"key\"), a \
+# mypy: allow-untyped-defs), and fails nothing for it. Warns, too, of a layer the map in AGENTS.md has no row for, and \
+of a row for a layer declared absent, and fails nothing for it: the file is the project's. With todo_link in the declaration (\"number\" or \"key\"), a \
 comment that holds TODO(#123): what is left (\"number\") or TODO(ABC-123): what is left (\"key\"), on one line, with the \
 number or key of the issue that tracks the work, is not a finding: every one is printed on every run under `linked \
 TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. Writes \
@@ -113,9 +116,14 @@ enum Command {
     /// a CI workflow that installs the pinned Rotproof (from PyPI with requirements-dev.txt for python, from npm with
     /// the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
-    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), and docs/index.md and the
+    /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
+    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), .rotproof/readers.md (who reads
+    /// each shared unit, when a unit is shared), and docs/index.md and the
     /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
-    /// Never overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing
+    /// Never overwrites another file, and never moves or deletes one, except that in a rust project it adds the
+    /// crates it makes to the members of the workspace in Cargo.toml when none names them, and replaces the member
+    /// `crates/*` with the crates it matched when it would match a directory that has no Cargo.toml, as a unit's
+    /// does, and says each change. Run it when a project starts, and after editing
     /// the declaration; after upgrading Rotproof, `rotproof init` does what it does, without making a layer.
     /// Makes layers only with --yes: without it, a run that would make one lists them, writes nothing and exits 2, so
     /// the layers the project does not have are declared absent first. Exits 2 too when the declaration cannot be read
@@ -130,14 +138,20 @@ enum Command {
     Check,
     /// Print the rules Rotproof keeps for a stack, the text of .rotproof/AGENTS.md, writing nothing
     ///
-    /// Prints the guide of the stack the project declares, or of the stack named with --stack, which needs no project:
-    /// how to run Rotproof, the layers of the stack with where each lives and what it may import, and the rules of the
-    /// records. The same text `rotproof create` writes to .rotproof/AGENTS.md. Exits 2 for an unknown stack, or when
-    /// no stack is named and the declaration cannot be read.
+    /// Prints the guide of the stack and the UI the project declares, or of the stack named with --stack, which needs
+    /// no project: how to run Rotproof, the layers of the stack with where each lives and what it may import, and the
+    /// rules of the records. The same text `rotproof create` writes to .rotproof/AGENTS.md. With --stack, --ui picks
+    /// the UI, as for `rotproof init` (with python and typescript, atomic or none; the layers of the fullest UI the
+    /// stack offers without it). Exits 2 for an unknown stack or UI, or when no stack is named and the declaration
+    /// cannot be read.
     Guide {
         /// python, typescript, rust, or none (records only). Without it, the stack in .config/rotproof.toml
         #[arg(long)]
         stack: Option<String>,
+        /// The UI of the layers to show, as for `rotproof init`: atomic or none with python and typescript. Needs
+        /// --stack
+        #[arg(long, requires = "stack")]
+        ui: Option<String>,
     },
     /// Approve on a terminal a forbidden import, or the knowledge documents whose followed code changed (--reviewed);
     /// or remove the approvals that match nothing (--prune)
@@ -183,7 +197,9 @@ enum Command {
     /// docs/knowledge/rules.md, each only when it differs from what it would write, and names each it wrote (when none
     /// differs, it says so). Run it after a knowledge document changes; never edit these by hand. Writes nothing
     /// in docs/work/, which Rotproof no longer reads. Lists the documents it left out and why, also under `# Left out`
-    /// in the index. Exits 2 when the declaration or a document cannot be read.
+    /// in the index. In a project that declares a shared unit it writes, too, .rotproof/readers.md, the names the other
+    /// units read of each shared unit with the units that read them (run it after the imports between units change),
+    /// and takes it away once no unit is shared. Exits 2 when the declaration or a document cannot be read.
     Index,
     /// Pin keys in a knowledge document's follows, at the hash of the code as it is now
     ///
@@ -192,17 +208,19 @@ enum Command {
     /// (docs/knowledge/api.md, or docs\knowledge\api.md). Each key is what follows names: a file from the root
     /// (src/api/routes.py), a definition of a Python, TypeScript, JavaScript or Rust file
     /// (src/api/routes.py::create_user, src/api.ts::Router.add, src/cli.rs::Command.Before: Name, or Name.Name; a Rust
-    /// type covers its impl blocks), or every file read as code under a directory (src/api/: .py, .rs and the
-    /// TypeScript and JavaScript extensions). A name defined more than once in a file is hashed on all its pieces. A
-    /// key in follows gets its new hash, and a key not in it is added at its end, with the hash quoted (follows is made
-    /// at the end of the frontmatter when the document has none); nothing else in the document changes, and it keeps a
-    /// byte order mark and its line endings (CRLF on every line when one line had it). Prints each key with what was
-    /// done, then whether the document was written. Writes all the keys or none, and only the keys named: re-pinning
-    /// every changed document in one act is `rotproof approve --reviewed`, which a person runs. Needs no terminal:
-    /// pinning one document is an edit of it, which git records. A key gone from the code is left to edit by hand.
-    /// Exits 2, writing nothing, when the first argument is not a knowledge document (as before 0.4.0, when follows
-    /// took the keys alone), the document is not there, cannot be read, is a guide or is deprecated, or a key is not a
-    /// form follows takes, names what is not there, or cannot be read.
+    /// type covers its impl blocks), a table of a .toml file (.config/rotproof.toml::unit: every [[unit]] in it, and
+    /// not the fields above them; a table in another is Name.Name, and a name holds the tables below it), or every file
+    /// read as code under a directory (src/api/: .py, .rs and the TypeScript and JavaScript extensions). A name defined
+    /// more than once in a file is hashed on all its pieces. A key in follows gets its new hash, and a key not in it is
+    /// added at its end, with the hash quoted (follows is made at the end of the frontmatter when the document has
+    /// none); nothing else in the document changes, and it keeps a byte order mark and its line endings (CRLF on every
+    /// line when one line had it). Prints each key with what was done, then whether the document was written. Writes
+    /// all the keys or none, and only the keys named: re-pinning every changed document in one act is `rotproof approve
+    /// --reviewed`, which a person runs. Needs no terminal: pinning one document is an edit of it, which git records. A
+    /// key gone from the code is left to edit by hand. Exits 2, writing nothing, when the first argument is not a
+    /// knowledge document (as before 0.4.0, when follows took the keys alone), the document is not there, cannot be
+    /// read, is a guide or is deprecated, or a key is not a form follows takes, names what is not there, or cannot be
+    /// read.
     Follows {
         /// The knowledge document: knowledge/<slug>.md, or docs/knowledge/<slug>.md
         document: String,
@@ -241,10 +259,14 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         }
         Command::Create { yes } => create(commands, &names, root, yes).map(|()| true),
         Command::Check => check(commands, &names, root),
-        Command::Guide { stack } => commands.guide(root, stack.as_deref()).map(|text| {
-            print!("{text}");
-            true
-        }),
+        Command::Guide { stack, ui } => {
+            commands
+                .guide(root, stack.as_deref(), ui.as_deref())
+                .map(|text| {
+                    print!("{text}");
+                    true
+                })
+        }
         Command::Index => index(commands, root).map(|()| true),
         Command::Approve {
             file,
@@ -361,6 +383,19 @@ fn init(
         println!("move by hand: {how}");
     }
     report_made(names, &upgraded.made);
+    if let Some(path) = &upgraded.drafted {
+        println!(
+            "drafted {path}: the units as the code has them, to write over with the picture you intend; it follows \
+             the units of {declaration}, so `rotproof check` fails when one changes until it is read again"
+        );
+    }
+    if let Some(why) = &upgraded.not_drafted {
+        println!("{why}");
+    }
+    // The map is the project's file, so it is told of and never written over
+    for stale in &upgraded.stale_map {
+        println!("note: {stale}");
+    }
     if !upgraded.by_hand.is_empty() {
         for why in &upgraded.by_hand {
             println!("needs a person: {why}");
@@ -388,8 +423,14 @@ fn report_made(names: &Names, made: &Made) {
     for path in &made.written {
         println!("wrote {path}");
     }
+    for path in &made.removed {
+        println!("removed {path}");
+    }
     for field in &made.added {
         println!("added to {}: {field}", names.declaration);
+    }
+    for (path, what) in &made.changed {
+        println!("changed {path}: {what}");
     }
     if let Some(why) = &made.not_written {
         println!("not written: {why}");
@@ -403,13 +444,15 @@ fn report_made(names: &Names, made: &Made) {
 fn create(commands: &dyn Commands, names: &Names, root: &Path, yes: bool) -> Result<(), String> {
     let made = commands.create(root, yes)?;
     report_made(names, &made);
-    if made.written.is_empty() {
+    // A changed file is written too, and told of above
+    let wrote = !made.written.is_empty() || !made.removed.is_empty() || !made.changed.is_empty();
+    if !wrote {
         println!(
             "nothing to make: the tree has what {} declares",
             names.declaration
         );
     }
-    if !made.written.is_empty() {
+    if wrote {
         println!("next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md");
     }
     Ok(())
@@ -679,11 +722,14 @@ fn follows(
 /// Write each index file that is out of date, or say that none is, then list what was left out of them.
 fn index(commands: &dyn Commands, root: &Path) -> Result<(), String> {
     let indexed = commands.index(root)?;
-    if indexed.written.is_empty() {
+    if indexed.written.is_empty() && indexed.removed.is_empty() {
         println!("nothing written: every index file is up to date");
     }
     for path in indexed.written {
         println!("wrote {path}");
+    }
+    for path in indexed.removed {
+        println!("removed {path}");
     }
     for (name, why) in indexed.left_out {
         println!("left out of the index, fix it: {name}: {why}");

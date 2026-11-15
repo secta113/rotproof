@@ -853,12 +853,9 @@ fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
         for (edit, says) in [
             (
                 Some("edited by hand\n"),
-                "out of date, run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise",
+                "out of date, run `rotproof create`",
             ),
-            (
-                None,
-                "missing, run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise",
-            ),
+            (None, "missing, run `rotproof create`"),
         ] {
             match edit {
                 Some(text) => fs::write(&guide, text).unwrap(),
@@ -883,6 +880,155 @@ fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
             assert!(run(&["--root", &arg, "check"]).status.success());
         }
     }
+}
+
+#[test]
+fn a_guide_behind_an_upgrade_is_written_by_init_and_one_changed_under_the_same_version_by_create() {
+    // The files are up to an older Rotproof: the upgrade is init, which also sets files
+    let root = declared(
+        "stack = \"none\"
+areas = [\"a\"]
+files = \"1.0.0\"
+",
+    );
+    let arg = root_arg(root.path());
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "Rotproof's guide is up to date:
+  missing, run `rotproof init`: .rotproof/AGENTS.md"
+        ),
+        "{}",
+        stdout(&out)
+    );
+    // A declaration with no files is the first release's
+    fs::write(
+        root.path().join(".config/rotproof.toml"),
+        "stack = \"none\"
+areas = [\"a\"]
+",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        stdout(&out).contains("missing, run `rotproof init`: .rotproof/AGENTS.md"),
+        "{}",
+        stdout(&out)
+    );
+    // Brought to this version, only the guide is behind, and create writes it
+    let out = create(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        root.path().join(".rotproof/AGENTS.md"),
+        "old
+",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        stdout(&out).contains("out of date, run `rotproof create`: .rotproof/AGENTS.md"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(
+        !stdout(&out).contains("run `rotproof init`"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn guide_without_a_stack_prints_what_create_writes_for_the_declared_ui() {
+    for (stack, ui) in [
+        ("typescript", "none"),
+        ("typescript", "atomic"),
+        ("python", "none"),
+        ("python", "atomic"),
+        ("rust", "none"),
+    ] {
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\nui = \"{ui}\"\n"
+        ));
+        let arg = root_arg(root.path());
+        assert!(
+            create(&["--root", &arg, "create", "--yes"])
+                .status
+                .success(),
+            "{stack} {ui}"
+        );
+        let written = fs::read_to_string(root.path().join(".rotproof/AGENTS.md")).unwrap();
+        let out = run(&["--root", &arg, "guide"]);
+        assert!(out.status.success(), "{stack} {ui}");
+        assert_eq!(stdout(&out), written, "{stack} {ui}");
+        // Named with the same stack and UI, it is the same text
+        let named = run(&["--root", &arg, "guide", "--stack", stack, "--ui", ui]);
+        assert_eq!(stdout(&named), written, "{stack} {ui}");
+    }
+    // The two UIs of a stack are two texts, so the comparison above says something
+    let ts = |ui: &str| {
+        let root = declared(&format!(
+            "stack = \"typescript\"\nareas = [\"a\"]\nui = \"{ui}\"\n"
+        ));
+        stdout(&run(&["--root", &root_arg(root.path()), "guide"]))
+    };
+    assert_ne!(ts("none"), ts("atomic"));
+    // A declaration from before `ui` has the fullest the stack offers, as the guide of a stack alone does
+    let root = declared("stack = \"typescript\"\nareas = [\"a\"]\n");
+    let out = run(&["--root", &root_arg(root.path()), "guide"]);
+    assert_eq!(stdout(&out), ts("atomic"));
+}
+
+#[test]
+fn guide_takes_the_ui_with_a_stack_as_init_does_and_needs_no_project() {
+    let root = tempfile::tempdir().unwrap();
+    let arg = root_arg(root.path());
+    let guide = |args: &[&str]| run(&[&["--root", &arg, "guide"], args].concat());
+    let none = guide(&["--stack", "typescript", "--ui", "none"]);
+    let atomic = guide(&["--stack", "typescript", "--ui", "atomic"]);
+    assert!(none.status.success() && atomic.status.success());
+    assert!(
+        stdout(&atomic).contains("| `ui.pages` |")
+            && stdout(&atomic).contains("| `presentation.models` |"),
+        "{}",
+        stdout(&atomic)
+    );
+    assert!(
+        !stdout(&none).contains("| `ui.pages` |") && !stdout(&none).contains("| `presentation"),
+        "{}",
+        stdout(&none)
+    );
+    // Without --ui it is the fullest, as before
+    let fullest = guide(&["--stack", "typescript"]);
+    assert_eq!(stdout(&fullest), stdout(&atomic));
+    // The values and the checks of init, in its words, and an exit of 2
+    for (args, says) in [
+        (
+            &["--stack", "typescript", "--ui", "x"][..],
+            "unknown UI \"x\" for the typescript stack (known: atomic, none)",
+        ),
+        (
+            &["--stack", "rust", "--ui", "atomic"][..],
+            "unknown UI \"atomic\" for the rust stack (known: none)",
+        ),
+        (
+            &["--stack", "none", "--ui", "none"][..],
+            "stack \"none\" has no layers, so it has no UI",
+        ),
+    ] {
+        let out = guide(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(says),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.stdout.is_empty(), "{args:?}");
+    }
+    // A UI means a stack: the declaration's is not the one to pick it for
+    let out = guide(&["--ui", "none"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--stack"));
 }
 
 #[test]
@@ -1755,14 +1901,15 @@ fn every_form_of_rust_dependency_is_judged() {
         "crates/domain/Cargo.toml:9: depends on proto (crates/protocol), in protocol; ",
         "crates/domain/Cargo.toml:10: depends on infra (crates/infrastructure), in infrastructure; ",
         "crates/domain/Cargo.toml:12: missing comes from the workspace, and Cargo.toml has no missing in \
-         [workspace.dependencies], so it is not checked",
+         [workspace.dependencies], so it cannot be judged: add it there, or give it a path",
         "crates/domain/Cargo.toml:15: depends on composition (crates/composition), in composition; ",
         "crates/domain/Cargo.toml:21: depends on app (crates/application), in application; ",
         "crates/protocol/Cargo.toml:8: depends on application (crates/application, from the workspace), in \
          application; protocol may import `domain`",
         "crates/infrastructure/Cargo.toml:8: core comes from the workspace, and .., which [package] workspace names, \
-         is no workspace, so it is not checked",
+         is no workspace, so it cannot be judged: declare the workspace, or give core a path",
         "crates/application/Cargo.toml:1: cannot be read as TOML (",
+        "), so its dependencies cannot be judged: fix the file",
     ] {
         assert!(said.contains(line), "{line}:\n{said}");
     }
@@ -2044,7 +2191,8 @@ fn every_form_of_typescript_import_is_judged() {
     write(
         "src/domain/song.ts",
         "import React from 'react';\nimport type { Play } from '../application/play';\nexport * from '@/infrastructure/db';\n\
-         export const load = () => import('../composition/main');\nconst x = require(`../vendor/x`);\n",
+         export const load = () => import('../composition/main');\nconst x = require(`../vendor/x`);\n\
+         const where = import.meta.resolve('../composition/worker');\n",
     );
     write(
         "src/ui/molecules/Row.tsx",
@@ -2063,6 +2211,7 @@ fn every_form_of_typescript_import_is_judged() {
          no other layer",
         "src/domain/song.ts:3: imports @/infrastructure/db (src/infrastructure/db), in infrastructure; ",
         "src/domain/song.ts:4: imports ../composition/main (src/composition/main), in composition; ",
+        "src/domain/song.ts:6: imports ../composition/worker (src/composition/worker), in composition; ",
         "src/ui/molecules/Row.tsx:2: imports ../organisms/List (src/ui/organisms/List), in ui.organisms; \
          ui.molecules may import the levels below it",
         "src/ui/molecules/Row.tsx:3: imports ../index.css (src/ui/index.css), in ui outside its levels; ",
@@ -2070,7 +2219,7 @@ fn every_form_of_typescript_import_is_judged() {
     ] {
         assert!(said.contains(line), "{line}:\n{said}");
     }
-    assert_eq!(said.matches(": imports ").count(), 6, "{said}");
+    assert_eq!(said.matches(": imports ").count(), 7, "{said}");
 }
 
 /// The `src/` of Vite's React starter (`npm create vite -- --template react-ts`, Vite 8.3, measured 2026-10-04), cut
@@ -2305,7 +2454,9 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
         "{said}"
     );
     assert!(
-        said.contains("domain/latin.py: cannot be read as UTF-8"),
+        said.contains(
+            "domain/latin.py: cannot be read as UTF-8, so its imports cannot be read: save it as UTF-8"
+        ),
         "{said}"
     );
 }
@@ -3999,5 +4150,1256 @@ fn follows_pins_the_keys_in_the_document_and_prints_the_log_line() {
             .status
             .code(),
         Some(2)
+    );
+}
+
+#[test]
+fn follows_pins_a_table_of_a_toml_file_and_the_check_fails_when_only_that_table_changes() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let doc = r.join("docs/knowledge/model.md");
+    let units =
+        "areas = [\"a\"]\nfiles = \"1\"\n\n[[unit]]\nname = \"x\"\n\n[[unit]]\nname = \"y\"\n";
+    fs::write(r.join("domain/units.toml"), units).unwrap();
+    fs::write(
+        &doc,
+        "---\ntype: Knowledge\ntitle: M\ndescription: D.\ntags: [a]\nstatus: stable\n---\n\n# Shape\n\nIt plays.\n",
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+
+    // A table that is not there is said as a definition that is not there is, and nothing is written
+    let before = fs::read_to_string(&doc).unwrap();
+    let out = run(&[
+        "--root",
+        &arg,
+        "follows",
+        "knowledge/model.md",
+        "domain/units.toml::gone",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("domain/units.toml::gone: not there"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+
+    let out = run(&[
+        "--root",
+        &arg,
+        "follows",
+        "knowledge/model.md",
+        "domain/units.toml::unit",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("follows:\n  domain/units.toml::unit: \""),
+        "{}",
+        fs::read_to_string(&doc).unwrap()
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // The fields above the tables are not the table
+    fs::write(
+        r.join("domain/units.toml"),
+        units
+            .replace("\"1\"", "\"2\"")
+            .replace("[\"a\"]", "[\"a\", \"b\"]"),
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // A unit is
+    fs::write(r.join("domain/units.toml"), units.replace("\"y\"", "\"z\"")).unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "follows domain/units.toml::unit, which changed since the document was last reviewed"
+        ),
+        "{}",
+        stdout(&out)
+    );
+}
+
+/// The declaration of a Python monorepo of two units, its fields above the tables and `shared` as `shared`.
+fn two_units(shared: &str) -> String {
+    format!(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
+         path = \"packages/core/src/core\"\nshared = {shared}\n\n[[unit]]\nname = \"billing\"\n\
+         path = \"packages/billing/src/billing\"\n",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+#[test]
+fn a_project_that_declares_units_gets_the_layers_of_each_and_is_checked_as_one() {
+    let root = declared(&two_units("true"));
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    for unit in ["core", "billing"] {
+        for layer in ["domain", "composition", "infrastructure/inbound"] {
+            let made = format!("packages/{unit}/src/{unit}/{layer}/__init__.py");
+            assert!(r.join(&made).is_file(), "{made}");
+        }
+    }
+    // No unit is implicit: the layers of the root are not made
+    assert!(!r.join("domain").exists());
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // What a unit lacks is its own: a layer deleted from one unit is missing there, not in the other
+    fs::remove_dir_all(r.join("packages/billing/src/billing/application")).unwrap();
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains("packages/billing/src/billing/application/"),
+        "{said}"
+    );
+    assert!(
+        !said.contains("packages/core/src/core/application/"),
+        "{said}"
+    );
+}
+
+#[test]
+fn the_map_in_agents_md_names_the_unit_of_each_row_and_check_and_init_tell_when_it_is_behind() {
+    let absent = "path = \"packages/billing/src/billing\"\n";
+    let root =
+        declared(&two_units("true").replace(absent, &format!("{absent}absent = [\"protocol\"]\n")));
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let agents = fs::read_to_string(r.join("AGENTS.md")).unwrap();
+    // A row for each layer of each unit, the unit named, and the whole first sentence of the role
+    assert!(
+        agents.contains(
+            "| `packages/core/src/core/domain/` | core: The concepts and rules of the business: types, \
+             calculations and decisions. |\n"
+        ),
+        "{agents}"
+    );
+    assert!(
+        agents.contains("| `packages/billing/src/billing/domain/` | billing: "),
+        "{agents}"
+    );
+    assert!(
+        !agents.contains("packages/billing/src/billing/protocol/"),
+        "{agents}"
+    );
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        out.status.success() && !stdout(&out).contains("AGENTS.md has no row"),
+        "{}",
+        stdout(&out)
+    );
+
+    // The layer is declared absent no more, and made: the map is behind, which is said and fails nothing
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        declaration.replace("absent = [\"protocol\"]\n", ""),
+    )
+    .unwrap();
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let behind = "AGENTS.md has no row in its map for packages/billing/src/billing/protocol/, the layer protocol of \
+                  the unit billing: add it, or declare the layer absent in .config/rotproof.toml";
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains(
+            "the map in AGENTS.md lists the layers .config/rotproof.toml declares (a warning, which fails nothing) (1):"
+        ),
+        "{said}"
+    );
+    assert!(said.contains(&format!("  {behind}\n")), "{said}");
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(&format!("note: {behind}\n")),
+        "{}",
+        stdout(&out)
+    );
+
+    // Add the row, and both are quiet; the file is the project's, and was never written over
+    let row = "| `packages/billing/src/billing/protocol/` | billing: Mine. |\n";
+    fs::write(
+        r.join("AGENTS.md"),
+        agents.replace("| `docs/`", &format!("{row}| `docs/`")),
+    )
+    .unwrap();
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(!said.contains("AGENTS.md has no row"), "{said}");
+    let said = stdout(&run(&["--root", &arg, "init"]));
+    assert!(!said.contains("note: "), "{said}");
+}
+
+#[test]
+fn a_declaration_of_units_that_cannot_be_read_says_every_reason() {
+    for (declaration, said) in [
+        (
+            two_units("false").replace("name = \"billing\"", "name = \"core\""),
+            vec!["two units are named \"core\""],
+        ),
+        (
+            two_units("false")
+                .replace("packages/core/src/core", "packages/billing/src/billing")
+                .replace("name = \"billing\"", "name = \"Bad Name\""),
+            vec![
+                "unit name \"Bad Name\" is not a name: start with a lowercase letter, then lowercase letters, digits \
+                 and _",
+                "units \"core\" and \"Bad Name\" both have path \"packages/billing/src/billing\"",
+            ],
+        ),
+        (
+            two_units("true").replace(
+                "shared = true\n",
+                "shared = true\nentry = [\"packages/core/src/core/__main__.py\"]\n",
+            ),
+            vec![
+                "unit \"core\" is shared and declares entry: an app (a unit with entry) wires the units",
+            ],
+        ),
+        (
+            two_units("false").replace("ui = \"none\"\n", "ui = \"none\"\nabsent = [\"domain\"]\n"),
+            vec![
+                "absent lists [\"domain\"], and the project declares units: name what each unit lacks in its own",
+            ],
+        ),
+        (
+            two_units("false") + "absent = [\"domainx\"]\n",
+            vec![
+                "unit \"billing\" names \"domainx\" in absent, which the python layout does not have",
+            ],
+        ),
+        (
+            two_units("false")
+                + "absent = [\"infrastructure.inbound\", \"infrastructure.outbound\"]\n",
+            vec![
+                "unit \"billing\" names every level of infrastructure in absent, but not infrastructure itself, \
+                 which holds only its levels: list infrastructure, so that it is not made as a directory with \
+                 nothing in it",
+            ],
+        ),
+    ] {
+        let root = declared(&declaration);
+        let arg = root_arg(root.path());
+        for command in [&["create"][..], &["check"]] {
+            let mut args = vec!["--root", &arg];
+            args.extend(command);
+            let out = run(&args);
+            let all = format!("{}{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
+            let all = all.split_whitespace().collect::<Vec<_>>().join(" ");
+            for line in &said {
+                let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(all.contains(&line), "{command:?}: {line}\n{all}");
+            }
+            assert!(!out.status.success(), "{command:?}: {declaration}");
+        }
+        assert!(!root.path().join("packages").exists(), "{declaration}");
+    }
+    // A repository of records only has no units
+    let root = declared(&format!(
+        "stack = \"none\"\nareas = [\"a\"]\nfiles = \"{}\"\n[[unit]]\nname = \"a\"\npath = \"a\"\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    let said = stdout(&out);
+    assert!(
+        said.contains("stack = \"none\" has no layers, so it has no units: take out [[unit]]"),
+        "{said}"
+    );
+}
+
+#[test]
+fn follows_pins_the_units_of_the_declaration_and_the_check_fails_when_a_unit_changes_not_the_fields_above()
+ {
+    let root = declared(&two_units("false"));
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success(),
+        "create"
+    );
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let doc = r.join("docs/knowledge/units.md");
+    fs::write(
+        &doc,
+        "---\ntype: Knowledge\ntitle: Units\ndescription: Why the code is in two units.\ntags: [a]\nstatus: stable\n---\n\n\
+         # Why two\n\nThey are bought apart.\n",
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+    let key = ".config/rotproof.toml::unit";
+    let out = run(&["--root", &arg, "follows", "knowledge/units.md", key]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pinned = fs::read_to_string(&doc).unwrap();
+    assert!(
+        pinned.contains(&format!("follows:\n  {key}: \"")),
+        "{pinned}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // The fields above the tables are not the tables: `areas` and `files` change, and the document still holds
+    let before = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    declare(
+        r,
+        &before
+            .replace("areas = [\"a\"]", "areas = [\"a\", \"b\"]")
+            .replace(
+                &format!("files = \"{}\"", env!("CARGO_PKG_VERSION")),
+                &format!("files = \"{}\"\ndeclined = []", env!("CARGO_PKG_VERSION")),
+            ),
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // A unit is: the document is to be read again
+    declare(r, &before.replace("shared = false", "shared = true"));
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(&format!(
+            "follows {key}, which changed since the document was last reviewed"
+        )),
+        "{said}"
+    );
+    // Reviewing it pins the new units, and the check passes again once the list of who reads the shared unit is written
+    let out = run(&["--root", &arg, "follows", "knowledge/units.md", key]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        said.contains("out of date, run `rotproof index`: .rotproof/readers.md"),
+        "{said}"
+    );
+    let out = run(&["--root", &arg, "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // A project with no unit has no such table, as a definition that is not there is said
+    declare(
+        r,
+        &format!(
+            "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
+    let out = run(&["--root", &arg, "follows", "knowledge/units.md", key]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&format!("{key}: not there")),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A Python modular monolith of three units, made by `rotproof create` and kept: `core` is shared, in a package of its
+/// own with its manifest (`root`), `billing` is not, and `app` is an app that holds only `composition` and
+/// `infrastructure`, with its entry file outside its path, which `rotproof create` makes. Each unit's own `__init__.py`
+/// is there, and the manifest of the project at the root.
+fn modular_monolith() -> tempfile::TempDir {
+    let root = declared(&format!(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
+         path = \"packages/core/src/core\"\nroot = \"packages/core\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
+         path = \"modules/billing\"\n\n[[unit]]\nname = \"app\"\npath = \"modules/app\"\nentry = [\"bin/run.py\"]\n\
+         absent = [\"domain\", \"application\", \"protocol\"]\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let r = root.path();
+    let out = create(&["--root", &root_arg(r), "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    for file in [
+        "pyproject.toml",
+        "packages/core/pyproject.toml",
+        "packages/core/src/core/__init__.py",
+        "modules/billing/__init__.py",
+    ] {
+        fs::write(r.join(file), "").unwrap();
+    }
+    root
+}
+
+/// What `rotproof check` prints under the structure heading, and whether it passed.
+fn structure_findings(root: &Path) -> (bool, String) {
+    let out = run(&["--root", &root_arg(root), "check"]);
+    let said = stdout(&out);
+    let findings = said
+        .split("the tree matches .config/rotproof.toml:\n")
+        .nth(1)
+        .map(|rest| rest.split("\n\n").next().unwrap_or(rest))
+        .unwrap_or("")
+        .trim_end()
+        .to_string();
+    (out.status.success(), findings)
+}
+
+#[test]
+fn a_modular_monolith_of_three_units_passes_and_each_new_finding_names_its_unit() {
+    let root = modular_monolith();
+    let r = root.path();
+    // `create` made the entry file the app declares, outside its path, and the check passes right after it
+    let entry = fs::read_to_string(r.join("bin/run.py")).unwrap();
+    assert!(
+        entry.starts_with("\"\"\"The entry file: it calls `composition`"),
+        "{entry}"
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // What is moved out of the project's tree to be put back is kept beside it, not in it: in the tree it would be
+    // code in no unit
+    let kept = tempfile::tempdir().unwrap();
+
+    // Whatever a unit lacks is its own: a layer taken from one unit is missing there, and in no other
+    let layer = r.join("modules/billing/domain");
+    let backup = kept.path().join("domain");
+    fs::rename(&layer, &backup).unwrap();
+    let (passed, found) = structure_findings(r);
+    assert!(!passed);
+    assert_eq!(
+        found,
+        "  domain of unit billing is missing: modules/billing/domain/ (run `rotproof create`, or name it in the \
+         absent of the unit in .config/rotproof.toml)"
+    );
+    fs::rename(&backup, &layer).unwrap();
+
+    // A layer the unit declares absent that is there
+    fs::create_dir_all(r.join("modules/app/domain")).unwrap();
+    fs::write(r.join("modules/app/domain/__init__.py"), "").unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(
+        found,
+        "  domain of unit app is declared absent, but modules/app/domain/ exists: remove one or the other"
+    );
+    fs::remove_dir_all(r.join("modules/app/domain")).unwrap();
+
+    // The floor is each unit's: with no layer left in billing, it says so, and the other units are not asked
+    fs::rename(r.join("modules/billing"), kept.path().join("billing")).unwrap();
+    fs::create_dir_all(r.join("modules/billing")).unwrap();
+    fs::write(r.join("modules/billing/__init__.py"), "").unwrap();
+    let (_, found) = structure_findings(r);
+    assert!(
+        found.starts_with("  composition of unit billing is missing: modules/billing/composition/"),
+        "{found}"
+    );
+    assert!(
+        found.ends_with(
+            "  no layer is present in unit billing: the python layout has modules/billing/composition/, \
+             modules/billing/infrastructure/, modules/billing/application/, modules/billing/protocol/, \
+             modules/billing/domain/"
+        ),
+        "{found}"
+    );
+    assert!(
+        !found.contains("of unit core") && !found.contains("of unit app"),
+        "{found}"
+    );
+    fs::remove_dir_all(r.join("modules/billing")).unwrap();
+
+    // A unit that is not there says it all
+    let (_, found) = structure_findings(r);
+    assert_eq!(
+        found,
+        "  unit billing is missing: modules/billing/ (make it with rotproof create, or take the unit out of \
+         .config/rotproof.toml)"
+    );
+    fs::rename(kept.path().join("billing"), r.join("modules/billing")).unwrap();
+
+    // An entry file that is not there, outside the unit's path as it is
+    fs::remove_file(r.join("bin/run.py")).unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(found, "  the entry bin/run.py of unit app is missing");
+    fs::write(r.join("bin/run.py"), "").unwrap();
+
+    // Code in no unit's path fails as code outside the layers, wherever it was moved to; the paths that are no layer
+    // (a package keeps its `tests/` in its root) and what `unchecked` keeps do not
+    fs::create_dir_all(r.join("scripts")).unwrap();
+    fs::create_dir_all(r.join("packages/core/tests")).unwrap();
+    for file in ["helper.py", "scripts/a.py", "packages/core/tests/test_a.py"] {
+        fs::write(r.join(file), "").unwrap();
+    }
+    let (_, found) = structure_findings(r);
+    let said = |what: &str| {
+        format!(
+            "  code outside the layers: {what} (it is in no unit: move it into a layer of one, or list it in unchecked \
+             in .config/rotproof.toml)"
+        )
+    };
+    assert_eq!(found, format!("{}\n{}", said("helper.py"), said("scripts")));
+    // A file taken out of a unit's path is found the same, and its place in the unit is not the one to blame
+    fs::rename(r.join("helper.py"), r.join("modules/helper.py")).unwrap();
+    fs::remove_dir_all(r.join("scripts")).unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(found, said("modules"));
+    fs::remove_file(r.join("modules/helper.py")).unwrap();
+    let (passed, found) = structure_findings(r);
+    assert!(passed, "{found}");
+
+    // Code in a unit's path outside its layers fails there, and `unchecked` keeps it, but cannot switch the unit off
+    fs::write(r.join("modules/billing/helpers.py"), "").unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(
+        found,
+        "  code outside the layers of unit billing: modules/billing/helpers.py (move it into a layer, or list it in \
+         unchecked in .config/rotproof.toml)"
+    );
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    let with_unchecked = |path: &str| {
+        declaration.replace(
+            "ui = \"none\"\n",
+            &format!("ui = \"none\"\nunchecked = [\"{path}\"]\n"),
+        )
+    };
+    let write = |text: &str| fs::write(r.join(".config/rotproof.toml"), text).unwrap();
+    write(&with_unchecked("modules/billing/helpers.py"));
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    write(&with_unchecked("modules/billing"));
+    let (passed, found) = structure_findings(r);
+    assert!(!passed);
+    assert_eq!(
+        found.lines().next().unwrap(),
+        "  unchecked lists modules/billing, which holds the unit billing (modules/billing/): a unit cannot be \
+         switched off"
+    );
+    write(&declaration);
+    fs::remove_file(r.join("modules/billing/helpers.py")).unwrap();
+
+    // A package's manifest belongs to a unit by its root: below a root and in a layer it does, and elsewhere it is a
+    // package no unit says it is
+    fs::create_dir_all(r.join("packages/core/docs")).unwrap();
+    fs::write(r.join("packages/core/docs/pyproject.toml"), "").unwrap();
+    fs::write(r.join("modules/billing/domain/pyproject.toml"), "").unwrap();
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::create_dir_all(r.join("tools")).unwrap();
+    fs::write(r.join("tools/pyproject.toml"), "").unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(
+        found,
+        "  tools/pyproject.toml is a manifest outside every unit's root: declare the unit whose root is tools (root \
+         = \"tools\"), or list tools in unchecked in .config/rotproof.toml"
+    );
+    write(&with_unchecked("tools"));
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn init_drafts_the_document_of_the_units_once_and_the_check_passes_with_it() {
+    let root = modular_monolith();
+    let r = root.path();
+    let arg = root_arg(r);
+    // `billing` reads the shared `core`, and the app wires `billing` through its composition
+    write_file(
+        r,
+        "modules/billing/application/play.py",
+        "from core.domain import score\n",
+    );
+    write_file(r, "modules/billing/composition/build.py", "");
+    write_file(
+        r,
+        "modules/app/composition/wire.py",
+        "from billing.composition import build\n",
+    );
+    let doc = r.join("docs/knowledge/units.md");
+    assert!(!doc.exists());
+
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let said = stdout(&out);
+    assert!(said.contains("drafted docs/knowledge/units.md: "), "{said}");
+    assert!(said.contains("wrote docs/knowledge/index.md\n"), "{said}");
+    let text = fs::read_to_string(&doc).unwrap();
+    assert!(text.contains("\ntags: [\"a\"]\n"), "{text}");
+    assert!(
+        text.contains("\nflowchart LR\n    core([\"core (shared)\"])\n    billing[\"billing\"]\n    app[\"app (app)\"]\n"),
+        "{text}"
+    );
+    for edge in ["billing --> core", "app --> billing"] {
+        assert!(text.contains(&format!("\n    {edge}\n")), "{text}");
+    }
+    for unit in ["core", "billing", "app"] {
+        assert!(text.contains(&format!("\n## {unit}\n")), "{text}");
+    }
+    // It passes the check as it was written, with the readers of the shared unit listed by the same run
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // Written once: a second run says nothing of it and leaves it as it is, even rewritten by a person
+    let again = run(&["--root", &arg, "init"]);
+    assert!(again.status.success(), "{}", stdout(&again));
+    assert!(!stdout(&again).contains("draft"), "{}", stdout(&again));
+    assert_eq!(fs::read_to_string(&doc).unwrap(), text);
+
+    // It pins the units: one that changes fails the check, naming the command that pins the document again
+    let before = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    declare(
+        r,
+        &before.replace(
+            "path = \"modules/billing\"",
+            "path = \"modules/billing\"\nabsent = []",
+        ),
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "knowledge/units.md follows .config/rotproof.toml::unit, which changed since the document was last \
+             reviewed"
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_composition_reads_the_protocol_and_the_domain_of_a_shared_unit_and_builds_no_insides_of_another_unit()
+ {
+    let root = modular_monolith();
+    let r = root.path();
+    let arg = root_arg(r);
+    // The shared `core` is a kernel of value types: the composition of the app and that of `billing`, which is no
+    // app, read its `domain`, and its `protocol`
+    write_file(
+        r,
+        "modules/app/composition/wire.py",
+        "from core.domain import money\nfrom core.protocol.inbound import port\nfrom billing.composition import build\n",
+    );
+    write_file(
+        r,
+        "modules/billing/composition/build.py",
+        "from core.domain import money\nfrom core.protocol.outbound import store\n",
+    );
+    let out = run(&["--root", &arg, "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // No composition builds the insides of another unit, a shared one included: that unit builds them in its own
+    // composition, which the app wires. The application of a unit still reads no other's
+    write_file(
+        r,
+        "modules/app/composition/wire.py",
+        "from core.domain import money\nfrom core.application import pay\nfrom billing.domain import invoice\n",
+    );
+    write_file(
+        r,
+        "modules/billing/composition/build.py",
+        "from core.infrastructure.outbound import db\n",
+    );
+    write_file(
+        r,
+        "modules/billing/application/pay.py",
+        "from core.application import pay\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    for line in [
+        "modules/app/composition/wire.py:2: imports core.application.pay, in application of unit core; the \
+         composition of an app imports only the composition, protocol and domain of a shared unit: core builds its \
+         own insides in its own composition",
+        "modules/app/composition/wire.py:3: imports billing.domain.invoice, in domain of unit billing; the \
+         composition of an app imports only the composition and protocol of a unit that is not shared: billing \
+         builds its own insides in its own composition",
+        "modules/billing/composition/build.py:1: imports core.infrastructure.outbound.db, in infrastructure.outbound \
+         of unit core; the composition of a unit imports only the protocol and domain of a shared unit: core builds \
+         its own insides in its own composition",
+        "modules/billing/application/pay.py:1: imports core.application.pay, in application of unit core; \
+         application never imports another unit's application: composition passes a shared unit's use cases in",
+    ] {
+        assert!(said.contains(line), "{line}:\n{said}");
+    }
+    assert_eq!(said.matches(": imports ").count(), 4, "{said}");
+}
+
+#[test]
+fn init_drafts_nothing_without_an_area_and_says_why_until_there_is_one() {
+    let root = declared(&two_units("true").replace("areas = [\"a\"]", "areas = []"));
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let said = stdout(&out);
+    assert!(
+        said.contains(
+            "docs/knowledge/units.md is not drafted: .config/rotproof.toml declares no areas"
+        ),
+        "{said}"
+    );
+    assert!(!r.join("docs/knowledge/units.md").exists());
+
+    declare(
+        r,
+        &fs::read_to_string(r.join(".config/rotproof.toml"))
+            .unwrap()
+            .replace("areas = []", "areas = [\"a\"]"),
+    );
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("drafted docs/knowledge/units.md: "),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stdout(&out).contains("is not drafted"), "{}", stdout(&out));
+}
+
+#[test]
+fn a_project_that_declares_no_unit_is_not_asked_for_manifests_or_given_the_name_of_a_unit() {
+    let root = clean_repo();
+    let r = root.path();
+    fs::create_dir_all(r.join("tools")).unwrap();
+    fs::write(r.join("tools/pyproject.toml"), "").unwrap();
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::remove_dir_all(r.join("domain")).unwrap();
+    let (passed, found) = structure_findings(r);
+    assert!(!passed);
+    assert!(
+        found.starts_with(
+            "  domain is missing: domain/ (run `rotproof create`, or declare it in absent in"
+        ),
+        "{found}"
+    );
+    assert!(
+        !found.contains("unit") && !found.contains("manifest"),
+        "{found}"
+    );
+}
+
+/// The names of the packages `cargo metadata` finds in the workspace at `root`, sorted. Panics, saying why, when Cargo
+/// refuses the workspace.
+fn workspace_packages(root: &Path) -> Vec<String> {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let out = Command::new(cargo)
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--offline",
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let metadata = String::from_utf8_lossy(&out.stdout).into_owned();
+    // A package is the one object that has a name and then a version: a dependency or a target has none
+    let mut names: Vec<String> = metadata
+        .split("{\"name\":\"")
+        .skip(1)
+        .filter_map(|part| {
+            let (name, rest) = part.split_once('"')?;
+            rest.starts_with(",\"version\":").then(|| name.to_string())
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+const RUST_LAYERS: [&str; 5] = [
+    "application",
+    "composition",
+    "domain",
+    "infrastructure",
+    "protocol",
+];
+
+/// The declaration of a Rust project of two units: `core`, shared, whose crates sit in `crates/core`, and `cli`, an
+/// app that holds `composition` and `infrastructure` only, whose crates sit in `apps/cli/crates` and whose entry file
+/// is `entry`, in the package at `apps/cli` (its `root`).
+fn rust_units(entry: &str) -> String {
+    format!(
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
+         path = \"crates/core\"\nshared = true\n\n[[unit]]\nname = \"cli\"\npath = \"apps/cli/crates\"\n\
+         root = \"apps/cli\"\nentry = [\"{entry}\"]\nabsent = [\"application\", \"protocol\", \"domain\"]\n",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+#[test]
+fn a_rust_project_that_declares_units_gets_the_crates_of_each_named_for_its_unit_and_passes_its_check()
+ {
+    let root = declared(&rust_units("apps/cli/src/main.rs"));
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let layers = [
+        ("core", "crates/core", &RUST_LAYERS[..]),
+        (
+            "cli",
+            "apps/cli/crates",
+            &["composition", "infrastructure"][..],
+        ),
+    ];
+    for (unit, base, layers) in layers {
+        for layer in layers {
+            let manifest =
+                fs::read_to_string(r.join(format!("{base}/{layer}/Cargo.toml"))).unwrap();
+            assert!(
+                manifest.contains(&format!("name = \"{unit}_{layer}\"\n")),
+                "{unit} {layer}: {manifest}"
+            );
+            assert!(r.join(format!("{base}/{layer}/src/lib.rs")).is_file());
+        }
+        // The unit's directory holds crates, and is none itself
+        assert!(!r.join(format!("{base}/Cargo.toml")).exists());
+    }
+    // The levels are modules of their crate, in the unit's directory
+    assert!(r.join("crates/core/protocol/src/inbound/mod.rs").is_file());
+    // The entry file of the app, in the package that holds it, which depends on the app's own `composition`
+    assert!(r.join("apps/cli/src/main.rs").is_file());
+    let package = fs::read_to_string(r.join("apps/cli/Cargo.toml")).unwrap();
+    assert!(package.contains("name = \"cli\"\n"), "{package}");
+    assert!(
+        package.contains("cli_composition = { path = \"crates/composition\" }"),
+        "{package}"
+    );
+    // The units replace the implicit one: no crate of the project's own, and no root package or entry file
+    assert!(!r.join("crates/domain").exists() && !r.join("src/main.rs").exists());
+    // The workspace names each crate, which a glob over `crates/` could not: it would match `crates/core`
+    let workspace = fs::read_to_string(r.join("Cargo.toml")).unwrap();
+    assert!(
+        !workspace.contains("[package]") && !workspace.contains('*'),
+        "{workspace}"
+    );
+    let mut have: Vec<String> = workspace
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix('"')?.strip_suffix("\","))
+        .map(String::from)
+        .collect();
+    have.sort();
+    let mut want: Vec<String> = layers
+        .iter()
+        .flat_map(|(_, base, layers)| layers.iter().map(move |layer| format!("{base}/{layer}")))
+        .chain(["apps/cli".to_string()])
+        .collect();
+    want.sort();
+    assert_eq!(have, want, "{workspace}");
+    // Cargo reads it, and finds a crate for each layer of each unit and the app's package, no two named alike
+    let mut crates: Vec<String> = layers
+        .iter()
+        .flat_map(|(unit, _, layers)| layers.iter().map(move |layer| format!("{unit}_{layer}")))
+        .chain(["cli".to_string()])
+        .collect();
+    crates.sort();
+    assert_eq!(workspace_packages(r), crates);
+    // What it made is what the check expects of the units, with nothing a person has to move first
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // A second run has nothing to make, and writes nothing
+    let before = tree(r);
+    let second = create(&["--root", &arg, "create"]);
+    assert!(second.status.success(), "{}", stdout(&second));
+    assert!(
+        stdout(&second).contains("nothing to make"),
+        "{}",
+        stdout(&second)
+    );
+    assert_eq!(tree(r), before);
+}
+
+#[test]
+fn a_rust_entry_file_with_no_place_for_its_package_fails_create_before_it_writes_anything() {
+    for (entry, said) in [
+        (
+            "apps/cli/main.rs",
+            "a Rust entry file is <dir>/src/main.rs, so that its package is <dir>/Cargo.toml",
+        ),
+        ("src/main.rs", "at the root, where the workspace is"),
+    ] {
+        let root = declared(&rust_units(entry));
+        let r = root.path();
+        let out = create(&["--root", &root_arg(r), "create", "--yes"]);
+        assert_eq!(out.status.code(), Some(2), "{entry}");
+        let said_by = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(said_by.contains(said), "{entry}: {said_by}");
+        // Nothing was written: only the declaration is there
+        assert_eq!(
+            tree(r)
+                .iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            [".config/rotproof.toml"],
+            "{entry}"
+        );
+    }
+}
+
+#[test]
+fn a_rust_workspace_that_exists_gets_the_crates_of_a_unit_and_loses_the_glob_that_would_match_it() {
+    // A project made by an older Rotproof: its workspace is the glob over `crates/`, and it declares no unit
+    let older = "[package]\nname = \"older\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n\
+                 [dependencies]\ncomposition = { path = \"crates/composition\" }\n\n\
+                 [workspace]\nmembers = [\"crates/*\"]\nresolver = \"3\"\n";
+    let root = declared(
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"application\", \"infrastructure\", \"protocol\"]\n",
+    );
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::write(r.join("Cargo.toml"), older).unwrap();
+    fs::create_dir_all(r.join("src")).unwrap();
+    fs::write(r.join("src/main.rs"), "fn main() {}\n").unwrap();
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // It keeps working, and untouched: the glob matches the crates it made
+    assert_eq!(fs::read_to_string(r.join("Cargo.toml")).unwrap(), older);
+    assert!(
+        !stdout(&out).contains("changed Cargo.toml"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(workspace_packages(r), ["composition", "domain", "older"]);
+
+    // The project nests its crates in a unit: the glob would match `crates/billing`, which holds no manifest
+    declare(
+        r,
+        concat!(
+            "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"",
+            env!("CARGO_PKG_VERSION"),
+            "\"\n\n[[unit]]\nname = \"billing\"\npath = \"crates/billing\"\n\
+             absent = [\"application\", \"infrastructure\", \"protocol\"]\n"
+        ),
+    );
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains(
+            "changed Cargo.toml: replaced \"crates/*\" in members with the crates it matched, since it would match \
+             crates/billing, which has no Cargo.toml"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "changed Cargo.toml: added to members: crates/billing/composition, crates/billing/domain"
+        ),
+        "{said}"
+    );
+    let workspace = fs::read_to_string(r.join("Cargo.toml")).unwrap();
+    assert!(!workspace.contains("crates/*"), "{workspace}");
+    // The rest of the manifest is as it was written
+    assert!(
+        workspace.starts_with(&older[..older.find("members").unwrap()]),
+        "{workspace}"
+    );
+    assert!(workspace.ends_with("resolver = \"3\"\n"), "{workspace}");
+    assert_eq!(
+        workspace_packages(r),
+        [
+            "billing_composition",
+            "billing_domain",
+            "composition",
+            "domain",
+            "older"
+        ]
+    );
+    // Said once: a second run changes nothing more
+    let out = create(&["--root", &arg, "create"]);
+    assert!(
+        !stdout(&out).contains("changed Cargo.toml"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(fs::read_to_string(r.join("Cargo.toml")).unwrap(), workspace);
+}
+
+#[test]
+fn a_python_or_typescript_project_that_declares_units_gets_layers_and_no_manifest() {
+    for (stack, unit_path) in [
+        ("python", "packages/billing/src/billing"),
+        ("typescript", "packages/billing/src"),
+    ] {
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{version}\"\n\n[[unit]]\nname = \"billing\"\n\
+             path = \"{unit_path}\"\n",
+            version = env!("CARGO_PKG_VERSION")
+        ));
+        let r = root.path();
+        let out = create(&["--root", &root_arg(r), "create", "--yes"]);
+        assert!(out.status.success(), "{stack}: {}", stdout(&out));
+        assert!(r.join(unit_path).join("domain").is_dir(), "{stack}");
+        for manifest in [
+            "pyproject.toml",
+            "package.json",
+            "Cargo.toml",
+            "packages/billing/pyproject.toml",
+            "packages/billing/package.json",
+        ] {
+            assert!(!r.join(manifest).exists(), "{stack}: {manifest}");
+        }
+    }
+}
+
+/// A TypeScript monorepo as npm workspaces lay it out, with no `npm install`: the `package.json` files are written,
+/// and nothing is in `node_modules`. `db` is shared and exports what it lets other units import, `billing` is a
+/// package with no `exports`, and `web` is an app that holds only `composition` and `infrastructure`, its entry file
+/// made by `rotproof create`.
+fn npm_workspaces() -> tempfile::TempDir {
+    let root = declared(&format!(
+        "stack = \"typescript\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"db\"\n\
+         path = \"packages/db/src\"\nroot = \"packages/db\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
+         path = \"packages/billing/src\"\nroot = \"packages/billing\"\n\n[[unit]]\nname = \"web\"\n\
+         path = \"apps/web/src\"\nroot = \"apps/web\"\nentry = [\"apps/web/src/main.ts\"]\n\
+         absent = [\"domain\", \"application\", \"protocol\"]\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let r = root.path();
+    let out = create(&["--root", &root_arg(r), "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    write_file(
+        r,
+        "package.json",
+        "{ \"name\": \"acme\", \"private\": true, \"workspaces\": [\"packages/*\", \"apps/*\"] }\n",
+    );
+    write_file(
+        r,
+        "packages/db/package.json",
+        "{\n  \"name\": \"@acme/db\",\n  \"exports\": {\n    \"./protocol/*\": \"./src/protocol/*/index.ts\",\n    \
+         \"./client\": { \"types\": \"./src/infrastructure/outbound/client.ts\", \"default\": \"./dist/client.js\" },\n    \
+         \"./internal/*\": null\n  }\n}\n",
+    );
+    write_file(
+        r,
+        "packages/db/src/infrastructure/outbound/client.ts",
+        "export const client = 1;\n",
+    );
+    write_file(
+        r,
+        "packages/billing/package.json",
+        "{ \"name\": \"@acme/billing\", \"private\": true }\n",
+    );
+    write_file(
+        r,
+        "apps/web/package.json",
+        "{ \"name\": \"@acme/web\", \"private\": true }\n",
+    );
+    root
+}
+
+#[test]
+fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
+    let root = npm_workspaces();
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // What passes: the use cases of a unit import the `protocol.inbound` of a shared one, by the name of its package
+    write_file(
+        r,
+        "packages/billing/src/application/invoice.ts",
+        "import type { Run } from '@acme/db/protocol/inbound';\nimport { f } from '../domain';\nexport const x = 1;\n",
+    );
+    write_file(
+        r,
+        "packages/db/src/protocol/inbound/index.ts",
+        "export type Run = number;\n",
+    );
+    // What billing reads of the shared unit is listed, which the check keeps in step with the code
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("out of date, run `rotproof index`: .rotproof/readers.md"),
+        "{}",
+        stdout(&out)
+    );
+    let out = run(&["--root", &arg, "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("wrote .rotproof/readers.md"),
+        "{}",
+        stdout(&out)
+    );
+    // Another unit reading the name is said under the finding, with the shared unit it is of
+    write_file(
+        r,
+        "apps/web/src/composition/more.ts",
+        "import type { Run } from '@acme/db/protocol/inbound';\nexport type M = Run;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "  out of date, run `rotproof index`: .rotproof/readers.md\n    db: \
+             packages/db/src/protocol/inbound/index: Run is read by billing, web (was billing)\n"
+        ),
+        "{said}"
+    );
+    fs::remove_file(r.join("apps/web/src/composition/more.ts")).unwrap();
+    let listed = fs::read_to_string(r.join(".rotproof/readers.md")).unwrap();
+    assert!(
+        listed.ends_with(
+            "## db\n\n`packages/db/src`\n\n### Read by one unit\n\n| Name | Read by |\n|---|---|\n\
+             | `packages/db/src/protocol/inbound/index: Run` | billing |\n"
+        ),
+        "{listed}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // The domain of a unit reaching the infrastructure of another, which a package of a third party it was taken for
+    // let through: `@acme/db/client` is exported as src/infrastructure/outbound/client.ts
+    write_file(
+        r,
+        "packages/billing/src/domain/song.ts",
+        "import { client } from '@acme/db/client';\nexport const y = client;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    assert!(
+        said.contains(
+            "packages/billing/src/domain/song.ts:1: imports @acme/db/client \
+             (packages/db/src/infrastructure/outbound/client.ts), in infrastructure.outbound of unit db; domain imports \
+             no other layer"
+        ),
+        "{said}"
+    );
+    assert_eq!(said.matches(": imports ").count(), 1, "{said}");
+
+    // A subpath the package does not export fails, and says what to do: it is no file Node or tsc finds either
+    write_file(
+        r,
+        "packages/billing/src/domain/song.ts",
+        "import { a } from '@acme/db/domain';\nimport { b } from '@acme/db/internal/x';\nexport const y = 1;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    for line in [
+        "packages/billing/src/domain/song.ts:1: imports @acme/db/domain, which packages/db/package.json does not \
+         export, so Node and tsc fail it and its layer cannot be judged: export the subpath in \
+         packages/db/package.json, or import one that is exported",
+        "packages/billing/src/domain/song.ts:2: imports @acme/db/internal/x, which packages/db/package.json does \
+         not export, so Node and tsc fail it and its layer cannot be judged: export the subpath in \
+         packages/db/package.json, or import one that is exported",
+    ] {
+        assert!(said.contains(line), "{line}:\n{said}");
+    }
+
+    // The composition of the app wires a unit that is not shared through that unit's composition, and a name that is no
+    // unit's package is a package
+    write_file(
+        r,
+        "packages/billing/src/domain/song.ts",
+        "export const y = 1;\n",
+    );
+    write_file(
+        r,
+        "packages/billing/src/composition/index.ts",
+        "export const y = 1;\n",
+    );
+    write_file(
+        r,
+        "apps/web/src/composition/index.ts",
+        "import { y } from '@acme/billing/src/composition/index';\nimport React from 'react';\nexport const z = y;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // and builds none of its insides, which that unit's own composition builds
+    write_file(
+        r,
+        "apps/web/src/composition/index.ts",
+        "import { y } from '@acme/billing/src/domain/song';\nexport const z = y;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    assert!(
+        said.contains(
+            "apps/web/src/composition/index.ts:1: imports @acme/billing/src/domain/song \
+             (packages/billing/src/domain/song), in domain of unit billing; the composition of an app imports only \
+             the composition and protocol of a unit that is not shared: billing builds its own insides in its own \
+             composition"
+        ),
+        "{said}"
+    );
+    write_file(
+        r,
+        "apps/web/src/composition/index.ts",
+        "import { y } from '@acme/billing/src/composition/index';\nexport const z = y;\n",
+    );
+    // The entry file reads the composition of its own unit alone
+    write_file(
+        r,
+        "apps/web/src/main.ts",
+        "import { y } from '@acme/billing/src/composition/index';\nexport const w = y;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    assert!(
+        said.contains("apps/web/src/main.ts:1: imports @acme/billing/src/composition/index"),
+        "{said}"
     );
 }

@@ -11,7 +11,8 @@ Rotproof makes the layer directories, checks that they are where the project dec
 direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
 the levels inside a crate, from the paths its code names. From the same reading of the code it checks that only
 `infrastructure` reads the environment variables, and that no comment switches the type checker off (see "What
-`rotproof check` checks").
+`rotproof check` checks"). A project made of several parts that each hold the layers declares them as units, and all
+of this holds in each unit, with the imports between units judged too (see "Units").
 
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 (its `SPEC.md` as of commit `ad30107`): every document has YAML frontmatter with a `type`, `index.md` and `log.md` are
@@ -33,12 +34,14 @@ rotproof --root <repository> init    # after upgrading Rotproof: update the proj
 rotproof --root <repository> create  # list the layers it would make, writing nothing (makes docs/ when it makes no layer)
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
-rotproof --root <repository> index   # write the generated files in docs/ that are out of date (the index files and the knowledge rules)
+rotproof --root <repository> index   # write the generated files that are out of date (docs/'s index files and the knowledge rules, and who reads the shared units)
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
+rotproof guide                       # print the guide `rotproof create` writes for the stack and the UI the declaration has
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
+rotproof guide --stack typescript --ui none  # the same for the layers of that UI (the values of init's --ui), with no project
 ```
 
 `--root` defaults to the current directory. The declaration is read from `<repository>/.config/rotproof.toml`, and the
@@ -71,16 +74,21 @@ names the rest of the starter (`App.tsx`, the styles, `assets/`) as code outside
 
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
-(below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files and the
-knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
-overwrites a file it does not generate, apart from adding the fields the declaration lacks (below), and never moves or
-deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
+(below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, `.rotproof/readers.md` when a unit
+is shared, and the index files and the knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
+overwrites a file it does not generate, apart from adding the fields the declaration lacks (below) and, in a Rust
+project, adding the crates it makes to the workspace's `members` when none names them (see "Units"), and never moves
+or deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
+A project that declares units (see "Units") also gets each entry file its units declare that is missing, made from
+one text for the stack (the entry file's docstring or doc comment, and in Rust `fn main() {}`), whatever the file is
+named, and in Rust the package that holds it (`Cargo.toml` beside its `src/`); the entry file of a project of one unit
+stays the project's to write, but in Rust, where it is the root package's `src/main.rs`.
 
 The project's files are written once, as a starting point, and are the project's from then on:
 
 | File | Content |
 |---|---|
-| `AGENTS.md` | The map (the layers present, with their roles to rewrite), the differences from what Rotproof keeps, and the project's own rules. It points at `.rotproof/AGENTS.md` |
+| `AGENTS.md` | The map (the layers present, each with the first sentence of its role to rewrite, and in a project that declares units a row for each layer of each unit, with the unit's name before the role), the differences from what Rotproof keeps, and the project's own rules. It points at `.rotproof/AGENTS.md` |
 | `CLAUDE.md` | `@AGENTS.md` and `@.rotproof/AGENTS.md` |
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
@@ -88,8 +96,8 @@ The project's files are written once, as a starting point, and are the project's
 | `.claude/settings.json` | The rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit. `typescript`: installs what `package.json` and its lockfile pin (`npm ci`) and runs `npx --no -- rotproof check`, which never downloads another Rotproof, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
-| `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
-| `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program |
+| `Cargo.toml` | `rust`: the workspace, whose members are the crates of the layers present, each named on a line of its own (no glob: see "Units"), so `cargo build` builds every layer present, and its root package, which depends on `composition`. A project that declares units has the workspace alone |
+| `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program. A project that declares units has none: an entry file is a unit's own |
 
 A project that does not write Python needs no Python for Rotproof: `rust` and `none` pin only the version, as
 Rotproof's GitHub Releases are immutable, so a version names one binary, as on PyPI. A binary cannot know the hash of
@@ -117,8 +125,8 @@ that has a declaration:
   or not an update applies, so every upgrade runs `rotproof init` once.
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
-  `.rotproof/AGENTS.md`, the generated files in `docs/`, and `docs/knowledge/`, the log and the project's files where
-  they are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
+  `.rotproof/AGENTS.md`, `.rotproof/readers.md` when a unit is shared, the generated files in `docs/`, and
+  `docs/knowledge/`, the log and the project's files where they are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
   names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
@@ -127,8 +135,11 @@ that has a declaration:
   `ui/` is there, `"none"` otherwise. With `"atomic"`, it says, as the same lines, that `presentation` is to be made
   (`rotproof create --yes`), and that the state of a page and its calls of the use cases move to
   `presentation.models` and the domain values the parts show to `presentation.display`; with `"none"`, that `ui` is
-  to be taken out of `absent`, where `rotproof check` fails on it. It never changes the declaration's other values,
-  and once it has set `files`, running it again changes nothing.
+  to be taken out of `absent`, where `rotproof check` fails on it. For a project that declares units and has no
+  document that follows them, it also drafts one, once ("The document of the units"). It never changes the
+  declaration's other values, and once it has set `files`, running it again changes nothing. It never writes the
+  project's `AGENTS.md`, but says on every run, as `note: ...` lines, what its map has gone behind on (see "The map in
+  `AGENTS.md`").
 - **An update only adds, or takes out what Rotproof itself wrote and no longer keeps, matched exactly,** and does
   nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
   byte order mark it had. What it cannot do without a person (its file is not in a form Rotproof can read),
@@ -148,7 +159,7 @@ reported by `rotproof check` as naming no update: take the name out.
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
-`layers/table.toml`), and gives the rules of the records, starting with reading the knowledge index before work, and
+`layers/table.toml`), gives the rules of units, and gives the rules of the records, starting with reading the knowledge index before work, and
 where open work is kept (an issue). It names
 the Rotproof version that wrote it, so after an upgrade `rotproof check` fails until `rotproof init` (or
 `rotproof create`) has rewritten it. Edited by hand, it fails too: a project's own rules go in its own `AGENTS.md`.
@@ -282,9 +293,245 @@ guide and the project's files, and `rotproof check` checks only the records and 
 layers. It is a line in the declaration, not a flag, so the structure check is never switched off where the
 declaration still declares layers.
 
-A level is declared absent by its dotted name (`absent = ["ui.templates"]`). Files `.gitignore` excludes and
+A level is declared absent by its dotted name (`absent = ["ui.templates"]`). A layer holds only its levels, so one
+whose every level is in `absent` is not there either, and is declared absent as a layer: `absent = ["infrastructure"]`,
+not both of its levels, which fails the declaration (it would otherwise make a directory with nothing in it, and
+there would be two ways to write one thing). Files `.gitignore` excludes and
 hidden files are not looked at, so a virtual environment or a build directory is not code. A code file is matched in any
 case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
+
+A project made of several parts that each hold the layers declares them as units, with `[[unit]]` tables (see
+"Units"); without them the whole project is one unit, which is what the rest of this file describes.
+
+## Units
+
+A project is one unit unless it says otherwise: its layers sit where its stack puts them, and every rule above is
+about them. A project made of several parts that each hold the layers, such as the packages of a monorepo or the
+modules of a modular monolith, declares them in `.config/rotproof.toml`, one `[[unit]]` table for each. Each unit
+then holds the layers by itself, and the project holds none of its own: the units replace the one implicit unit.
+
+```toml
+[[unit]]
+name = "billing"                       # required: a lowercase letter, then lowercase letters, digits and _
+path = "packages/billing/src/billing"  # required: where its layers sit directly, from the root ("." is the root)
+shared = true                          # optional, false by default: any unit may import it
+entry = ["apps/cli/__main__.py"]       # optional, an array even for one path: the unit is an app, which wires the others
+root = "packages/billing"              # optional, `path` by default: where the unit's manifest is
+absent = ["domain"]                    # optional: the layers or levels this unit does not have
+```
+
+`rotproof init` writes a commented example at the end of the declaration, after `files` and `declined`, so that a
+project that takes it out of the comment leaves them above the tables. The `[[unit]]` tables come last in the file for
+that reason: a key written after one belongs to it. Once the project declares units, `absent` at the top is no unit's
+and must be empty: each unit says what it lacks in its own `absent`, which names the same layers and levels, and an
+app, which holds only `composition` and `infrastructure`, lacks the rest. `unchecked` is the project's, and so is
+every other field above the tables; `stack = "none"` has no layers and so no units. A unit `rotproof create` makes is
+made as the one unit is, in the directory of its `path`, and it makes the layers alone: a Python or TypeScript unit
+gets no `pyproject.toml` or `package.json`, which are the project's. A Rust unit's layers are crates, each named for its
+unit (`billing_domain` for the layer `domain` of the unit `billing`, against `domain` in a project with no unit), since
+Cargo refuses two crates of one name; the unit's directory holds the crates and has no manifest of its own. The root
+`Cargo.toml` it writes then is a workspace with no package, naming each crate in `members` (a glob such as
+`crates/*` would match the directory of a unit and fail in Cargo), and `src/main.rs` is not written. The entry file
+of a unit is `<dir>/src/main.rs` in Rust, and `rotproof create` makes with it the package that holds it, `<dir>/Cargo.toml`
+(named for the unit, and for the unit and its directory from its second entry on), which depends on the unit's own
+`composition` by path and which `members` names; an entry file declared in another form, that is not there, fails the
+run before anything is written, and one that is there is the project's, with its package. When the root `Cargo.toml` is
+there already, `rotproof create` changes `members` and nothing else of it, only to add the crates and packages it made
+that no member names, and to replace the member `crates/*`, the glob Rotproof wrote before units, with the crates it
+matched once it would match a directory that has no `Cargo.toml`; it says each change (`changed Cargo.toml: ...`). A
+project made by an older Rotproof that declares no unit keeps its glob, and `rotproof create` leaves its `Cargo.toml`
+as it is.
+
+A declaration that cannot be read as it is written fails every check, saying every reason at once, from the
+declaration and the layout alone, before the tree is looked at:
+
+- a name that is not `[a-z][a-z0-9_]*`, or two units with the same name;
+- a `path` or `root` that is not written from the root with `/` as `unchecked` is (`./a`, `/a`, `a/../b`, `C:/a`, a
+  `\`, an empty one), and two units with the same `path`;
+- a `root` that is neither the `path` nor a directory above it;
+- a unit inside a layer of another unit (a unit sits beside the layers of the unit around it, however deep, and nowhere
+  in them), and a unit whose directory is named like a layer or like a path that is no layer (`tests`), which the
+  unit around it would read as one;
+- in Python, a unit whose name is not the name of the directory of its `path`, since Python imports a unit as that
+  name (a unit at the root has none to name it); two units whose directories have one name (`two units are imported as
+  billing (a/billing, b/billing)`), which Python cannot tell apart; and a unit whose directory is named like a module
+  of Python's standard library (`queue`, `string`: every name of `sys.stdlib_module_names` in Python 3.10 to 3.14), for
+  Python would import the unit or the module depending on how the program starts;
+- an `entry` written as a string (`entry = "apps/cli/main.py"`): it is an array even for one path, `entry =
+  ["apps/cli/main.py"]`, so that there is one way to write it;
+- an `entry` that is not written from the root, is no code of the stack, lies inside the path of a unit other than
+  the one that declares it (the innermost unit that holds an entry is its own, or none), or is declared by two units;
+- a unit that is `shared` and has an `entry`: an app is imported by none, and a shared unit by all;
+- a name in a unit's `absent` the layout does not have, as at the top for a project of one unit;
+- a unit whose `absent` names every level of a layer but not the layer, as at the top for a project of one unit;
+- an `absent` at the top, once units are declared.
+
+What `rotproof check` checks of the tree holds in each unit as it does in a project of one, and a finding about a unit
+names it (`domain of unit billing is missing: ...`), which a project that declares no unit never sees:
+
+- The unit is there (`unit billing is missing: packages/billing/src/billing/`, which says all about it: its layers are
+  not judged), and so is each entry file it declares (`the entry apps/cli/__main__.py of unit cli is missing`). The
+  entry of a project of one unit stays optional, as it was.
+- Every layer of the unit is present or in the `absent` of that unit, and no layer in it is there; the levels of a layer
+  are judged by the layer of their own unit. Each unit holds at least one layer, so the floor is each unit's.
+- No code sits outside the layers of a unit: every code file in its `path` is in a layer, or is one of its own entry
+  files, or sits in a path the layout says is no layer (`tests/` in Python), or in a path `unchecked` keeps, or in the
+  `path` of a unit inside it, which is that unit's to judge. A Python unit whose `path` is not the root may hold an
+  `__init__.py` directly in it, read as a place that imports no layer; no other file, and none in a TypeScript or a
+  Rust unit (`index.ts` at the top of a unit is code outside its layers). What the layout says of where code goes
+  (a screen goes in `src/ui/pages`) is left out of a finding about a unit, whose directories are its own.
+- Code in no unit's path fails too, as code outside the layers (`code outside the layers: helper.py (it is in no
+  unit: ...)`), so that moving a file out of every unit does not escape the checks: the layout's scope is walked as in
+  a project of one unit (Python: the whole project, TypeScript: `src/`, Rust: `crates/` and the `src/` of the root
+  package), and a code file there that is in no unit's `path`, is no unit's entry file, is not in a path that is no
+  layer (`tests/` in the scope, and in the root of each unit, where a package keeps its own) and is not kept by
+  `unchecked` fails. A unit at the root of the project holds every path. A unit whose `path` is outside the scope (a
+  monorepo's `packages/billing/src/billing` in TypeScript) is walked all the same.
+- A path in `unchecked` neither holds nor sits in a layer, and does not hold a unit: `unchecked = ["packages/billing"]`
+  would switch the unit off. A path inside a unit's `path` and outside its layers is what `unchecked` is for.
+- A manifest (`pyproject.toml` in Python, `package.json` in TypeScript, `Cargo.toml` in Rust, in any case: the one
+  kind of the stack) belongs to the unit whose `root` holds its directory, and a manifest elsewhere is a package no
+  unit says it is: `apps/x/package.json is a manifest outside every unit's root: declare the unit whose root is apps/x
+  (root = "apps/x"), or list apps/x in unchecked`. The manifest at the root of the project (a workspace's), one in a
+  layer (a Rust layer is a crate of its own), and one in a path `unchecked` keeps are not counted. A project that
+  declares no unit is not asked, so a project that is one package with others of tooling in it is read as before.
+
+A knowledge document that records why the code is divided so follows the table `.config/rotproof.toml::unit` (see
+The records and "The document of the units"), and is read again when a unit changes, not when `areas` or `files` does.
+
+### What a unit may import
+
+A unit imports the layers of its own unit as the table says. Only direct imports are judged, as everywhere. Between
+units, the rules are these, applied to an import from one unit's layer into another unit's, from the top:
+
+1. An import that lands in the directory of another unit outside its layers fails: what is read from it afterwards
+   cannot be seen. A layer is named, never the unit as a whole: the finding says how the stack imports one (a Python
+   module, `billing.protocol.inbound`; a TypeScript subpath of the unit's package, `@acme/billing/protocol/inbound`, or
+   its path from the importing file when the unit has no package; a Rust dependency on the crate of the layer,
+   `billing_protocol`), with a layer the unit holds as the example: `billing.domain` for a unit that lacks `protocol`.
+2. A unit that is not shared is imported by no other, except that the `composition` of an app wires the units: it
+   imports the `composition` and the `protocol` (both levels) of the units it wires, and no other layer of them, and
+   never another app's. Each unit builds its own insides in its own `composition`, and the app wires the units to each
+   other. The `composition` of a unit that is no app imports no unit that is not shared. Of a shared unit it reads
+   what rule 4 says.
+3. A shared unit imports shared units only.
+4. Into a shared unit, a layer imports what the table lets it import, the layers of the other unit standing where those
+   of its own do (`infrastructure.inbound` imports `protocol.inbound` of a shared unit), except that `application`
+   never imports another unit's `application`, which `composition` passes in as use cases, and that the `composition`
+   of a unit is imported by the `composition` of an app alone, and with two more. The `protocol.inbound` of any unit
+   also imports the `domain` of a shared unit, where the value types used across units live: an input port that could
+   not name them would copy their shape into its own data, and a copy drops what the original has (the currency of a
+   sum of money). It imports nothing of its own unit's `domain` and nothing of a unit that is not shared, as the table
+   says. And a `composition` imports of a shared unit its `protocol` and its `domain` (a kernel of value types such as
+   `Money` and `OrderId` is what the ports take and the app builds), an app's its `composition` too, and no other layer
+   of it: each unit, a shared one included, builds its own insides in its own `composition`, and the app wires them (a
+   shared database client offers a factory there), as rule 2 says of a unit that is not shared.
+5. An entry file imports the `composition` of its own unit alone.
+6. Shared units do not import each other in a cycle. This finding names the cycle and the imports that close it, and
+   cannot be approved.
+
+An import across units that the rules forbid is approved as any other forbidden import is
+(`rotproof approve <file> <import>`), except for the cycle. Only direct imports are judged across units too, and a chain
+of allowed imports across units can reach a layer that one import could not, in three places:
+
+- The entry file of an app, as in a project of one unit, imports its `composition`, which imports what the entry file
+  may not.
+- A `composition` builds its own unit, and the places it imports there import places of other units that it may not
+  import itself; it imports the `protocol` of another unit, and an app's the `composition` too, which import what it
+  may not read there (the ports of a `protocol` carry that unit's own `domain`, as they do in any unit).
+- A place that imports a `protocol.inbound` (the `ui`, `presentation.models`, `infrastructure.inbound`, `application`
+  and `composition`, in its own unit and, by rule 4, in another) meets the types of a shared unit's `domain` in the
+  data of its ports, though it may not import that `domain`. This holds in what the data carries and in no import:
+  nothing but a `protocol.inbound` imports that `domain`. A `protocol.inbound` of a shared unit that imports the
+  `domain` of another shared unit, which imports the first one's `domain`, closes a cycle of shared units, which rule 6
+  fails.
+
+### Who reads the shared units
+
+A shared unit is imported by any unit, and nothing stops it from collecting what no one needs. A project that declares
+a shared unit keeps `.rotproof/readers.md`, a list of what the other units read of each shared unit, which
+`rotproof index` and `rotproof create` write from the imports of the code and `rotproof check` compares with what they
+would write now. No rule fails for what the list shows: a library that one unit uses may be shared on purpose, and the
+list is for the person who reads it, and for the diff that shows a name appearing or its readers changing.
+
+```markdown
+<!-- Generated by `rotproof index` from the imports of the code: do not edit. -->
+# Who reads the shared units
+
+...
+
+## core
+
+`packages/core/src/core`
+
+| Name | Read by |
+|---|---|
+| `core.domain.score.count_star6` | billing, steps |
+
+### Read by one unit
+
+| Name | Read by |
+|---|---|
+| `core.domain.rank.top` | steps |
+```
+
+The shared units are in the order the declaration gives them, each with its `path`; the names under each are in byte
+order, and each is followed by the names of the units that read it, in byte order too, and no file (a change of a line
+moves nothing in the list). A name that exactly one unit reads is in the section `Read by one unit`, where what a
+shared unit holds for a single reader stands out. A shared unit that no unit reads says `Read by no unit.`. A name is
+what an import of another unit names in the shared unit, whether or not the rules between units allow it, as far as
+the reader sees it:
+
+- in Python, the dotted module as the import resolves it (`from m import n` is `m.n`, `import m.n` is `m.n`);
+- in TypeScript, the path the import lands in, from the root and without its extension, and `: name` for each name it
+  takes (`default`, `*` for `import * as ns` and `export * from`, the name as the module exports it for `{ a as b }`);
+  an import that takes none (`import "x"`, `require("x")`, `import("x")`, `import.meta.resolve("x")`) is the path alone;
+- in Rust, the path the crate writes through its dependency on a crate of the unit, from the crate
+  (`core_domain::score::count_star6`, also through a name bound with `as`); a module imported whole (`use
+  core_domain::score;`) is the module, and a crate bound to a name is the crate. A crate that declares the dependency
+  and names nothing from it reads nothing.
+
+An import of a unit's code outside its layers is no read of a name, nor is an import within a unit. The list is there
+when at least one unit is shared, and is not otherwise: `rotproof index` takes away a list that is left when no unit is
+shared any more, and `rotproof check` fails while it is there.
+
+When the list is there and is not what the code says, the finding names what changed in the names, a line each under
+it, so that a person sees which import moved the list and does not run `rotproof index` unread: the shared unit and
+the name, as `core: core.domain.rank is read now, by billing` for a name the list lacks, `core: core.domain.old is
+read no more (was read by steps)` for a name that no unit reads now, and `core: core.domain.score is read by billing,
+steps (was billing)` for a name whose readers are not the ones listed; a unit that is shared no more but is still in the
+list is `<unit> is listed, and is shared no more`. The lines are in the order of the unit's name and then the name's,
+the first ten are said and the rest counted (`and 26 more`). They are read from the rows of the list's tables, so
+nothing else that was edited in it is named, and a list that is missing says none.
+
+### The document of the units
+
+The rules above say what a unit may import. Why the code is split into these units, and why each edge between them
+exists, are for a person to say, in a knowledge document that follows the declaration: `follows` takes the key
+`.config/rotproof.toml::unit`, every `[[unit]]` table of the file and not its other fields, so `rotproof check` fails
+when a unit is added, removed or changed until the document is read against it again and pinned
+(`rotproof follows knowledge/units.md .config/rotproof.toml::unit`).
+
+`rotproof init` drafts that document when it runs on a project that has a declaration with `[[unit]]` tables, and
+neither a document of `docs/knowledge/` follows that key (a deprecated one counts, as it was deprecated on purpose) nor
+a file named `units.md` is there, in any case. It writes `docs/knowledge/units.md` once, then the index of
+`docs/knowledge/`, and says `drafted docs/knowledge/units.md`; a second run, with the document rewritten or not,
+writes nothing, and it never writes over a file. The draft is a knowledge document that passes `rotproof check` as it
+is written:
+
+- the frontmatter has the type `Knowledge`, the title `Units`, the first of the `areas` as its tag, the status `stable`,
+  and `follows` with the key above at the hash of the tables as they are now;
+- a `flowchart LR` of Mermaid has each unit as a node (a shared unit marked `(shared)`, an app `(app)`) and an arrow
+  from each unit to each unit it imports, once, from the imports the direction check reads in all three stacks,
+  whether or not the rules allow them: an import by the `composition` of an app of the units it wires, and the reads
+  of the shared units, as "Who reads the shared units" lists them;
+- each unit has a section, `## <unit>`, with a line that says its responsibility is not written yet: what the unit is
+  responsible for, why the code is split this way, why each of its edges exists, and which edges are left out on
+  purpose.
+
+The edges are what the code has, as a start to write over, and the draft says so: one that should not be there is a
+defect to fix. With no `areas` there is no tag to give it, so `rotproof init` writes nothing and says why, on every run,
+until there is an area; the same when the units are written in a form the key cannot follow (`unit = [{ ... }]`).
 
 ## The records
 
@@ -311,8 +558,9 @@ left out: the code says that, and a copy goes stale. A document is edited in pla
 deprecated, opening with `# Resolution`, only when it no longer holds. A document that describes code names it in
 `follows`, each with its hash when the document was last reviewed: a file in any language; in Python, TypeScript,
 JavaScript and Rust also a definition, written `<file>::<Name>.<Name>` in all of them (`src/api.py::Router.add`,
-`src/api.ts::Router.add`, `crates/x/src/cli.rs::Command.Before`); or every file Rotproof reads as code under a
-directory (`src/api/`: `.py`, `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` and `.rs`, in any case,
+`src/api.ts::Router.add`, `crates/x/src/cli.rs::Command.Before`); in a `.toml` file also a table, written
+`<file>::<name>` (`.config/rotproof.toml::unit`, `Cargo.toml::workspace.dependencies`); or every file Rotproof reads as
+code under a directory (`src/api/`: `.py`, `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` and `.rs`, in any case,
 whatever the stack of the project). A definition is hashed on its own source, so a change elsewhere in its file does
 not fail it. A name that is more than one piece in its file (overloads, a getter and its setter, a Python property and
 its `@x.setter`, an interface merged with a class, the `impl` blocks of a Rust type) is hashed on all of them, in the
@@ -324,7 +572,26 @@ enum, and `default` for an `export default` that has no name; in Rust, a `fn`, `
 (`tests.helper`). A Rust type's key covers its definition and every `impl` block for it in the file, `Type.method` is
 the method of that name in any of them, and a Rust definition starts at its first attribute or `///` doc comment, and one
 named by a raw identifier (`pub fn r#match`) is written without the `r#` (`src/lib.rs::match`). What
-a macro defines is not seen. Once the document is reviewed against the code, `rotproof follows knowledge/api.md
+a macro defines is not seen. A table is a heading, `[unit]` or `[[unit]]`, and a piece of it is that table as it is read, up to
+the next heading in the file. A name selects every table whose heading begins with it, as a class holds its methods: `unit` is
+each `[[unit]]` and each `[unit.x]` below one, `workspace` the `[workspace]` table and `[workspace.dependencies]`,
+and `workspace.dependencies` that table alone; the pieces are joined in the order they appear, as an overload's are.
+The keys above the first heading are in no table, so a document that follows `.config/rotproof.toml::unit` fails when
+a unit changes and not when `areas` or `files` does (the file as a key fails for both). A table is hashed as it is read,
+not as it is written: its heading and then each field on a line, `key = value`, in the byte order of the keys (a dotted
+key written out in full), strings in double quotes with `\`, `"` and the control characters escaped, arrays and inline
+tables on one line (an inline table's keys in order), so a comment, a blank line, the quotes of a string, how an array
+is wrapped, and the order of the keys leave the hash as it was, while a value written as another one (`a = "x"` for
+`a = ["x"]`) is another value, which is why a unit's `entry` has one way to be written (see "Units"). **Known limit:** what a
+person reads as the same table may be written in another order, and the hash does not know it. An array keeps the order
+it is written in, so a document that follows `.config/rotproof.toml::unit` fails when the strings of a unit's `absent`
+change places, and the pieces of a name are joined in the order they appear, so it fails too when the `[[unit]]`
+tables of the declaration change places, though what the project declares is the same. Read the table, and pin it
+again (`rotproof follows`, or `rotproof approve --reviewed`). To avoid it, write `absent` in one order, and add a
+unit at the end of the declaration. A name is bare keys joined by dots (letters, digits, `-` and `_`). A table with no heading of its own (a value, `unit = [{ ... }]`, or one made by a
+dotted key) is not named, so it is "not there"; a `.toml` file that is not TOML cannot be read, which the check says as
+it says it of a Python file that does not parse. A `.toml` file is no code of a directory: `src/` is hashed on the same
+files as before. Once the document is reviewed against the code, `rotproof follows knowledge/api.md
 <key>...` (or `docs/knowledge/api.md`) pins each key at its hash as the code is now, adding a key `follows` lacks with
 its hash quoted, and writes all the keys or none: pinning changes the document, so its commit records the review.
 Nothing else in the document changes: it keeps a byte order mark and its line endings (CRLF on every line when one
@@ -392,6 +659,10 @@ changed is in the commits, what was measured and decided along the way in the ta
   and the finding says where code goes, while what Cargo keeps outside `src/` in the root package (`build.rs`,
   `tests/`, `benches/`, `examples/`) and `xtask/` are not looked at. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.
+  A project that declares units (see "Units") is checked unit by unit: each unit's `path` and entry files are there, and
+  each of its layers is present or in its own `absent`, with at least one present; its code outside the layers is
+  looked for in its `path` up to the units inside it, and in the scope of the stack outside every unit's `path`; and
+  every manifest of the stack outside the root of every unit fails.
   A layer with levels holds only its levels: code beside them fails, apart from the layer's own file
   (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
   (a design value, one behaviour, a provider of a theme), is an atom, and what a screen holds and decides goes in
@@ -404,25 +675,51 @@ changed is in the commits, what was measured and decided along the way in the ta
   relative ones and those inside functions or under `if TYPE_CHECKING:` included, and those of the entry file. A
   layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own
   `imports` name, and in `ui` and `presentation` the levels below it. Only direct imports
-  are judged: what the table allows is closed under chaining, so a chain of allowed imports never reaches a forbidden
-  layer. A module is placed where its parts, as a path, land as the operating system that runs the check resolves
+  are judged: what the table allows is closed under chaining, so a chain of allowed imports inside a unit never reaches
+  a forbidden layer (between units it can: see "Units"). A module is placed where its parts, as a path, land as the operating system that runs the check resolves
   them: on Windows, `Infrastructure.db` lands in `infrastructure`, as Python imports it with `PYTHONCASEOK` set.
-  Imports of modules in no layer (the standard library, packages) are not judged, and imports built at run time
-  (`importlib`) are not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be
-  read.
+  Imports of modules in no layer (the standard library, packages) are not judged. A call of
+  `importlib.import_module` or `__import__` (also as `builtins.__import__`, or by a name imported with `from
+  importlib import import_module`) whose module is a string literal is an import of that module, read as one; a module
+  that is not a literal (a variable, an f-string, a concatenation with `+`) or is relative (`".x"`) is built at run
+  time and is not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be read.
 - **The layers import only what the table allows** (TypeScript): every `import` (`import type` too), `export ...
-  from`, `import x = require(...)`, and `import(...)` and `require(...)` with a literal string, in the `.ts`, `.tsx`,
-  `.js` and `.jsx` files (and `.mts`, `.cts`, `.mjs`, `.cjs`) of the layers, read with
+  from`, `import x = require(...)`, and `import(...)`, `import.meta.resolve(...)` and `require(...)` with a literal
+  string, in the `.ts`, `.tsx`, `.js` and `.jsx` files (and `.mts`, `.cts`, `.mjs`, `.cjs`) of the layers, read with
   [oxc](https://oxc.rs/). The place of an import is the path it lands on, whether or not a file is there: a relative
   specifier from the file, one starting with `/` from the root (as Vite reads it), and any other through
   `compilerOptions.paths` of the `tsconfig*.json` files at the root (and the local files they extend), then through
-  their `baseUrl` when a module is there; otherwise it names a package, which is not judged. The path is placed where
+  their `baseUrl` when a module is there, then through the package of a unit when it starts with the `name` of the
+  `package.json` at a unit's `root` (see below); otherwise it names a package, which is not judged. The path is placed where
   it lands as the operating system that runs the check resolves it: on Windows, `../Infrastructure/db`,
   `../infrastructure./db` and a short name (`../INFRAS~1/db`) land in `infrastructure`, as Vite builds them, and
   links are followed everywhere. A `tsconfig*.json` that
   cannot be read, or a `paths` entry with more than one `*`, fails rather than leaving its aliases unjudged. Two
   limits: only the first target of a `paths` entry is used, and a config extended from a package is not read, so an
-  alias defined only there is taken for a package.
+  alias defined only there is taken for a package. A project that declares units reads the `package.json` at the `root`
+  of each unit (the root of the project too, when a unit's root is there), and an import through a package's `name`
+  and a subpath (`@acme/db/client`) is placed where that package says it lands, then judged between units as any
+  import is: the package without `exports` takes the subpath as a path in the package (`@acme/db/src/domain`), and
+  the package itself is its `types`, or its `main`, or its root; with `exports` (a string, a map of subpaths, a pattern
+  with one `*`, a map of conditions, a list), only the subpaths it lists are the package's, each an exact key or the
+  pattern with the longest prefix, and among conditions the first of `types`, `import` and `default` that leads to a
+  path is taken. An import of a subpath a package with `exports` does not list (or lists as `null`) fails as `imports
+  @acme/db/domain, which packages/db/package.json does not export, so Node and tsc fail it and its layer cannot be
+  judged: export the subpath in packages/db/package.json, or import one that is exported`, which no approval covers:
+  it is a failure, not an import skipped, and nothing is judged of it until it names a subpath the package exports.
+  An import of a subpath it lists whose target holds no file fails too, such as `@acme/db/domain/invoice.ts` through
+  `"./*": "./src/*/index.ts"`, which leads to `src/domain/invoice.ts/index.ts`: it fails as `imports
+  @acme/db/domain/invoice.ts, which packages/db/package.json exports as packages/db/src/domain/invoice.ts/index.ts,
+  where no file is`, and is judged by where it leads all the same, so that a rule it breaks is not hidden by the path
+  being wrong. A file is there when the path is one, or has an extension of source (`.ts`, `.tsx`, `.mts`, `.cts`,
+  `.d.ts`, `.js`, ...) added, or holds an `index` of those, or is written `.js`, `.jsx`, `.mjs` or `.cjs` beside the
+  source it is built from; a target that lands outside every unit (build output that is not there yet) says nothing.
+  A package with no `exports`, which takes the subpath as a path, is held to the same. A `package.json` that cannot be
+  read as JSON, or whose `exports` is not a string, a list or a map, fails too, and a package with no `name` is no
+  package an import names. Limits: the `tsconfig` of a
+  unit is not read (its `paths` are not applied; only those at the project's root are), `imports` (`#name`) and a
+  condition other than the three are not read, and an import that lands outside every unit's path (a package
+  whose `exports` point to build output such as `./dist/client.js`) is not judged.
 - **The layers import only what the table allows** (Rust): a crate is compiled only against the crates its
   `Cargo.toml` declares, so the declarations are read instead of `use`: every dependency in `[dependencies]` and
   `[build-dependencies]` (and `build_dependencies`), under `[target.<cfg>]` too, of the `Cargo.toml` files in the
@@ -434,9 +731,17 @@ changed is in the commits, what was measured and decided along the way in the ta
   that lands nowhere, where Cargo fails too, or outside the root is not judged. A renamed dependency (`package`) is
   placed by its path all the same. `[dev-dependencies]` serve the tests and are not judged; dependencies from a
   registry or git are not judged. A `Cargo.toml` that is not UTF-8 or
-  TOML fails, and so does a dependency taken from a workspace that does not declare it. The root `Cargo.toml` is read
-  for the entry file, `src/main.rs` of the root package. Not seen: `[patch]` and `[replace]`, and source files taken
-  from another crate's directory (`include!`, `[lib] path`).
+  TOML fails, and so does a dependency taken from a workspace that does not declare it. An entry file is read through
+  the manifest of its package: the first `Cargo.toml` with a `[package]` from the entry's directory up to the root
+  (the root package's for `src/main.rs`, and for `src/bin/w.rs` of a unit's package the unit's), so the entry files of
+  every unit are read; an entry file that is there and has none fails, since what it imports cannot be judged (in a
+  project that declares no unit too), and one that is not there says nothing. A dependency on another unit's crate is
+  judged by the rules between units (below): in a project that declares units, `shipping_infrastructure` depending on
+  `billing_protocol`, both not shared, fails, a shared unit's `core_protocol` may be depended on as `protocol` is, and
+  `application` never depends on another unit's `application`; the levels of that crate are judged with the same rules
+  where its code names them (the `inbound` module of a `protocol` crate may name the `domain` crate of a shared unit,
+  and no other). Not seen: `[patch]` and `[replace]`, and source files taken from another crate's
+  directory (`include!`, `[lib] path`).
 - **The levels of a crate import only what the table allows** (Rust): a level is a module of its layer's crate,
   which the manifest cannot tell apart, so the code of `src/` is read. Every path from `crate`, `super`, `self` or a
   dependency on another layer, in a `use`, an expression or the tokens of a macro, is judged by the level it lands in
@@ -448,6 +753,62 @@ changed is in the commits, what was measured and decided along the way in the ta
   `protocol::outbound::Port` does), and so is a name bound to such a name; the file is read as one scope, so a name
   bound twice stands for both. Not seen: a path a macro builds from pieces, and a name bound in one file and used
   through another.
+- **Imports between units follow the units' rules** (every language): the units are the parts of the code that each
+  hold the layers (see Units); a project that declares none is one unit, and none of this applies. An import inside a
+  unit is judged as above. An import into another unit is judged by what each is, first:
+  1. the code of another unit outside its layers fails (`imports billing, in the unit billing outside its layers`):
+     import the module of a layer, such as `billing.protocol.inbound` (in TypeScript, a layer through the package of
+     the unit, such as `@acme/billing/protocol/inbound`, or by its path from the importing file when the unit has no
+     package; in Rust, depend on the crate of a layer, such as `billing_protocol`, since a dependency of Cargo is no
+     import of a module). The example is a layer the unit holds: `protocol.inbound` when it has it, else the first it
+     has of `protocol.outbound`, `domain`, `application`, `composition`, `infrastructure.inbound`,
+     `infrastructure.outbound`, `presentation.models` and `ui.pages` (`billing.domain` for a unit that lacks
+     `protocol`);
+  2. a shared unit imports only shared units (`the shared unit core imports only shared units, and billing is not
+     shared`);
+  3. a unit that is not shared is imported by the `composition` of an app, which is a unit with an entry, and by no
+     other place, nor by an app's `composition` into another app, and the `composition` of an app reads of it its
+     `composition` and its `protocol` (both levels) and no other layer (`the composition of an app imports only the
+     composition and protocol of a unit that is not shared: billing builds its own insides in its own composition`):
+     each unit builds its own insides, and `composition` wires the units and nothing else does; the `composition` of a
+     unit that is no app reads none of them;
+  4. a shared unit is read as if its place sat in the importer's own unit, so the table decides, with these more
+     rules: `application` never imports another unit's `application` (`composition` passes a shared unit's use cases
+     in), the `composition` of a shared unit is imported by the `composition` of an app alone, the `domain` of a shared
+     unit is imported by the `protocol.inbound` of any unit, which the table lets import nothing (the value types used
+     across units live in a shared unit, and an input port that cannot name them copies their shape into its own
+     data; a `protocol.inbound` imports no `domain` of its own unit and none of a unit that is not shared), and a
+     `composition` reads of it its `protocol` and its `domain` (the value types the ports take) and no other layer,
+     an app's its `composition` too (`the composition of a unit imports only the protocol and domain of a shared
+     unit: core builds its own insides in its own composition`; of an app, `...imports only the composition, protocol
+     and domain of a shared unit: ...`): a shared unit builds its own insides as any unit does.
+
+  The entry file reads the `composition` of its own unit and nothing of another unit. Only direct imports are
+  judged, and what these rules allow is closed under chaining except in three places. An entry file imports a
+  `composition` that wires what the entry file may not import. A `composition` builds its own unit, whose places
+  import places of other units that the `composition` may not import itself, and imports the `protocol` of another
+  unit (an app's `composition` its `composition` too, and a shared unit's `domain`), which import what it may not
+  read there. And every place that imports a
+  `protocol.inbound` (the `ui`, `presentation.models`, `infrastructure.inbound`, `application` and `composition`)
+  meets in the data of its ports the types of the shared `domain` that `protocol.inbound` imports, which it may not
+  import itself: this holds in what the data carries, and in no import, since nothing but a `protocol.inbound`
+  imports that `domain`. A forbidden import between units is approved as any
+  other. The shared units that import each other, one way round or more, fail once each, as one finding that names
+  the units in a cycle and the first import of each step (`the shared units import each other in a cycle: core →
+  steps → core (core/application/x.py:3 imports steps.domain.a; steps/domain/b.py:1 imports core.domain.c)`); it is
+  no import of a file, so no approval covers it. In Python, a name that is a layer's alone (`domain`) that fails in
+  another unit also says where the unit's own is: Python finds `domain` from where the program starts, and the
+  unit's own layer is `billing.domain`.
+
+  In Python a unit is imported as the name of its directory, so an import whose first part is that name is looked up
+  in the directory that holds the unit (`packages/billing/src` for `packages/billing/src/billing`) and lands in a layer
+  of the unit, or in the unit outside its layers: `import billing`, `from billing import models` and the like fail by
+  the first rule (a module reached through an attribute, `billing.protocol` after `import billing.domain`, is not
+  seen). A bare layer name is looked up from the root of the project, as Python does when the program starts there: it lands in the layer of a
+  unit at the root (`path = "."`) and, where the root has none, nowhere, so what it imports is not judged. The
+  `__init__.py` directly in a unit's directory is read as a place that imports no layer: it may import none, and the
+  code of another unit outside its layers fails there as everywhere. A relative import is a path, and lands where the
+  path does; it is named by its full dotted name in a finding and in an approval.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,
@@ -468,7 +829,8 @@ changed is in the commits, what was measured and decided along the way in the ta
   and every name in `declined` is an update.
 - **`.rotproof/AGENTS.md` is up to date:** it equals what `rotproof create` writes for the stack with this version of
   Rotproof (see "Upgrading Rotproof"), so it fails after an upgrade until `rotproof init` has run, and when edited by
-  hand.
+  hand. The finding names the command that applies: `rotproof create` when `files` names the running version (the
+  guide changed under it, as in a development build, or by hand), `rotproof init` otherwise.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
   outside `unchecked` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
@@ -514,9 +876,11 @@ changed is in the commits, what was measured and decided along the way in the ta
   once. A document that breaks one of these is left out of the index, which lists it first, with why.
 - **Every knowledge document matches the code it follows:** each key of `follows` names a path from the root with
   `/` (a file; a directory with a `/` at its end; a definition of a Python, TypeScript, JavaScript or Rust file after
-  `::`, as `f`, `Class` or `Class.method`) with a hash of 8 lower-case hex digits, and that hash is what it names now:
+  `::`, as `f`, `Class` or `Class.method`; a table of a `.toml` file, as `unit` or `workspace.dependencies`) with a
+  hash of 8 lower-case hex digits, and that hash is what it names now:
   the file's text, every line ending as `\n`; the definition's source from its first decorator or attribute to its
-  end, all the pieces of a name defined more than once in the order they appear, joined with `\n`; or every file read
+  end, all the pieces of a name defined more than once in the order they appear, joined with `\n`; a table's
+  headings, each to the next heading in the file, joined in the same way; or every file read
   as code under the directory (`.py`, `.rs` and the TypeScript and JavaScript extensions, in any case, whatever the
   stack; outside what the project's `.gitignore` files exclude, and hidden ones), each with its path. What is not
   there fails. A deprecated document no longer holds, so what it follows is not read.
@@ -549,6 +913,10 @@ changed is in the commits, what was measured and decided along the way in the ta
 - **Every file Rotproof generates equals what `rotproof index` writes:** `docs/index.md` and `docs/knowledge/index.md`,
   so nobody maintains a list by hand, and `docs/knowledge/rules.md`, so the rules a project reads are the rules its
   Rotproof checks. A project's own rules go in another guide beside it.
+- **The list of who reads the shared units equals what `rotproof index` writes:** `.rotproof/readers.md` is there, as
+  written from the imports of the code now, when a unit is shared, and is not there when none is (see "Who reads the
+  shared units"). It fails as ``out of date, run `rotproof index`: .rotproof/readers.md``, for a list that is missing,
+  edited, or no longer what the code says, with the names that changed under it (see "Who reads the shared units").
 
 What a check finds file by file (the layers' imports, the markers, `NOTE`, the environment variables and the
 type-checker suppressions) is listed in the byte order of the whole path, written with `/` from the root and compared
@@ -557,11 +925,26 @@ is the same on every operating system, whatever order its file system lists file
 check on the same tree print the same lines in the same order. The list of linked `TODO` comments keeps the order it
 had (path, then line), which this order agrees with.
 
-One thing is a warning and fails nothing: **a knowledge document whose `stale_after` has come** (the day in the time
+One thing is a warning and fails nothing, besides the comments that may make a type checker check less and the map in
+`AGENTS.md` (below): **a knowledge document whose `stale_after` has come** (the day in the time
 zone of the machine that runs the check) is printed on every run from that day, with what to do: measure again what it
 says of outside the code, which `follows` cannot watch, then write the day in `verified` and the next day in
 `stale_after`. Failing would turn CI red with no change, from the clock alone. A deprecated document is not read for
 it.
+
+### The map in `AGENTS.md`
+
+`AGENTS.md` is the project's own file, written once by `rotproof create` with a map: a table under `## Map` with a row
+for each layer present, whose first cell is the layer's path. The map goes behind when the declaration changes later: a
+layer declared absent and made afterwards, a unit added, a layer taken out. `rotproof check` warns of it, on every run
+and failing nothing, under `the map in AGENTS.md lists the layers .config/rotproof.toml declares`: a line for each layer
+present that has no row (`AGENTS.md has no row in its map for packages/cli/src/cli/protocol/, the layer protocol of the
+unit cli: add it, or declare the layer absent in .config/rotproof.toml`), and for each row of a layer declared absent;
+after six lines it counts the rest. `rotproof init` says the same, each line after `note: `. The words of a row are the
+project's and are never judged, and a file with no `## Map` and table, or none at all, is not read: a project may keep
+its map as it likes. The map `rotproof create` writes names the unit in each row when the project declares units (`cli:
+The composition root: ...`), as the same layer in two units would otherwise read alike, and gives the whole first
+sentence of the layer's role, not its first line.
 
 The frontmatter is read as YAML 1.2: quoting a date or a datetime never changes whether it passes. It holds no comment: a `#`
 after a space or at the start of a line starts one, which YAML reads as nothing, so an unquoted `title: PR #1` would

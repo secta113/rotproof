@@ -1,0 +1,41 @@
+- **A project that holds several parts, each with the layers (a package of a monorepo, a module of a modular
+  monolith), declares them as units: one `[[unit]]` in `.config/rotproof.toml` for each.** Without `[[unit]]` the
+  whole project is one unit, and the rules about units below are not in play. A unit has a `name` (a lowercase
+  letter, then lowercase letters, digits and `_`) and the `path`, from the root, where its layers sit directly. It
+  may also have `shared = true`, `entry` (an array of files, even for one: the unit is an app), `root` (where its manifest is:
+  `path` itself or a directory above it, and `path` when left out) and its own `absent`. Once units are declared the
+  top-level `absent` must be empty: each unit says what it lacks in its own, and an app, which holds only
+  `composition` and `infrastructure`, lacks the rest. A unit sits beside the layers of the unit around it, never in
+  one, and its directory is not named like a layer. `rotproof init` writes a commented example at the end of the
+  declaration.
+- **Where a unit sits depends on the stack.**
+  {where}
+- **The tree is checked in each unit, and a manifest belongs to a unit.** Each unit's layers are present or named in its
+  own `absent`, and code in its `path` outside them fails, but for its entry files{own}. Code in no unit's path fails
+  too, in the places the stack looks for code, as does a path that is no layer only where the stack says (`tests/`).
+  `unchecked` keeps code out of the check, never a unit. A `{manifest}` belongs to the unit whose `root` holds its directory; the one at the root of
+  the project, one in a layer and one in a path of `unchecked` are not counted, and any other fails: declare the unit
+  whose root it is, or list its directory in `unchecked`.
+- **A unit imports only the layers of its own unit, by the table, and no other unit unless it is shared.** A shared
+  unit may be imported by any unit, imports only shared units, and never in a cycle. Only direct imports are judged.
+- **Into a shared unit, a layer imports what its own layer may import by the table, the same name in the other unit.**
+  `infrastructure.inbound` imports `protocol.inbound` of a shared unit `core`, as it imports its own.
+- **A unit's `domain`, and every layer that may read its own `domain`, may read a shared unit's `domain`.** The layer
+  table, which says `domain` imports no other layer, does not show it: `billing`'s `domain` may import `core`'s
+  `Money` and `OrderId`. A `protocol.inbound` may too, though it reads no `domain` of its own unit: an input port names
+  a shared type and does not copy its shape.
+- **`application` never imports another unit's `application`.** `composition` passes the use cases in: `billing`'s
+  `application` takes `core`'s use case as an argument and never imports it.
+- **A `composition` imports another unit's `composition` (an app's only), `protocol` and, when that unit is shared,
+  `domain`, and nothing else of it.** The app's `composition` imports `billing`'s `composition` and `core`'s `Money`, never
+  `core`'s `application` or `infrastructure`: each unit, a shared one included, builds its own insides in its own
+  `composition`, and the app wires them. A shared database client offers a factory in its own `composition`, which the
+  app calls.
+- **A unit that is not shared is imported by the `composition` of an app alone, and only its `composition` and
+  `protocol`, never another app's.** `billing`'s `domain` stays closed to the app's `composition`.
+- **An entry file imports the `composition` of its own unit alone.**
+- **The table is not closed under chaining across units.** What reads a `protocol.inbound` meets the types of a shared
+  `domain` in its data, though it may not import that `domain`.
+- **An import of another unit names a module of one of its layers, never the unit as a whole.** An import that lands
+  in the unit's directory outside its layers fails, since what the code reads from it afterwards cannot be seen.
+  {names}

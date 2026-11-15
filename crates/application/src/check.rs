@@ -10,11 +10,13 @@ use std::io;
 use crate::finding::{under, warn};
 use crate::tree::{exactly, read_text};
 use domain::approvals::{shown, sort, stale};
-use domain::declaration::{Declared, INIT_OR_CREATE};
+use domain::declaration::Declared;
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
+use domain::project::MAP_HEADING;
 use domain::schema::Time;
 use domain::suppressions::WEAKENS_HEADING;
+use domain::upgrade::guide_command;
 use domain::version::VERSION;
 use protocol::inbound::{Finding, LinkedTodo, Report, Warning};
 use protocol::outbound::Parsers;
@@ -37,11 +39,16 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
         weakened = code(tree, parsers, declared, &mut report)?;
         report.findings.extend(rotproof_files(tree, declared));
     }
+    let mut stale_map = Vec::new();
+    if let Some(declared) = &structure.declared {
+        stale_map = warn(MAP_HEADING, crate::project::map_problems(tree, declared)).collect();
+    }
     let records = crate::records::problems(tree, parsers, structure.areas, now)?;
     report.findings.extend(records.found);
     // The warnings are printed in this order: the documents that are due, then the comments of the code
     report.warnings.extend(records.warnings);
     report.warnings.extend(weakened);
+    report.warnings.extend(stale_map);
     Ok(report)
 }
 
@@ -56,6 +63,7 @@ fn code(
     report: &mut Report,
 ) -> io::Result<Vec<Warning>> {
     let direction = crate::direction::problems(tree, parsers, declared)?;
+    let listed = crate::readers::problems(tree, declared, &direction.reads);
     let approvals = crate::approvals::read(tree)?;
     let sorted = sort(&direction.forbidden, &approvals.entries);
     report.findings.extend(under(
@@ -72,6 +80,9 @@ fn code(
             .into_iter()
             .chain(sorted.stale.iter().map(|entry| stale(entry))),
     ));
+    report
+        .findings
+        .extend(under(domain::readers::HEADING, listed));
     report.approved = sorted
         .approved
         .iter()
@@ -131,7 +142,10 @@ fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
         };
         found.extend(under(
             "Rotproof's guide is up to date",
-            [format!("{state}, {INIT_OR_CREATE}: {GUIDE}")],
+            [format!(
+                "{state}, {}: {GUIDE}",
+                guide_command(declared.declaration.files.as_deref(), VERSION)
+            )],
         ));
     }
     found

@@ -15,6 +15,10 @@ If LLM agents write the code of a repository, these are the things nobody has to
   Python, TypeScript and Rust. Code that cannot be split into the layers mixes responsibilities, so the table is also
   how an agent is made to split it. An exception is an entry that a person approves on a terminal, which a reviewer
   sees in the diff.
+- **Each part of a monorepo keeps its own layers.** The packages of a monorepo, or the modules of a modular monolith,
+  are declared as units: every import between them is checked, so a part reaches another only through the layers that
+  may be reached, and a shared part that collects what no one needs shows in a list that the diff displays (see
+  "Units").
 - **What the code cannot say stays true.** The reasons behind the code are kept in knowledge documents that name the
   code they describe, each pinned to it by a hash. When that code changes, `rotproof check` fails until someone reads
   the document against it and pins it again.
@@ -280,12 +284,75 @@ It keeps two structures:
   layers mixes responsibilities, so the layers
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
-  of dependencies stays what it was meant to be.
+  of dependencies stays what it was meant to be. A project made of several parts that each hold the layers declares
+  them as units (see "Units").
 - **The records:** how things are now, and why, as far as the code cannot tell it, in knowledge documents that
   follow the code they describe, so that `rotproof check` fails once the code changes under them (and alarms, for what
   matters only when it is seen); and a log of what each task left behind. Open work is kept in issues, not here.
   Knowledge does not stay outside them, nor does a finding: a `TODO` or `NOTE` in a code comment fails the check,
   unless it is a `TODO` that names its issue in a project that declares `todo_link`.
+
+## Units
+
+A project is one unit unless it says otherwise: one set of layers, where its stack puts them. A project made of several
+parts that each hold the layers, such as the packages of a monorepo or the modules of a modular monolith, declares each
+part as a unit, one `[[unit]]` table in `.config/rotproof.toml`. Rotproof then keeps the layers inside each unit, and
+judges the imports between units too. Each unit says in its own `absent` which layers it lacks, so the `absent` at the
+top stays empty. `rotproof init` writes a commented example at the end of the declaration. A Python monorepo with a
+shared unit, two units that are not shared, and an app:
+
+```toml
+[[unit]]
+name = "core"
+path = "packages/core/src/core"       # where its layers sit directly
+shared = true                         # any unit may import it
+
+[[unit]]
+name = "billing"
+path = "packages/billing/src/billing"
+root = "packages/billing"             # where its manifest is (`path` when left out)
+
+[[unit]]
+name = "shipping"
+path = "packages/shipping/src/shipping"
+root = "packages/shipping"
+
+[[unit]]
+name = "cli"
+path = "apps/cli/cli"
+entry = ["apps/cli/__main__.py"]        # an app: its composition wires the other units
+absent = ["application", "protocol", "domain"]   # an app holds only composition and infrastructure
+```
+
+`rotproof create --yes` then makes each unit's layers and each entry file that is missing, and the same checks hold in
+each unit, with the unit named in a finding. The rules between units are few:
+
+- A unit imports the layers of its own unit as the table says, and no other unit unless it is shared.
+- A shared unit imports shared units only, never in a cycle. A layer imports the layer of a shared unit that its own
+  layer may import by the table (`infrastructure.inbound` imports `protocol.inbound` of a shared unit), except that
+  `application` never imports another unit's `application`: the use cases are passed in. The one addition is
+  `protocol.inbound`, which also imports the `domain` of a shared unit, where the value types used across units live,
+  so that an input port names them and does not copy their shape.
+- A `composition` imports another unit only through that unit's `protocol`, and its `domain` when the unit is shared
+  (the value types the ports take), since each unit, a shared one included, builds its own insides in its own
+  `composition`. The `composition` of an app wires the units, so it imports their `composition` too, and never another
+  app's. An entry file imports the `composition` of its own unit alone.
+- An import of another unit names a module of one of its layers, never the unit as a whole: what the code reads from
+  outside the layers cannot be seen.
+
+A shared unit is imported by any unit, and nothing stops it from collecting what no one needs. A project that declares
+a shared unit keeps `.rotproof/readers.md`: what each unit reads of each shared unit, by name, with a name that only one
+unit reads set apart. `rotproof index` writes it from the imports and `rotproof check` fails while it is out of date.
+No rule fails for what the list shows, since a library that one unit uses may be shared on purpose: it is for the
+person who reads it, and for the diff that shows a name appearing or its readers changing.
+
+Why the code is split into these units is for a person to say. `rotproof init`, run on a project that declares units,
+has an area to tag it with and has no document that follows them, drafts `docs/knowledge/units.md` once: a Mermaid
+diagram of the units and the imports between them as the code has them, and a section for each unit whose
+responsibility is left to write. The
+document follows `.config/rotproof.toml::unit`, so `rotproof check` fails when a unit is added, removed or changed
+until the document is read against the declaration and pinned again. Every rule, and how each stack imports a unit, is
+in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units).
 
 ## Principles
 
@@ -327,6 +394,7 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
 - [The hooks Rotproof no longer writes][the-hooks-rotproof-no-longer-writes]: what became of `stop-hook` and `time-hook`.
 - [Approving a forbidden import][approving-a-forbidden-import]: the one way an import the table forbids stays.
 - [The layers][the-layers]: the layer table, and where each layer lives in a stack.
+- [Units][units]: `[[unit]]`, what a unit may import, who reads the shared units, and the document of the units.
 - [The records][the-records]: knowledge documents and `follows`, alarms, areas and the log.
 - [What `rotproof check` checks][what-rotproof-check-checks]: every rule, and how each fails.
 - [Work put off that an issue tracks][work-put-off-that-an-issue-tracks]: `todo_link`, and a `TODO` that names its issue.
@@ -337,6 +405,7 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
 [the-hooks-rotproof-no-longer-writes]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-hooks-rotproof-no-longer-writes
 [approving-a-forbidden-import]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#approving-a-forbidden-import
 [the-layers]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-layers
+[units]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
 [the-records]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-records
 [what-rotproof-check-checks]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#what-rotproof-check-checks
 [work-put-off-that-an-issue-tracks]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#work-put-off-that-an-issue-tracks
