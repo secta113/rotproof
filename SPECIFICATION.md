@@ -11,7 +11,8 @@ Rotproof makes the layer directories, checks that they are where the project dec
 direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
 the levels inside a crate, from the paths its code names. From the same reading of the code it checks that only
 `infrastructure` reads the environment variables, and that no comment switches the type checker off (see "What
-`rotproof check` checks").
+`rotproof check` checks"). A project made of several parts that each hold the layers declares them as units, and all
+of this holds in each unit, with the imports between units judged too (see "Units").
 
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 (its `SPEC.md` as of commit `ad30107`): every document has YAML frontmatter with a `type`, `index.md` and `log.md` are
@@ -71,8 +72,8 @@ names the rest of the starter (`App.tsx`, the styles, `assets/`) as code outside
 
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
-(below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files and the
-knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
+(below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, `.rotproof/readers.md` when a unit
+is shared, and the index files and the knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
 overwrites a file it does not generate, apart from adding the fields the declaration lacks (below) and, in a Rust
 project, adding the crates it makes to the workspace's `members` when none names them (see "Units"), and never moves
 or deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
@@ -122,8 +123,8 @@ that has a declaration:
   or not an update applies, so every upgrade runs `rotproof init` once.
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
-  `.rotproof/AGENTS.md`, the generated files in `docs/`, and `docs/knowledge/`, the log and the project's files where
-  they are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
+  `.rotproof/AGENTS.md`, `.rotproof/readers.md` when a unit is shared, the generated files in `docs/`, and
+  `docs/knowledge/`, the log and the project's files where they are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
   names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
@@ -154,7 +155,7 @@ reported by `rotproof check` as naming no update: take the name out.
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
-`layers/table.toml`), and gives the rules of the records, starting with reading the knowledge index before work, and
+`layers/table.toml`), gives the rules of units, and gives the rules of the records, starting with reading the knowledge index before work, and
 where open work is kept (an issue). It names
 the Rotproof version that wrote it, so after an upgrade `rotproof check` fails until `rotproof init` (or
 `rotproof create`) has rewritten it. Edited by hand, it fails too: a project's own rules go in its own `AGENTS.md`.
@@ -386,7 +387,7 @@ names it (`domain of unit billing is missing: ...`), which a project that declar
   declares no unit is not asked, so a project that is one package with others of tooling in it is read as before.
 
 A knowledge document that records why the code is divided so follows the table `.config/rotproof.toml::unit` (see
-The records), and is read again when a unit changes, not when `areas` or `files` does.
+The records and "The document of the units"), and is read again when a unit changes, not when `areas` or `files` does.
 
 ### What a unit may import
 
@@ -625,8 +626,8 @@ changed is in the commits, what was measured and decided along the way in the ta
   relative ones and those inside functions or under `if TYPE_CHECKING:` included, and those of the entry file. A
   layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own
   `imports` name, and in `ui` and `presentation` the levels below it. Only direct imports
-  are judged: what the table allows is closed under chaining, so a chain of allowed imports never reaches a forbidden
-  layer. A module is placed where its parts, as a path, land as the operating system that runs the check resolves
+  are judged: what the table allows is closed under chaining, so a chain of allowed imports inside a unit never reaches
+  a forbidden layer (between units it can: see "Units"). A module is placed where its parts, as a path, land as the operating system that runs the check resolves
   them: on Windows, `Infrastructure.db` lands in `infrastructure`, as Python imports it with `PYTHONCASEOK` set.
   Imports of modules in no layer (the standard library, packages) are not judged, and imports built at run time
   (`importlib`) are not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be
