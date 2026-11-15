@@ -9,7 +9,8 @@
 //! - **A file of a level names another layer only as its level may.** The manifest says what the whole crate may
 //!   depend on, which is more than each level may: `infrastructure` depends on `protocol` and `domain`, and its
 //!   `inbound` may use `protocol::inbound` alone. So a path from the name of a dependency on another layer is judged
-//!   too, as an import of that layer, or of its level when the path names one (`protocol::inbound::Commands`).
+//!   too, as an import of that layer, or of its level when the path names one (`protocol::inbound::Commands`). A path
+//!   that starts with `::` names the crate as the bare path does (edition 2018 and later), and is judged as it.
 //! - **A name bound with `as` is the path it renames.** `use protocol as p;`, `use protocol::{self as p};` and `extern
 //!   crate protocol as p;` bind `p` to the dependency, `use p::outbound as o;` binds `o` to a level of it, and `use
 //!   crate as c;` binds `c` to the crate: a path from such a name (`p::outbound::Port`) is judged as the path it stands
@@ -502,6 +503,31 @@ mod tests {
         // Nothing else: the paths through `p::inbound`, `o` and `w` stay in what the level may import, and a name
         // bound in a comment, or not bound at all, stands for nothing
         assert_eq!(said.len(), 10, "{said:#?}");
+    }
+
+    #[test]
+    fn a_path_from_a_leading_colons_is_judged_as_the_path_without_them() {
+        let said = details(&found(&[(
+            "src/inbound/mod.rs",
+            "pub fn rooted(_: ::protocol::outbound::Port) {}\nuse ::protocol::outbound::Tree;\n\
+             use ::{protocol::outbound as o};\n\
+             fn g(_: o::Q) -> ::protocol::inbound::Commands { <T as ::protocol::outbound::X>::f(); ::std::io::x(); }\n",
+        )]));
+        for line in [
+            "crates/infrastructure/src/inbound/mod.rs:1: uses protocol::outbound::Port, in protocol.outbound; \
+             infrastructure.inbound may import `protocol.inbound`",
+            "crates/infrastructure/src/inbound/mod.rs:2: uses protocol::outbound::Tree, in protocol.outbound; ",
+            "crates/infrastructure/src/inbound/mod.rs:3: uses protocol::outbound, in protocol.outbound; ",
+            "crates/infrastructure/src/inbound/mod.rs:4: uses protocol::outbound::Q through `o`, in protocol.outbound; ",
+            "crates/infrastructure/src/inbound/mod.rs:4: uses protocol::outbound::X, in protocol.outbound; ",
+        ] {
+            assert!(
+                said.iter().any(|s| s.starts_with(line)),
+                "{line}:\n{said:#?}"
+            );
+        }
+        // Nothing else: `::protocol::inbound` is the level's own, and `::std` is no layer
+        assert_eq!(said.len(), 5, "{said:#?}");
     }
 
     #[test]

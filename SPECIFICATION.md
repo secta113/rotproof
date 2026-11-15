@@ -442,7 +442,8 @@ changed is in the commits, what was measured and decided along the way in the ta
   dependency on another layer, in a `use`, an expression or the tokens of a macro, is judged by the level it lands in
   (`crate::outbound::Db` from `src/inbound/` fails, and so does `domain::Song` there). The crate's `src/lib.rs` only
   declares its levels' modules, so no re-export lets one level reach another; every other file of `src/` sits in a
-  level, and `#[path]` fails. A name bound with `as` is the path it renames (`use protocol as p;`,
+  level, and `#[path]` fails. A path that starts with `::` (`::protocol::outbound::Port`) is the path without them.
+  A name bound with `as` is the path it renames (`use protocol as p;`,
   `extern crate protocol as p;` or `use crate as c;`, then `p::outbound::Port` from `src/inbound/` fails as
   `protocol::outbound::Port` does), and so is a name bound to such a name; the file is read as one scope, so a name
   bound twice stands for both. Not seen: a path a macro builds from pieces, and a name bound in one file and used
@@ -453,7 +454,7 @@ changed is in the commits, what was measured and decided along the way in the ta
   `os.getenvb`, `os.putenv` and `os.unsetenv` in Python, `process.env` and `import.meta.env` in TypeScript, and
   `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var` and `remove_var` in Rust, each through an alias the file
   binds too (`import os as o`, `from os import getenv as g`, `import { env } from "node:process"`,
-  `const { env } = process`, `use std::env;` then `env::var`). Not judged: the command line (`sys.argv`,
+  `const { env } = process`, `use std::env;` then `env::var`, `::std::env::var`). Not judged: the command line (`sys.argv`,
   `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of
   `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
   (`getattr(os, "environ")`, `from os import *`), and the code outside the layers (`tests/` in Python).

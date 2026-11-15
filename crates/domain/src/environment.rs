@@ -11,8 +11,9 @@
 //!   built, not what came from outside, and pass; a value the project passes in (`VITE_API_URL`) counts.
 //! - **How it is seen:** every form written in the code, through an alias the file binds too (`import os as o`,
 //!   `from os import getenv as g`, `import { env } from "node:process"`, `const { env } = process`,
-//!   `use std::env;` then `env::var`). What is built at run time is not seen (`getattr(os, "environ")`,
-//!   `from os import *`, `use std as s;`), as the direction check does not see an import built at run time.
+//!   `use std::env;` then `env::var`, or from `::std::env::var`). What is built at run time is not seen
+//!   (`getattr(os, "environ")`, `from os import *`, `use std as s;`), as the direction check does not see an import
+//!   built at run time.
 //! - **Where:** the code of every layer but `infrastructure`, and the entry file; not `tests/` or another path that is
 //!   no layer. A layer's tests in TypeScript sit in its directory, and are its code.
 //!
@@ -145,6 +146,19 @@ fn b() { env::var(); }
             [
                 (1, "std::env::var".to_string()),
                 (2, "std::env::remove_var".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_path_from_a_leading_colons_is_the_same_path() {
+        let source =
+            "fn a() { ::std::env::var(\"A\"); }\nuse ::std::env;\nfn b() { env::vars(); }\n";
+        assert_eq!(
+            names(source),
+            [
+                (1, "std::env::var".to_string()),
+                (3, "std::env::vars".into())
             ]
         );
     }
