@@ -2,8 +2,9 @@
 
 use std::io;
 
+use super::moving::Moving;
 use super::{Direction, entry_files, layer_files, misread};
-use crate::code::lands;
+use crate::code::{lands, module_candidates};
 use crate::tree::{read_code, resolved};
 use domain::code::{Aliases, Reach, is_source, without_extension};
 use domain::direction::{Landing, Way, edge, judged_landing, landing_of};
@@ -27,6 +28,7 @@ pub(super) fn typescript(
     places: &[&Place],
     entries: &[Place],
     units: &[Unit],
+    moving: &mut Moving,
 ) -> io::Result<Direction> {
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
@@ -112,13 +114,37 @@ pub(super) fn typescript(
             }
         }
     }
+    read_moving(tree, parsers, &aliases, moving)?;
     Ok(Direction {
         problems: found,
         forbidden,
         edges,
         reads,
         links,
+        moving: None,
     })
+}
+
+/// Which of the files that are moving import which: every import of one that lands where another is, as it is
+/// resolved for the files in the layers. What it imports elsewhere, an import that cannot be resolved, and a file that
+/// cannot be read, are no finding: the code that is moving is not checked.
+fn read_moving(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    aliases: &Aliases,
+    moving: &mut Moving,
+) -> io::Result<()> {
+    for path in moving.files() {
+        let Some(source) = read_code(tree, &path, "imports", &mut Vec::new())? else {
+            continue;
+        };
+        for (_, import) in parsers.typescript(&source, &path).imports {
+            if let Reach::At(Some(target)) = lands(tree, aliases, &path, &import.specifier) {
+                moving.imports(&path, module_candidates(&resolved(tree, &target)));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// How an import of a layer of the unit `to` is written from the file `from`, for the finding that says an import

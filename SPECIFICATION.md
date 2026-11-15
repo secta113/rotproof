@@ -272,7 +272,8 @@ project declares either is a person's decision, which an agent never makes to pa
 middle of a refactoring. It is no `unchecked`: `unchecked` is for code that is never moved (generated or vendored
 files), and `moving` for code that is to go into the layers. It is written as `unchecked` is, from the root with `/`,
 and judged as it is: a path that holds or sits in a layer, that holds a unit, or that does not exist fails, and the code
-in it is looked at by no check (not the direction, not the markers, not the structure). `rotproof init` writes
+in it is judged by no check (not the direction, not the markers, not the structure). What `rotproof check` does with
+it is to count it and say which files to move first (see "The code that is moving"). `rotproof init` writes
 `moving = []` into a declaration it makes, `rotproof create` adds it to none, and a Rotproof older than the one that
 brought it cannot read a declaration that holds it, as for `todo_link`. A repository with `stack = "none"` has no code
 to move, so `moving` must be empty there.
@@ -947,6 +948,35 @@ zone of the machine that runs the check) is printed on every run from that day, 
 says of outside the code, which `follows` cannot watch, then write the day in `verified` and the next day in
 `stale_after`. Failing would turn CI red with no change, from the clock alone. A deprecated document is not read for
 it.
+
+### The code that is moving
+
+While `moving` lists a path, `rotproof check` prints, on every run and apart from the findings and the warnings,
+what is left to move and which files to move next, and fails nothing for it. No date is set: the count falls only when
+a file is moved, and a path is taken out of `moving` once its code is.
+
+```
+moving: 5 files are not in a layer yet, and none is checked. Move these next, which import no other file still moving:
+  legacy/a.py, legacy/b.py (they import each other: move them together)
+  legacy/money.py
+  and 2 more that import no other file still moving
+```
+
+- **The count is the code files in the listed paths:** `.py` files in Python, source files in TypeScript (`.ts`,
+  `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`), `.rs` files in Rust. Outside `.gitignore` and the hidden
+  directories, as everywhere. A project that lists no path hears nothing; one whose listed paths hold no code says to
+  take them out.
+- **The order is the import graph's, from its leaves.** An import of a file that is moving too (a module or a package
+  of Python; in TypeScript, the file an import resolves to as it does for the files in a layer) is a wait: the file goes into a layer after what it
+  imports. The files named are those that wait for no file still moving, in the byte order of their paths: the first
+  five are named and the rest counted. An import of a file in a layer, of the standard library, of a package outside
+  the project or of a file that is not listed is no wait, and an import that cannot be resolved is not said: no
+  check reads this code. A file that cannot be read, or has a syntax error, is counted and leaves out what it could
+  not give.
+- **Files that import each other are one group,** named together on one line: neither can go first, so they are moved
+  together. A group that imports a file outside it waits for that file.
+- **In Rust the files are counted and no order is given:** a layer is a crate, and what a crate imports is the
+  dependencies of its manifest, which are no files' to order.
 
 ### The map in `AGENTS.md`
 

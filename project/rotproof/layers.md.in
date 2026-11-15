@@ -6,7 +6,8 @@
   `rotproof create --yes`, which makes only what is missing (without `--yes`, it lists the layers it would make and
   writes nothing). Code outside every layer fails too: move it into a layer, or
   list its path in `unchecked` (helper scripts, generated code). Code of the project that is not in a layer yet is
-  listed in `moving` instead: no check reads it.{not_layers}
+  listed in `moving` instead: no check reads it, and while a path is listed `rotproof check` prints how many files are
+  left and which to move next. Move them into the layers in the order it gives.{not_layers}
 {direction}
 
 {table}

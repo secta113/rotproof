@@ -104,6 +104,22 @@ pub struct LinkedTodo {
     pub reference: String,
 }
 
+/// What `rotproof check` says of the code in the paths the declaration lists in `moving`, which no check judges: how
+/// much there is, and which files to move first. It is no finding, and fails nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Moving {
+    /// How many files are moving
+    pub total: usize,
+    /// Whether the files were put in an order. False for a language whose files' imports are not read: they are
+    /// counted, and none is named
+    pub ordered: bool,
+    /// The files to move next, in groups: a file that imports no other file still moving alone, or the files that
+    /// import each other, which are moved together
+    pub next: Vec<Vec<String>>,
+    /// How many files wait for no other file still moving and are not named in `next`
+    pub more: usize,
+}
+
 /// What `rotproof check` found.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -118,6 +134,9 @@ pub struct Report {
     /// line: printed on every run apart from the findings and the warnings, and failing nothing. Empty unless the
     /// declaration has `todo_link`
     pub linked: Vec<LinkedTodo>,
+    /// The code that is not in a layer yet, printed on every run apart from the findings and the warnings. `None`
+    /// unless the declaration lists a path in `moving`
+    pub moving: Option<Moving>,
     /// Every warning, in the order it is printed, each kind under its own heading: a knowledge document whose
     /// `stale_after` has come, with what to do, and a comment that may make the type checker check less
     /// (`# pyright: basic`), as `path:line` and the line under it

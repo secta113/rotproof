@@ -392,7 +392,8 @@ pub fn declaration_text(stack: &str, ui: &str) -> String {
          # or vendored code). A path that holds a layer, or does not exist, fails\n\
          unchecked = []\n\n\
          # Paths of the project's own code that is not in a layer yet, such as \"legacy\". Rotproof does not check it\n\
-         # and sets no date. A path that holds a layer, or does not exist, fails\n\
+         # and sets no date; `rotproof check` counts it and says what to move first. A path that holds a layer, or\n\
+         # does not exist, fails\n\
          moving = []\n{upgrades}{}",
         units_comment(stack)
     )

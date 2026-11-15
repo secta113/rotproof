@@ -22,6 +22,7 @@ pub mod markdown;
 pub mod markers;
 pub mod members;
 pub mod modules;
+pub mod moving;
 pub mod paths;
 pub mod project;
 pub mod python_stdlib;

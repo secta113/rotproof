@@ -2,6 +2,7 @@
 //! place, and judged by the rules in `domain`; and, from the imports from a shared unit to another, the cycles among
 //! the shared units.
 
+mod moving;
 mod python;
 mod rust;
 mod typescript;
@@ -12,8 +13,10 @@ use crate::tree::{code_files, exactly, is_file};
 use domain::declaration::Declared;
 use domain::direction::{Edge, Forbidden, cycles, place_of};
 use domain::layers::{Language, Layout, Place, table};
+use domain::moving::Order;
 use domain::readers::Read;
 use domain::units_doc::Link;
+use moving::Moving;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -32,6 +35,8 @@ pub struct Direction {
     /// Every import from a unit to another, whether or not the rules allow it, which the draft of the knowledge
     /// document of the units is made from
     pub links: Vec<Link>,
+    /// What to say of the code that is moving into the layers: `None` when the declaration lists no path of it
+    pub moving: Option<Order>,
 }
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
@@ -52,15 +57,30 @@ pub fn problems(
         .filter(|p| !declared.is_absent(p) && exactly(tree, &p.path).is_ok())
         .collect();
     let entries = declared.entries(&table());
+    let mut moving = Moving::list(tree, layout, declared)?;
     let mut direction = match layout.language {
-        Language::Python => {
-            python::python(tree, parsers, layout, &places, &entries, &declared.units)
-        }
-        Language::TypeScript => {
-            typescript::typescript(tree, parsers, layout, &places, &entries, &declared.units)
-        }
+        Language::Python => python::python(
+            tree,
+            parsers,
+            layout,
+            &places,
+            &entries,
+            &declared.units,
+            &mut moving,
+        ),
+        Language::TypeScript => typescript::typescript(
+            tree,
+            parsers,
+            layout,
+            &places,
+            &entries,
+            &declared.units,
+            &mut moving,
+        ),
         Language::Rust => rust::rust(tree, parsers, layout, &places, &entries, &declared.units),
     }?;
+    // The imports of the files of a Rust project are its crates' dependencies, which are no files'
+    direction.moving = moving.order(layout.language != Language::Rust);
     // A cycle of shared units is no import of a file but the shape of them all, so it is a problem, which no approval
     // covers, and not a forbidden import
     direction.problems.extend(cycles(&direction.edges));
@@ -262,5 +282,153 @@ import os
         let found = problems(&tree, &Readers, &declared).unwrap();
         assert!(found.problems.is_empty() && found.forbidden.is_empty() && found.edges.is_empty());
         assert!(found.links.is_empty());
+    }
+
+    /// What the direction check makes of the code that is moving in a project of one unit declared as `declaration`
+    /// says, over `files`, and the problems it found.
+    fn moving(declaration: &str, files: &[(&str, &str)]) -> (Option<Order>, Vec<String>) {
+        let declared = Declared::new(parse_declaration(declaration).unwrap()).unwrap();
+        let found = problems(&Fake::new(files), &Readers, &declared).unwrap();
+        assert!(found.forbidden.is_empty(), "{:?}", found.forbidden);
+        (found.moving, found.problems)
+    }
+
+    fn next(order: &Order) -> Vec<Vec<&str>> {
+        order
+            .next
+            .iter()
+            .map(|group| group.iter().map(String::as_str).collect())
+            .collect()
+    }
+
+    const PYTHON_MOVING: &str =
+        "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\", \"old.py\"]\n";
+
+    #[test]
+    fn python_files_that_are_moving_are_ordered_by_what_they_import_of_each_other() {
+        let (order, problems) = moving(
+            PYTHON_MOVING,
+            &[
+                ("domain/a.py", ""),
+                // A leaf: what it imports is the standard library, a package of the project's and a layer
+                (
+                    "legacy/money.py",
+                    "import os\nimport requests\nfrom domain import a\n",
+                ),
+                // A module, a name taken from one, a package and a relative import: each a file that is moving
+                (
+                    "legacy/order.py",
+                    "from legacy import money\nfrom legacy.money import total\nfrom . import tax\nimport legacy.pkg\n",
+                ),
+                ("legacy/tax.py", "from .order import x\nimport legacy.tax\n"),
+                ("legacy/pkg/__init__.py", ""),
+                ("legacy/pkg/inner.py", "from ..pkg import inner\n"),
+                // Outside the directory listed, and a file listed alone
+                ("old.py", "import legacy.money\n"),
+                ("elsewhere.py", "import legacy.order\n"),
+            ],
+        );
+        let order = order.expect("the declaration lists paths");
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(order.total, 6);
+        assert!(order.ordered);
+        // `order` and `tax` import each other and wait for `money` and the package; `old.py` waits for `money`;
+        // `inner` imports only itself; `elsewhere.py` is not listed
+        assert_eq!(
+            next(&order),
+            [
+                vec!["legacy/money.py"],
+                vec!["legacy/pkg/__init__.py"],
+                vec!["legacy/pkg/inner.py"]
+            ]
+        );
+        assert_eq!(order.more, 0);
+    }
+
+    #[test]
+    fn python_files_that_import_each_other_are_one_group_and_wait_for_the_files_they_import() {
+        let (order, _) = moving(
+            PYTHON_MOVING,
+            &[
+                ("legacy/a.py", "from legacy import b\n"),
+                (
+                    "legacy/b.py",
+                    "from legacy.a import x\nfrom legacy import leaf\n",
+                ),
+                ("legacy/c.py", "from legacy import a\n"),
+                ("legacy/leaf.py", ""),
+            ],
+        );
+        // a and b are one group, which waits for the leaf; c waits for them
+        assert_eq!(next(&order.unwrap()), [vec!["legacy/leaf.py"]]);
+    }
+
+    #[test]
+    fn a_file_with_a_syntax_error_is_counted_and_says_nothing() {
+        let (order, problems) = moving(
+            "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\"]\n",
+            &[("legacy/a.py", "def broken(:\n"), ("legacy/b.py", "")],
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let order = order.unwrap();
+        assert_eq!(order.total, 2);
+        assert_eq!(next(&order), [vec!["legacy/a.py"], vec!["legacy/b.py"]]);
+    }
+
+    #[test]
+    fn typescript_files_that_are_moving_are_ordered_by_what_they_import_of_each_other() {
+        let (order, problems) = moving(
+            "stack = \"typescript\"\nareas = []\nui = \"none\"\nmoving = [\"src/legacy\"]\n",
+            &[
+                ("src/domain/index.ts", ""),
+                (
+                    "src/legacy/money.ts",
+                    "import { d } from \"../domain\";\nimport x from \"react\";\n",
+                ),
+                (
+                    "src/legacy/order.ts",
+                    "import { m } from \"./money\";\nexport * from \"./tax.js\";\n",
+                ),
+                ("src/legacy/tax.ts", "import \"./order\";\n"),
+                ("src/legacy/ui/index.tsx", "import { o } from \"..\";\n"),
+                ("src/legacy/index.ts", "import \"./ui\";\n"),
+                ("src/legacy/logo.svg", "<svg/>"),
+            ],
+        );
+        let order = order.unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
+        // The `.svg` is no source. `order` and `tax` import each other and wait for `money`; `index` and `ui/index`
+        // import each other and nothing else
+        assert_eq!(order.total, 5);
+        assert_eq!(
+            next(&order),
+            [
+                vec!["src/legacy/index.ts", "src/legacy/ui/index.tsx"],
+                vec!["src/legacy/money.ts"]
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_files_that_are_moving_are_counted_and_put_in_no_order() {
+        let (order, problems) = moving(
+            "stack = \"rust\"\nareas = []\nui = \"none\"\nmoving = [\"crates/legacy\"]\n",
+            &[
+                ("crates/legacy/Cargo.toml", "[package]\nname = \"legacy\"\n"),
+                ("crates/legacy/src/lib.rs", "pub mod a;\n"),
+                ("crates/legacy/src/a.rs", ""),
+            ],
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(order, Some(Order::unordered(2)));
+    }
+
+    #[test]
+    fn nothing_is_said_of_a_project_that_lists_no_path_as_moving() {
+        let (order, _) = moving(
+            "stack = \"python\"\nareas = []\nui = \"none\"\n",
+            &[("legacy/a.py", "")],
+        );
+        assert_eq!(order, None);
     }
 }

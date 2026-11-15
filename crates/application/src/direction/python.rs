@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 use std::io;
 
+use super::moving::{Moving, python_files};
 use super::{Direction, entry_files, layer_files, misread};
 use crate::tree::{exactly, read_code, resolved};
 use domain::code::module_parts;
@@ -32,6 +33,7 @@ pub(super) fn python(
     places: &[&Place],
     entries: &[Place],
     units: &[Unit],
+    moving: &mut Moving,
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
@@ -78,13 +80,36 @@ pub(super) fn python(
             links.extend(link(from, to));
         }
     }
+    read_moving(tree, parsers, &imported, moving)?;
     Ok(Direction {
         problems: found,
         forbidden,
         edges,
         reads,
         links,
+        moving: None,
     })
+}
+
+/// Which of the files that are moving import which: every import of one, as the module it names, that is a file or a
+/// package of another. What it imports elsewhere, and a file it cannot read, are no finding: the code that is moving
+/// is not checked.
+fn read_moving(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    imported: &BTreeMap<&str, &str>,
+    moving: &mut Moving,
+) -> io::Result<()> {
+    for path in moving.files() {
+        let Some(source) = read_code(tree, &path, "imports", &mut Vec::new())? else {
+            continue;
+        };
+        for (_, module) in parsers.python(&source, &path).imports {
+            let (target, _) = path_of(&module, imported);
+            moving.imports(&path, python_files(&resolved(tree, &target)));
+        }
+    }
+    Ok(())
 }
 
 /// The path a module is looked up at, from the root, and whether a unit named it: a module whose first part is the

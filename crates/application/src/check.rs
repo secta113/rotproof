@@ -18,7 +18,7 @@ use domain::schema::Time;
 use domain::suppressions::WEAKENS_HEADING;
 use domain::upgrade::guide_command;
 use domain::version::VERSION;
-use protocol::inbound::{Finding, LinkedTodo, Report, Warning};
+use protocol::inbound::{Finding, LinkedTodo, Moving, Report, Warning};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -63,6 +63,12 @@ fn code(
     report: &mut Report,
 ) -> io::Result<Vec<Warning>> {
     let direction = crate::direction::problems(tree, parsers, declared)?;
+    report.moving = direction.moving.map(|order| Moving {
+        total: order.total,
+        ordered: order.ordered,
+        next: order.next,
+        more: order.more,
+    });
     let listed = crate::readers::problems(tree, declared, &direction.reads);
     let approvals = crate::approvals::read(tree)?;
     let sorted = sort(&direction.forbidden, &approvals.entries);

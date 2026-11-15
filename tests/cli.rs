@@ -2579,8 +2579,9 @@ fn code_in_a_path_that_is_moving_is_kept_out_of_the_checks_of_the_layers_and_the
         "{}",
         stdout(&out)
     );
+    // The code that is moving is named for what to move first, and by no finding
     assert!(
-        !stdout(&out).contains("legacy/order.py"),
+        !stdout(&out).contains("legacy/order.py:"),
         "{}",
         stdout(&out)
     );
@@ -2595,6 +2596,104 @@ fn code_in_a_path_that_is_moving_is_kept_out_of_the_checks_of_the_layers_and_the
         stdout(&out).contains("moving must be empty"),
         "{}",
         stdout(&out)
+    );
+}
+
+#[test]
+fn check_counts_the_code_that_is_moving_and_names_the_files_to_move_first_and_fails_nothing() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let moving = |paths: &str| {
+        declare(
+            r,
+            &format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [{paths}]\n"),
+        )
+    };
+    let said = || {
+        let out = run(&["--root", &arg, "check"]);
+        // The code that is moving is counted, and the check passes all the same
+        assert!(out.status.success(), "{}", stdout(&out));
+        stdout(&out)
+            .lines()
+            .filter(|line| line.starts_with("moving") || line.starts_with("  "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    // A project that lists nothing hears nothing
+    assert_eq!(said(), "");
+    write_file(r, "legacy/money.py", "import os\n");
+    write_file(r, "legacy/order.py", "from legacy import money\n");
+    write_file(r, "legacy/a.py", "from legacy import b\n");
+    write_file(r, "legacy/b.py", "from legacy.a import x\n");
+    write_file(r, "legacy/report.py", "from legacy.order import total\n");
+    moving("\"legacy\"");
+    assert_eq!(
+        said(),
+        "moving: 5 files are not in a layer yet, and none is checked. Move these next, which import no other file \
+         still moving:\n  legacy/a.py, legacy/b.py (they import each other: move them together)\n  legacy/money.py"
+    );
+    // The count falls when a file is moved, and what waited for it is next
+    fs::remove_file(r.join("legacy/money.py")).unwrap();
+    write_file(r, "domain/money.py", "import os\n");
+    assert_eq!(
+        said(),
+        "moving: 4 files are not in a layer yet, and none is checked. Move these next, which import no other file \
+         still moving:\n  legacy/a.py, legacy/b.py (they import each other: move them together)\n  legacy/order.py"
+    );
+    // More than the next few are counted, not named
+    for i in 0..6 {
+        write_file(r, &format!("legacy/leaf{i}.py"), "");
+    }
+    let said_now = said();
+    assert!(
+        said_now.starts_with("moving: 10 files are not in a layer yet"),
+        "{said_now}"
+    );
+    assert!(
+        said_now.ends_with("  and 3 more that import no other file still moving"),
+        "{said_now}"
+    );
+    // A path with no code left in it says to take it out
+    for entry in fs::read_dir(r.join("legacy")).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    fs::write(r.join("legacy/notes.txt"), "x\n").unwrap();
+    assert_eq!(
+        said(),
+        "moving: no code is left in the paths `moving` lists in .config/rotproof.toml: take them out"
+    );
+}
+
+#[test]
+fn check_counts_the_rust_code_that_is_moving_and_names_none_to_move_first() {
+    let root = declared("stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    write_file(
+        r,
+        "crates/legacy/Cargo.toml",
+        "[package]\nname = \"legacy\"\n",
+    );
+    write_file(r, "crates/legacy/src/lib.rs", "pub mod a;\n");
+    write_file(r, "crates/legacy/src/a.rs", "");
+    declare(
+        r,
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"crates/legacy\"]\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(
+        said.contains(
+            "moving: 2 files are not in a layer yet, and none is checked. Rotproof does not read what a Rust file \
+             imports, so it names none to move first\n"
+        ),
+        "{said}"
     );
 }
 
