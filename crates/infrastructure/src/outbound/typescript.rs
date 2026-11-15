@@ -1,9 +1,9 @@
 //! Reading TypeScript and JavaScript with oxc. [`read`] gives what a file imports, its comments and its reads of the
 //! environment; the outline, the aliases and the packages are read apart, by a module each in `typescript/`.
 //!
-//! - **What a file imports** (here): `import` (`import type` too), `export ... from`, `import("...")` and
-//!   `require("...")` with a literal string, `import x = require("...")`, and `import("...")` in a type. A specifier
-//!   built at run time is not seen.
+//! - **What a file imports** (here): `import` (`import type` too), `export ... from`, `import("...")`,
+//!   `import.meta.resolve("...")` and `require("...")` with a literal string, `import x = require("...")`, and
+//!   `import("...")` in a type. A specifier built at run time is not seen.
 //! - **Its comments** (here), `//` and `/* */`. JSX text is not a comment.
 //! - **Its reads of the environment** (`environment.rs`, for `domain::environment`): `process.env` and
 //!   `import.meta.env`, given by [`read`] with the rest.
@@ -149,8 +149,11 @@ impl<'a> Visit<'a> for Imports<'_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        let is_require = matches!(&it.callee, Expression::Identifier(id) if id.name == "require");
-        if is_require
+        // `import.meta.resolve("./x")` names a module as `import("./x")` does, from the file it is written in
+        let names_a_module = matches!(&it.callee, Expression::Identifier(id) if id.name == "require")
+            || matches!(&it.callee, Expression::StaticMemberExpression(member)
+                if member.property.name == "resolve" && matches!(member.object, Expression::ImportMeta(_)));
+        if names_a_module
             && it.arguments.len() == 1
             && let Some(specifier) = it.arguments[0].as_expression().and_then(literal)
         {
@@ -216,6 +219,12 @@ type H = typeof import('../ui/h');
 const i = import(name);
 const j = require('x' + y);
 export const k = 1;
+const l = import.meta.resolve('../domain/l');
+const m = import.meta.resolve(`../domain/m`);
+const n = import.meta.resolve(name);
+const o = import.meta.resolve('x' + y);
+const p = import.meta.env.resolve('../domain/p');
+const q = other.resolve('../domain/q');
 ";
         let read = read(source, "src/ui/atoms/x.ts");
         assert_eq!(read.error, None);
@@ -235,6 +244,8 @@ export const k = 1;
                 (6, "../utils/f"),
                 (7, "../handler/g"),
                 (8, "../ui/h"),
+                (12, "../domain/l"),
+                (13, "../domain/m"),
             ]
         );
     }

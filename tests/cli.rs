@@ -2150,7 +2150,8 @@ fn every_form_of_typescript_import_is_judged() {
     write(
         "src/domain/song.ts",
         "import React from 'react';\nimport type { Play } from '../application/play';\nexport * from '@/infrastructure/db';\n\
-         export const load = () => import('../composition/main');\nconst x = require(`../vendor/x`);\n",
+         export const load = () => import('../composition/main');\nconst x = require(`../vendor/x`);\n\
+         const where = import.meta.resolve('../composition/worker');\n",
     );
     write(
         "src/ui/molecules/Row.tsx",
@@ -2169,6 +2170,7 @@ fn every_form_of_typescript_import_is_judged() {
          no other layer",
         "src/domain/song.ts:3: imports @/infrastructure/db (src/infrastructure/db), in infrastructure; ",
         "src/domain/song.ts:4: imports ../composition/main (src/composition/main), in composition; ",
+        "src/domain/song.ts:6: imports ../composition/worker (src/composition/worker), in composition; ",
         "src/ui/molecules/Row.tsx:2: imports ../organisms/List (src/ui/organisms/List), in ui.organisms; \
          ui.molecules may import the levels below it",
         "src/ui/molecules/Row.tsx:3: imports ../index.css (src/ui/index.css), in ui outside its levels; ",
@@ -2176,7 +2178,7 @@ fn every_form_of_typescript_import_is_judged() {
     ] {
         assert!(said.contains(line), "{line}:\n{said}");
     }
-    assert_eq!(said.matches(": imports ").count(), 6, "{said}");
+    assert_eq!(said.matches(": imports ").count(), 7, "{said}");
 }
 
 /// The `src/` of Vite's React starter (`npm create vite -- --template react-ts`, Vite 8.3, measured 2026-10-04), cut

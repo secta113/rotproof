@@ -63,8 +63,8 @@ pub struct Import {
     pub specifier: String,
     /// The names it takes, as the module exports them: `default`, `*` for the whole module (`import * as ns`,
     /// `export * from`), and each name of `import { a as b }` or `export { a as b } from` as `a`. Empty for an import
-    /// that takes none (`import "x"`, `import("x")`, `require("x")`, `import x = require("x")`, `import("x")` in a
-    /// type), which is read as the module
+    /// that takes none (`import "x"`, `import("x")`, `import.meta.resolve("x")`, `require("x")`,
+    /// `import x = require("x")`, `import("x")` in a type), which is read as the module
     pub names: Vec<String>,
 }
 

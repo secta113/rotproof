@@ -480,7 +480,7 @@ the reader sees it:
 - in Python, the dotted module as the import resolves it (`from m import n` is `m.n`, `import m.n` is `m.n`);
 - in TypeScript, the path the import lands in, from the root and without its extension, and `: name` for each name it
   takes (`default`, `*` for `import * as ns` and `export * from`, the name as the module exports it for `{ a as b }`);
-  an import that takes none (`import "x"`, `require("x")`, `import("x")`) is the path alone;
+  an import that takes none (`import "x"`, `require("x")`, `import("x")`, `import.meta.resolve("x")`) is the path alone;
 - in Rust, the path the crate writes through its dependency on a crate of the unit, from the crate
   (`core_domain::score::count_star6`, also through a name bound with `as`); a module imported whole (`use
   core_domain::score;`) is the module, and a crate bound to a name is the crate. A crate that declares the dependency
@@ -674,8 +674,8 @@ changed is in the commits, what was measured and decided along the way in the ta
   that is not a literal (a variable, an f-string, a concatenation with `+`) or is relative (`".x"`) is built at run
   time and is not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be read.
 - **The layers import only what the table allows** (TypeScript): every `import` (`import type` too), `export ...
-  from`, `import x = require(...)`, and `import(...)` and `require(...)` with a literal string, in the `.ts`, `.tsx`,
-  `.js` and `.jsx` files (and `.mts`, `.cts`, `.mjs`, `.cjs`) of the layers, read with
+  from`, `import x = require(...)`, and `import(...)`, `import.meta.resolve(...)` and `require(...)` with a literal
+  string, in the `.ts`, `.tsx`, `.js` and `.jsx` files (and `.mts`, `.cts`, `.mjs`, `.cjs`) of the layers, read with
   [oxc](https://oxc.rs/). The place of an import is the path it lands on, whether or not a file is there: a relative
   specifier from the file, one starting with `/` from the root (as Vite reads it), and any other through
   `compilerOptions.paths` of the `tsconfig*.json` files at the root (and the local files they extend), then through
