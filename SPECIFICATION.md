@@ -581,8 +581,13 @@ not as it is written: its heading and then each field on a line, `key = value`, 
 key written out in full), strings in double quotes with `\`, `"` and the control characters escaped, arrays and inline
 tables on one line (an inline table's keys in order), so a comment, a blank line, the quotes of a string, how an array
 is wrapped, and the order of the keys leave the hash as it was, while a value written as another one (`a = "x"` for
-`a = ["x"]`) is another value, which is why a unit's `entry` has one way to be written (see "Units"). A name is bare keys joined by
-dots (letters, digits, `-` and `_`). A table with no heading of its own (a value, `unit = [{ ... }]`, or one made by a
+`a = ["x"]`) is another value, which is why a unit's `entry` has one way to be written (see "Units"). **Known limit:** what a
+person reads as the same table may be written in another order, and the hash does not know it. An array keeps the order
+it is written in, so a document that follows `.config/rotproof.toml::unit` fails when the strings of a unit's `absent`
+change places, and the pieces of a name are joined in the order they appear, so it fails too when the `[[unit]]`
+tables of the declaration change places, though what the project declares is the same. Read the table, and pin it
+again (`rotproof follows`, or `rotproof approve --reviewed`). To avoid it, write `absent` in one order, and add a
+unit at the end of the declaration. A name is bare keys joined by dots (letters, digits, `-` and `_`). A table with no heading of its own (a value, `unit = [{ ... }]`, or one made by a
 dotted key) is not named, so it is "not there"; a `.toml` file that is not TOML cannot be read, which the check says as
 it says it of a Python file that does not parse. A `.toml` file is no code of a directory: `src/` is hashed on the same
 files as before. Once the document is reviewed against the code, `rotproof follows knowledge/api.md
