@@ -200,10 +200,6 @@ pub trait Commands {
     ) -> Result<String, String>;
     /// Remove every approval that matches no forbidden import.
     fn prune(&self, root: &Path) -> Result<Vec<Removed>, String>;
-    /// Every key of the knowledge documents whose code is not as pinned.
-    fn changed(&self, root: &Path) -> Result<Vec<Drift>, String>;
-    /// Pin each of `drifts` as reviewed: the file name of each document written.
-    fn repin(&self, root: &Path, drifts: &[Drift]) -> Result<Vec<String>, String>;
     /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
 }

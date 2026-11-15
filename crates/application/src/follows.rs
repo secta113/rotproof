@@ -123,48 +123,10 @@ pub fn drift(
         .collect()
 }
 
-/// Every key whose code is not as pinned, in the knowledge documents of the project `tree` holds, for the re-pin.
-pub fn changed(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Vec<Drift>, String> {
-    let areas = crate::layers::areas(tree).map_err(|e| e.to_string())??;
-    let documents = Bundle::new(tree, areas)
-        .read_knowledge()
-        .map_err(|e| e.to_string())?
-        .documents
-        .into_iter()
-        .map(|(name, (doc, _))| (name, doc))
-        .collect();
-    Ok(drifts(tree, parsers, &documents))
-}
-
-/// Write the new hash of every changed key in `drifts` into its document, through `out`. A key that is gone or cannot
-/// be read is left for a person. A document keeps its line endings and its byte order mark
-/// ([`Written`](domain::tree::Written)). The file name of each document written.
-pub fn repin(tree: &dyn Tree, out: &dyn Writer, drifts: &[Drift]) -> Result<Vec<String>, String> {
-    let mut by_doc: BTreeMap<&str, Vec<(&str, &str, &str)>> = BTreeMap::new();
-    for d in drifts {
-        if let Ok(Some(now)) = &d.now {
-            by_doc
-                .entry(&d.doc)
-                .or_default()
-                .push((&d.key, &d.pinned, now));
-        }
-    }
-    let mut written = Vec::new();
-    for (doc, pins) in by_doc {
-        let path = in_docs(&format!("knowledge/{doc}"));
-        let (text, was) = read_written(tree, &path).map_err(|e| format!("{path}: {e}"))?;
-        let pinned = repinned(&text, &pins).map_err(|why| format!("{path}: {why}"))?;
-        out.write(&path, &was.restore(&pinned))
-            .map_err(|e| format!("{path}: {e}"))?;
-        written.push(doc.to_string());
-    }
-    Ok(written)
-}
-
 /// Pin each of `keys` in the knowledge document `document` names (`knowledge/api.md` or `docs/knowledge/api.md`) at
 /// its hash now, through `out`: a pinned key gets its new hash, a key not in `follows` is added. All of them or none:
 /// when a key is not there or cannot be read, nothing is written. A deprecated document no longer holds, so it is not
-/// pinned. The document keeps its line endings and its byte order mark, as in [`repin`].
+/// pinned. The document keeps its line endings and its byte order mark.
 pub fn pin(
     tree: &dyn Tree,
     out: &dyn Writer,
@@ -272,6 +234,19 @@ mod tests {
 
     const DOC: &str = "docs/knowledge/model.md";
 
+    /// Every key whose code is not as pinned, in the knowledge documents of the project `tree` holds.
+    fn changed(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Vec<Drift>, String> {
+        let areas = crate::layers::areas(tree).map_err(|e| e.to_string())??;
+        let documents = Bundle::new(tree, areas)
+            .read_knowledge()
+            .map_err(|e| e.to_string())?
+            .documents
+            .into_iter()
+            .map(|(name, (doc, _))| (name, doc))
+            .collect();
+        Ok(drifts(tree, parsers, &documents))
+    }
+
     fn project(pins: &[(&str, &str)]) -> Fake {
         let follows: String = pins
             .iter()
@@ -294,26 +269,16 @@ mod tests {
     }
 
     #[test]
-    fn every_changed_key_is_re_pinned_and_a_gone_one_is_left() {
+    fn a_changed_key_and_a_gone_one_both_drift() {
         let tree = project(&[
             ("domain/model.py::play", "00000000"),
             ("domain/gone.py", "11111111"),
         ]);
         let drifts = changed(&tree, &Readers).unwrap();
         assert_eq!(drifts.len(), 2, "{drifts:?}");
-        let written = repin(&tree, &tree, &drifts).unwrap();
-        assert_eq!(written.len(), 1);
-        assert_eq!(written, ["model.md"]);
-        let text = tree.text(DOC).unwrap();
-        assert!(
-            !text.contains("00000000") && text.contains("11111111"),
-            "{text}"
-        );
-        // What changed is pinned now; what is gone still drifts
-        let left = changed(&tree, &Readers).unwrap();
-        assert_eq!(left.len(), 1);
-        assert_eq!(left[0].key, "domain/gone.py");
-        assert_eq!(left[0].now, Ok(None));
+        assert!(matches!(&drifts[0].now, Ok(Some(_))), "{drifts:?}");
+        assert_eq!(drifts[1].key, "domain/gone.py");
+        assert_eq!(drifts[1].now, Ok(None));
     }
 
     #[test]
@@ -759,24 +724,23 @@ mod tests {
             // Written, as the text shows above
             assert!(done.written);
 
+            // A key pinned again after its code changed keeps the line endings and the byte order mark too
             tree.write("domain/model.py", "def play():\n    return 2\n")
                 .unwrap();
-            let drifts = changed(&tree, &Readers).unwrap();
-            let written = repin(&tree, &tree, &drifts).unwrap();
-            let mut repinned = pinned.clone();
-            for d in &drifts {
-                let Ok(Some(now)) = &d.now else {
-                    panic!("{drifts:?}")
-                };
-                repinned = repinned.replace(&d.pinned, now);
-            }
-            assert_ne!(repinned, pinned);
+            let again = pin(
+                &tree,
+                &tree,
+                &Readers,
+                "knowledge/model.md",
+                &keys(&["domain/model.py::play"]),
+            )
+            .unwrap();
+            assert_ne!(again.keys[0].2, done.keys[0].2);
             assert_eq!(
                 tree.text(DOC).unwrap(),
-                as_written(&repinned),
+                as_written(&pinned.replace(&done.keys[0].2, &again.keys[0].2)),
                 "crlf {crlf}, bom {bom}"
             );
-            assert_eq!(written, ["model.md"]);
         }
     }
 

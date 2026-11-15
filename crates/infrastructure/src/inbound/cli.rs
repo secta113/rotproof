@@ -153,43 +153,28 @@ enum Command {
         #[arg(long, requires = "stack")]
         ui: Option<String>,
     },
-    /// Approve on a terminal a forbidden import, or the knowledge documents whose followed code changed (--reviewed);
-    /// or remove the approvals that match nothing (--prune)
+    /// Approve on a terminal a forbidden import, or remove the approvals that match nothing (--prune)
     ///
     /// `rotproof approve <file> <import>` keeps an import the layer table forbids, as `rotproof check` names it: the
     /// file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each name of
     /// `from m import n`; a TypeScript specifier; a crate's dependency). It shows the forbidden import, asks why it is
     /// kept and for a y, signs with git's user.name (or a name it asks for), and adds the entry to
     /// .config/rotproof-approved.toml, which keeps a byte order mark and its line endings (CRLF on every line when one
-    /// line had it), as does --prune. `rotproof approve --reviewed`, after a refactoring that kept what the code does,
-    /// lists every knowledge document whose followed code changed and what changed under it, says to read the changes
-    /// first, asks for one y, writes the new hashes in their follows (each document keeps a byte order mark and its
-    /// line endings, as with rotproof follows), and names each document it wrote; what is gone is left to edit by
-    /// hand. Both run only when stdin is a terminal, so an agent's shell cannot approve: a person does. `rotproof
-    /// approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden import, needs
-    /// no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not a terminal, the import
-    /// is not forbidden or is approved already, the answer is not y, something followed is gone, or a file cannot be
-    /// read or written.
+    /// line had it), as does --prune. It runs only when stdin is a terminal, so an agent's shell cannot approve: a
+    /// person does. `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that matches no
+    /// forbidden import, needs no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not
+    /// a terminal, the import is not forbidden or is approved already, the answer is not y, or a file cannot be read
+    /// or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
-        #[arg(
-            required_unless_present_any = ["prune", "reviewed"],
-            conflicts_with_all = ["prune", "reviewed"]
-        )]
+        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
         file: Option<String>,
         /// What it imports, as `rotproof check` names it
-        #[arg(
-            required_unless_present_any = ["prune", "reviewed"],
-            conflicts_with_all = ["prune", "reviewed"]
-        )]
+        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
         import: Option<String>,
         /// Remove the entries that match no forbidden import
-        #[arg(long, conflicts_with = "reviewed")]
-        prune: bool,
-        /// Re-pin, in one act on a terminal, every knowledge document whose followed code changed (after a
-        /// refactoring that kept what the code does): each hash in follows set to what the code is now
         #[arg(long)]
-        reviewed: bool,
+        prune: bool,
     },
     /// Write docs/index.md and docs/knowledge/index.md from the frontmatter, and the rules.md Rotproof keeps
     ///
@@ -215,12 +200,11 @@ enum Command {
     /// added at its end, with the hash quoted (follows is made at the end of the frontmatter when the document has
     /// none); nothing else in the document changes, and it keeps a byte order mark and its line endings (CRLF on every
     /// line when one line had it). Prints each key with what was done, then whether the document was written. Writes
-    /// all the keys or none, and only the keys named: re-pinning every changed document in one act is `rotproof approve
-    /// --reviewed`, which a person runs. Needs no terminal: pinning one document is an edit of it, which git records. A
-    /// key gone from the code is left to edit by hand. Exits 2, writing nothing, when the first argument is not a
-    /// knowledge document (as before 0.4.0, when follows took the keys alone), the document is not there, cannot be
-    /// read, is a guide or is deprecated, or a key is not a form follows takes, names what is not there, or cannot be
-    /// read.
+    /// all the keys or none, and only the keys named. Needs no terminal: pinning one document is an edit of it, which
+    /// git records. A key gone from the code is left to edit by hand. Exits 2, writing nothing, when the first
+    /// argument is not a knowledge document (as before 0.4.0, when follows took the keys alone), the document is not
+    /// there, cannot be read, is a guide or is deprecated, or a key is not a form follows takes, names what is not
+    /// there, or cannot be read.
     Follows {
         /// The knowledge document: knowledge/<slug>.md, or docs/knowledge/<slug>.md
         document: String,
@@ -272,15 +256,15 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
             file,
             import,
             prune,
-            reviewed,
-        } => match (prune, reviewed, file, import) {
-            (true, _, _, _) => approve_prune(commands, &names, root).map(|()| true),
-            (_, true, _, _) => approve_reviewed(commands, root).map(|()| true),
-            (false, false, Some(file), Some(import)) => {
+        } => match (prune, file, import) {
+            (true, _, _) => approve_prune(commands, &names, root).map(|()| true),
+            (false, Some(file), Some(import)) => {
                 approve(commands, &names, root, &file, &import).map(|()| true)
             }
             _ => {
-                unreachable!("clap requires the file and the import without --prune or --reviewed")
+                unreachable!(
+                    "clap requires the file and the import when --prune is not given, and no more"
+                )
             }
         },
         Command::Follows { document, keys } => {
@@ -614,65 +598,6 @@ fn ask(question: &str) -> Result<String, String> {
             return Ok(line.to_string());
         }
     }
-}
-
-/// Ask a person on the terminal, once, to re-pin every knowledge document whose followed code changed, and write the
-/// new hashes. What is gone, or cannot be read, is left for the person to edit.
-fn approve_reviewed(commands: &dyn Commands, root: &Path) -> Result<(), String> {
-    if !std::io::stdin().is_terminal() {
-        return Err(
-            "rotproof approve --reviewed asks a person, and stdin is not a terminal (an agent's shell has none): run \
-             it in your own terminal, or review each document and pin it with the `rotproof follows` that `rotproof \
-             check` names"
-                .into(),
-        );
-    }
-    let drifts = commands.changed(root)?;
-    if drifts.is_empty() {
-        println!("nothing to re-pin: every knowledge document matches the code it follows");
-        return Ok(());
-    }
-    let mut left = Vec::new();
-    println!("the code changed under these knowledge documents since they were last reviewed:");
-    for d in &drifts {
-        match &d.now {
-            Ok(Some(now)) => println!(
-                "  knowledge/{} follows {}: {} -> {now}",
-                d.doc, d.key, d.pinned
-            ),
-            Ok(None) => left.push(format!(
-                "knowledge/{} follows {}, which is not there",
-                d.doc, d.key
-            )),
-            Err(why) => left.push(format!("knowledge/{} follows {}: {why}", d.doc, d.key)),
-        }
-    }
-    let changed = drifts.len() - left.len();
-    if changed > 0 {
-        // A hash says only that the code changed; the refactoring may be committed already, so no diff is named
-        println!(
-            "the hashes do not say what changed: read the changes first (git diff, or the commits since each document \
-             was last reviewed)"
-        );
-        let answer = ask(&format!(
-            "re-pin these {changed} as reviewed, as if each document was read against its code? [y/N] "
-        ))?;
-        if !answer.eq_ignore_ascii_case("y") {
-            return Err("not re-pinned: nothing written".into());
-        }
-        for doc in commands.repin(root, &drifts)? {
-            println!("wrote docs/knowledge/{doc}");
-        }
-    }
-    if !left.is_empty() {
-        for why in &left {
-            println!("needs a person: {why}");
-        }
-        return Err(
-            "what is gone was not re-pinned: edit follows in those documents by hand".into(),
-        );
-    }
-    Ok(())
 }
 
 /// Remove the approvals that match no forbidden import, and say which.

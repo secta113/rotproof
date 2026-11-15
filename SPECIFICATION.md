@@ -37,7 +37,6 @@ rotproof --root <repository> check   # check the layers and the records; exits 1
 rotproof --root <repository> index   # write the generated files that are out of date (docs/'s index files and the knowledge rules, and who reads the shared units)
 rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
-rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof guide                       # print the guide `rotproof create` writes for the stack and the UI the declaration has
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
@@ -587,7 +586,7 @@ person reads as the same table may be written in another order, and the hash doe
 it is written in, so a document that follows `.config/rotproof.toml::unit` fails when the strings of a unit's `absent`
 change places, and the pieces of a name are joined in the order they appear, so it fails too when the `[[unit]]`
 tables of the declaration change places, though what the project declares is the same. Read the table, and pin it
-again (`rotproof follows`, or `rotproof approve --reviewed`). To avoid it, write `absent` in one order, and add a
+again with `rotproof follows`. To avoid it, write `absent` in one order, and add a
 unit at the end of the declaration. A name is bare keys joined by dots (letters, digits, `-` and `_`). A table with no heading of its own (a value, `unit = [{ ... }]`, or one made by a
 dotted key) is not named, so it is "not there"; a `.toml` file that is not TOML cannot be read, which the check says as
 it says it of a Python file that does not parse. A `.toml` file is no code of a directory: `src/` is hashed on the same
@@ -597,12 +596,8 @@ its hash quoted, and writes all the keys or none: pinning changes the document, 
 Nothing else in the document changes: it keeps a byte order mark and its line endings (CRLF on every line when one
 line had it). Run it when a document starts to follow something, and when `rotproof check` fails because what it
 follows changed since: the check names the command to run. It pins only the keys named, needs no terminal, and leaves
-a key gone from the code to edit by hand. After a refactoring that moved code without changing what it does, a person
-can re-pin every changed hash in one act: `rotproof approve --reviewed` lists each document and what changed under it,
-says to read the changes first (a hash says only that the code changed), asks for one `y` on a terminal (an agent's
-shell has none), writes the new hashes (each document keeping a byte order mark and its line endings, as `rotproof
-follows` does), and names the documents it wrote. What is gone is left for the person to edit. No LLM judges whether
-the meaning changed: the agent that refactors is usually one.
+a key gone from the code to edit by hand. There is no command that re-pins every changed hash in one act: a hash says
+only that the code changed, so each document is read against its code and pinned with the keys named.
 
 Some knowledge matters only when something is seen: a service refuses an upload, a CI image moves. Such a document is
 an alarm, with `# When` (what is seen and where, in the words of the output) and `# Do` (what to do then, usually

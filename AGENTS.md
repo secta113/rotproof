@@ -48,7 +48,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/infrastructure/src/inbound/` | Content |
 |---|---|
 | `mod.rs` | The level's role |
-| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept, or the knowledge documents re-pinned with `--reviewed`), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here: `rotproof check` prints the approvals, the list of comments tied to an issue (`linked TODO`, whose lines a CI step reads, so their form is kept: the specification says it), the warnings, then the findings. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0, says in one line that they were removed and exits 1, never 2 (no command of that name is left) |
+| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here: `rotproof check` prints the approvals, the list of comments tied to an issue (`linked TODO`, whose lines a CI step reads, so their form is kept: the specification says it), the warnings, then the findings. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0, says in one line that they were removed and exits 1, never 2 (no command of that name is left) |
 
 | Module of `crates/infrastructure/src/outbound/` | Content |
 |---|---|
@@ -134,7 +134,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `code.rs` | Where a TypeScript import lands: through `paths`, then a `baseUrl` where the tree has a module, then the package of a unit |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
-| `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, the re-pin of `rotproof approve --reviewed`, and the pin of `rotproof follows` |
+| `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, and the pin of `rotproof follows` |
 | `environment.rs` | The environment check, read from the tree: the code of every layer but `infrastructure`, and the entry file, read by the reader of its language |
 | `markers.rs` | The checks of the comments, read from the tree: every code file walked, and its comments read by the reader of its language, for the marker check and the suppression check |
 | `index.rs` | `rotproof index`: every index file written from the frontmatter |

@@ -369,9 +369,8 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   keeping its line endings and byte order mark. These change what a person wrote, each in a command run for that.
   Rotproof never moves or rewrites a record: from 1.0 it reads no records of work, and those of an older project stay
   where they are, as they are. Once a knowledge
-  document is reviewed against its code, `rotproof follows` (the keys named) and `rotproof approve --reviewed` (a
-  person, on a terminal) write the hashes in its `follows`: the review is the person's or the agent's, and pinning
-  only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
+  document is reviewed against its code, `rotproof follows` (the keys named) writes the hashes in its `follows`: the
+  review is the person's or the agent's, and pinning only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
   `rotproof check` fails on: it only takes away, so nothing passes that failed before. Code it never moves: when the
   layer table changes (0.4.0, 1.0.0-rc.3), `rotproof init` says where each layer's code goes, and the person moves
   it.
