@@ -1,10 +1,12 @@
 //! What `rotproof init` tells a project that an upgrade crosses a table that changed what the layers are
 //! (`domain::crossing` names the versions and the words): where the code of each retired layer goes, and what the
-//! screens move out of `ui`. It reads the tree to say which of it applies, and moves nothing.
+//! screens move out of `ui`; and, for a Python project, what locking it asks. It reads the tree to say which of it
+//! applies, and moves nothing.
 
 use crate::create::ui_in_tree;
 use domain::crossing::{
-    ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, retired,
+    LOCKED, LOCKED_MOVES, LOCKED_REQUIREMENTS, ONION, PORTS_MOVED, PRESENTATION,
+    PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, retired,
 };
 use domain::declaration::Fields;
 use domain::layers::{NO_UI, layout};
@@ -19,6 +21,22 @@ pub(super) fn moves(tree: &dyn Tree, declared: &Fields, from: &str, running: &st
     }
     if crosses(PRESENTATION, from, running) {
         moves.extend(presentation_moves(tree, declared));
+    }
+    if crosses(LOCKED, from, running) {
+        moves.extend(locked_moves(tree, declared.stack.as_deref()));
+    }
+    moves
+}
+
+/// What a Python project is told on becoming locked: to list its dependencies, lock them and keep one `.venv`, and,
+/// when `requirements-dev.txt` is there, to move the pin of Rotproof out of it. Nothing for another stack.
+fn locked_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
+    if stack != Some("python") {
+        return Vec::new();
+    }
+    let mut moves = vec![LOCKED_MOVES.to_string()];
+    if tree.found("requirements-dev.txt") == Some(false) {
+        moves.push(format!("requirements-dev.txt: {LOCKED_REQUIREMENTS}"));
     }
     moves
 }
@@ -193,5 +211,47 @@ mod tests {
         assert_eq!(moves("typescript", "", &[]), (Vec::new(), none.clone()));
         assert_eq!(moves("rust", "", &[]), (Vec::new(), none));
         assert_eq!(moves("none", "", &[]), (Vec::new(), None));
+    }
+
+    #[test]
+    fn crossing_the_lock_of_python_says_what_the_project_does_and_edits_no_file() {
+        let moves = |stack: &str, planted: &[&str], running: &str| {
+            let tree = Fake::default();
+            let areas = if stack == "none" {
+                ""
+            } else {
+                "areas = []\nui = \"none\"\n"
+            };
+            tree.write(
+                DECLARATION,
+                &format!("stack = \"{stack}\"\n{areas}files = \"2.0.0-rc.1\"\n"),
+            )
+            .unwrap();
+            for path in planted {
+                tree.write(path, "pinned\n").unwrap();
+            }
+            let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", running)
+            else {
+                panic!("upgraded");
+            };
+            for path in planted {
+                assert_eq!(tree.text(path).as_deref(), Some("pinned\n"), "{path}");
+            }
+            upgraded.moves
+        };
+        // A Python project with the requirements file of before is told of it, after the rule for the project
+        let said = moves("python", &["requirements-dev.txt"], LOCKED);
+        assert_eq!(said.len(), 2, "{said:#?}");
+        assert_eq!(said[0], LOCKED_MOVES);
+        assert_eq!(
+            said[1],
+            format!("requirements-dev.txt: {LOCKED_REQUIREMENTS}")
+        );
+        // One without it is told the first only, and another stack nothing
+        assert_eq!(moves("python", &[], LOCKED), [LOCKED_MOVES]);
+        assert!(moves("rust", &[], LOCKED).is_empty());
+        assert!(moves("none", &[], LOCKED).is_empty());
+        // Not before the version it comes with
+        assert!(moves("python", &["requirements-dev.txt"], "2.0.0-rc.1").is_empty());
     }
 }

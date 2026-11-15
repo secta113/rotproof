@@ -1,0 +1,9 @@
+[Rotproof](https://github.com/secta113/rotproof) keeps the layers and the records in `docs/`. It is pinned in `dev` of
+`[dependency-groups]` in `pyproject.toml`, which `poetry.lock` locks, and CI (`.github/workflows/ci.yml`) installs the
+lock with `poetry install` and runs `rotproof check`.
+
+```sh
+poetry config virtualenvs.in-project true   # once: the environment is .venv, the one Rotproof accepts
+poetry install --no-root
+poetry run rotproof check
+```

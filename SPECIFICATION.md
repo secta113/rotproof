@@ -95,12 +95,26 @@ The project's files are written once, as a starting point, and are the project's
 | `AGENTS.md` | The map (the layers present, each with the first sentence of its role to rewrite, and in a project that declares units a row for each layer of each unit, with the unit's name before the role), the differences from what Rotproof keeps, and the project's own rules. It points at `.rotproof/AGENTS.md` |
 | `CLAUDE.md` | `@AGENTS.md` and `@.rotproof/AGENTS.md` |
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
-| `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
+| `.gitignore`, `.gitattributes` | For the stack (`python` ignores `.venv/`); line endings as LF |
 | `docs/log.md` | The log, with its title |
-| `requirements-dev.txt` | `python`: Rotproof pinned with `==` |
-| `.github/workflows/ci.yml` | `python`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit. `typescript`: installs what `package.json` and its lockfile pin (`npm ci`) and runs `npx --no -- rotproof check`, which never downloads another Rotproof, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
+| `pyproject.toml` | `python`: the project's name (its directory's, as a distribution is named), version `0.1.0`, `requires-python = ">=3.10"`, no dependency, and Rotproof pinned with `==` in `dev` of `[dependency-groups]` |
+| `.github/workflows/ci.yml` | `python`: installs what the lock file at the root holds with the tool that made it (below) and runs `rotproof check`, with a time limit. `typescript`: installs what `package.json` and its lockfile pin (`npm ci`) and runs `npx --no -- rotproof check`, which never downloads another Rotproof, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates of the layers present, each named on a line of its own (no glob: see "Units"), so `cargo build` builds every layer present, and its root package, which holds the entry file and lists no dependency until the entry file names one (`composition`, which it calls). A project that declares units has the workspace alone |
 | `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program. A project that declares units has none: an entry file is a unit's own |
+
+A `python` project pins Rotproof in the `dev` group of its `pyproject.toml` (PEP 735), which its lock file locks, so
+that Rotproof is installed into the virtual environment of the project and nowhere else. `rotproof create` writes the
+`pyproject.toml` when there is none, and, as `package.json` below, never edits one that is there: it says that the pin
+is the project's to add. It writes no lock file, which only a tool can make: it says so, and `rotproof check` fails
+until one is committed (see "What `rotproof check` checks"). The workflow is written for the tool of the lock file the
+root has (`uv.lock`, `poetry.lock`, `pdm.lock`, a `pylock.toml` or a `pylock.<name>.toml`; the first of these when
+there are several), and for uv when it has none. Each installs from the lock, failing when the lock is not what
+`pyproject.toml` says where the tool can tell, then runs `rotproof check` in the environment: uv `uv sync --locked`
+and `uv run --no-sync rotproof check`; Poetry `poetry install --no-root` and `poetry run rotproof check`; PDM
+`pdm install --check --no-self` and `pdm run rotproof check`; pip, which installs a `pylock.toml` (PEP 751, which pip
+installs experimentally), `pip install -r <the lock file>` into a `.venv` it makes. uv, Poetry and PDM come from PyPI
+in the workflow at the version they have on the day it runs, which the project may freeze there. Each README holds the
+same commands for a person.
 
 A project that does not write Python needs no Python for Rotproof: `rust` and `none` pin only the version, as
 Rotproof's GitHub Releases are immutable, so a version names one binary, as on PyPI. A binary cannot know the hash of
@@ -139,7 +153,11 @@ that has a declaration:
   `ui/` is there, `"none"` otherwise. With `"atomic"`, it says, as the same lines, that `presentation` is to be made
   (`rotproof create --yes`), and that the state of a page and its calls of the use cases move to
   `presentation.models` and the domain values the parts show to `presentation.display`; with `"none"`, that `ui` is
-  to be taken out of `absent`, where `rotproof check` fails on it. For a project that declares units and has no
+  to be taken out of `absent`, where `rotproof check` fails on it. Crossing 2.0.0-rc.2, which makes a Python project
+  locked (see "What `rotproof check` checks"), it says, for a project of the `python` stack, to list its dependencies in
+  `pyproject.toml` and commit a lock file, to move the pin of Rotproof from `requirements-dev.txt` to `dev` of
+  `[dependency-groups]` when that file is there, to install the lock in the CI workflow it wrote before, and to keep
+  one `.venv`, as "move by hand" lines; it edits none of those files. For a project that declares units and has no
   document that follows them, it also drafts one, once ("The document of the units"). It never changes the
   declaration's other values, and once it has set `files`, running it again changes nothing. It never writes the
   project's `AGENTS.md`, but says on every run, as `note: ...` lines, what its map has gone behind on (see "The map in
@@ -355,7 +373,8 @@ A level is declared absent by its dotted name (`absent = ["ui.templates"]`). A l
 whose every level is in `absent` is not there either, and is declared absent as a layer: `absent = ["infrastructure"]`,
 not both of its levels, which fails the declaration (it would otherwise make a directory with nothing in it, and
 there would be two ways to write one thing). Files `.gitignore` excludes and
-hidden files are not looked at, so a virtual environment or a build directory is not code. A code file is matched in any
+hidden files are not looked at, so a virtual environment or a build directory is not code (one thing looks at them, for
+a Python project: the search for virtual environments, below). A code file is matched in any
 case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 
 A project made of several parts that each hold the layers declares them as units, with `[[unit]]` tables (see
@@ -908,7 +927,7 @@ entry can be told, is one.
   alone. The manifest is the `pyproject.toml` at the root of each unit, and at the root of the project when it declares
   none; the code is what the direction check reads (the layers, the entry file, a unit's `__init__.py`) and the tests,
   the code files in `tests/` of the unit's directory or its root, which are no layer. A path in `unchecked` or `moving` is not
-  read. A unit with no `pyproject.toml` at its root is not compared with one, and a `pyproject.toml` that cannot be read as
+  read. A unit with no `pyproject.toml` at its root is not compared with one (the next rule fails it), and a `pyproject.toml` that cannot be read as
   UTF-8 or TOML fails. What is listed is read as the tools that write the file say: `[project] dependencies` and the
   keys of `[tool.poetry.dependencies]` are the runtime dependencies (each a PEP 508 string, whose distribution is cut
   out of its extras, version and marker), each list of `[project.optional-dependencies]` is optional, and each group of
@@ -935,6 +954,39 @@ entry can be told, is one.
   names the distribution the environment provides the module as, from the metadata of each `*.dist-info` (the top-level
   names its `RECORD` installs), and the lines to add. This only words the message: the environment is ignored by git and
   differs from one machine to another, so the verdict never reads it.
+- **A Python project is locked, and keeps one virtual environment** (Python): whether a machine runs Python in a virtual
+  environment is not in the tree (`.venv` is ignored, and CI starts from nothing), so the rule asks for what the tree
+  shows. A package that happens to be installed globally lets an import pass that no manifest lists, and nobody sees it
+  until a clean machine runs the code; the lock file makes every machine install the same packages.
+  1. **Each unit has a `pyproject.toml` at its root** (the root of the project when it declares no unit), which lists its
+     dependencies: `requirements*.txt` files are no declaration, and a project that has only those fails as one that
+     has nothing;
+  2. **a lock file is committed at that root or in a directory above it**: `uv.lock`, `poetry.lock`, `pdm.lock`,
+     `pylock.toml` or `pylock.<name>.toml` (PEP 751), any of them, compared exactly by name. The one in a directory
+     above is a workspace's, which is one for all its members (a uv workspace has one at its root). It is in the tree
+     the walk reads, so a lock file the project's `.gitignore` excludes is not committed, and fails as a missing
+     one. A project that declares units is judged by the root of each of them. A project that uses only the standard
+     library has a lock file too: Rotproof is a development dependency of every project, pinned in the `dev` group;
+  3. **a virtual environment is `.venv` beside a lock file, and ignored**. A directory that holds a `pyvenv.cfg` is a
+     virtual environment, whatever it is called, so a renamed one is found and a directory called `env` or a file
+     `.env` is not. The directories looked at are the direct children of each directory the walk reads (the root
+     included), the ignored and hidden children too, and never what is below a child the walk leaves out, so
+     `node_modules/` and a `.tox/py312` of tox, which are ignored, are not entered, and an environment at any depth of
+     the project's own directories is found. One named otherwise than `.venv` fails (`venv/ is a virtual
+     environment ...: delete venv/ and use .venv`), the name uv, PDM and Poetry (set to keep it in the project) give by
+     default, so that a tool run as it is makes no second one. A `.venv` fails when no lock file is in its own directory
+     (not only above it): with one lock file at the root of a workspace, the one `.venv` is the root's, and a
+     `packages/api/.venv` is a second environment. A `.venv` that the `.gitignore` files of the project do not exclude
+     fails, as it can be committed; one whose own `.gitignore` holds `*`, as uv writes it, is excluded as git reads it.
+     A path in `unchecked` or `moving` is not looked at.
+
+  The search for environments is the one place a check reads what the project's `.gitignore` hides, and the one place
+  its answer comes from the machine and not from the commit: CI, which has no environment of its own before it installs
+  one, finds the `.venv` of the lock beside it and passes, and a machine with a `venv/` fails where the harm is done (a
+  package installed in only one of two environments hides a dependency nobody listed). It is the one exception to
+  "the same files, the same answer", made on purpose; the other `.gitignore` files that differ between machines (a
+  global excludes file, `.git/info/exclude`) are still never read. The findings are listed in the byte order of their
+  paths, and only for a project of the `python` stack.
 - **The manifests list the dependencies the code imports, both ways** (TypeScript): the manifest is the `package.json`
   at the root of each unit, and at the root of the project when it declares none; the code is the source files the
   direction check reads (the layers and the entry files in `src/`), with the imports it collects (`import`, `export ...

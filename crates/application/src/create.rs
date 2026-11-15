@@ -18,8 +18,9 @@ use domain::declaration::{
 };
 use domain::guide::{GUIDE, guide};
 use domain::layers::{Language, NO_UI, Place, layout, table, uis};
+use domain::locked::{Locked, is_lock};
 use domain::members::{Package, entry_package, extended};
-use domain::project::project_files;
+use domain::project::{PythonTree, project_files};
 use domain::skill::{PATHS as SKILL_PATHS, SKILL};
 use domain::tree::{Written, with_lf};
 use protocol::inbound::Made;
@@ -288,7 +289,7 @@ fn write_project(
         .map(|place| place.path.clone())
         .collect();
     crates.extend(made_crates.packages.iter().map(|p| p.dir.clone()));
-    let (files, not_written) = project_files(declared, name, &crates);
+    let (files, not_written) = project_files(declared, name, &crates, &python_tree(tree));
     for (path, text) in files {
         if tree.found(path).is_none() {
             write(out, path, &text, made)?;
@@ -296,6 +297,24 @@ fn write_project(
     }
     made.not_written = not_written;
     Ok(())
+}
+
+/// What the root of a Python project holds that decides the files written for it: the lock file it has (the tool of its
+/// CI is the tool that made it), and whether its `pyproject.toml` is there without Rotproof pinned in it. Read for
+/// every stack, which the other stacks ignore.
+fn python_tree(tree: &dyn Tree) -> PythonTree {
+    let names: Vec<String> = tree
+        .entries("")
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, is_dir)| !is_dir)
+        .map(|(name, _)| name)
+        .collect();
+    PythonTree {
+        locked: Locked::of_names(&names),
+        has_lock: names.iter().any(|name| is_lock(name)),
+        unpinned: read_text(tree, "pyproject.toml").is_ok_and(|text| !text.contains("rotproof")),
+    }
 }
 
 /// In a Rust project, the workspace in the `Cargo.toml` at the root, when the project has one and this run did not

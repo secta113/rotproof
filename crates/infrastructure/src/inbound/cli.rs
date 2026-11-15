@@ -73,7 +73,9 @@ what the layer table allows, without what is declared absent, or was approved in
 listed fails, and so does a runtime dependency no code imports; development dependencies are never judged unused, and \
 in Python the code of a layer uses runtime dependencies only; the distribution an import is of and a dependency used without an \
 import are said in [dependencies] of the declaration; nothing is installed, and what a .venv provides only words a \
-message), that only \
+message), that a Python project is locked (a pyproject.toml at the root of each unit, a lock file in that directory or \
+above it: uv.lock, poetry.lock, pdm.lock or pylock.toml, committed; and no virtual environment but a .venv beside a lock \
+file that the .gitignore excludes: a directory that holds a pyvenv.cfg is found even where the .gitignore hides it), that only \
 infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
@@ -143,9 +145,12 @@ enum Command {
     /// Makes only what is missing: each layer neither present nor declared absent, docs/knowledge/, docs/log.md, and
     /// the project's files
     /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes,
-    /// a CI workflow that installs the pinned Rotproof (from PyPI with requirements-dev.txt for python, from npm with
-    /// the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
+    /// a CI workflow that installs the pinned Rotproof (from the lock file of the project, with the tool that made it,
+    /// uv's when there is none, for python, whose pyproject.toml pins Rotproof in dev of [dependency-groups]; from npm
+    /// with the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
+    /// A Python project's lock file is the one thing it does not write: a tool makes it, and `rotproof check` fails
+    /// until one is committed.
     /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), the skill rotproof (how to
     /// upgrade Rotproof and when to run each command; the same text in .claude/skills/rotproof/SKILL.md and

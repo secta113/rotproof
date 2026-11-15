@@ -14,5 +14,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: python -m pip install -r requirements-dev.txt
-      - run: rotproof check
+      - run: python -m venv .venv
+      # pip installs {lock} from 26.1, which calls the support experimental: it may change without notice
+      - run: .venv/bin/python -m pip install --upgrade "pip>=26.1"
+      - run: .venv/bin/python -m pip install -r {lock}
+      - run: .venv/bin/rotproof check

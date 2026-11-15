@@ -1,8 +1,0 @@
-[Rotproof](https://github.com/secta113/rotproof) keeps the layers and the records in `docs/`. It is pinned in
-`requirements-dev.txt`, and CI (`.github/workflows/ci.yml`) runs `rotproof check`.
-
-```sh
-python -m venv venv
-./venv/Scripts/python -m pip install -r requirements-dev.txt   # on Linux: ./venv/bin/python
-./venv/Scripts/rotproof check                                  # on Linux: ./venv/bin/rotproof
-```

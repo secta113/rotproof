@@ -27,8 +27,42 @@ fn repo() -> tempfile::TempDir {
     root
 }
 
-/// A repository with only `.config/rotproof.toml`, its files up to this version of Rotproof.
+/// A repository with only `.config/rotproof.toml`, its files up to this version of Rotproof, and, for a Python project,
+/// what every one of them has: the manifest and the lock file at the root, which the tests that are about something
+/// else need to pass the check of the lock (`unlocked` makes a Python project that has neither).
 fn declared(declaration: &str) -> tempfile::TempDir {
+    let root = unlocked(declaration);
+    if declaration.contains("stack = \"python\"") {
+        let roots = unit_roots(declaration);
+        let mut all = vec![""];
+        all.extend(roots.iter().map(String::as_str));
+        locked(root.path(), &all);
+    }
+    root
+}
+
+/// The directory of the manifest of each `[[unit]]` of `declaration`: its `root`, or its `path` when it says none.
+fn unit_roots(declaration: &str) -> Vec<String> {
+    let value = |table: &str, key: &str| {
+        table.lines().find_map(|line| {
+            let rest = line.trim_start().strip_prefix(key)?.trim_start();
+            let rest = rest.strip_prefix('=')?.trim();
+            Some(rest.trim_matches('"').to_string())
+        })
+    };
+    declaration
+        .split("[[unit]]")
+        .skip(1)
+        .filter_map(|table| {
+            // Up to the next table that is not a unit's own, which ends the unit
+            let table = table.split("\n[dependencies]").next().unwrap_or(table);
+            value(table, "root").or_else(|| value(table, "path"))
+        })
+        .collect()
+}
+
+/// A repository with only `.config/rotproof.toml`, whatever its stack.
+fn unlocked(declaration: &str) -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     fs::create_dir_all(root.path().join(".config")).unwrap();
     fs::write(
@@ -37,6 +71,19 @@ fn declared(declaration: &str) -> tempfile::TempDir {
     )
     .unwrap();
     root
+}
+
+/// A `pyproject.toml` in each of the directories `roots` of `root` ("" is the root), and a `uv.lock` at the root.
+fn locked(root: &Path, roots: &[&str]) {
+    for dir in roots {
+        fs::create_dir_all(root.join(dir)).unwrap();
+        fs::write(
+            root.join(dir).join("pyproject.toml"),
+            "[project]\nname = \"x\"\ndependencies = []\n",
+        )
+        .unwrap();
+    }
+    fs::write(root.join("uv.lock"), "").unwrap();
 }
 
 /// `declaration` with `files` at this version of Rotproof, unless it names one: a declaration written by hand would
@@ -745,12 +792,7 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
 }
 
 /// The project's files at the root that `rotproof create` writes, outside hidden directories
-const PROJECT_FILES: [&str; 4] = [
-    "AGENTS.md",
-    "CLAUDE.md",
-    "README.md",
-    "requirements-dev.txt",
-];
+const PROJECT_FILES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "README.md"];
 
 #[test]
 fn create_writes_the_projects_files_once() {
@@ -815,13 +857,43 @@ fn create_writes_the_projects_files_once() {
         let workflow = root.join(".github/workflows/ci.yml");
         let readme = fs::read_to_string(root.join("README.md")).unwrap();
         if channel == "pypi" {
-            let pin = format!("rotproof=={}\n", env!("CARGO_PKG_VERSION"));
-            assert!(fs::read_to_string(&requirements).unwrap().contains(&pin));
-            let workflow = fs::read_to_string(&workflow).unwrap();
+            // The pin is in the dev group of the manifest, which a lock file locks: no requirements file, and the
+            // workflow of uv, the tool of a project that has no lock file yet
+            assert!(!requirements.exists(), "{stack}");
+            let pin = format!("dev = [\"rotproof=={}\"]\n", env!("CARGO_PKG_VERSION"));
+            let manifest = fs::read_to_string(root.join("pyproject.toml")).unwrap();
             assert!(
-                workflow.contains("timeout-minutes:") && workflow.contains("- run: rotproof check")
+                manifest.contains("[dependency-groups]\n") && manifest.contains(&pin),
+                "{manifest}"
             );
-            assert!(!stdout(&out).contains("not written"), "{}", stdout(&out));
+            assert!(manifest.contains("name = \"my-app\""), "{manifest}");
+            let workflow = fs::read_to_string(&workflow).unwrap();
+            for part in [
+                "timeout-minutes:",
+                "- run: uv sync --locked",
+                "- run: uv run --no-sync rotproof check",
+            ] {
+                assert!(workflow.contains(part), "{stack}: {part}: {workflow}");
+            }
+            assert!(!workflow.contains("requirements"), "{workflow}");
+            assert!(readme.contains("uv sync"), "{readme}");
+            let ignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+            assert!(ignore.lines().any(|line| line == ".venv/"), "{ignore}");
+            // The lock file is what no command here writes: a tool makes it from the manifest
+            assert!(
+                stdout(&out).contains(
+                    "not written: the lock file (uv.lock, poetry.lock, pdm.lock or pylock.toml)"
+                ),
+                "{}",
+                stdout(&out)
+            );
+            assert!(!root.join("uv.lock").exists(), "{stack}");
+            assert_eq!(
+                run(&["--root", &arg, "check"]).status.code(),
+                Some(1),
+                "{stack}"
+            );
+            fs::write(root.join("uv.lock"), "").unwrap();
         } else if channel == "release" {
             // No Python: the version is pinned in the workflow, which takes the release's archive and checks it
             assert!(!requirements.exists(), "{stack}");
@@ -2650,6 +2722,12 @@ fn a_tsconfig_that_extends_itself_is_a_finding_and_not_a_crash() {
 fn every_form_of_import_is_judged() {
     let root = repo_with_ui("python", "");
     let r = root.path();
+    // `requests` is listed, so that only the imports between layers are found
+    fs::write(
+        r.join("pyproject.toml"),
+        "[project]\nname = \"x\"\ndependencies = [\"requests\"]\n",
+    )
+    .unwrap();
     let write = |path: &str, text: &str| {
         let full = r.join(path);
         fs::create_dir_all(full.parent().unwrap()).unwrap();
@@ -2693,7 +2771,13 @@ fn every_form_of_import_is_judged() {
 fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
     let root = repo_with_ui("python", "\"infrastructure\"");
     let r = root.path();
-    // A layer declared absent is a module the project does not have: a package of the same name is not judged
+    // A layer declared absent is a module the project does not have: a package of the same name is not judged, and
+    // the manifest lists one
+    fs::write(
+        r.join("pyproject.toml"),
+        "[project]\nname = \"x\"\ndependencies = [\"infrastructure\"]\n",
+    )
+    .unwrap();
     fs::write(r.join("domain/model.py"), "import infrastructure.db\n").unwrap();
     let out = run(&["--root", &root_arg(r), "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
@@ -3061,8 +3145,16 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         "# Log\n\n## 2026-10-04\n\n* Started\n",
     )
     .unwrap();
-    // Nothing is left for a person to write before the first check passes: no area is needed until the first
-    // knowledge document
+    // Nothing is left for a person to write before the first check passes but the lock file, which a tool makes: no
+    // area is needed until the first knowledge document
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("pyproject.toml has no lock file in the root or above it"),
+        "{}",
+        stdout(&out)
+    );
+    fs::write(root.path().join("uv.lock"), "").unwrap();
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
@@ -3161,6 +3253,10 @@ fn init_writes_a_declaration_that_create_reads() {
         );
         let out = create(&["--root", &arg, "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
+        if stack == "python" {
+            // The lock file is made by the tool of the project
+            fs::write(root.path().join("uv.lock"), "").unwrap();
+        }
         let out = run(&["--root", &arg, "check"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
         let written = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
@@ -4948,7 +5044,8 @@ fn a_declaration_of_units_that_cannot_be_read_says_every_reason() {
             ],
         ),
     ] {
-        let root = declared(&declaration);
+        // No manifest or lock file: `create` makes no directory of a declaration that cannot be read
+        let root = unlocked(&declaration);
         let arg = root_arg(root.path());
         for command in [&["create"][..], &["check"]] {
             let mut args = vec!["--root", &arg];
@@ -5084,7 +5181,8 @@ fn modular_monolith() -> tempfile::TempDir {
         "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
          path = \"packages/core/src/core\"\nroot = \"packages/core\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
          path = \"modules/billing\"\n\n[[unit]]\nname = \"app\"\npath = \"modules/app\"\nentry = [\"bin/run.py\"]\n\
-         absent = [\"domain\", \"application\", \"protocol\"]\n",
+         absent = [\"domain\", \"application\", \"protocol\"]\n\n[dependencies]\n\
+         without_import = [\"core\", \"billing\"]\n",
         env!("CARGO_PKG_VERSION")
     ));
     let r = root.path();
@@ -5103,6 +5201,18 @@ fn modular_monolith() -> tempfile::TempDir {
     ] {
         fs::write(r.join(file), "").unwrap();
     }
+    // The units that import another list it, by the name of its manifest, which `core` has none of: the name of the
+    // unit
+    for (unit, name, listed) in [
+        ("billing", "billing", "\"core\""),
+        ("app", "app", "\"core\", \"billing\""),
+    ] {
+        fs::write(
+            r.join(format!("modules/{unit}/pyproject.toml")),
+            format!("[project]\nname = \"{name}\"\ndependencies = [{listed}]\n"),
+        )
+        .unwrap();
+    }
     root
 }
 
@@ -5116,7 +5226,11 @@ fn structure_findings(root: &Path) -> (bool, String) {
         .map(|rest| rest.split("\n\n").next().unwrap_or(rest))
         .unwrap_or("")
         .trim_end()
-        .to_string();
+        .lines()
+        // Up to the heading of the next check, whose findings are another matter
+        .take_while(|line| line.starts_with("  "))
+        .collect::<Vec<_>>()
+        .join("\n");
     (out.status.success(), findings)
 }
 
@@ -5712,7 +5826,7 @@ fn a_python_or_typescript_project_that_declares_units_gets_layers_and_no_manifes
         ("python", "packages/billing/src/billing"),
         ("typescript", "packages/billing/src"),
     ] {
-        let root = declared(&format!(
+        let root = unlocked(&format!(
             "stack = \"{stack}\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{version}\"\n\n[[unit]]\nname = \"billing\"\n\
              path = \"{unit_path}\"\n",
             version = env!("CARGO_PKG_VERSION")
@@ -5721,8 +5835,9 @@ fn a_python_or_typescript_project_that_declares_units_gets_layers_and_no_manifes
         let out = create(&["--root", &root_arg(r), "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
         assert!(r.join(unit_path).join("domain").is_dir(), "{stack}");
+        // A unit's manifest is the project's. The one at the root of a Python project is the pin of Rotproof, which
+        // the workflow installs
         for manifest in [
-            "pyproject.toml",
             "package.json",
             "Cargo.toml",
             "packages/billing/pyproject.toml",
@@ -5730,6 +5845,11 @@ fn a_python_or_typescript_project_that_declares_units_gets_layers_and_no_manifes
         ] {
             assert!(!r.join(manifest).exists(), "{stack}: {manifest}");
         }
+        assert_eq!(
+            r.join("pyproject.toml").exists(),
+            stack == "python",
+            "{stack}"
+        );
     }
 }
 
@@ -6617,4 +6737,168 @@ fn a_rust_dependency_the_crate_does_not_name_is_unused_and_fails() {
     );
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn a_python_project_lists_its_dependencies_in_a_manifest_and_commits_a_lock_file() {
+    let root = unlocked(&format!(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let heading = "a Python project lists its dependencies in pyproject.toml, commits a lock file, and keeps its virtual \
+                   environment in .venv beside it:\n";
+    // `create` wrote the manifest, with Rotproof pinned in its dev group, and a tool makes the lock
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(&format!("{heading}  pyproject.toml has no lock file in the root or above it: commit one (uv.lock")),
+        "{said}"
+    );
+    // A requirements file is no declaration, with a lock file or without one
+    fs::remove_file(r.join("pyproject.toml")).unwrap();
+    fs::write(r.join("requirements.txt"), "requests\n").unwrap();
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains("  pyproject.toml is missing: a Python project lists its dependencies in pyproject.toml (a requirements file does not count)"),
+        "{said}"
+    );
+    // Each tool's lock file is accepted
+    fs::write(r.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+    for lock in [
+        "uv.lock",
+        "poetry.lock",
+        "pdm.lock",
+        "pylock.toml",
+        "pylock.dev.toml",
+    ] {
+        fs::write(r.join(lock), "").unwrap();
+        let out = run(&["--root", &arg, "check"]);
+        assert!(out.status.success(), "{lock}: {}", stdout(&out));
+        fs::remove_file(r.join(lock)).unwrap();
+    }
+    // One the project's .gitignore excludes is not committed
+    fs::write(r.join("uv.lock"), "").unwrap();
+    let ignore = fs::read_to_string(r.join(".gitignore")).unwrap();
+    fs::write(r.join(".gitignore"), format!("{ignore}uv.lock\n")).unwrap();
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(said.contains("pyproject.toml has no lock file"), "{said}");
+}
+
+#[test]
+fn a_virtual_environment_is_the_dot_venv_beside_a_lock_file_that_the_gitignore_excludes() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let ignore = fs::read_to_string(r.join(".gitignore")).unwrap();
+    assert!(ignore.lines().any(|line| line == ".venv/"), "{ignore}");
+    let check = || {
+        let out = run(&["--root", &arg, "check"]);
+        (out.status.code(), stdout(&out))
+    };
+    // The .venv `create` ignores, hidden and with all it holds, is no business of the other checks
+    write_file(r, ".venv/pyvenv.cfg", "home = /usr/bin\n");
+    write_file(
+        r,
+        ".venv/Lib/site-packages/dotenv/__init__.py",
+        "import nothing\n",
+    );
+    let (code, said) = check();
+    assert_eq!(code, Some(0), "{said}");
+    // The .gitignore does not exclude it: it can be committed
+    fs::write(r.join(".gitignore"), ignore.replace(".venv/\n", "")).unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "  .venv/ is a virtual environment that no .gitignore excludes, so it can be committed"
+        ),
+        "{said}"
+    );
+    // The `.gitignore` uv writes into its own .venv excludes it too, as it does for git
+    write_file(r, ".venv/.gitignore", "*\n");
+    let (code, said) = check();
+    assert_eq!(code, Some(0), "{said}");
+    fs::remove_file(r.join(".venv/.gitignore")).unwrap();
+    fs::write(r.join(".gitignore"), &ignore).unwrap();
+
+    // Another name is found by its `pyvenv.cfg`, though the .gitignore hides it; a directory of any other kind is not
+    write_file(r, "venv/pyvenv.cfg", "");
+    write_file(r, "env/notes.txt", "");
+    write_file(r, "py312/pyvenv.cfg", "");
+    fs::write(r.join(".gitignore"), format!("{ignore}venv/\npy312/\n")).unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("  venv/ is a virtual environment (it holds pyvenv.cfg), and the virtual environment of a Rotproof project is named .venv alone"),
+        "{said}"
+    );
+    assert!(said.contains("  py312/ is a virtual environment"), "{said}");
+    assert!(
+        !said.contains("\n  env/ is a virtual environment"),
+        "{said}"
+    );
+    fs::remove_dir_all(r.join("venv")).unwrap();
+    fs::remove_dir_all(r.join("py312")).unwrap();
+    fs::remove_dir_all(r.join("env")).unwrap();
+    fs::write(r.join(".gitignore"), &ignore).unwrap();
+
+    // Below an ignored or hidden directory nothing is looked at, as for every check (a tox environment, a package
+    // that brings its own)
+    write_file(r, ".tox/py312/pyvenv.cfg", "");
+    write_file(r, "node_modules/pkg/venv/pyvenv.cfg", "");
+    fs::write(
+        r.join(".gitignore"),
+        format!("{ignore}.tox/\nnode_modules/\n"),
+    )
+    .unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(0), "{said}");
+
+    // A directory of the project, however deep, is looked at: the .venv of a package is a second environment beside
+    // the lock file of the root, and the right one beside a lock file of its own
+    write_file(r, "tools/notes.txt", "");
+    write_file(r, "tools/.venv/pyvenv.cfg", "");
+    fs::write(
+        r.join(".gitignore"),
+        format!("{ignore}.tox/\nnode_modules/\n"),
+    )
+    .unwrap();
+    let (code, said) = check();
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("  tools/.venv/ is a virtual environment in a directory with no lock file"),
+        "{said}"
+    );
+    write_file(r, "tools/uv.lock", "");
+    let (code, said) = check();
+    assert_eq!(code, Some(0), "{said}");
+}
+
+#[test]
+fn a_project_that_is_not_python_is_not_asked_for_a_lock_file_or_judged_by_its_environments() {
+    let root = unlocked(&format!(
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    write_file(r, "venv/pyvenv.cfg", "");
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        !stdout(&out).contains("virtual environment"),
+        "{}",
+        stdout(&out)
+    );
 }

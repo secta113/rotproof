@@ -178,9 +178,16 @@ pub mod fake {
         dirs: RefCell<BTreeSet<String>>,
         /// Each path read through the port, in order
         reads: RefCell<Vec<String>>,
+        /// The paths a `.gitignore` of the project excludes, with what is below them
+        ignored: RefCell<BTreeSet<String>>,
     }
 
     impl Fake {
+        /// Exclude `path`, and what is below it, as a `.gitignore` of the project does: `files` leaves it out
+        pub fn ignore(&self, path: &str) {
+            self.ignored.borrow_mut().insert(path.to_string());
+        }
+
         pub fn new(files: &[(&str, &str)]) -> Self {
             let fake = Fake::default();
             for (path, text) in files {
@@ -245,8 +252,16 @@ pub mod fake {
                 .borrow()
                 .keys()
                 .filter(|path| dir.is_empty() || path.starts_with(&format!("{dir}/")))
+                .filter(|path| !self.ignored(path))
                 .cloned()
                 .collect())
+        }
+
+        fn ignored(&self, path: &str) -> bool {
+            self.ignored
+                .borrow()
+                .iter()
+                .any(|ignored| domain::paths::within(path, ignored))
         }
 
         /// By the exact names only: the fake has no operating system to read names otherwise

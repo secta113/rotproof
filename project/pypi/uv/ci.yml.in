@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rotproof:
+    runs-on: ubuntu-latest
+    # Without a limit, a job that hangs runs for GitHub's default of six hours
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # uv comes from PyPI at the version it has today; write uv==<version> to freeze it
+      - run: python -m pip install uv
+      # Fails when uv.lock is not what pyproject.toml says. The dev group, Rotproof's pin, is installed by default
+      - run: uv sync --locked
+      - run: uv run --no-sync rotproof check

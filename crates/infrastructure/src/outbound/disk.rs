@@ -70,6 +70,34 @@ impl Tree for Disk {
         Ok(found)
     }
 
+    fn ignored(&self, path: &str) -> bool {
+        if self.found(path).is_none() {
+            return false;
+        }
+        // The walk of `files` with the hidden ones kept, down the path alone: the entry is yielded unless an ignore
+        // file leaves it out, or one of the directories above it
+        let root = &self.root;
+        let walk = ignore::WalkBuilder::new(root)
+            .hidden(false)
+            .require_git(false)
+            .parents(false)
+            .ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .filter_entry({
+                let root = root.clone();
+                let target = path.to_string();
+                move |entry| {
+                    let at = relative_path(entry.path(), &root);
+                    at.is_empty() || within(&target, &at)
+                }
+            })
+            .build();
+        !walk
+            .filter_map(Result::ok)
+            .any(|entry| relative_path(entry.path(), root) == path)
+    }
+
     fn landed(&self, dir: &str, rel: &str) -> Option<String> {
         let real = fs::canonicalize(&self.root).ok()?;
         let full = fs::canonicalize(self.root.join(dir).join(rel)).ok()?;
@@ -202,5 +230,49 @@ mod tests {
         assert_eq!(disk.found("a/b"), Some(true));
         assert_eq!(disk.found("a/b/c.md"), Some(false));
         assert_eq!(disk.found("a/x"), None);
+    }
+
+    #[test]
+    fn a_path_is_ignored_by_the_gitignore_files_of_the_project_hidden_or_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = Disk::new(dir.path());
+        disk.write(".gitignore", "venv/\n.cache/\n*.log\n").unwrap();
+        for path in [
+            "venv/pyvenv.cfg",
+            ".cache/x",
+            ".hidden/x",
+            "kept/pyvenv.cfg",
+            "kept/run.log",
+            "sub/.gitignore",
+            "sub/out/a",
+            "sub/seen/a",
+        ] {
+            disk.write(path, "x\n").unwrap();
+        }
+        // The `.gitignore` of a directory below the root counts for what is below it, and a pattern for a directory
+        // reaches what is in it
+        disk.write("sub/.gitignore", "out/\n").unwrap();
+        for (path, ignored) in [
+            ("venv", true),
+            ("venv/pyvenv.cfg", true),
+            (".cache", true),
+            // Hidden is not ignored: `files` leaves it out for another reason, which this does not say
+            (".hidden/x", false),
+            ("kept/pyvenv.cfg", false),
+            ("kept/run.log", true),
+            ("sub/out", true),
+            ("sub/out/a", true),
+            ("sub/seen/a", false),
+            // What is not there is not ignored
+            ("venv/other", false),
+            ("nothing", false),
+        ] {
+            assert_eq!(disk.ignored(path), ignored, "{path}");
+        }
+        // A `.gitignore` inside the directory itself excludes what it holds, as uv writes one into its `.venv`
+        disk.write(".venv/pyvenv.cfg", "x\n").unwrap();
+        assert!(!disk.ignored(".venv/pyvenv.cfg"));
+        disk.write(".venv/.gitignore", "*\n").unwrap();
+        assert!(disk.ignored(".venv/pyvenv.cfg"));
     }
 }

@@ -1,3 +1,0 @@
-# Pinned with ==, so an upgrade, which can bring new rules, is a commit of its own. After changing a version here,
-# install it, run `rotproof init`, then `rotproof check`.
-rotproof=={version}

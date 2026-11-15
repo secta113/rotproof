@@ -10,3 +10,13 @@
   The message says which, and names the distribution the environment in `.venv` has when there is one, which only words
   the hint: the verdict is the same on every machine. Fix a missing dependency by listing it in `pyproject.toml`, and an
   unused one by taking it out; never list a package only to pass the check.
+- **A Python project is locked, and keeps one virtual environment.** `rotproof check` fails without a `pyproject.toml` at
+  the root of each unit (a `requirements.txt` is no declaration), and without a lock file in that directory or above it
+  (`uv.lock`, `poetry.lock`, `pdm.lock` or `pylock.toml`; a lock file the `.gitignore` excludes is not committed). Rotproof
+  is a development dependency of the project, pinned in `dev` of `[dependency-groups]` and installed from the lock: raise
+  it there, lock again with the tool of the project, then run `rotproof init`. A directory that holds a `pyvenv.cfg` is a
+  virtual environment, found even where the `.gitignore` hides it, in any directory of the project (never below an ignored
+  or hidden one). The only one allowed is `.venv`, in the directory of a lock file and ignored by the `.gitignore`: delete
+  `venv/` and any other, and never make a second one in a package of a workspace that has one lock file at its root. Run
+  the tools as they are (`uv sync`, `pdm install`, `poetry install` with `virtualenvs.in-project` set), so that they make
+  `.venv`.

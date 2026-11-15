@@ -1,0 +1,8 @@
+[Rotproof](https://github.com/secta113/rotproof) keeps the layers and the records in `docs/`. It is pinned in `dev` of
+`[dependency-groups]` in `pyproject.toml`, which `pdm.lock` locks, and CI (`.github/workflows/ci.yml`) installs the
+lock with `pdm install --check` and runs `rotproof check`.
+
+```sh
+pdm install --no-self   # makes .venv, the one virtual environment of the project, from pdm.lock
+pdm run rotproof check
+```

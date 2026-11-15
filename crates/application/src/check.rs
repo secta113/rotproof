@@ -101,6 +101,10 @@ fn code(
         crate::dependencies::problems(tree, parsers, declared)?,
     ));
     report.findings.extend(under(
+        domain::locked::HEADING,
+        crate::locked::problems(tree, declared)?,
+    ));
+    report.findings.extend(under(
         "every approval matches a forbidden import",
         approvals
             .problems

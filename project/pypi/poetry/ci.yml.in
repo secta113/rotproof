@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rotproof:
+    runs-on: ubuntu-latest
+    # Without a limit, a job that hangs runs for GitHub's default of six hours
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # [dependency-groups] is read from Poetry 2.2, and Poetry 2.3 is the one its own announcement recommends for it
+      - run: python -m pip install "poetry>=2.3"
+      # Fails when poetry.lock is not what pyproject.toml says. --no-root: the project is no package to install
+      - run: poetry install --no-root
+      - run: poetry run rotproof check
