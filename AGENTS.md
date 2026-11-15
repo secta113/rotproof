@@ -127,7 +127,6 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly (and whether it is a file), where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
-| `direction.rs` | The direction check, read from the tree: the code of each language read, and every import resolved to a place: for Rust, each dependency of a crate resolved to the path it comes from (through its workspace too) and then the levels inside each crate |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
 | `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, the re-pin of `rotproof approve --reviewed`, and the pin of `rotproof follows` |
@@ -139,6 +138,13 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `finding.rs` | A finding or a warning of `rotproof check`, made from what a check found and the heading it is printed under |
 | `records.rs` | The checks of the records, read from the tree: the areas, the floor, the links of `docs/knowledge/` and the log, the log, the knowledge documents and the generated files |
 | `structure.rs` | The structure check, read from the tree |
+
+| Module of `crates/application/src/direction/` | Content |
+|---|---|
+| `mod.rs` | The direction check, read from the tree: `problems` reads the places of the declared layout and hands them to the reader of the language, with what the three share (the code files of the layers, the entry files, and the finding for a file a reader gave up on) |
+| `python.rs` | The direction check of a Python project: every import of a `.py` file in a layer and of the entry file, as the module it names |
+| `typescript.rs` | The direction check of a TypeScript project: every import of a source file in a layer and of the entry file, resolved to a path through the aliases, judged by the place that path sits in |
+| `rust.rs` | The direction check of a Rust project: each dependency of a crate resolved to the path it comes from (through its workspace too), judged by the place that path sits in, and then the levels inside each crate |
 
 ## How this repository differs from what Rotproof keeps
 
