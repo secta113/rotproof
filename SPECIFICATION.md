@@ -719,7 +719,7 @@ changed is in the commits, what was measured and decided along the way in the ta
   TOML fails, and so does a dependency taken from a workspace that does not declare it. An entry file is read through
   the manifest of its package: the first `Cargo.toml` with a `[package]` from the entry's directory up to the root
   (the root package's for `src/main.rs`, and for `src/bin/w.rs` of a unit's package the unit's), so the entry files of
-  every unit are read; an entry file that is there and has none fails, since what it imports is not checked (in a
+  every unit are read; an entry file that is there and has none fails, since what it imports cannot be judged (in a
   project that declares no unit too), and one that is not there says nothing. A dependency on another unit's crate is
   judged by the rules between units (below): in a project that declares units, `shipping_infrastructure` depending on
   `billing_protocol`, both not shared, fails, a shared unit's `core_protocol` may be depended on as `protocol` is, and

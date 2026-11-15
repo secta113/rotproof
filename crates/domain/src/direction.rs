@@ -7,7 +7,8 @@
 //! - Only direct imports are judged. What the table allows is closed under chaining (a test keeps it so), so a chain
 //!   of allowed imports never reaches what its first module may not import.
 //! - An import of a module in no layer present (the standard library, a third-party package, a layer declared absent)
-//!   is not judged. Imports built at run time (`importlib.import_module`, `__import__`) are not seen.
+//!   is not judged. A Python call of `importlib.import_module` or `__import__` with a string literal is an import of
+//!   that module; one built at run time (a variable, an f-string, a relative name) is not seen.
 //! - The entry file, which is no layer, is judged as a place of its own that may import what the table's `entry` lists.
 //!   Nothing may import it.
 //!

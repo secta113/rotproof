@@ -42,7 +42,7 @@ pub(super) fn typescript(
     let mut found: Vec<String> = aliases
         .problems
         .iter()
-        .map(|why| format!("{why}; imports through it are not checked"))
+        .map(|why| format!("{why}; imports through it cannot be judged until it is fixed"))
         .collect();
     let mut files = layer_files(tree, layout, places, str::to_string)?;
     files.extend(entry_files(tree, entries));
@@ -568,7 +568,7 @@ mod tests {
         );
         assert!(
             found.problems[0].ends_with(
-                "so the package @acme/db is not known; imports through it are not checked"
+                "so the package @acme/db is not known; imports through it cannot be judged until it is fixed"
             )
         );
     }

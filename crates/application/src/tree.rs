@@ -19,7 +19,7 @@ pub fn read_written(tree: &dyn Tree, path: &str) -> io::Result<(String, Written)
     Ok((with_lf(&raw), Written::of(&raw)))
 }
 
-/// Read a code file for a check: `None`, with a finding that its `what` are not checked, when it is not UTF-8. An
+/// Read a code file for a check: `None`, with a finding that its `what` cannot be read, when it is not UTF-8. An
 /// error is a file that could not be read at all.
 pub fn read_code(
     tree: &dyn Tree,
@@ -31,7 +31,7 @@ pub fn read_code(
         Ok(source) => Ok(Some(source)),
         Err(e) if e.kind() == io::ErrorKind::InvalidData => {
             found.push(format!(
-                "{path}: cannot be read as UTF-8, so its {what} are not checked"
+                "{path}: cannot be read as UTF-8, so its {what} cannot be read: save it as UTF-8"
             ));
             Ok(None)
         }

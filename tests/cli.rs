@@ -1755,14 +1755,15 @@ fn every_form_of_rust_dependency_is_judged() {
         "crates/domain/Cargo.toml:9: depends on proto (crates/protocol), in protocol; ",
         "crates/domain/Cargo.toml:10: depends on infra (crates/infrastructure), in infrastructure; ",
         "crates/domain/Cargo.toml:12: missing comes from the workspace, and Cargo.toml has no missing in \
-         [workspace.dependencies], so it is not checked",
+         [workspace.dependencies], so it cannot be judged: add it there, or give it a path",
         "crates/domain/Cargo.toml:15: depends on composition (crates/composition), in composition; ",
         "crates/domain/Cargo.toml:21: depends on app (crates/application), in application; ",
         "crates/protocol/Cargo.toml:8: depends on application (crates/application, from the workspace), in \
          application; protocol may import `domain`",
         "crates/infrastructure/Cargo.toml:8: core comes from the workspace, and .., which [package] workspace names, \
-         is no workspace, so it is not checked",
+         is no workspace, so it cannot be judged: declare the workspace, or give core a path",
         "crates/application/Cargo.toml:1: cannot be read as TOML (",
+        "), so its dependencies cannot be judged: fix the file",
     ] {
         assert!(said.contains(line), "{line}:\n{said}");
     }
@@ -2305,7 +2306,9 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
         "{said}"
     );
     assert!(
-        said.contains("domain/latin.py: cannot be read as UTF-8"),
+        said.contains(
+            "domain/latin.py: cannot be read as UTF-8, so its imports cannot be read: save it as UTF-8"
+        ),
         "{said}"
     );
 }

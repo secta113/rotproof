@@ -171,8 +171,8 @@ fn no_package(entry: &Place) -> String {
         format!(" of unit {}", entry.unit.name)
     };
     format!(
-        "{}: the entry{of} has no Cargo.toml with a [package] from its directory up to the root, so what it imports is \
-         not checked",
+        "{}: the entry{of} has no Cargo.toml with a [package] from its directory up to the root, so what it imports \
+         cannot be judged: give it a package, or take the entry file out",
         entry.path
     )
 }
@@ -288,7 +288,7 @@ impl<'p> Manifests<'p> {
                 Ok(manifest) => Some(manifest),
                 Err((line, why)) => {
                     found.push(format!(
-                        "{path}:{line}: cannot be read as TOML ({why}), so its dependencies are not checked"
+                        "{path}:{line}: cannot be read as TOML ({why}), so its dependencies cannot be judged: fix the file"
                     ));
                     None
                 }
@@ -327,14 +327,15 @@ impl<'p> Manifests<'p> {
                         }
                     };
                     found.push(format!(
-                        "{at}: {name} comes from the workspace, and {looked}, so it is not checked"
+                        "{at}: {name} comes from the workspace, and {looked}, so it cannot be judged: declare the \
+                         workspace, or give {name} a path"
                     ));
                     return Ok(None);
                 };
                 let Some(rel) = workspace_manifest.workspace_dependencies.get(name) else {
                     found.push(format!(
                         "{at}: {name} comes from the workspace, and {} has no {name} in \
-                         [workspace.dependencies], so it is not checked",
+                         [workspace.dependencies], so it cannot be judged: add it there, or give it a path",
                         join(&workspace, "Cargo.toml")
                     ));
                     return Ok(None);
@@ -834,7 +835,8 @@ mod tests {
             problems,
             [
                 "apps/cli/src/bin/w.rs: the entry of unit cli has no Cargo.toml with a [package] from its \
-                 directory up to the root, so what it imports is not checked"
+                 directory up to the root, so what it imports cannot be judged: give it a package, or take the \
+                 entry file out"
             ]
         );
         assert!(forbidden.is_empty());
@@ -853,7 +855,7 @@ mod tests {
             problems,
             [
                 "src/main.rs: the entry has no Cargo.toml with a [package] from its directory up to the root, so \
-                 what it imports is not checked"
+                 what it imports cannot be judged: give it a package, or take the entry file out"
             ]
         );
         // With the package at the root, the walk from `src/` finds it
