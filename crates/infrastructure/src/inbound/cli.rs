@@ -84,14 +84,14 @@ enum Command {
     /// Without a declaration, writes only the declaration, with every field and what it means, so the layers the
     /// project does not want are listed in absent before anything is made; then edit it and run `rotproof create`.
     /// With one, it is the whole upgrade of Rotproof: it applies every update a newer Rotproof brings to the files
-    /// `rotproof create` wrote once (such as a rule added to .claude/settings.json), except the ones the declaration
-    /// lists in declined, does what `rotproof create` does after an upgrade without making a layer, and sets files in
-    /// the declaration to this version, adding declined = [] when the declaration lacks it. It names every field it
-    /// adds to the declaration, as `rotproof create` does, and never changes its other values. What an update cannot do
-    /// without a person, it says, leaves files as it was, and exits 2. It never moves or rewrites a record. Crossing
-    /// 0.4.0, which builds the layer table on the onion architecture, it says where the code of the layers that are
-    /// gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left until it is
-    /// moved. Crossing 1.0.0-rc.3, which splits the UI into the view (ui) and the state of the screens
+    /// `rotproof create` wrote once (such as a hook or a rule taken out of .claude/settings.json), except the ones the
+    /// declaration lists in declined, does what `rotproof create` does after an upgrade without making a layer, and
+    /// sets files in the declaration to this version, adding declined = [] when the declaration lacks it. It names
+    /// every field it adds to the declaration, as `rotproof create` does, and never changes its other values. What an
+    /// update cannot do without a person, it says, leaves files as it was, and exits 2. It never moves or rewrites a
+    /// record. Crossing 0.4.0, which builds the layer table on the onion architecture, it says where the code of the
+    /// layers that are gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left
+    /// until it is moved. Crossing 1.0.0-rc.3, which splits the UI into the view (ui) and the state of the screens
     /// (presentation) and declares the UI, the refresh adds ui to the declaration ("atomic" when ui/ is there, "none"
     /// otherwise), and it says to make presentation, what moves out of ui, and to take ui out of absent once ui is
     /// "none", and moves no code either. Exits 2 too for an unknown stack or UI, a stack or UI other than the declared
@@ -110,8 +110,7 @@ enum Command {
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, docs/knowledge/, docs/log.md, and
     /// the project's files
-    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes, Claude Code's settings with the rule that denies
-    /// editing the approvals file,
+    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes,
     /// a CI workflow that installs the pinned Rotproof (from PyPI with requirements-dev.txt for python, from npm with
     /// the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.

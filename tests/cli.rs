@@ -2781,7 +2781,8 @@ fn init_needs_a_known_stack() {
 
 #[test]
 fn init_upgrades_a_project_made_by_the_first_release() {
-    // As `rotproof create` of 0.1.0 left a project: no files in the declaration, and settings without the deny rule
+    // As `rotproof create` of 0.1.0 left a project: no files in the declaration, and settings without the deny rule,
+    // which nothing adds any more
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     let arg = root_arg(r);
@@ -2791,7 +2792,9 @@ fn init_upgrades_a_project_made_by_the_first_release() {
     )
     .unwrap();
     assert!(create(&["--root", &arg, "create"]).status.success());
-    fs::write(r.join(".claude/settings.json"), "{\n  \"hooks\": {}\n}\n").unwrap();
+    fs::create_dir_all(r.join(".claude")).unwrap();
+    let settings = "{\n  \"hooks\": {}\n}\n";
+    fs::write(r.join(".claude/settings.json"), settings).unwrap();
     fs::write(
         r.join("docs/log.md"),
         "# Log\n\n## 2026-10-02\n\n* Something\n",
@@ -2812,7 +2815,16 @@ fn init_upgrades_a_project_made_by_the_first_release() {
     );
     let out = run(&["--root", &arg, "init"]);
     assert!(out.status.success(), "{}", stdout(&out));
-    assert!(stdout(&out).contains("updated .claude/settings.json: claude-deny-approvals"));
+    // Nothing in the settings is Rotproof's to take out: it says nothing of them and leaves them as they are
+    assert!(
+        !stdout(&out).contains("updated .claude/settings.json"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(
+        fs::read_to_string(r.join(".claude/settings.json")).unwrap(),
+        settings
+    );
     // Every field it adds to the declaration is named, as `rotproof create` names those it adds
     for field in [format!("files = \"{version}\""), "declined = []".into()] {
         assert!(
@@ -2821,11 +2833,6 @@ fn init_upgrades_a_project_made_by_the_first_release() {
             stdout(&out)
         );
     }
-    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
-    assert!(
-        settings.contains("Edit(/.config/rotproof-approved.toml)"),
-        "{settings}"
-    );
     let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
     assert!(
         declaration.starts_with("stack = \"none\"\nareas = [\"a\"]\n"),
@@ -2862,9 +2869,9 @@ fn init_upgrades_a_project_made_by_the_first_release() {
 }
 
 #[test]
-fn init_asks_no_person_for_the_settings_it_writes_itself() {
-    // A project of the first release without .claude/settings.json: the deny rule's update finds no file, and the
-    // refresh of the same run writes one that has the rule
+fn init_writes_no_settings_and_asks_no_person_for_a_file_that_is_not_there() {
+    // A project of the first release without .claude/settings.json: no update has a file to change, and the refresh of
+    // the same run writes none, as `rotproof create` has no settings of its own
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     let arg = root_arg(r);
@@ -2880,16 +2887,12 @@ fn init_asks_no_person_for_the_settings_it_writes_itself() {
     let out = run(&["--root", &arg, "init"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(
-        stdout(&out).contains("wrote .claude/settings.json"),
+        !stdout(&out).contains(".claude/settings.json"),
         "{}",
         stdout(&out)
     );
     assert!(!stdout(&out).contains("needs a person"), "{}", stdout(&out));
-    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
-    assert!(
-        settings.contains("Edit(/.config/rotproof-approved.toml)"),
-        "{settings}"
-    );
+    assert!(!r.join(".claude").exists());
     let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
     assert!(
         declaration.contains(&format!("files = \"{version}\"")),
@@ -3509,20 +3512,13 @@ fn run_with_input(args: &[&str], input: &str) -> Output {
 }
 
 #[test]
-fn create_writes_no_hook_and_the_settings_deny_only_the_approvals_file() {
+fn create_writes_no_settings_for_claude_code_neither_a_hook_nor_a_deny_rule() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     assert!(create(&["--root", &root_arg(r), "create"]).status.success());
-    // create wrote the settings that run no hook, for Claude Code only
-    let settings = fs::read_to_string(r.join(".claude/settings.json")).unwrap();
-    assert!(!settings.contains("\"hooks\""), "{settings}");
-    assert!(!settings.contains("stop-hook"), "{settings}");
-    assert!(!settings.contains("time-hook"), "{settings}");
-    // and that deny Claude Code editing the approvals file, which only a person adds to
-    assert!(
-        settings.contains("\"deny\": [\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]"),
-        "{settings}"
-    );
+    // It wrote them once, to run no hook and to deny editing the approvals file, which an agent may now approve
+    // through; a project that has them is upgraded by `rotproof init`
+    assert!(!r.join(".claude").exists(), "{:?}", tree(r));
     assert!(!r.join(".gemini").exists());
 }
 

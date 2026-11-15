@@ -7,9 +7,8 @@
 //!   between the declaration's `files` and the running version that the project did not decline, does what
 //!   `rotproof create` does after an upgrade without making a layer, and sets `files` to the running version. What an
 //!   update cannot do without a person it says, and then `files` stays where it was, so `rotproof check` keeps
-//!   failing until it is done or declined. An update whose file is missing asks no person when the refresh then
-//!   writes that file with what the update adds, as it writes `.claude/settings.json`. It adds `declined`, empty,
-//!   when the declaration lacks it, names every field it adds, and never changes the declaration's other values.
+//!   failing until it is done or declined. An update whose file is missing has nothing to do. It adds `declined`,
+//!   empty, when the declaration lacks it, names every field it adds, and never changes the declaration's other values.
 //!   It never moves or rewrites a record: from 1.0, Rotproof reads no records of work, wherever they are.
 //! - **With units,** an upgrade also drafts, once, the knowledge document of the units (`draft`), which needs the
 //!   parsers to read the imports between them.
@@ -105,10 +104,9 @@ fn upgrade(
         from: from.clone(),
         ..Upgraded::default()
     };
-    let mut asked = Vec::new();
     for update in pending(&from, running, &declared.declined)? {
         if let Some(why) = apply(tree, out, update, &mut upgraded)? {
-            asked.push((update, why));
+            upgraded.by_hand.push(why);
         }
     }
     if crosses(ONION, &from, running) {
@@ -118,12 +116,6 @@ fn upgrade(
         upgraded.moves.extend(presentation_moves(tree, &declared));
     }
     upgraded.made = refresh(tree, out, name)?;
-    // An update that asked a person for a file the refresh then wrote with what the update adds asks no more
-    for (update, why) in asked {
-        if !written_done(tree, update, &upgraded.made.written)? {
-            upgraded.by_hand.push(why);
-        }
-    }
     if upgraded.by_hand.is_empty() && declared.files.as_deref() != Some(running) {
         // Read again: the refresh may have added a field the declaration lacked
         let (text, was) = read_written(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
@@ -303,19 +295,6 @@ fn apply(
     Ok(None)
 }
 
-/// Whether the refresh wrote the file of an update that asked a person, as it writes `.claude/settings.json` when
-/// there is none, and the file it wrote has what the update adds. The update is asked again of the written file
-/// rather than trusted by the path alone, so a file the refresh writes without what the update adds still needs a
-/// person.
-fn written_done(tree: &dyn Tree, update: Update, written: &[String]) -> Result<bool, String> {
-    let path = update.file();
-    if !written.iter().any(|w| w == path) {
-        return Ok(false);
-    }
-    let text = read_text(tree, path).map_err(|e| format!("{path}: {e}"))?;
-    Ok(update.apply(Some(&text)) == domain::upgrade::Outcome::Done)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,6 +303,19 @@ mod tests {
     use infrastructure::outbound::readers::Readers;
 
     const SETTINGS: &str = ".claude/settings.json";
+
+    /// The settings `rotproof create` wrote from 1.0.0-rc.4 to 2.0.0-rc.1: the rule that denied editing the approvals
+    /// file, and nothing else.
+    const DENY_ONLY: &str = "{\n  \"permissions\": {\n    \"deny\": [\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]\n  }\n}\n";
+
+    /// A project made by 2.0.0-rc.1, whose files are up to it, with `settings` as its `.claude/settings.json`.
+    fn made_by_rc_1(settings: &str) -> Fake {
+        let tree = Fake::default();
+        tree.write(DECLARATION, "stack = \"none\"\nfiles = \"2.0.0-rc.1\"\n")
+            .unwrap();
+        tree.write(SETTINGS, settings).unwrap();
+        tree
+    }
 
     /// A project as `rotproof create` of 0.1.0 left it: no files in the declaration, settings without the deny rule
     fn made_by_first() -> Fake {
@@ -423,13 +415,13 @@ mod tests {
             panic!("upgraded");
         };
         assert_eq!(upgraded.from, "0.1.0");
-        assert_eq!(upgraded.applied, [("claude-deny-approvals", SETTINGS)]);
+        // The rule that denied editing the approvals file is not added: nothing is to be applied up to 0.2.0
+        assert!(upgraded.applied.is_empty(), "{:?}", upgraded.applied);
         assert!(upgraded.by_hand.is_empty());
         assert!(upgraded.files_set);
-        assert!(
-            tree.text(SETTINGS)
-                .unwrap()
-                .contains("Edit(/.config/rotproof-approved.toml)")
+        assert_eq!(
+            tree.text(SETTINGS).as_deref(),
+            Some("{\n  \"hooks\": {}\n}\n")
         );
         let declared = read_fields(&tree.text(DECLARATION).unwrap()).unwrap();
         assert_eq!(declared.files.as_deref(), Some("0.2.0"));
@@ -454,36 +446,67 @@ mod tests {
     }
 
     #[test]
-    fn an_update_asks_no_person_for_a_file_the_refresh_writes_with_what_it_adds() {
+    fn a_project_with_no_settings_has_nothing_to_take_out_and_is_given_none() {
         let tree = made_by_first();
         tree.remove(SETTINGS).unwrap();
-        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "0.2.0")
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "2.0.0-rc.2")
         else {
             panic!("upgraded");
         };
-        // The refresh wrote the settings, with the rule, and the update asks for nothing more
-        assert!(upgraded.made.written.iter().any(|p| p == SETTINGS));
-        assert!(
-            tree.text(SETTINGS)
-                .unwrap()
-                .contains("Edit(/.config/rotproof-approved.toml)")
+        // The updates ask no person for a file that is not there, and the refresh writes none: `rotproof create` has no
+        // settings of its own to write now
+        assert!(upgraded.by_hand.is_empty(), "{:?}", upgraded.by_hand);
+        assert!(upgraded.applied.is_empty(), "{:?}", upgraded.applied);
+        assert!(upgraded.files_set);
+        assert_eq!(tree.text(SETTINGS), None);
+        assert!(!upgraded.made.written.iter().any(|p| p == SETTINGS));
+    }
+
+    #[test]
+    fn the_deny_rule_is_taken_out_on_the_way_to_rc_2_and_a_project_that_declined_keeps_it() {
+        let tree = made_by_rc_1(DENY_ONLY);
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "2.0.0-rc.2")
+        else {
+            panic!("upgraded");
+        };
+        assert_eq!(
+            upgraded.applied,
+            [("claude-remove-deny-approvals", SETTINGS)]
         );
         assert!(upgraded.by_hand.is_empty(), "{:?}", upgraded.by_hand);
-        assert!(upgraded.applied.is_empty());
         assert!(upgraded.files_set);
-
-        // Asked again of the file, not trusted by its path: a written file without the rule still needs a person
-        let written = [SETTINGS.to_string()];
+        assert_eq!(tree.text(SETTINGS).as_deref(), Some("{}\n"));
+        // Said once: the next run finds nothing to take out
+        let Ok(Initialized::Upgraded(again)) = init(&tree, &tree, None, None, "x", "2.0.0-rc.2")
+        else {
+            panic!("upgraded");
+        };
+        assert!(again.applied.is_empty(), "{:?}", again.applied);
+        // A project that declined it keeps the rule
+        let tree = made_by_rc_1(DENY_ONLY);
+        let text = tree.text(DECLARATION).unwrap();
+        tree.write(
+            DECLARATION,
+            &format!("{text}declined = [\"claude-remove-deny-approvals\"]\n"),
+        )
+        .unwrap();
+        let Ok(Initialized::Upgraded(kept)) = init(&tree, &tree, None, None, "x", "2.0.0-rc.2")
+        else {
+            panic!("upgraded");
+        };
+        assert!(kept.applied.is_empty() && kept.files_set);
+        assert_eq!(tree.text(SETTINGS).as_deref(), Some(DENY_ONLY));
+        // What the project denies itself and allows stays, in its order
+        let theirs = "{\n  \"permissions\": {\n    \"allow\": [\"Bash(ls)\"],\n    \"deny\": [\n      \"Read(x)\",\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]\n  }\n}\n";
+        let tree = made_by_rc_1(theirs);
+        let Ok(Initialized::Upgraded(_)) = init(&tree, &tree, None, None, "x", "2.0.0-rc.2") else {
+            panic!("upgraded");
+        };
         assert_eq!(
-            written_done(&tree, Update::DenyApprovals, &written),
-            Ok(true)
-        );
-        // Not written by the refresh: the request stays, whatever the file holds
-        assert_eq!(written_done(&tree, Update::DenyApprovals, &[]), Ok(false));
-        tree.write(SETTINGS, "{}\n").unwrap();
-        assert_eq!(
-            written_done(&tree, Update::DenyApprovals, &written),
-            Ok(false)
+            tree.text(SETTINGS).as_deref(),
+            Some(
+                "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(ls)\"\n    ],\n    \"deny\": [\n      \"Read(x)\"\n    ]\n  }\n}\n"
+            )
         );
     }
 
@@ -524,16 +547,22 @@ mod tests {
     #[test]
     fn an_update_keeps_the_line_endings_and_the_byte_order_mark_of_its_file() {
         for (crlf, bom) in [(true, true), (true, false), (false, true), (false, false)] {
-            let tree = made_by_first();
-            let lf = tree.text(SETTINGS).unwrap();
-            let text = if crlf { lf.replace('\n', "\r\n") } else { lf };
+            let text = if crlf {
+                DENY_ONLY.replace('\n', "\r\n")
+            } else {
+                DENY_ONLY.to_string()
+            };
             let raw = if bom { format!("\u{feff}{text}") } else { text };
-            tree.write(SETTINGS, &raw).unwrap();
-            let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "0.2.0")
+            let tree = made_by_rc_1(&raw);
+            let Ok(Initialized::Upgraded(upgraded)) =
+                init(&tree, &tree, None, None, "x", "2.0.0-rc.2")
             else {
                 panic!("upgraded");
             };
-            assert_eq!(upgraded.applied, [("claude-deny-approvals", SETTINGS)]);
+            assert_eq!(
+                upgraded.applied,
+                [("claude-remove-deny-approvals", SETTINGS)]
+            );
             let now = tree.text(SETTINGS).unwrap();
             let said = format!("crlf {crlf}, bom {bom}: {now:?}");
             assert_eq!(now.starts_with('\u{feff}'), bom, "{said}");
@@ -542,10 +571,8 @@ mod tests {
             } else {
                 assert!(!now.contains('\r'), "{said}");
             }
-            assert!(
-                now.contains("Edit(/.config/rotproof-approved.toml)"),
-                "{said}"
-            );
+            assert!(now.contains("{}"), "{said}");
+            assert!(!now.contains("Edit("), "{said}");
         }
     }
 
@@ -601,8 +628,7 @@ mod tests {
             upgraded.applied
         );
         assert!(upgraded.by_hand.is_empty(), "{:?}", upgraded.by_hand);
-        let new = domain::hook::SETTINGS[0].1;
-        assert_eq!(tree.text(SETTINGS), Some(new.replace('\n', "\r\n")));
+        assert_eq!(tree.text(SETTINGS), Some(DENY_ONLY.replace('\n', "\r\n")));
         // Said once: the next run finds nothing to take out
         let Ok(Initialized::Upgraded(again)) = init(&tree, &tree, None, None, "x", "1.0.0-rc.4")
         else {
@@ -645,10 +671,7 @@ mod tests {
             "{:?}",
             upgraded.applied
         );
-        assert_eq!(
-            tree.text(SETTINGS).as_deref(),
-            Some(domain::hook::SETTINGS[0].1)
-        );
+        assert_eq!(tree.text(SETTINGS).as_deref(), Some(DENY_ONLY));
     }
 
     /// Upgraded to 1.0, the settings 0.4.0 wrote lose the stop hook and end as a new project's, in their line endings.
@@ -859,9 +882,8 @@ mod tests {
 
     #[test]
     fn an_update_that_needs_a_person_leaves_the_files_behind_until_it_is_declined() {
-        let tree = made_by_first();
-        tree.write(SETTINGS, "not json").unwrap();
-        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "0.2.0")
+        let tree = made_by_rc_1("not json");
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "2.0.0-rc.2")
         else {
             panic!("upgraded");
         };
@@ -869,18 +891,21 @@ mod tests {
         assert!(!upgraded.files_set);
         assert_eq!(tree.text(SETTINGS).as_deref(), Some("not json"));
         assert_eq!(
-            read_fields(&tree.text(DECLARATION).unwrap()).unwrap().files,
-            None
+            read_fields(&tree.text(DECLARATION).unwrap())
+                .unwrap()
+                .files
+                .as_deref(),
+            Some("2.0.0-rc.1")
         );
 
         // Declined, it is neither applied nor asked for again, and the files reach the running version
         let text = tree.text(DECLARATION).unwrap();
         tree.write(
             DECLARATION,
-            &format!("{text}declined = [\"claude-deny-approvals\"]\n"),
+            &format!("{text}declined = [\"claude-remove-deny-approvals\"]\n"),
         )
         .unwrap();
-        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "0.2.0")
+        let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "2.0.0-rc.2")
         else {
             panic!("upgraded");
         };

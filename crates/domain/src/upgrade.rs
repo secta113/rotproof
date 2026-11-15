@@ -24,19 +24,20 @@ pub const FIRST: &str = "0.1.0";
 /// An update of the project's files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Update {
-    /// The rule that denies Claude Code editing the approvals file, in `.claude/settings.json`
-    DenyApprovals,
     /// The stop hook taken out, with the hook beside it, from `.claude/settings.json`: 1.0 no longer has one
     RemoveStopHook,
     /// The time hook taken out of `.claude/settings.json`: 1.0 no longer has one
     RemoveTimeHook,
+    /// The rule that denied Claude Code editing the approvals file taken out of `.claude/settings.json`: 2.0 lets an
+    /// agent run `rotproof approve`, with a reason, and no longer writes the rule
+    RemoveDenyApprovals,
 }
 
 /// Every update, oldest first.
 pub const UPDATES: [Update; 3] = [
-    Update::DenyApprovals,
     Update::RemoveStopHook,
     Update::RemoveTimeHook,
+    Update::RemoveDenyApprovals,
 ];
 
 /// What an update does to its file.
@@ -54,25 +55,25 @@ impl Update {
     /// The name a project declines it by, in `declined`
     pub fn name(self) -> &'static str {
         match self {
-            Update::DenyApprovals => "claude-deny-approvals",
             Update::RemoveStopHook => "claude-remove-stop-hook",
             Update::RemoveTimeHook => "claude-remove-time-hook",
+            Update::RemoveDenyApprovals => "claude-remove-deny-approvals",
         }
     }
 
     /// The version that brings it
     pub fn version(self) -> &'static str {
         match self {
-            Update::DenyApprovals => "0.2.0",
             Update::RemoveStopHook => "1.0.0-rc.1",
             Update::RemoveTimeHook => "1.0.0-rc.4",
+            Update::RemoveDenyApprovals => "2.0.0-rc.2",
         }
     }
 
     /// The file it changes, from the root
     pub fn file(self) -> &'static str {
         match self {
-            Update::DenyApprovals | Update::RemoveStopHook | Update::RemoveTimeHook => {
+            Update::RemoveStopHook | Update::RemoveTimeHook | Update::RemoveDenyApprovals => {
                 ".claude/settings.json"
             }
         }
@@ -81,9 +82,9 @@ impl Update {
     /// What it does to its file, whose text is `text` (`None` when there is no file).
     pub fn apply(self, text: Option<&str>) -> Outcome {
         let edited = match self {
-            Update::DenyApprovals => settings::deny_approvals(text),
             Update::RemoveStopHook => settings::remove_stop_hook(text),
             Update::RemoveTimeHook => settings::remove_time_hook(text),
+            Update::RemoveDenyApprovals => settings::remove_deny_approvals(text),
         };
         match edited {
             Ok(None) => Outcome::Done,
@@ -100,10 +101,6 @@ impl Update {
     /// What a person does when the update cannot be applied: the edit, as the settings then need it.
     fn by_hand(self) -> String {
         match self {
-            Update::DenyApprovals => format!(
-                "Add \"{}\" to permissions.deny there",
-                settings::deny_rule()
-            ),
             Update::RemoveStopHook => format!(
                 "Remove the Stop hooks that run {:?} and {:?}",
                 hook::COMMAND,
@@ -113,6 +110,10 @@ impl Update {
                 "Remove the {} hooks that run {:?}",
                 hook::TIME_EVENTS.join(" and "),
                 hook::TIME_COMMAND
+            ),
+            Update::RemoveDenyApprovals => format!(
+                "Remove \"{}\" from permissions.deny there",
+                settings::deny_rule()
             ),
         }
     }
@@ -256,16 +257,11 @@ mod tests {
 
     #[test]
     fn the_updates_between_two_versions_apply_unless_declined() {
-        assert_eq!(
-            pending("0.1.0", "0.2.0", &[]),
-            Ok(vec![Update::DenyApprovals])
-        );
+        // The rule that denied editing the approvals file is no longer added, from any version
+        assert_eq!(pending("0.1.0", "0.2.0", &[]), Ok(vec![]));
         assert_eq!(pending("0.2.0", "0.2.0", &[]), Ok(vec![]));
         assert_eq!(pending("0.1.0", "0.1.5", &[]), Ok(vec![]));
-        assert_eq!(
-            pending("0.1.0", "0.3.0", &["claude-deny-approvals".into()]),
-            Ok(vec![])
-        );
+        assert_eq!(pending("0.1.0", "0.3.0", &[]), Ok(vec![]));
         // Nothing adds a hook any more: from before the stop hook was taken out, both hooks go, in the order of the
         // versions, and the project that declined one keeps it
         assert_eq!(pending("0.3.0", "0.4.0", &[]), Ok(vec![]));
@@ -290,8 +286,36 @@ mod tests {
             Ok(vec![Update::RemoveTimeHook])
         );
         assert_eq!(pending("1.0.0-rc.4", "1.0.0", &[]), Ok(vec![]));
-        // The names of the updates that added the hooks, until 1.0.0-rc.4, are no names now
-        for name in ["claude-time-hook", "claude-stop-hook-on-path"] {
+        // The rule goes from 2.0.0-rc.2, after the hooks when a project comes from before them, and a project may
+        // keep it
+        assert_eq!(pending("2.0.0-rc.1", "2.0.0-rc.1", &[]), Ok(vec![]));
+        assert_eq!(
+            pending("2.0.0-rc.1", "2.0.0", &[]),
+            Ok(vec![Update::RemoveDenyApprovals])
+        );
+        assert_eq!(
+            pending("1.0.0", "2.0.0-rc.2", &[]),
+            Ok(vec![Update::RemoveDenyApprovals])
+        );
+        assert_eq!(
+            pending("0.1.0", "2.0.0", &[]),
+            Ok(vec![
+                Update::RemoveStopHook,
+                Update::RemoveTimeHook,
+                Update::RemoveDenyApprovals
+            ])
+        );
+        assert_eq!(
+            pending("1.0.0", "2.0.0", &["claude-remove-deny-approvals".into()]),
+            Ok(vec![])
+        );
+        // The names of the updates that added the hooks, until 1.0.0-rc.4, and the one that added the rule, until
+        // 2.0.0-rc.1, are no names now
+        for name in [
+            "claude-time-hook",
+            "claude-stop-hook-on-path",
+            "claude-deny-approvals",
+        ] {
             let found = problems(Some("1.0.0"), &[name.into()], "1.0.0");
             assert_eq!(found.len(), 1, "{found:?}");
             assert!(found[0].contains("which is no update"), "{found:?}");
@@ -331,30 +355,44 @@ mod tests {
     }
 
     #[test]
-    fn the_deny_rule_is_added_once_and_only_added() {
-        let settings =
-            "{\n  \"hooks\": {\"Stop\": []},\n  \"permissions\": {\"allow\": [\"Bash(ls)\"]}\n}\n";
-        let Outcome::Changed(once) = Update::DenyApprovals.apply(Some(settings)) else {
-            panic!("the rule is added");
+    fn the_deny_rule_is_taken_out_once_and_only_it() {
+        let rule = deny_rule();
+        let settings = format!(
+            r#"{{"hooks": {{"Stop": []}}, "permissions": {{"allow": ["Bash(ls)"], "deny": ["{rule}"]}}}}"#
+        );
+        let Outcome::Changed(once) = Update::RemoveDenyApprovals.apply(Some(&settings)) else {
+            panic!("the rule is taken out");
         };
         let read: Value = serde_json::from_str(&once).unwrap();
-        assert_eq!(read["permissions"]["deny"][0], deny_rule());
+        assert!(read["permissions"].get("deny").is_none(), "{once}");
         assert_eq!(read["permissions"]["allow"][0], "Bash(ls)");
         // The keys keep their order
         assert!(once.find("hooks") < once.find("permissions"), "{once}");
-        assert_eq!(Update::DenyApprovals.apply(Some(&once)), Outcome::Done);
-        // With no permissions at all
-        let Outcome::Changed(added) = Update::DenyApprovals.apply(Some("{}")) else {
-            panic!("the rule is added");
+        assert_eq!(
+            Update::RemoveDenyApprovals.apply(Some(&once)),
+            Outcome::Done
+        );
+        // What the project denies itself stays
+        let theirs = format!(r#"{{"permissions": {{"deny": ["Read(x)", "{rule}"]}}}}"#);
+        let Outcome::Changed(kept) = Update::RemoveDenyApprovals.apply(Some(&theirs)) else {
+            panic!("the rule is taken out");
         };
-        assert!(added.contains(&deny_rule()));
+        let read: Value = serde_json::from_str(&kept).unwrap();
+        assert_eq!(read["permissions"]["deny"], json!(["Read(x)"]));
+        // No settings, none of Rotproof's: nothing to take out
+        for text in [None, Some("{}")] {
+            assert_eq!(Update::RemoveDenyApprovals.apply(text), Outcome::Done);
+        }
     }
+
+    /// The settings `rotproof create` wrote from 1.0.0-rc.4 to 2.0.0-rc.1: the rule that denied editing the approvals
+    /// file, and no hook.
+    const DENY_ONLY: &str = "{\n  \"permissions\": {\n    \"deny\": [\n      \"Edit(/.config/rotproof-approved.toml)\"\n    ]\n  }\n}\n";
 
     /// The settings `rotproof create` wrote from 0.4.0 to 1.0.0-rc.3: the stop hook and the hook beside it, and the
     /// time hook on both of its events, as the updates of those versions wrote them.
     fn settings_0_4() -> String {
-        let (_, text) = hook::SETTINGS[0];
-        let mut settings: Value = serde_json::from_str(text).unwrap();
+        let mut settings: Value = serde_json::from_str(DENY_ONLY).unwrap();
         settings["hooks"] = json!({
             "Stop": [group(hook::COMMAND), group(hook::ON_PATH)],
             "SessionStart": [group(hook::TIME_COMMAND)],
@@ -365,17 +403,18 @@ mod tests {
 "
     }
 
-    /// Upgraded untouched, the settings are what a new project gets: every update of the file, in their order.
+    /// Upgraded untouched, the settings end as nothing is left in them, which a new project has no file for: every
+    /// update of the file, in their order.
     #[test]
     fn untouched_settings_upgrade_to_what_a_new_project_gets() {
         let mut text = settings_0_4();
-        for update in [Update::RemoveStopHook, Update::RemoveTimeHook] {
+        for update in UPDATES {
             let Outcome::Changed(changed) = update.apply(Some(&text)) else {
                 panic!("{} changes them", update.name());
             };
             text = changed;
         }
-        assert_eq!(text, hook::SETTINGS[0].1);
+        assert_eq!(text, "{}\n");
         for update in UPDATES {
             assert_eq!(
                 update.apply(Some(&text)),
@@ -487,8 +526,8 @@ mod tests {
         let Outcome::Changed(removed) = Update::RemoveTimeHook.apply(Some(written)) else {
             panic!("the hooks are taken out");
         };
-        // The file ends as a new project's: no hooks left, and the deny rule where it was
-        assert_eq!(removed, hook::SETTINGS[0].1);
+        // The file ends as `rotproof create` wrote it from 1.0.0-rc.4: no hooks left, and the deny rule where it was
+        assert_eq!(removed, DENY_ONLY);
         assert_eq!(Update::RemoveTimeHook.apply(Some(&removed)), Outcome::Done);
         // The project's own hooks stay: a group of its own, one beside Rotproof's in a group, and a command that runs
         // rotproof time-hook otherwise (a path to the binary, as a project that builds Rotproof itself runs it)
@@ -548,20 +587,25 @@ mod tests {
 
     #[test]
     fn what_cannot_be_updated_is_said_with_how_to_decline_it() {
-        for text in [
-            None,
-            Some("not json"),
-            Some("[]"),
-            Some("{\"permissions\": []}"),
-            Some("{\"permissions\": {\"deny\": \"x\"}}"),
-        ] {
-            let Outcome::ByHand(why) = Update::DenyApprovals.apply(text) else {
+        for text in [Some("not json"), Some("[]"), Some("\"x\"")] {
+            let Outcome::ByHand(why) = Update::RemoveDenyApprovals.apply(text) else {
                 panic!("{text:?} needs a person");
             };
             assert!(
-                why.contains("declined = [\"claude-deny-approvals\"]"),
+                why.contains("declined = [\"claude-remove-deny-approvals\"]"),
                 "{why}"
             );
+            assert!(
+                why.contains("Remove \"Edit(/.config/rotproof-approved.toml)\""),
+                "{why}"
+            );
+        }
+        // A shape that holds no rule of Rotproof's has nothing to take out, whatever else it holds
+        for text in [
+            "{\"permissions\": []}",
+            "{\"permissions\": {\"deny\": \"x\"}}",
+        ] {
+            assert_eq!(Update::RemoveDenyApprovals.apply(Some(text)), Outcome::Done);
         }
     }
 }

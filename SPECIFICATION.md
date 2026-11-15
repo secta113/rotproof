@@ -92,7 +92,6 @@ The project's files are written once, as a starting point, and are the project's
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack; line endings as LF |
 | `docs/log.md` | The log, with its title |
-| `.claude/settings.json` | The rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit. `typescript`: installs what `package.json` and its lockfile pin (`npm ci`) and runs `npx --no -- rotproof check`, which never downloads another Rotproof, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
 | `Cargo.toml` | `rust`: the workspace, whose members are the crates of the layers present, each named on a line of its own (no glob: see "Units"), so `cargo build` builds every layer present, and its root package, which depends on `composition`. A project that declares units has the workspace alone |
@@ -148,13 +147,14 @@ that has a declaration:
 
 | Update | Version | File | What it does |
 |---|---|---|---|
-| `claude-deny-approvals` | 0.2.0 | `.claude/settings.json` | Adds `"Edit(/.config/rotproof-approved.toml)"` to `permissions.deny` (see "Approving a forbidden import"). The file is written again with its keys in their order and two spaces of indentation |
-| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook`, or the hook beside it that 0.4.0 added (it said when `rotproof` was not on the `PATH`), a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above: an untouched file ends as `rotproof create` writes it now |
-| `claude-remove-time-hook` | 1.0.0-rc.4 | `.claude/settings.json` | Takes out each hook on `SessionStart` and `UserPromptSubmit` whose command is exactly `rotproof time-hook`, a group left with no hook, an event left with no group, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). A hook with another command that runs it, such as a path to the binary, stays. Written again as above: an untouched file ends as `rotproof create` writes it now |
+| `claude-remove-stop-hook` | 1.0.0-rc.1 | `.claude/settings.json` | Takes out each `Stop` hook whose command is exactly `rotproof stop-hook`, or the hook beside it that 0.4.0 added (it said when `rotproof` was not on the `PATH`), a group left with no hook, `Stop` when no group is left, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). Written again as above |
+| `claude-remove-time-hook` | 1.0.0-rc.4 | `.claude/settings.json` | Takes out each hook on `SessionStart` and `UserPromptSubmit` whose command is exactly `rotproof time-hook`, a group left with no hook, an event left with no group, and `hooks` when no event is left (see "The hooks Rotproof no longer writes"). A hook with another command that runs it, such as a path to the binary, stays. Written again as above |
+| `claude-remove-deny-approvals` | 2.0.0-rc.2 | `.claude/settings.json` | Takes out each `"Edit(/.config/rotproof-approved.toml)"` of `permissions.deny`, which `rotproof create` wrote until 2.0.0-rc.1 so that an agent could not write the approvals file, `deny` when no rule is left, and `permissions` when no key is left (see "Approving a forbidden import"). A rule with another text stays. Written again as above: a file with nothing else in it ends as `{}` and is not deleted |
 
-The two updates 0.4.0 brought, `claude-stop-hook-on-path` and `claude-time-hook`, which added the hooks the two updates
-above take out again, are gone, as nothing adds those hooks now. A declaration that still names either in `declined` is
-reported by `rotproof check` as naming no update: take the name out.
+The two updates 0.4.0 brought, `claude-stop-hook-on-path` and `claude-time-hook`, which added the hooks the first two
+updates above take out again, are gone, as nothing adds those hooks now, and so is `claude-deny-approvals`, which added
+the rule the last one takes out. A declaration that still names one of them in `declined` is reported by `rotproof
+check` as naming no update: take the name out. `rotproof create` writes no `.claude/settings.json` any more.
 
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It says how to run Rotproof, lists the layers with where each lives and what it may import (from
@@ -222,10 +222,11 @@ approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
 - **Run it only when the user asked for the exception, and say that you ran it.** The guide in `.rotproof/AGENTS.md`
   says so. There is no comment that silences the check on the import's line: it would be the easiest thing for an
   agent to write.
-- **Claude Code is denied editing the file.** The `.claude/settings.json` that `rotproof create` writes holds
-  `"permissions": { "deny": ["Edit(/.config/rotproof-approved.toml)"] }`, which refuses Claude Code's edit tools and
-  its shell's file commands and redirects (`>>`, `sed -i`) on the file, with no prompt. A person edits it in an
-  editor, or through `rotproof approve`.
+- **Claude Code is not denied editing the file.** Until 2.0.0-rc.1 the `.claude/settings.json` that `rotproof create`
+  wrote held `"permissions": { "deny": ["Edit(/.config/rotproof-approved.toml)"] }`, which refused Claude Code's edit
+  tools and its shell's file commands and redirects on the file. It is not written now, and `rotproof init` takes it
+  out of a project's settings (see "Upgrading Rotproof"): an approval is kept in view by the check, which prints it on
+  every run and counts it, and not by keeping the agent from the file.
 - **An approval never hides.** `rotproof check` passes the approved import on every line of its file, and prints every
   approval on every run.
 - **An approval follows the code.** An entry that matches no forbidden import fails: the import moved away, was

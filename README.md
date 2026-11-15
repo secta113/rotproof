@@ -364,7 +364,7 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   (see [Upgrading Rotproof](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#upgrading-rotproof)), and the files Rotproof generates, which nobody writes by hand. A field the declaration
   lacks takes its first value from the tree, once (`areas` gets the tags the knowledge documents use, so the documents
   that kept the rules keep them); from then on a document with a tag the declaration does not list fails. An update of
-  `.claude/settings.json` keeps its keys, their order and their values (it takes out only the stop hook and the time hook
+  `.claude/settings.json` keeps its keys, their order and their values (it takes out only the stop hook, the time hook and the deny rule
   Rotproof wrote, matched exactly), but writes the whole file again in Rotproof's layout (two spaces of indentation),
   keeping its line endings and byte order mark. These change what a person wrote, each in a command run for that.
   Rotproof never moves or rewrites a record: from 1.0 it reads no records of work, and those of an older project stay

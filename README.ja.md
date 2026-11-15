@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 110e70f0. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at db76a54c. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -373,7 +373,7 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
   そして誰も手で書かない、Rotproof が生成するファイルです。宣言に無い欄は、最初の値を一度だけ木から取ります
   （`areas` には knowledge の文書が使っているタグが入るので、規則を守っていた文書は守ったままになります）。それ以降、
   宣言に無いタグを持つ文書は失敗します。`.claude/settings.json` の更新は、キーとその順番と値を保ちますが
-  （取り除くのは、Rotproof が書いた stop hook と time hook に厳密に一致するものだけです）、ファイル全体を Rotproof の
+  （取り除くのは、Rotproof が書いた stop hook と time hook と deny の規則に厳密に一致するものだけです）、ファイル全体を Rotproof の
   体裁（インデントは空白 2 つ）で書き直します。行末と byte order mark は保ちます。これらは人が書いたものを変えますが、
   どれもそのために実行するコマンドの中でのことです。Rotproof は記録を動かしたり書き換えたりしません。1.0 からは
   作業の記録を読まず、古いプロジェクトの記録は、あった場所にそのまま残ります。knowledge の文書をコードに照らして
