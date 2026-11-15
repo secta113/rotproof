@@ -853,12 +853,9 @@ fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
         for (edit, says) in [
             (
                 Some("edited by hand\n"),
-                "out of date, run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise",
+                "out of date, run `rotproof create`",
             ),
-            (
-                None,
-                "missing, run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise",
-            ),
+            (None, "missing, run `rotproof create`"),
         ] {
             match edit {
                 Some(text) => fs::write(&guide, text).unwrap(),
@@ -883,6 +880,62 @@ fn the_guide_is_rotproofs_and_check_fails_until_create_rewrites_it() {
             assert!(run(&["--root", &arg, "check"]).status.success());
         }
     }
+}
+
+#[test]
+fn a_guide_behind_an_upgrade_is_written_by_init_and_one_changed_under_the_same_version_by_create() {
+    // The files are up to an older Rotproof: the upgrade is init, which also sets files
+    let root = declared(
+        "stack = \"none\"
+areas = [\"a\"]
+files = \"1.0.0\"
+",
+    );
+    let arg = root_arg(root.path());
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "Rotproof's guide is up to date:
+  missing, run `rotproof init`: .rotproof/AGENTS.md"
+        ),
+        "{}",
+        stdout(&out)
+    );
+    // A declaration with no files is the first release's
+    fs::write(
+        root.path().join(".config/rotproof.toml"),
+        "stack = \"none\"
+areas = [\"a\"]
+",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        stdout(&out).contains("missing, run `rotproof init`: .rotproof/AGENTS.md"),
+        "{}",
+        stdout(&out)
+    );
+    // Brought to this version, only the guide is behind, and create writes it
+    let out = create(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        root.path().join(".rotproof/AGENTS.md"),
+        "old
+",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        stdout(&out).contains("out of date, run `rotproof create`: .rotproof/AGENTS.md"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(
+        !stdout(&out).contains("run `rotproof init`"),
+        "{}",
+        stdout(&out)
+    );
 }
 
 #[test]

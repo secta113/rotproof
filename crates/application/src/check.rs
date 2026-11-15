@@ -10,12 +10,13 @@ use std::io;
 use crate::finding::{under, warn};
 use crate::tree::{exactly, read_text};
 use domain::approvals::{shown, sort, stale};
-use domain::declaration::{Declared, INIT_OR_CREATE};
+use domain::declaration::Declared;
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
 use domain::project::MAP_HEADING;
 use domain::schema::Time;
 use domain::suppressions::WEAKENS_HEADING;
+use domain::upgrade::guide_command;
 use domain::version::VERSION;
 use protocol::inbound::{Finding, LinkedTodo, Report, Warning};
 use protocol::outbound::Parsers;
@@ -141,7 +142,10 @@ fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
         };
         found.extend(under(
             "Rotproof's guide is up to date",
-            [format!("{state}, {INIT_OR_CREATE}: {GUIDE}")],
+            [format!(
+                "{state}, {}: {GUIDE}",
+                guide_command(declared.declaration.files.as_deref(), VERSION)
+            )],
         ));
     }
     found
