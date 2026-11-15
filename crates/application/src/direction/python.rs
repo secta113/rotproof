@@ -26,14 +26,14 @@ use protocol::outbound::Tree;
 
 /// The direction check of a Python project: every import of a `.py` file in a layer, of the entry file and of the
 /// package file of a unit, as the module it names.
-pub(super) fn python(
+pub(super) fn python<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     layout: &Layout,
-    places: &[&Place],
-    entries: &[Place],
-    units: &[Unit],
-    moving: &mut Moving,
+    places: &[&'a Place],
+    entries: &'a [Place],
+    units: &'a [Unit],
+    moving: &mut Moving<'a>,
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
@@ -60,7 +60,9 @@ pub(super) fn python(
         }
         for (line, module) in read.imports {
             let (target, by_unit) = path_of(&module, &imported);
-            let Some(to) = landing_of(&resolved(tree, &target), places, units) else {
+            let at = resolved(tree, &target);
+            moving.read_by(from, || python_files(&at));
+            let Some(to) = landing_of(&at, places, units) else {
                 continue;
             };
             let dotted = module.join(".");
@@ -80,7 +82,7 @@ pub(super) fn python(
             links.extend(link(from, to));
         }
     }
-    read_moving(tree, parsers, &imported, moving)?;
+    read_moving(tree, parsers, &imported, places, units, moving)?;
     Ok(Direction {
         problems: found,
         forbidden,
@@ -91,14 +93,16 @@ pub(super) fn python(
     })
 }
 
-/// Which of the files that are moving import which: every import of one, as the module it names, that is a file or a
-/// package of another. What it imports elsewhere, and a file it cannot read, are no finding: the code that is moving
-/// is not checked.
-fn read_moving(
+/// What each of the files that are moving imports, as the module it names: a file or a package of another that is
+/// moving, or else where it lands in the layers. A file it cannot read is no finding: the code that is moving is not
+/// checked.
+fn read_moving<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     imported: &BTreeMap<&str, &str>,
-    moving: &mut Moving,
+    places: &[&'a Place],
+    units: &'a [Unit],
+    moving: &mut Moving<'a>,
 ) -> io::Result<()> {
     for path in moving.files() {
         let Some(source) = read_code(tree, &path, "imports", &mut Vec::new())? else {
@@ -106,7 +110,8 @@ fn read_moving(
         };
         for (_, module) in parsers.python(&source, &path).imports {
             let (target, _) = path_of(&module, imported);
-            moving.imports(&path, python_files(&resolved(tree, &target)));
+            let at = resolved(tree, &target);
+            moving.imports(&path, python_files(&at), landing_of(&at, places, units));
         }
     }
     Ok(())

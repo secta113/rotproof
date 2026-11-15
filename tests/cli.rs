@@ -2581,7 +2581,7 @@ fn code_in_a_path_that_is_moving_is_kept_out_of_the_checks_of_the_layers_and_the
     );
     // The code that is moving is named for what to move first, and by no finding
     assert!(
-        !stdout(&out).contains("legacy/order.py:"),
+        !stdout(&out).contains("legacy/order.py:1"),
         "{}",
         stdout(&out)
     );
@@ -2630,16 +2630,21 @@ fn check_counts_the_code_that_is_moving_and_names_the_files_to_move_first_and_fa
     moving("\"legacy\"");
     assert_eq!(
         said(),
-        "moving: 5 files are not in a layer yet, and none is checked. Move these next, which import no other file \
-         still moving:\n  legacy/a.py, legacy/b.py (they import each other: move them together)\n  legacy/money.py"
+        "moving: 5 files are not in a layer yet, and none is checked. Move these next (they import no other file \
+         still moving), each with the layers it could go in:\n  legacy/a.py, legacy/b.py import each other, so \
+         move them together:\n    legacy/a.py: any layer\n    legacy/b.py: any layer\n  legacy/money.py: any layer"
     );
-    // The count falls when a file is moved, and what waited for it is next
+    // The count falls when a file is moved, and what waited for it is next, with the layers that pass for its import
+    // of the layer it went to
     fs::remove_file(r.join("legacy/money.py")).unwrap();
     write_file(r, "domain/money.py", "import os\n");
+    write_file(r, "legacy/order.py", "from domain import money\n");
     assert_eq!(
         said(),
-        "moving: 4 files are not in a layer yet, and none is checked. Move these next, which import no other file \
-         still moving:\n  legacy/a.py, legacy/b.py (they import each other: move them together)\n  legacy/order.py"
+        "moving: 4 files are not in a layer yet, and none is checked. Move these next (they import no other file \
+         still moving), each with the layers it could go in:\n  legacy/a.py, legacy/b.py import each other, so \
+         move them together:\n    legacy/a.py: any layer\n    legacy/b.py: any layer\n  legacy/order.py: domain, \
+         protocol.outbound, application, infrastructure.outbound, composition"
     );
     // More than the next few are counted, not named
     for i in 0..6 {

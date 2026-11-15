@@ -952,13 +952,15 @@ it.
 ### The code that is moving
 
 While `moving` lists a path, `rotproof check` prints, on every run and apart from the findings and the warnings,
-what is left to move and which files to move next, and fails nothing for it. No date is set: the count falls only when
-a file is moved, and a path is taken out of `moving` once its code is.
+what is left to move and which files to move next with the layers each could go in, and fails nothing for it. No date
+is set: the count falls only when a file is moved, and a path is taken out of `moving` once its code is.
 
 ```
-moving: 5 files are not in a layer yet, and none is checked. Move these next, which import no other file still moving:
-  legacy/a.py, legacy/b.py (they import each other: move them together)
-  legacy/money.py
+moving: 5 files are not in a layer yet, and none is checked. Move these next (they import no other file still moving), each with the layers it could go in:
+  legacy/a.py, legacy/b.py import each other, so move them together:
+    legacy/a.py: any layer
+    legacy/b.py: domain, protocol.outbound, application, infrastructure.outbound, composition
+  legacy/money.py: any layer
   and 2 more that import no other file still moving
 ```
 
@@ -967,14 +969,25 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next, wh
   directories, as everywhere. A project that lists no path hears nothing; one whose listed paths hold no code says to
   take them out.
 - **The order is the import graph's, from its leaves.** An import of a file that is moving too (a module or a package
-  of Python; in TypeScript, the file an import resolves to as it does for the files in a layer) is a wait: the file goes into a layer after what it
-  imports. The files named are those that wait for no file still moving, in the byte order of their paths: the first
-  five are named and the rest counted. An import of a file in a layer, of the standard library, of a package outside
-  the project or of a file that is not listed is no wait, and an import that cannot be resolved is not said: no
-  check reads this code. A file that cannot be read, or has a syntax error, is counted and leaves out what it could
-  not give.
-- **Files that import each other are one group,** named together on one line: neither can go first, so they are moved
-  together. A group that imports a file outside it waits for that file.
+  of Python; in TypeScript, the file an import resolves to as it does for the files in a layer) is a wait: the file
+  goes into a layer after what it imports. The files named are those that wait for no file still moving, in the byte
+  order of their paths: the first five are named and the rest counted. An import of a file in a layer, of the standard
+  library, of a package outside the project or of a file that is not listed is no wait, and an import that cannot be
+  resolved is not said: no check reads this code. A file that cannot be read, or has a syntax error, is counted and
+  leaves out what it could not give.
+- **Files that import each other are one group,** named together: neither can go first, so they are moved together.
+  A group that imports a file outside it waits for that file.
+- **The layers a file could go in are the places where the direction check would pass it,** innermost first: every
+  layer, and every level of a layer that has levels (such a layer holds only its levels), of the unit whose directory
+  holds the file, or of every unit when none does. A place passes when each import the file makes of a layer, as an
+  import from that place, and each import of the file by a file in a layer or by an entry file, as an import of that
+  place, is allowed by the table and by the rules between units. `any layer` says that every place passes, as for a
+  file that imports nothing of a layer and that no layer imports; none passing is said as it is. A name says its unit
+  when the project declares units (`domain of unit billing`). Only the places that are there are offered, and a file's
+  imports of the other files that are moving are not counted: where those go is not known yet. Which of the layers
+  that pass is the one is decided by what the code is for, and Rotproof never says it: that a file belongs to `domain`
+  or to `application` is for the person who moves it. Nor does it say that a file that does I/O belongs in
+  `infrastructure`: it names no module that does.
 - **In Rust the files are counted and no order is given:** a layer is a crate, and what a crate imports is the
   dependencies of its manifest, which are no files' to order.
 

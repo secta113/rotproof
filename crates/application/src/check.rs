@@ -13,12 +13,13 @@ use domain::approvals::{over_limit, shown, sort, stale};
 use domain::declaration::Declared;
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
+use domain::moving::Candidates;
 use domain::project::MAP_HEADING;
 use domain::schema::Time;
 use domain::suppressions::WEAKENS_HEADING;
 use domain::upgrade::guide_command;
 use domain::version::VERSION;
-use protocol::inbound::{Finding, LinkedTodo, Moving, Report, Warning};
+use protocol::inbound::{Finding, LinkedTodo, Moving, MovingFile, Report, Warning};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -66,7 +67,22 @@ fn code(
     report.moving = direction.moving.map(|order| Moving {
         total: order.total,
         ordered: order.ordered,
-        next: order.next,
+        next: order
+            .next
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .map(|file| MovingFile {
+                        path: file.path,
+                        candidates: match file.candidates {
+                            Candidates::Any => None,
+                            Candidates::Only(places) => Some(places),
+                        },
+                    })
+                    .collect()
+            })
+            .collect(),
         more: order.more,
     });
     let listed = crate::readers::problems(tree, declared, &direction.reads);

@@ -8,28 +8,43 @@ use std::io;
 use crate::tree::{code_files, exactly};
 use domain::code::is_source;
 use domain::declaration::Declared;
-use domain::layers::{Language, Layout};
+use domain::direction::Landing;
+use domain::layers::{Language, Layout, Place};
 use domain::moving::{File, Order, order};
 use domain::paths::{file_name, join, parent};
 use domain::rust::is_source as is_rust;
+use domain::units::Unit;
 
-/// The files of the paths `moving` lists, and the imports among them.
+/// What is read of one file that is moving.
 #[derive(Debug, Default)]
-pub(super) struct Moving {
-    /// Whether the declaration lists a path at all: nothing is said of a project that lists none
-    listed: bool,
-    /// What the files import among themselves, by path: every code file in the paths listed
-    needs: BTreeMap<String, BTreeSet<String>>,
+struct Read<'a> {
+    /// The files that are moving that it imports
+    needs: BTreeSet<String>,
+    /// Where its other imports land
+    landings: Vec<Landing<'a>>,
+    /// The places of the files that import it that are in a layer, or are an entry file, by their unit and name: a
+    /// place is named so, not held, as the file that is read is no longer than the loop that reads it
+    readers: BTreeSet<(String, String)>,
 }
 
-impl Moving {
+/// The files of the paths `moving` lists, the imports among them, and what each imports of the layers and the layers
+/// import of it.
+#[derive(Debug, Default)]
+pub(super) struct Moving<'a> {
+    /// Whether the declaration lists a path at all: nothing is said of a project that lists none
+    listed: bool,
+    /// Every code file in the paths listed, by path
+    files: BTreeMap<String, Read<'a>>,
+}
+
+impl<'a> Moving<'a> {
     /// The code files of the paths `declared` lists in `moving` that are there, as the language of `layout` reads them.
     /// A path that is not there, or holds or sits in a layer, is the structure check's to say.
     pub(super) fn list(
         tree: &dyn protocol::outbound::Tree,
         layout: &Layout,
         declared: &Declared,
-    ) -> io::Result<Moving> {
+    ) -> io::Result<Moving<'a>> {
         let mut moving = Moving {
             listed: !declared.declaration.moving.is_empty(),
             ..Moving::default()
@@ -48,10 +63,10 @@ impl Moving {
             };
             if is_dir {
                 for file in code_files(tree, &path, is_code)? {
-                    moving.needs.insert(file, BTreeSet::new());
+                    moving.files.insert(file, Read::default());
                 }
             } else if is_code(file_name(&path)) {
-                moving.needs.insert(path, BTreeSet::new());
+                moving.files.insert(path, Read::default());
             }
         }
         Ok(moving)
@@ -59,43 +74,90 @@ impl Moving {
 
     /// The files, in the byte order of their paths.
     pub(super) fn files(&self) -> Vec<String> {
-        self.needs.keys().cloned().collect()
+        self.files.keys().cloned().collect()
     }
 
-    /// Note that the file `from` imports a file that is moving, the first of `candidates` that is: the files a module
-    /// at the place an import lands can be, the most specific first. An import of itself is none.
-    pub(super) fn imports(&mut self, from: &str, candidates: impl IntoIterator<Item = String>) {
-        let Some(to) = candidates
+    /// The file that is moving among `candidates`, the first that is: the files a module at the place an import lands
+    /// can be, the most specific first.
+    fn find(&self, candidates: impl IntoIterator<Item = String>) -> Option<String> {
+        candidates
             .into_iter()
-            .find(|candidate| self.needs.contains_key(candidate))
-        else {
+            .find(|candidate| self.files.contains_key(candidate))
+    }
+
+    /// Note an import by the file `from`, which is moving, of what `candidates` name and `landing` is where it lands: a
+    /// file that is moving (not itself), or else where it lands, when it lands anywhere.
+    pub(super) fn imports(
+        &mut self,
+        from: &str,
+        candidates: Vec<String>,
+        landing: Option<Landing<'a>>,
+    ) {
+        let imported = self.find(candidates);
+        let Some(read) = self.files.get_mut(from) else {
             return;
         };
-        if to != from
-            && let Some(needs) = self.needs.get_mut(from)
+        match (imported, landing) {
+            (Some(to), _) if to != from => {
+                read.needs.insert(to);
+            }
+            (Some(_), _) => {}
+            (None, Some(landing)) => read.landings.push(landing),
+            (None, None) => {}
+        }
+    }
+
+    /// Note an import by a file of the place `reader`, a layer's or an entry file's, of what `candidates` name, when it
+    /// is a file that is moving. `candidates` is asked for only when there is such a file to find.
+    pub(super) fn read_by(&mut self, reader: &Place, candidates: impl FnOnce() -> Vec<String>) {
+        if self.files.is_empty() {
+            return;
+        }
+        if let Some(to) = self.find(candidates())
+            && let Some(read) = self.files.get_mut(&to)
         {
-            needs.insert(to);
+            read.readers
+                .insert((reader.unit.name.clone(), reader.name.clone()));
         }
     }
 
     /// What to say of the files: `None` when the declaration lists no path. `read` is whether their imports were read:
-    /// where they were not, they are counted and not put in an order.
-    pub(super) fn order(&self, read: bool) -> Option<Order> {
+    /// where they were not, they are counted and not put in an order. `places` and `entries` are what the readers of a
+    /// file are found among, and what it could be moved into.
+    pub(super) fn order(
+        &self,
+        read: bool,
+        places: &[&'a Place],
+        entries: &'a [Place],
+        units: &[Unit],
+    ) -> Option<Order> {
         if !self.listed {
             return None;
         }
         if !read {
-            return Some(Order::unordered(self.needs.len()));
+            return Some(Order::unordered(self.files.len()));
         }
         let files: Vec<File> = self
-            .needs
+            .files
             .iter()
-            .map(|(path, needs)| File {
+            .map(|(path, read)| File {
                 path: path.clone(),
-                needs: needs.clone(),
+                needs: read.needs.clone(),
+                landings: read.landings.clone(),
+                readers: read
+                    .readers
+                    .iter()
+                    .filter_map(|(unit, name)| {
+                        places
+                            .iter()
+                            .copied()
+                            .chain(entries)
+                            .find(|place| &place.unit.name == unit && &place.name == name)
+                    })
+                    .collect(),
             })
             .collect();
-        Some(order(&files))
+        Some(order(&files, places, units))
     }
 }
 

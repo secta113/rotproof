@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use protocol::inbound::{Commands, Initialized, LinkedTodo, Made, Moving, Names, Warning};
+use protocol::inbound::{
+    Commands, Initialized, LinkedTodo, Made, Moving, MovingFile, Names, Warning,
+};
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -62,8 +64,8 @@ comment that holds TODO(#123): what is left (\"number\") or TODO(ABC-123): what 
 number or key of the issue that tracks the work, is not a finding: every one is printed on every run under `linked \
 TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. With \
 paths in moving in the declaration (the project's code that is not in a layer yet, which no check reads), prints on \
-every run how many files are left and which to move next, those that import no other file still moving first, and \
-fails nothing for it. Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+every run how many files are left and which to move next, those that import no other file still moving first, each \
+with the layers it could go in (where the direction check would pass it), and fails nothing for it. Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
 cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
@@ -554,16 +556,24 @@ fn moving_lines(moving: &Moving, declaration: &str) -> Vec<String> {
         )];
     }
     let mut lines = vec![format!(
-        "{head}. Move these next, which import no other file still moving:"
+        "{head}. Move these next (they import no other file still moving), each with the layers it could go in:"
     )];
     for group in &moving.next {
-        lines.push(match group.as_slice() {
-            [file] => format!("  {file}"),
-            files => format!(
-                "  {} (they import each other: move them together)",
-                files.join(", ")
-            ),
-        });
+        match group.as_slice() {
+            [file] => lines.push(format!("  {}", moving_file(file))),
+            files => {
+                let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+                lines.push(format!(
+                    "  {} import each other, so move them together:",
+                    paths.join(", ")
+                ));
+                lines.extend(
+                    files
+                        .iter()
+                        .map(|file| format!("    {}", moving_file(file))),
+                );
+            }
+        }
     }
     if moving.more > 0 {
         lines.push(format!(
@@ -572,6 +582,19 @@ fn moving_lines(moving: &Moving, declaration: &str) -> Vec<String> {
         ));
     }
     lines
+}
+
+/// A file to move with the layers it could go in: every one, or those named, or none.
+fn moving_file(file: &MovingFile) -> String {
+    let layers = match &file.candidates {
+        None => "any layer".to_string(),
+        Some(places) if places.is_empty() => {
+            "no layer passes the direction check, for what it imports and what imports it"
+                .to_string()
+        }
+        Some(places) => places.join(", "),
+    };
+    format!("{}: {layers}", file.path)
 }
 
 /// Print the comments tied to an issue under their heading, apart from the warnings and the findings.

@@ -104,6 +104,16 @@ pub struct LinkedTodo {
     pub reference: String,
 }
 
+/// A file to move next, and the layers it could go in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MovingFile {
+    /// From the root, with `/`
+    pub path: String,
+    /// The layers and levels in which the direction check would pass it, innermost first, as a finding names a place;
+    /// none when empty. `None`: every one there is, as nothing it imports and nothing that imports it says against any
+    pub candidates: Option<Vec<String>>,
+}
+
 /// What `rotproof check` says of the code in the paths the declaration lists in `moving`, which no check judges: how
 /// much there is, and which files to move first. It is no finding, and fails nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,7 +125,7 @@ pub struct Moving {
     pub ordered: bool,
     /// The files to move next, in groups: a file that imports no other file still moving alone, or the files that
     /// import each other, which are moved together
-    pub next: Vec<Vec<String>>,
+    pub next: Vec<Vec<MovingFile>>,
     /// How many files wait for no other file still moving and are not named in `next`
     pub more: usize,
 }

@@ -80,7 +80,12 @@ pub fn problems(
         Language::Rust => rust::rust(tree, parsers, layout, &places, &entries, &declared.units),
     }?;
     // The imports of the files of a Rust project are its crates' dependencies, which are no files'
-    direction.moving = moving.order(layout.language != Language::Rust);
+    direction.moving = moving.order(
+        layout.language != Language::Rust,
+        &places,
+        &entries,
+        &declared.units,
+    );
     // A cycle of shared units is no import of a file but the shape of them all, so it is a problem, which no approval
     // covers, and not a forbidden import
     direction.problems.extend(cycles(&direction.edges));
@@ -297,7 +302,7 @@ import os
         order
             .next
             .iter()
-            .map(|group| group.iter().map(String::as_str).collect())
+            .map(|group| group.iter().map(|next| next.path.as_str()).collect())
             .collect()
     }
 
@@ -430,5 +435,213 @@ import os
             &[("legacy/a.py", "")],
         );
         assert_eq!(order, None);
+    }
+
+    /// The layers of a Python project with no screens, each an empty package: what a file that is moving can be put in.
+    const LAYERS: &[(&str, &str)] = &[
+        ("composition/__init__.py", ""),
+        ("infrastructure/__init__.py", ""),
+        ("infrastructure/inbound/__init__.py", ""),
+        ("infrastructure/outbound/__init__.py", ""),
+        ("application/__init__.py", ""),
+        ("protocol/__init__.py", ""),
+        ("protocol/inbound/__init__.py", ""),
+        ("protocol/outbound/__init__.py", ""),
+        ("domain/__init__.py", ""),
+    ];
+
+    /// The layers each file named by the order of a Python project that lists `legacy` could go in, by path. `None`
+    /// for every layer there is, and the names, innermost first, otherwise.
+    fn candidates(files: &[(&str, &str)]) -> Vec<(String, Option<Vec<String>>)> {
+        let mut all = LAYERS.to_vec();
+        all.extend_from_slice(files);
+        let (order, _) = moving(
+            "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\"]\n",
+            &all,
+        );
+        order
+            .unwrap()
+            .next
+            .into_iter()
+            .flatten()
+            .map(|file| {
+                let places = match file.candidates {
+                    domain::moving::Candidates::Any => None,
+                    domain::moving::Candidates::Only(places) => Some(places),
+                };
+                (file.path, places)
+            })
+            .collect()
+    }
+
+    fn only(path: &str, places: &[&str]) -> (String, Option<Vec<String>>) {
+        (
+            path.to_string(),
+            Some(places.iter().map(|place| place.to_string()).collect()),
+        )
+    }
+
+    #[test]
+    fn the_layers_a_file_could_go_in_are_those_that_pass_for_what_it_imports_of_the_layers() {
+        let found = candidates(&[
+            ("legacy/leaf.py", "import os\nimport requests\n"),
+            (
+                "legacy/price.py",
+                "from domain import money\nfrom legacy import leaf\n",
+            ),
+            (
+                "legacy/store.py",
+                "from infrastructure.outbound import db\n",
+            ),
+            ("domain/money.py", ""),
+            ("infrastructure/outbound/db.py", ""),
+        ]);
+        // `price` waits for `leaf`, and is not named: the order is the graph's, the layers are the rules'
+        assert_eq!(
+            found,
+            [
+                ("legacy/leaf.py".to_string(), None),
+                only(
+                    "legacy/store.py",
+                    &["infrastructure.outbound", "composition"]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_layers_a_file_could_go_in_are_those_that_the_layers_importing_it_may_import() {
+        let found = candidates(&[
+            ("legacy/price.py", "from domain import money\n"),
+            ("legacy/rule.py", ""),
+            // `domain` reads `price`, and `application` reads `rule`
+            ("domain/money.py", ""),
+            ("domain/uses.py", "from legacy import price\n"),
+            ("application/use.py", "from legacy import rule\n"),
+            // The entry file is no layer, and a place of its own that may import `composition` alone
+            ("__main__.py", "from legacy import rule\n"),
+        ]);
+        assert_eq!(
+            found,
+            [
+                only("legacy/price.py", &["domain"]),
+                // Read by `application` and by the entry file: no layer is imported by both
+                only("legacy/rule.py", &[]),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_a_file_imports_of_code_outside_the_layers_that_is_not_moving_passes_every_layer() {
+        let found = candidates(&[
+            ("legacy/a.py", "import helper\nimport legacy.b\n"),
+            ("legacy/b.py", ""),
+            ("helper.py", ""),
+        ]);
+        assert_eq!(found, [("legacy/b.py".to_string(), None)]);
+    }
+
+    #[test]
+    fn a_file_in_a_unit_could_go_in_a_layer_of_its_unit_by_the_rules_between_units() {
+        let (order, problems) = moving(
+            "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"billing/legacy\"]\n\
+             [[unit]]\nname = \"core\"\npath = \"core\"\nshared = true\n\
+             [[unit]]\nname = \"billing\"\npath = \"billing\"\n",
+            &[
+                ("core/domain/__init__.py", ""),
+                ("core/domain/money.py", ""),
+                ("core/application/__init__.py", ""),
+                ("core/application/pay.py", ""),
+                ("billing/domain/__init__.py", ""),
+                ("billing/application/__init__.py", ""),
+                ("billing/infrastructure/__init__.py", ""),
+                ("billing/infrastructure/inbound/__init__.py", ""),
+                ("billing/infrastructure/outbound/__init__.py", ""),
+                // A shared unit's `domain` is read as its own is, by the table
+                ("billing/legacy/price.py", "from core.domain import money\n"),
+                // Another unit's `application` is read by no `application`, and the table lets no other layer in
+                (
+                    "billing/legacy/use.py",
+                    "from core.application import pay\n",
+                ),
+            ],
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let found: Vec<_> = order
+            .unwrap()
+            .next
+            .into_iter()
+            .flatten()
+            .map(|file| (file.path, file.candidates))
+            .collect();
+        let names = |places: &[&str]| {
+            domain::moving::Candidates::Only(places.iter().map(|place| place.to_string()).collect())
+        };
+        assert_eq!(
+            found,
+            [
+                (
+                    "billing/legacy/price.py".to_string(),
+                    names(&[
+                        "domain of unit billing",
+                        "application of unit billing",
+                        "infrastructure.outbound of unit billing",
+                    ])
+                ),
+                ("billing/legacy/use.py".to_string(), names(&[])),
+            ]
+        );
+    }
+
+    #[test]
+    fn typescript_files_are_given_the_layers_by_what_they_import_and_by_who_imports_them() {
+        let (order, problems) = moving(
+            "stack = \"typescript\"\nareas = []\nui = \"none\"\nmoving = [\"src/legacy\"]\n",
+            &[
+                ("src/composition/index.ts", ""),
+                ("src/infrastructure/index.ts", ""),
+                ("src/infrastructure/inbound/index.ts", ""),
+                ("src/infrastructure/outbound/index.ts", ""),
+                ("src/application/index.ts", ""),
+                ("src/protocol/index.ts", ""),
+                ("src/protocol/inbound/index.ts", ""),
+                ("src/protocol/outbound/index.ts", ""),
+                ("src/domain/index.ts", ""),
+                (
+                    "src/legacy/store.ts",
+                    "import { db } from \"../infrastructure/outbound\";\n",
+                ),
+                (
+                    "src/legacy/price.ts",
+                    "import { money } from \"../domain\";\n",
+                ),
+                // `domain` reads `price`
+                (
+                    "src/domain/uses.ts",
+                    "import { price } from \"../legacy/price\";\n",
+                ),
+            ],
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let found: Vec<_> = order
+            .unwrap()
+            .next
+            .into_iter()
+            .flatten()
+            .map(|file| (file.path, file.candidates))
+            .collect();
+        let names = |places: &[&str]| {
+            domain::moving::Candidates::Only(places.iter().map(|place| place.to_string()).collect())
+        };
+        assert_eq!(
+            found,
+            [
+                ("src/legacy/price.ts".to_string(), names(&["domain"])),
+                (
+                    "src/legacy/store.ts".to_string(),
+                    names(&["infrastructure.outbound", "composition"])
+                ),
+            ]
+        );
     }
 }

@@ -21,14 +21,14 @@ use protocol::outbound::Tree;
 /// through the name of a unit's package resolves through its `package.json`, as `exports` says; one of a subpath the
 /// package does not export is a problem, since where it lands is not known, and so is one it exports as a path where no
 /// file is (`"./*": "./src/*/index.ts"` takes `domain/invoice.ts` to `src/domain/invoice.ts/index.ts`).
-pub(super) fn typescript(
+pub(super) fn typescript<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     layout: &Layout,
-    places: &[&Place],
-    entries: &[Place],
-    units: &[Unit],
-    moving: &mut Moving,
+    places: &[&'a Place],
+    entries: &'a [Place],
+    units: &'a [Unit],
+    moving: &mut Moving<'a>,
 ) -> io::Result<Direction> {
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
@@ -90,6 +90,7 @@ pub(super) fn typescript(
                     leads
                 }
             };
+            moving.read_by(from, || module_candidates(&target));
             let Some(to) = landing_of(&target, places, units) else {
                 continue;
             };
@@ -114,7 +115,7 @@ pub(super) fn typescript(
             }
         }
     }
-    read_moving(tree, parsers, &aliases, moving)?;
+    read_moving(tree, parsers, &aliases, places, units, moving)?;
     Ok(Direction {
         problems: found,
         forbidden,
@@ -125,14 +126,16 @@ pub(super) fn typescript(
     })
 }
 
-/// Which of the files that are moving import which: every import of one that lands where another is, as it is
-/// resolved for the files in the layers. What it imports elsewhere, an import that cannot be resolved, and a file that
-/// cannot be read, are no finding: the code that is moving is not checked.
-fn read_moving(
+/// What each of the files that are moving imports, resolved as it is for the files in the layers: a file that is
+/// moving too, or else where it lands in the layers. An import that cannot be resolved, and a file that cannot be read,
+/// are no finding: the code that is moving is not checked.
+fn read_moving<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     aliases: &Aliases,
-    moving: &mut Moving,
+    places: &[&'a Place],
+    units: &'a [Unit],
+    moving: &mut Moving<'a>,
 ) -> io::Result<()> {
     for path in moving.files() {
         let Some(source) = read_code(tree, &path, "imports", &mut Vec::new())? else {
@@ -140,7 +143,12 @@ fn read_moving(
         };
         for (_, import) in parsers.typescript(&source, &path).imports {
             if let Reach::At(Some(target)) = lands(tree, aliases, &path, &import.specifier) {
-                moving.imports(&path, module_candidates(&resolved(tree, &target)));
+                let at = resolved(tree, &target);
+                moving.imports(
+                    &path,
+                    module_candidates(&at),
+                    landing_of(&at, places, units),
+                );
             }
         }
     }
