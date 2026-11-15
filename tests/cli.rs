@@ -3673,7 +3673,7 @@ fn an_approved_import_passes_and_is_printed_and_a_stale_approval_fails() {
     let (code, said) = check();
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains(
-        "approved by a person in .config/rotproof-approved.toml (1):\n  infrastructure.db in domain/model.py: \
+        "approved in .config/rotproof-approved.toml (1):\n  infrastructure.db in domain/model.py: \
          the framework loads it (someone, 2026-10-06T09:00:00+09:00)\n"
     ), "{said}");
     assert!(!said.contains("domain/model.py:1:"), "{said}");
@@ -3731,31 +3731,93 @@ fn an_approved_import_passes_and_is_printed_and_a_stale_approval_fails() {
     assert!(said.contains("every approval matches a forbidden import:\n  .config/rotproof-approved.toml: missing field"), "{said}");
 }
 
+/// `rotproof approve ...` in `root`, with git's configuration as `config` says it (the text of a global config file, or
+/// none): neither the machine's own nor the user's decides who an approval is signed by.
+fn approve_with_git(root: &Path, config: Option<&str>, args: &[&str]) -> Output {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("gitconfig");
+    if let Some(text) = config {
+        fs::write(&global, text).unwrap();
+    }
+    Command::new(env!("CARGO_BIN_EXE_rotproof"))
+        .args(["--root", &root_arg(root), "approve"])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", &global)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .expect("the binary runs")
+}
+
 #[test]
-fn approve_refuses_without_a_terminal_and_prune_removes_only_what_matches_nothing() {
+fn approve_needs_a_reason_and_asks_nothing_and_prune_removes_only_what_matches_nothing() {
     let root = clean_repo();
     let r = root.path();
     fs::write(r.join("domain/model.py"), "import infrastructure.db\n").unwrap();
     let path = r.join(".config/rotproof-approved.toml");
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let args = ["domain/model.py", "infrastructure.db"];
+    let with_reason = |reason: &'static str| [args[0], args[1], "--reason", reason];
+    let said = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
 
-    // The test's stdin is no terminal, as an agent's shell has none: nothing is asked, nothing written
-    let out = run(&[
-        "--root",
-        &root_arg(r),
-        "approve",
-        "domain/model.py",
-        "infrastructure.db",
-    ]);
+    // The reason is required: no reason, and an empty one, write nothing and ask nothing
+    let out = approve_with_git(r, named, &args);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("--reason"), "{}", said(&out));
+    let out = approve_with_git(r, named, &with_reason("  "));
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("--reason is empty"), "{}", said(&out));
+    // The file and the import are both needed, unless pruning, and a reason is no part of pruning
+    let out = approve_with_git(r, named, &["domain/model.py", "--reason", "why"]);
+    assert_eq!(out.status.code(), Some(2));
+    let out = approve_with_git(r, named, &["--prune", "--reason", "why"]);
+    assert_eq!(out.status.code(), Some(2));
+    // Only what the check forbids is approved
+    let out = approve_with_git(
+        r,
+        named,
+        &["domain/model.py", "application", "--reason", "why"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("no forbidden import"), "{}", said(&out));
+    // The approval is signed with git's user.name, and without one it is not written
+    let out = approve_with_git(r, None, &with_reason("the ORM's session"));
     assert_eq!(out.status.code(), Some(2));
     assert!(
-        String::from_utf8_lossy(&out.stderr).contains("stdin is not a terminal"),
+        said(&out).contains("user.name is not set"),
         "{}",
-        String::from_utf8_lossy(&out.stderr)
+        said(&out)
     );
     assert!(!path.exists());
-    // The file and the import are both needed, unless pruning
-    let out = run(&["--root", &root_arg(r), "approve", "domain/model.py"]);
+
+    // Given a reason and a name it asks nothing, though stdin is no terminal, and the entry is what was given
+    let out = approve_with_git(
+        r,
+        named,
+        &with_reason("the \"ORM\" builds its session here"),
+    );
+    assert_eq!(out.status.code(), Some(0), "{}{}", stdout(&out), said(&out));
+    assert!(
+        stdout(&out).contains("wrote .config/rotproof-approved.toml"),
+        "{}",
+        stdout(&out)
+    );
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.contains("by = \"Someone Else\""), "{written}");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "approved in .config/rotproof-approved.toml (1):\n  infrastructure.db in domain/model.py: the \"ORM\" \
+             builds its session here (Someone Else, "
+        ),
+        "{}",
+        stdout(&out)
+    );
+    // Once: it is approved already
+    let out = approve_with_git(r, named, &with_reason("again"));
     assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("approved already"), "{}", said(&out));
+    fs::remove_file(&path).unwrap();
 
     // Nothing to prune without a file
     let out = run(&["--root", &root_arg(r), "approve", "--prune"]);

@@ -48,7 +48,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/infrastructure/src/inbound/` | Content |
 |---|---|
 | `mod.rs` | The level's role |
-| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a person on the terminal: an import kept), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here: `rotproof check` prints the approvals, the list of comments tied to an issue (`linked TODO`, whose lines a CI step reads, so their form is kept: the specification says it), the warnings, then the findings. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0, says in one line that they were removed and exits 1, never 2 (no command of that name is left) |
+| `cli.rs` | The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (an import kept for a reason it is given, or the stale approvals removed), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from one to the next. Each command is a call of `protocol::inbound::Commands`; what it prints and how it exits are decided here: `rotproof check` prints the approvals, the list of comments tied to an issue (`linked TODO`, whose lines a CI step reads, so their form is kept: the specification says it), the warnings, then the findings. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0, says in one line that they were removed and exits 1, never 2 (no command of that name is left) |
 
 | Module of `crates/infrastructure/src/outbound/` | Content |
 |---|---|
@@ -82,7 +82,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/domain/src/` | Content |
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
-| `approvals.rs` | The approvals file, `.config/rotproof-approved.toml`: the imports the layer table forbids that a person approved, each keyed by its file and what it imports, matched against what the direction check found, and the file with an entry added or removed |
+| `approvals.rs` | The approvals file, `.config/rotproof-approved.toml`: the imports the layer table forbids that were approved with a reason, each keyed by its file and what it imports, matched against what the direction check found, and the file with an entry added or removed |
 | `bundle.rs` | The part of `docs/` Rotproof keeps, as one OKF bundle: the knowledge documents sorted out once they are read, the files Rotproof generates (the index files and the rules), and the tags the knowledge documents use |
 | `schema.rs` | The frontmatter of a knowledge document and of a guide |
 | `follows.rs` | What a knowledge document follows: the forms of a key of `follows` (a file, a directory of code, a definition in a file of a language Rotproof reads, a table of a `.toml` file, read with `toml_edit`), the language of a file, the hash a key is pinned at and the hash of a directory, what fails when one changed or is gone, the document `rotproof follows` names, and a hash replaced or a key added in the frontmatter |
@@ -125,7 +125,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/application/src/` | Content |
 |---|---|
 | `lib.rs` | The layer's role, and its modules |
-| `approvals.rs` | Reading the approvals file from the tree, and `rotproof approve`: an entry added for a forbidden import a person approved, and the entries that match nothing removed (`--prune`), the file written back as it was written |
+| `approvals.rs` | Reading the approvals file from the tree, and `rotproof approve`: an entry added for a forbidden import with the reason it was given, and the entries that match nothing removed (`--prune`), the file written back as it was written |
 | `bundle.rs` | Reading `docs/knowledge/` from the tree |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and what each found printed under its heading; the comments tied to an issue (`todo_link`) go into the report apart from the findings |
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |

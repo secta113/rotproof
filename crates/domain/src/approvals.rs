@@ -1,4 +1,4 @@
-//! The approvals: imports the layer table forbids that a person approved, kept in one file,
+//! The approvals: imports the layer table forbids that were approved with a reason, kept in one file,
 //! `.config/rotproof-approved.toml`.
 //!
 //! - **An entry is keyed by the file that imports and what it imports,** never by the line, so moving an import does
@@ -7,7 +7,7 @@
 //! - **An entry that matches no forbidden import fails.** The import moved away, was fixed, or became allowed: the
 //!   approval goes with it, through `rotproof approve --prune`, instead of waiting for the next import to cover.
 //!
-//! Only `rotproof approve`, on a terminal, adds an entry; Claude Code is denied editing the file. The rules here take
+//! `rotproof approve` adds an entry, and asks for a reason; Claude Code is denied editing the file. The rules here take
 //! the file's text and the forbidden imports `application` found, and give back what passes and what fails.
 
 use std::collections::BTreeSet;
@@ -23,10 +23,10 @@ pub const APPROVALS: &str = ".config/rotproof-approved.toml";
 
 /// What the approvals file says at its top, when `rotproof approve` starts it.
 const HEADER: &str = "\
-# Imports the layer table forbids, kept with a person's approval. `rotproof check` passes each one and prints it on
-# every run, and fails on an entry that matches no forbidden import.
-# Only `rotproof approve <file> <import>`, on a terminal, adds an entry; `rotproof approve --prune` removes the entries
-# that match nothing. Claude Code is denied editing this file.
+# Imports the layer table forbids, kept with a reason. `rotproof check` passes each one and prints it on every run, and
+# fails on an entry that matches no forbidden import.
+# `rotproof approve <file> <import> --reason \"<why>\"` adds an entry, when the user asked for the exception;
+# `rotproof approve --prune` removes the entries that match nothing. Claude Code is denied editing this file.
 ";
 
 /// An import the project keeps for good.

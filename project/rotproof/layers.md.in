@@ -16,10 +16,10 @@
   a port only when it is called, with only the methods called.
 - **A part goes in the layer whose concept it speaks.** No layer holds general-purpose parts: a general procedure comes
   from the standard library or an external one, and wanting to write one's own is a sign of a concept not named yet.
-- **An import the table forbids passes only when a person approves it.** Fix a forbidden import; when the project
-  means to keep it (a framework forces it, a fix cannot wait for the refactoring), ask a person to run
-  `rotproof approve <file> <import>` on a terminal, which adds it to `.config/rotproof-approved.toml` with the reason.
-  An agent cannot approve: the command refuses without a terminal, and Claude Code is denied editing that file.
+- **An import the table forbids passes only as an approval, and an approval is asked for by the user.** Fix a
+  forbidden import. Run `rotproof approve <file> <import> --reason "<why>"` only when the user asked you to keep it
+  (a framework forces it, a fix cannot wait for the refactoring), and say so in your report, with the reason: it adds
+  the import to `.config/rotproof-approved.toml`, signed with git's `user.name`, and asks for nothing else.
   `rotproof check` prints every approval on every run, and fails on one that matches no forbidden import any more:
-  after fixing an approved import, run `rotproof approve --prune`, which removes such entries and needs no terminal.
+  after fixing an approved import, run `rotproof approve --prune`, which removes such entries.
 {units}{rules}{ui}

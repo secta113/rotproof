@@ -13,8 +13,8 @@ If LLM agents write the code of a repository, these are the things nobody has to
 - **A layer an agent crosses fails the build.** Every import is checked against a layer table (the onion architecture:
   `composition`, `infrastructure`, `application`, `protocol`, `domain`, and `ui` and `presentation` for screens), in
   Python, TypeScript and Rust. Code that cannot be split into the layers mixes responsibilities, so the table is also
-  how an agent is made to split it. An exception is an entry that a person approves on a terminal, which a reviewer
-  sees in the diff.
+  how an agent is made to split it. An exception is an entry in an approvals file, with the reason it was given, which a
+  reviewer sees in the diff.
 - **Each part of a monorepo keeps its own layers.** The packages of a monorepo, or the modules of a modular monolith,
   are declared as units: every import between them is checked, so a part reaches another only through the layers that
   may be reached, and a shared part that collects what no one needs shows in a list that the diff displays (see
@@ -360,7 +360,7 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   tree that differs from it fails, either way, and someone decides whether the tree or the declaration is wrong.
   `rotproof check` only reports. What writes is a command a person or an agent runs, and it says what it did. Such a
   command adds what is missing and leaves the values a person wrote as they are: a layer or a project's file that is
-  not there, a field the declaration lacks, an entry a person approved, what a named update of `rotproof init` brings
+  not there, a field the declaration lacks, an approval, what a named update of `rotproof init` brings
   (see [Upgrading Rotproof](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#upgrading-rotproof)), and the files Rotproof generates, which nobody writes by hand. A field the declaration
   lacks takes its first value from the tree, once (`areas` gets the tags the knowledge documents use, so the documents
   that kept the rules keep them); from then on a document with a tag the declaration does not list fails. An update of

@@ -112,7 +112,7 @@ pub struct Report {
     pub skipped: Option<String>,
     /// Whether the tree was checked against a stack's layers (not for `stack = "none"`)
     pub layers_checked: bool,
-    /// Every forbidden import a person approved, as printed on every run: one line per entry that approves something
+    /// Every forbidden import that was approved, as printed on every run: one line per entry that approves something
     pub approved: Vec<String>,
     /// Every comment that keeps the first marker with the reference of an issue, sorted by path and then by
     /// line: printed on every run apart from the findings and the warnings, and failing nothing. Empty unless the

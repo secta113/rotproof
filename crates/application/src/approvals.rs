@@ -1,7 +1,7 @@
 //! The approvals file, `.config/rotproof-approved.toml`, read from the tree and judged by the rules in `domain`, and
 //! `rotproof approve`: an entry added for a forbidden import, and the entries that match nothing removed.
 //!
-//! Whether a person is at a terminal is the command line's to ask; these take what the person answered.
+//! The reason and the name an entry carries are the command line's to give; these take them as they are.
 
 use std::io;
 

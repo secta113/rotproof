@@ -35,7 +35,7 @@ rotproof --root <repository> create  # list the layers it would make, writing no
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write the generated files that are out of date (docs/'s index files and the knowledge rules, and who reads the shared units)
-rotproof --root <repository> approve <file> <import>  # keep a forbidden import, asked on a terminal (see below)
+rotproof --root <repository> approve <file> <import> --reason "<why>"  # keep a forbidden import (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof guide                       # print the guide `rotproof create` writes for the stack and the UI the declaration has
@@ -196,19 +196,20 @@ code 1 is an error that is only shown. The hook input on stdin is not read.
 ## Approving a forbidden import
 
 Sometimes a project means to break the layer table: a framework forces an import, or a fix cannot wait for the
-refactoring. Such an import passes only as an entry in `.config/rotproof-approved.toml`, which a person adds on a
-terminal:
+refactoring. Such an import passes only as an entry in `.config/rotproof-approved.toml`, which `rotproof approve`
+adds, with the reason it is given:
 
 ```sh
-rotproof approve domain/model.py infrastructure.db
+rotproof approve domain/model.py infrastructure.db --reason "the ORM's session factory must be built where the model is"
 ```
 
 The file and the import are named as `rotproof check` names them: the file from the root, and the import as the check
 writes it (a Python dotted name, a TypeScript specifier, a crate's dependency). In Python, each name of
 `from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them.
-`rotproof approve` shows the forbidden import, asks why it is kept and for a `y`, signs with git's `user.name` (or a
-name it asks for when that is not set), and adds the entry (the file keeps a byte order mark and its line endings,
-CRLF on every line when one line had it, and so it does when `--prune` removes entries):
+`rotproof approve` shows the forbidden import, signs with git's `user.name`, and adds the entry (the file keeps a byte
+order mark and its line endings, CRLF on every line when one line had it, and so it does when `--prune` removes
+entries). It asks nothing, so an agent's shell can run it, but it takes no approval without `--reason` (an empty one
+fails), and it fails when `user.name` is not set, as the entry would carry no name:
 
 ```toml
 [[kept]]
@@ -218,8 +219,9 @@ reason = "the ORM's session factory must be built where the model is"
 approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
 ```
 
-- **It runs only when stdin is a terminal,** so an agent's shell cannot approve: a person does. There is no comment
-  that silences the check on the import's line: it would be the easiest thing for an agent to write.
+- **Run it only when the user asked for the exception, and say that you ran it.** The guide in `.rotproof/AGENTS.md`
+  says so. There is no comment that silences the check on the import's line: it would be the easiest thing for an
+  agent to write.
 - **Claude Code is denied editing the file.** The `.claude/settings.json` that `rotproof create` writes holds
   `"permissions": { "deny": ["Edit(/.config/rotproof-approved.toml)"] }`, which refuses Claude Code's edit tools and
   its shell's file commands and redirects (`>>`, `sed -i`) on the file, with no prompt. A person edits it in an
@@ -229,9 +231,9 @@ approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
 - **An approval follows the code.** An entry that matches no forbidden import fails: the import moved away, was
   fixed, or became allowed. `rotproof approve --prune` removes those entries. It needs no terminal, since it only
   takes approvals away and never lets anything pass that failed before.
-- **This raises the cost of an exception; it does not prevent everything.** A script that writes the file passes. The
-  point is that an exception is a deliberate act that a reviewer sees in the diff, never a side effect of fixing a
-  failure.
+- **This does not prevent an exception; it makes one visible.** Nothing stops a run of `rotproof approve` that nobody
+  asked for, or a script that writes the file. What stays is that an approval is a named line with its reason, printed
+  on every run, which fails once it matches nothing, and which a reviewer sees in the diff.
 
 ## The layers
 

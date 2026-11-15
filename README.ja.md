@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 3142e878. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 110e70f0. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -20,7 +20,7 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
 - **エージェントが層をまたぐと、ビルドが落ちます。** すべての import を層の表に照らします。表はオニオンアーキテクチャで、
   `composition`、`infrastructure`、`application`、`protocol`、`domain` と、画面のための `ui`、`presentation` です。
   Python、TypeScript、Rust を検査します。この層に分けられないコードは責務が混ざっているので、表はエージェントに
-  コードを分けさせる手段でもあります。例外は、人が端末で承認したエントリだけで、レビューする人は差分でそれを見ます。
+  コードを分けさせる手段でもあります。例外は、承認のファイルにある、理由つきのエントリだけで、レビューする人は差分でそれを見ます。
 - **モノレポの各部分が、自分の層を守ります。** モノレポのパッケージやモジュラーモノリスのモジュールをユニットとして
   宣言すると、そのあいだの import がすべて検査されます。ある部分が別の部分に届くのは、届いてよい層を通るときだけです。
   誰も必要としないものを集めてしまう共有ユニットは、差分に出る一覧で見つかります（「ユニット」を参照）。
@@ -367,7 +367,7 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
 - **宣言が正であり、Rotproof は直さない。** プロジェクトが宣言した構造が、その構造です。それと違う木は、どちら向きの
   違いでも失敗し、木と宣言のどちらが間違っているかは誰かが決めます。`rotproof check` は報告するだけです。書くのは、
   人やエージェントが実行するコマンドで、何をしたかを言います。そういうコマンドは、足りないものを足し、人が書いた値は
-  そのままにします。足すのは、無い層やプロジェクトのファイル、宣言に無い欄、人が承認したエントリ、`rotproof init` の
+  そのままにします。足すのは、無い層やプロジェクトのファイル、宣言に無い欄、承認、`rotproof init` の
   名前の付いた更新が持ち込むもの
   （[Upgrading Rotproof](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#upgrading-rotproof) を参照）、
   そして誰も手で書かない、Rotproof が生成するファイルです。宣言に無い欄は、最初の値を一度だけ木から取ります

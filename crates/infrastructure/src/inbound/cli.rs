@@ -1,10 +1,9 @@
-//! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which alone asks a
-//! person on the terminal), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help that leads from
-//! one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and how it exits are
-//! decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's
-//! Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
+//! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which keeps a
+//! forbidden import for a reason it is given), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help
+//! that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and
+//! how it exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a
+//! project's Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
 
-use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -34,7 +33,7 @@ Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotp
 .config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
 its --root is not a directory, `rotproof create` would make layers
 without --yes, `rotproof init` leaves an update of the project's files to a person,
-or `rotproof approve` is not run on a terminal or not answered y.";
+or `rotproof approve` is given no reason, or an import that is not forbidden.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -153,18 +152,18 @@ enum Command {
         #[arg(long, requires = "stack")]
         ui: Option<String>,
     },
-    /// Approve on a terminal a forbidden import, or remove the approvals that match nothing (--prune)
+    /// Keep a forbidden import for a reason (--reason), or remove the approvals that match nothing (--prune)
     ///
-    /// `rotproof approve <file> <import>` keeps an import the layer table forbids, as `rotproof check` names it: the
-    /// file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each name of
-    /// `from m import n`; a TypeScript specifier; a crate's dependency). It shows the forbidden import, asks why it is
-    /// kept and for a y, signs with git's user.name (or a name it asks for), and adds the entry to
-    /// .config/rotproof-approved.toml, which keeps a byte order mark and its line endings (CRLF on every line when one
-    /// line had it), as does --prune. It runs only when stdin is a terminal, so an agent's shell cannot approve: a
-    /// person does. `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that matches no
-    /// forbidden import, needs no terminal, and never lets anything pass that failed before. Exits 2 when stdin is not
-    /// a terminal, the import is not forbidden or is approved already, the answer is not y, or a file cannot be read
-    /// or written.
+    /// `rotproof approve <file> <import> --reason "<why>"` keeps an import the layer table forbids, as `rotproof check`
+    /// names it: the file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each
+    /// name of `from m import n`; a TypeScript specifier; a crate's dependency). It shows the forbidden import, signs
+    /// with git's user.name, and adds the entry, with the reason, to .config/rotproof-approved.toml, which keeps a byte
+    /// order mark and its line endings (CRLF on every line when one line had it), as does --prune. It asks nothing and
+    /// needs no terminal, but it takes no approval without a reason, and `rotproof check` prints every approval on
+    /// every run. Run it only when the user asked for the exception, and say that you ran it.
+    /// `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden
+    /// import, and never lets anything pass that failed before. Exits 2 when --reason is empty, git's user.name is not
+    /// set, the import is not forbidden or is approved already, or a file cannot be read or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
         #[arg(required_unless_present = "prune", conflicts_with = "prune")]
@@ -172,6 +171,14 @@ enum Command {
         /// What it imports, as `rotproof check` names it
         #[arg(required_unless_present = "prune", conflicts_with = "prune")]
         import: Option<String>,
+        /// Why the import is kept: it is written in the entry and printed on every run
+        #[arg(
+            long,
+            value_name = "WHY",
+            required_unless_present = "prune",
+            conflicts_with = "prune"
+        )]
+        reason: Option<String>,
         /// Remove the entries that match no forbidden import
         #[arg(long)]
         prune: bool,
@@ -255,11 +262,12 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Command::Approve {
             file,
             import,
+            reason,
             prune,
-        } => match (prune, file, import) {
-            (true, _, _) => approve_prune(commands, &names, root).map(|()| true),
-            (false, Some(file), Some(import)) => {
-                approve(commands, &names, root, &file, &import).map(|()| true)
+        } => match (prune, file, import, reason) {
+            (true, _, _, _) => approve_prune(commands, &names, root).map(|()| true),
+            (false, Some(file), Some(import), Some(reason)) => {
+                approve(commands, root, &file, &import, &reason).map(|()| true)
             }
             _ => {
                 unreachable!(
@@ -451,7 +459,7 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
     // An approval never hides: every one is printed, on every run, before what fails
     if !report.approved.is_empty() {
         println!(
-            "approved by a person in {} ({}):",
+            "approved in {} ({}):",
             names.approvals,
             report.approved.len()
         );
@@ -540,64 +548,41 @@ fn warnings(all: &[Warning]) -> Vec<(&str, Vec<&str>)> {
     kinds
 }
 
-/// Ask a person on the terminal to approve the forbidden import of `import` by `file`, and add the entry. Every answer
-/// is read from stdin, which must be a terminal: an agent's shell tool has none.
+/// Keep the forbidden import of `import` by `file` for `reason`, signed with git's `user.name`, and say what was
+/// written. Nothing is asked: the reason is what the entry holds, and it is printed on every run of `rotproof check`.
 fn approve(
     commands: &dyn Commands,
-    names: &Names,
     root: &Path,
     file: &str,
     import: &str,
+    reason: &str,
 ) -> Result<(), String> {
-    if !std::io::stdin().is_terminal() {
-        return Err(
-            "rotproof approve asks a person, and stdin is not a terminal (an agent's shell has none): run it in your \
-             own terminal"
-                .into(),
-        );
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Err(format!(
+            "--reason is empty: say why {import} in {file} is kept"
+        ));
     }
     let pending = commands.pending(root, file, import)?;
+    let by = signer(commands, root)?;
     println!("forbidden by the layer table:");
     for detail in &pending {
         println!("  {detail}");
     }
-    let by = match commands.user_name(root) {
-        Some(name) => name,
-        None => ask("git's user.name is not set; the name to sign with: ")?,
-    };
-    let reason = ask(&format!("why is {import} in {file} kept? "))?;
-    let answer = ask(&format!(
-        "approve it as {by}, in {}, printed on every run? [y/N] ",
-        names.approvals
-    ))?;
-    if !answer.eq_ignore_ascii_case("y") {
-        return Err("not approved: nothing written".into());
-    }
-    let path = commands.approve(root, file, import, &reason, &by)?;
-    println!("wrote {path}");
+    let path = commands.approve(root, file, import, reason, &by)?;
+    println!(
+        "wrote {path}: {import} in {file} kept by {by}; `rotproof check` prints it on every run"
+    );
     Ok(())
 }
 
-/// Print `question` and read one line of answer from stdin, trimmed. An empty answer is asked again; the end of the
-/// input is an error.
-fn ask(question: &str) -> Result<String, String> {
-    loop {
-        print!("{question}");
-        std::io::stdout()
-            .flush()
-            .map_err(|e| format!("the question could not be shown: {e}"))?;
-        let mut line = String::new();
-        let read = std::io::stdin()
-            .read_line(&mut line)
-            .map_err(|e| format!("the answer could not be read: {e}"))?;
-        if read == 0 {
-            return Err("no answer: nothing written".into());
-        }
-        let line = line.trim();
-        if !line.is_empty() {
-            return Ok(line.to_string());
-        }
-    }
+/// The name an approval is signed with: git's `user.name`.
+fn signer(commands: &dyn Commands, root: &Path) -> Result<String, String> {
+    commands.user_name(root).ok_or_else(|| {
+        "git's user.name is not set, so the approval would carry no name: set it (git config user.name <name>) and \
+         run the command again"
+            .to_string()
+    })
 }
 
 /// Remove the approvals that match no forbidden import, and say which.
