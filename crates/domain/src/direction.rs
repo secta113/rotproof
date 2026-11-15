@@ -35,23 +35,29 @@
 //!    in the importer's own unit, so the table decides, the place itself included. One place is read beyond the
 //!    table: a shared unit's `domain`, which the `protocol.inbound` of any unit may read, since a shared unit is
 //!    where the value types used across units live, and an input port that could not name them would copy their
-//!    shape. It reads nothing of its own unit and nothing of a unit that is not shared, as the table says.
+//!    shape. It reads nothing of its own unit and nothing of a unit that is not shared, as the table says. A
+//!    `composition` is read beyond the table the other way: of a shared unit it reads the `protocol`, the `domain`
+//!    (the value types the ports take, which it builds the arguments from) and, an app's, the `composition`, and no
+//!    other place.
 //! 5. The entry file reads the `composition` of its own unit and nothing of another unit: rules 2 to 4 refuse it.
 //!
-//! The `composition` of any unit, where rules 2 and 4 let it read another unit, reads that unit's `protocol` (both
-//! levels) and no other place, and an app's reads its `composition` too (rule 4 lets no other): each unit builds its
-//! own insides in its own `composition`, and the app wires the units to each other.
+//! The `composition` of an app, where rule 2 lets it read a unit that is not shared, reads that unit's `composition`
+//! and `protocol` (both levels) and no other place; of a shared unit, its `domain` too, which holds the value types
+//! the ports take. Each unit, a shared one included, builds its own insides in its own `composition` (a shared client
+//! offers a factory there), and the app wires the units to each other. The `composition` of no other unit reads a
+//! unit that is not shared at all.
 //!
 //! Only direct imports are judged between units too, and what these rules allow is closed under chaining but in
 //! three places. The chain of an entry file is the point of one: it imports the composition of its unit, which
 //! imports what the entry file may not, in its own unit and in others. A `composition` builds its own unit and
-//! imports the `protocol` of another (an app's, the `composition` too), which import what a `composition` may not read
-//! in another unit, so it reaches them through what it builds and through what it is given (the ports of a `protocol`
-//! carry that unit's own `domain`). And whatever reads a `protocol.inbound` reaches, through the data its ports
-//! carry, the shared `domain` that `protocol.inbound` may read, whether or not it may import that `domain` itself;
-//! this holds in a type alone, since nothing but a `protocol.inbound` imports it, and a `protocol.inbound` that reads
-//! the `domain` of another shared unit, which reads its own, closes a cycle (`cycles`) (a test runs every chain of
-//! places across units and names the exceptions). `import billing` followed by `billing.protocol.x` is not seen, as a
+//! imports the `protocol` of another (an app's, the `composition` too, and a shared unit's `domain`), which import what
+//! a `composition` may not read in another unit, so it reaches them through what it builds and through what it is
+//! given (the ports of a `protocol` carry that unit's own `domain`). And whatever reads a `protocol.inbound` reaches,
+//! through the data its ports carry, the shared `domain` that `protocol.inbound` may read, whether or not it may import
+//! that `domain` itself; this holds in a type alone,
+//! since nothing but a `protocol.inbound` imports it, and a `protocol.inbound` that reads the `domain` of another
+//! shared unit, which reads its own, closes a cycle (`cycles`) (a test runs every chain of places across units and
+//! names the exceptions). `import billing` followed by `billing.protocol.x` is not seen, as a
 //! module reached through an attribute never is: rule 1 fails the first, which names no layer. The finding for the
 //! first says how to import a layer in the stack of the reader (`Way`), with a layer the unit holds as the example.
 //!
@@ -70,11 +76,11 @@ use crate::units::Unit;
 const COMPOSITION: &str = "composition";
 /// The layer of the use cases, which no other unit's use cases import.
 const APPLICATION: &str = "application";
-/// The layer of the contracts, both levels of which an app's `composition` reads in the units it wires.
+/// The layer of the contracts, both levels of which an app's `composition` reads in a unit that is not shared.
 const PROTOCOL: &str = "protocol";
 /// The level of the input ports, which reads no `domain` but a shared unit's.
 const PROTOCOL_INBOUND: &str = "protocol.inbound";
-/// The layer of the concepts, which `protocol.inbound` reads in a shared unit.
+/// The layer of the concepts, which `protocol.inbound` and every `composition` read in a shared unit.
 const DOMAIN: &str = "domain";
 /// The places the example of a layer to import in a finding is taken from, the first that the unit holds: the input
 /// ports first, since that is what another unit is read for, then the rest in the order of the table.
@@ -324,22 +330,6 @@ pub fn verdict(from: &Place, to: Landing, way: &Way) -> Verdict {
             refuse(what_it_may_import(from))
         }
     };
-    // A composition, in another unit: that unit's protocol, and its composition too for an app's (the composition of a
-    // unit is refused to any other before this), which the table has to let it import too, and no other place
-    let in_composition = || {
-        if to.name != COMPOSITION && to.layer_name() != PROTOCOL {
-            let (whose, only) = if wires {
-                ("an app", "composition and protocol")
-            } else {
-                ("a unit", "protocol")
-            };
-            return refuse(format!(
-                "the composition of {whose} imports only the {only} of another unit: {t} builds its own insides in \
-                 its own composition"
-            ));
-        }
-        by_table()
-    };
     if !to.unit.shared {
         if from.unit.shared {
             return refuse(format!(
@@ -356,7 +346,16 @@ pub fn verdict(from: &Place, to: Landing, way: &Way) -> Verdict {
                 "{f} imports no unit that is not shared, and {t} is not: an app's composition wires the two"
             ));
         }
-        return in_composition();
+        // The composition of an app, in a unit that is not shared: that unit's composition and protocol, which the
+        // table has to let it import too, and no other place, since the unit builds its own insides in its own
+        // composition
+        if to.name != COMPOSITION && to.layer_name() != PROTOCOL {
+            return refuse(format!(
+                "the composition of an app imports only the composition and protocol of a unit that is not shared: \
+                 {t} builds its own insides in its own composition"
+            ));
+        }
+        return by_table();
     }
     if from.name == PROTOCOL_INBOUND && to.name == DOMAIN {
         // The value types of a shared unit, which an input port may carry: the one place read beyond the table, which
@@ -375,8 +374,23 @@ pub fn verdict(from: &Place, to: Landing, way: &Way) -> Verdict {
                 .to_string(),
         );
     }
-    if from.name == COMPOSITION {
-        return in_composition();
+    // A composition, in a shared unit too: that unit's protocol, its domain (the value types the ports take), and its
+    // composition for an app's (refused to any other above), which the table has to let it import too, and no other
+    // place, since each unit, a shared one included, builds its own insides in its own composition
+    if from.name == COMPOSITION
+        && to.name != COMPOSITION
+        && to.name != DOMAIN
+        && to.layer_name() != PROTOCOL
+    {
+        let (whose, only) = if wires {
+            ("an app", "composition, protocol and domain")
+        } else {
+            ("a unit", "protocol and domain")
+        };
+        return refuse(format!(
+            "the composition of {whose} imports only the {only} of a shared unit: {t} builds its own insides in its \
+             own composition"
+        ));
     }
     by_table()
 }
@@ -816,13 +830,18 @@ mod tests {
         };
         let insides = |to: &str| {
             format!(
-                "the composition of an app imports only the composition and protocol of another unit: {to} builds \
-                 its own insides in its own composition"
+                "the composition of an app imports only the composition and protocol of a unit that is not shared: \
+                 {to} builds its own insides in its own composition"
             )
         };
-        let insides_of_a_unit = |to: &str| {
+        let shared_insides = |whose: &str, to: &str| {
+            let only = if whose == "an app" {
+                "composition, protocol and domain"
+            } else {
+                "protocol and domain"
+            };
             format!(
-                "the composition of a unit imports only the protocol of another unit: {to} builds its own insides in \
+                "the composition of {whose} imports only the {only} of a shared unit: {to} builds its own insides in \
                  its own composition"
             )
         };
@@ -997,47 +1016,81 @@ mod tests {
             // Rule 4b: the composition of a shared unit is imported by the composition of an app
             ("cli.composition", "core.composition", None),
             ("web.composition", "steps.composition", None),
-            // ... which reads the rest of a shared unit through the composition and protocol alone
+            // ... which reads of a shared unit its protocol and its domain (the value types the ports take), whoever
+            // the composition is, and no other place: a unit builds its own insides, a shared one included
             ("cli.composition", "core.protocol.inbound", None),
             ("cli.composition", "core.protocol.outbound", None),
+            ("cli.composition", "core.domain", None),
+            ("steps.composition", "core.protocol.inbound", None),
+            ("steps.composition", "core.protocol.outbound", None),
+            ("steps.composition", "core.domain", None),
+            ("core.composition", "steps.domain", None),
+            ("billing.composition", "core.domain", None),
             (
                 "cli.composition",
                 "core.application",
-                Some(format!("in application of unit core; {}", insides("core"))),
+                Some(format!("in application of unit core; {}", shared_insides("an app", "core"))),
             ),
             (
                 "cli.composition",
                 "core.infrastructure.outbound",
                 Some(format!(
                     "in infrastructure.outbound of unit core; {}",
-                    insides("core")
+                    shared_insides("an app", "core")
                 )),
             ),
             (
                 "cli.composition",
-                "core.domain",
-                Some(format!("in domain of unit core; {}", insides("core"))),
+                "core.infrastructure.inbound",
+                Some(format!(
+                    "in infrastructure.inbound of unit core; {}",
+                    shared_insides("an app", "core")
+                )),
             ),
-            // The composition of a unit that is no app reads another unit through its protocol alone
-            ("steps.composition", "core.protocol.inbound", None),
-            ("steps.composition", "core.protocol.outbound", None),
+            (
+                "cli.composition",
+                "core.ui.pages",
+                Some(format!("in ui.pages of unit core; {}", shared_insides("an app", "core"))),
+            ),
+            (
+                "cli.composition",
+                "core.presentation.models",
+                Some(format!(
+                    "in presentation.models of unit core; {}",
+                    shared_insides("an app", "core")
+                )),
+            ),
             (
                 "steps.composition",
-                "core.domain",
-                Some(format!("in domain of unit core; {}", insides_of_a_unit("core"))),
+                "core.application",
+                Some(format!("in application of unit core; {}", shared_insides("a unit", "core"))),
             ),
             (
                 "steps.composition",
                 "core.infrastructure.outbound",
                 Some(format!(
                     "in infrastructure.outbound of unit core; {}",
-                    insides_of_a_unit("core")
+                    shared_insides("a unit", "core")
                 )),
             ),
             (
                 "billing.composition",
                 "core.application",
-                Some(format!("in application of unit core; {}", insides_of_a_unit("core"))),
+                Some(format!("in application of unit core; {}", shared_insides("a unit", "core"))),
+            ),
+            (
+                "billing.composition",
+                "core.infrastructure.outbound",
+                Some(format!(
+                    "in infrastructure.outbound of unit core; {}",
+                    shared_insides("a unit", "core")
+                )),
+            ),
+            // ... and of a unit that is not shared, an app's reads its composition and protocol alone, and no domain
+            (
+                "cli.composition",
+                "shipping.domain",
+                Some(format!("in domain of unit shipping; {}", insides("shipping"))),
             ),
             // Rule 4: the input ports of any unit read the domain of a shared unit, and nothing else of any other
             ("billing.protocol.inbound", "core.domain", None),
@@ -1163,11 +1216,13 @@ mod tests {
                 let wires = from.name == "composition" && from.unit.app;
                 // A unit that is not shared is imported by the composition of an app alone, and no app is imported
                 assert!(to.unit.shared || (wires && !to.unit.app), "{name}");
-                // A composition reads another unit through its protocol, and an app's through its composition too
+                // A composition reads another unit through its protocol, and an app's through its composition too, and
+                // the domain of a shared unit
                 assert!(
                     from.name != "composition"
                         || to.layer_name() == "protocol"
-                        || (wires && to.name == "composition"),
+                        || (wires && to.name == "composition")
+                        || (to.unit.shared && to.name == "domain"),
                     "{name}"
                 );
                 // A shared unit imports only shared ones
@@ -1211,9 +1266,10 @@ mod tests {
         // - the entry file of an app, here as in a project of one unit (the table is not closed over it either): it
         //   imports its composition and, through it, what that composition wires, which is what an entry file is for;
         // - a composition, which builds its own unit and so reaches, through the places it imports there, what they
-        //   read in other units and it may not: only the protocol of another unit is its to read, and an app's its
-        //   composition too, each unit builds its own insides; and through those, what the composition builds there
-        //   and what the ports of the protocol carry of that unit's own `domain`, as in any unit;
+        //   read in other units and it may not: only the protocol of another unit is its to read (and its `domain`, in
+        //   a shared one), and an app's its composition too, each unit builds its own insides; and through those, what
+        //   the composition builds there and what the ports of the protocol carry of that unit's own `domain`, as in
+        //   any unit;
         // - what reads a `protocol.inbound`, which reaches the shared `domain` it reads by the type of its data, in no
         //   import: the one thing that imports that `domain` is the `protocol.inbound`;
         // - and, in that, the `protocol.inbound` of a shared unit that reads the `domain` of another, which reads its

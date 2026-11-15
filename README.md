@@ -333,9 +333,10 @@ each unit, with the unit named in a finding. The rules between units are few:
   `application` never imports another unit's `application`: the use cases are passed in. The one addition is
   `protocol.inbound`, which also imports the `domain` of a shared unit, where the value types used across units live,
   so that an input port names them and does not copy their shape.
-- A `composition` imports another unit only through that unit's `protocol`, since each unit builds its own insides in
-  its own `composition`. The `composition` of an app wires the units, so it imports their `composition` too, and never
-  another app's. An entry file imports the `composition` of its own unit alone.
+- A `composition` imports another unit only through that unit's `protocol`, and its `domain` when the unit is shared
+  (the value types the ports take), since each unit, a shared one included, builds its own insides in its own
+  `composition`. The `composition` of an app wires the units, so it imports their `composition` too, and never another
+  app's. An entry file imports the `composition` of its own unit alone.
 - An import of another unit names a module of one of its layers, never the unit as a whole: what the code reads from
   outside the layers cannot be seen.
 

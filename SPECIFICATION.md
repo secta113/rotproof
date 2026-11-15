@@ -406,8 +406,8 @@ units, the rules are these, applied to an import from one unit's layer into anot
 2. A unit that is not shared is imported by no other, except that the `composition` of an app wires the units: it
    imports the `composition` and the `protocol` (both levels) of the units it wires, and no other layer of them, and
    never another app's. Each unit builds its own insides in its own `composition`, and the app wires the units to each
-   other. The `composition` of a unit that is no app imports no unit that is not shared, and a shared unit through its
-   `protocol` alone (rule 4).
+   other. The `composition` of a unit that is no app imports no unit that is not shared. Of a shared unit it reads
+   what rule 4 says.
 3. A shared unit imports shared units only.
 4. Into a shared unit, a layer imports what the table lets it import, the layers of the other unit standing where those
    of its own do (`infrastructure.inbound` imports `protocol.inbound` of a shared unit), except that `application`
@@ -416,8 +416,10 @@ units, the rules are these, applied to an import from one unit's layer into anot
    also imports the `domain` of a shared unit, where the value types used across units live: an input port that could
    not name them would copy their shape into its own data, and a copy drops what the original has (the currency of a
    sum of money). It imports nothing of its own unit's `domain` and nothing of a unit that is not shared, as the table
-   says. And a `composition` imports a shared unit through its `protocol` alone, an app's through its `composition`
-   too, and no other layer of it, as rule 2 says of a unit that is not shared.
+   says. And a `composition` imports of a shared unit its `protocol` and its `domain` (a kernel of value types such as
+   `Money` and `OrderId` is what the ports take and the app builds), an app's its `composition` too, and no other layer
+   of it: each unit, a shared one included, builds its own insides in its own `composition`, and the app wires them (a
+   shared database client offers a factory there), as rule 2 says of a unit that is not shared.
 5. An entry file imports the `composition` of its own unit alone.
 6. Shared units do not import each other in a cycle. This finding names the cycle and the imports that close it, and
    cannot be approved.
@@ -756,23 +758,26 @@ changed is in the commits, what was measured and decided along the way in the ta
   3. a unit that is not shared is imported by the `composition` of an app, which is a unit with an entry, and by no
      other place, nor by an app's `composition` into another app, and the `composition` of an app reads of it its
      `composition` and its `protocol` (both levels) and no other layer (`the composition of an app imports only the
-     composition and protocol of another unit: billing builds its own insides in its own composition`): each unit
-     builds its own insides, and `composition` wires the units and nothing else does;
+     composition and protocol of a unit that is not shared: billing builds its own insides in its own composition`):
+     each unit builds its own insides, and `composition` wires the units and nothing else does; the `composition` of a
+     unit that is no app reads none of them;
   4. a shared unit is read as if its place sat in the importer's own unit, so the table decides, with these more
      rules: `application` never imports another unit's `application` (`composition` passes a shared unit's use cases
      in), the `composition` of a shared unit is imported by the `composition` of an app alone, the `domain` of a shared
      unit is imported by the `protocol.inbound` of any unit, which the table lets import nothing (the value types used
      across units live in a shared unit, and an input port that cannot name them copies their shape into its own
      data; a `protocol.inbound` imports no `domain` of its own unit and none of a unit that is not shared), and a
-     `composition` reads no layer of it but its `protocol`, as in 3 (`the composition of a unit imports only the
-     protocol of another unit: core builds its own insides in its own composition`), the `composition` of an app its
-     `composition` too.
+     `composition` reads of it its `protocol` and its `domain` (the value types the ports take) and no other layer,
+     an app's its `composition` too (`the composition of a unit imports only the protocol and domain of a shared
+     unit: core builds its own insides in its own composition`; of an app, `...imports only the composition, protocol
+     and domain of a shared unit: ...`): a shared unit builds its own insides as any unit does.
 
   The entry file reads the `composition` of its own unit and nothing of another unit. Only direct imports are
   judged, and what these rules allow is closed under chaining except in three places. An entry file imports a
   `composition` that wires what the entry file may not import. A `composition` builds its own unit, whose places
   import places of other units that the `composition` may not import itself, and imports the `protocol` of another
-  unit (an app's `composition` its `composition` too), which import what it may not read there. And every place that imports a
+  unit (an app's `composition` its `composition` too, and a shared unit's `domain`), which import what it may not
+  read there. And every place that imports a
   `protocol.inbound` (the `ui`, `presentation.models`, `infrastructure.inbound`, `application` and `composition`)
   meets in the data of its ports the types of the shared `domain` that `protocol.inbound` imports, which it may not
   import itself: this holds in what the data carries, and in no import, since nothing but a `protocol.inbound`

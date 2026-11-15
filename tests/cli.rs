@@ -4641,6 +4641,67 @@ fn init_drafts_the_document_of_the_units_once_and_the_check_passes_with_it() {
 }
 
 #[test]
+fn a_composition_reads_the_protocol_and_the_domain_of_a_shared_unit_and_builds_no_insides_of_another_unit()
+ {
+    let root = modular_monolith();
+    let r = root.path();
+    let arg = root_arg(r);
+    // The shared `core` is a kernel of value types: the composition of the app and that of `billing`, which is no
+    // app, read its `domain`, and its `protocol`
+    write_file(
+        r,
+        "modules/app/composition/wire.py",
+        "from core.domain import money\nfrom core.protocol.inbound import port\nfrom billing.composition import build\n",
+    );
+    write_file(
+        r,
+        "modules/billing/composition/build.py",
+        "from core.domain import money\nfrom core.protocol.outbound import store\n",
+    );
+    let out = run(&["--root", &arg, "index"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // No composition builds the insides of another unit, a shared one included: that unit builds them in its own
+    // composition, which the app wires. The application of a unit still reads no other's
+    write_file(
+        r,
+        "modules/app/composition/wire.py",
+        "from core.domain import money\nfrom core.application import pay\nfrom billing.domain import invoice\n",
+    );
+    write_file(
+        r,
+        "modules/billing/composition/build.py",
+        "from core.infrastructure.outbound import db\n",
+    );
+    write_file(
+        r,
+        "modules/billing/application/pay.py",
+        "from core.application import pay\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    for line in [
+        "modules/app/composition/wire.py:2: imports core.application.pay, in application of unit core; the \
+         composition of an app imports only the composition, protocol and domain of a shared unit: core builds its \
+         own insides in its own composition",
+        "modules/app/composition/wire.py:3: imports billing.domain.invoice, in domain of unit billing; the \
+         composition of an app imports only the composition and protocol of a unit that is not shared: billing \
+         builds its own insides in its own composition",
+        "modules/billing/composition/build.py:1: imports core.infrastructure.outbound.db, in infrastructure.outbound \
+         of unit core; the composition of a unit imports only the protocol and domain of a shared unit: core builds \
+         its own insides in its own composition",
+        "modules/billing/application/pay.py:1: imports core.application.pay, in application of unit core; \
+         application never imports another unit's application: composition passes a shared unit's use cases in",
+    ] {
+        assert!(said.contains(line), "{line}:\n{said}");
+    }
+    assert_eq!(said.matches(": imports ").count(), 4, "{said}");
+}
+
+#[test]
 fn init_drafts_nothing_without_an_area_and_says_why_until_there_is_one() {
     let root = declared(&two_units("true").replace("areas = [\"a\"]", "areas = []"));
     let r = root.path();
@@ -5161,7 +5222,8 @@ fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
         said.contains(
             "apps/web/src/composition/index.ts:1: imports @acme/billing/src/domain/song \
              (packages/billing/src/domain/song), in domain of unit billing; the composition of an app imports only \
-             the composition and protocol of another unit: billing builds its own insides in its own composition"
+             the composition and protocol of a unit that is not shared: billing builds its own insides in its own \
+             composition"
         ),
         "{said}"
     );

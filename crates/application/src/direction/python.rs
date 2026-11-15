@@ -247,18 +247,20 @@ mod tests {
                     "shipping/composition/wire.py",
                     "from billing.domain import invoice\n",
                 ),
-                // The composition of a unit reads the shared unit through its protocol alone, an app's through its
-                // composition too
+                // The composition of a unit reads the shared unit through its protocol and its domain (the value types
+                // the ports take), and builds none of its insides
                 (
                     "billing/composition/wire.py",
-                    "from core.protocol.inbound import port\nfrom core.domain import money\n",
+                    "from core.protocol.inbound import port\nfrom core.domain import money\n\
+                     from core.infrastructure.outbound import db\n",
                 ),
-                // An app's composition wires them, through their composition and protocol, and builds none of their
-                // insides
+                // An app's composition wires the units that are not shared, through their composition and protocol,
+                // and builds none of their insides; of the shared unit it reads the domain too
                 (
                     "cli/composition/wire.py",
                     "from billing.composition import wire\nimport shipping.protocol.outbound\n\
-                     import shipping.infrastructure.outbound.db\nfrom core.domain import money\n",
+                     import shipping.infrastructure.outbound.db\nfrom core.domain import money\n\
+                     from core.application import pay\n",
                 ),
                 // The entry file reads its own unit's composition, and not another's
                 (
@@ -271,19 +273,19 @@ mod tests {
         assert_eq!(
             forbidden,
             [
-                "billing/composition/wire.py:2: imports core.domain.money, in domain of unit core; the composition of \
-                 a unit imports only the protocol of another unit: core builds its own insides in its own \
-                 composition",
+                "billing/composition/wire.py:3: imports core.infrastructure.outbound.db, in infrastructure.outbound of \
+                 unit core; the composition of a unit imports only the protocol and domain of a shared unit: core \
+                 builds its own insides in its own composition",
                 "billing/domain/invoice.py:1: imports shipping.domain.parcel, in domain of unit shipping; billing \
                  imports no unit that is not shared, and shipping is not: an app's composition wires the two",
                 "cli/__main__.py:2: imports billing.composition.wire, in composition of unit billing; cli imports no \
                  unit that is not shared, and billing is not: an app's composition wires the two",
                 "cli/composition/wire.py:3: imports shipping.infrastructure.outbound.db, in infrastructure.outbound \
-                 of unit shipping; the composition of an app imports only the composition and protocol of another \
-                 unit: shipping builds its own insides in its own composition",
-                "cli/composition/wire.py:4: imports core.domain.money, in domain of unit core; the composition of an \
-                 app imports only the composition and protocol of another unit: core builds its own insides in its \
-                 own composition",
+                 of unit shipping; the composition of an app imports only the composition and protocol of a unit \
+                 that is not shared: shipping builds its own insides in its own composition",
+                "cli/composition/wire.py:5: imports core.application.pay, in application of unit core; the \
+                 composition of an app imports only the composition, protocol and domain of a shared unit: core \
+                 builds its own insides in its own composition",
                 "shipping/composition/wire.py:1: imports billing.domain.invoice, in domain of unit billing; shipping \
                  imports no unit that is not shared, and billing is not: an app's composition wires the two",
             ]

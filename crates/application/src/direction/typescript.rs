@@ -507,8 +507,8 @@ mod tests {
         assert_eq!(found.problems, Vec::<String>::new());
         // The composition of an app wires a unit that is not shared, through its composition and protocol alone; a
         // shared unit imports shared units only
-        let wired = "the composition of an app imports only the composition and protocol of another unit: billing \
-                     builds its own insides in its own composition";
+        let wired = "the composition of an app imports only the composition and protocol of a unit that is not \
+                     shared: billing builds its own insides in its own composition";
         assert_eq!(
             details(&found),
             [

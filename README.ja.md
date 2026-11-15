@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 8ba3d039. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 36265ca8. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -341,10 +341,10 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
   ただし `application` は、ほかのユニットの `application` を import しません。ユースケースは渡されます。追加は 1 つで、
   `protocol.inbound` は共有ユニットの `domain` も import します。ユニットをまたいで使う値の型はそこにあるので、入力
   ポートはその形を写さずに、名前で指せます。
-- `composition` は、ほかのユニットをそのユニットの `protocol` を通してだけ import します。各ユニットは自分の中身を、
-  自分の `composition` で組み立てるからです。アプリの `composition` はユニットを組み合わせるので、ユニットの
-  `composition` も import しますが、別のアプリのものは import しません。entry ファイルが import するのは、自分の
-  ユニットの `composition` だけです。
+- `composition` は、ほかのユニットをそのユニットの `protocol` を通して import し、共有ユニットなら `domain`（ポートが
+  取る値の型）も import します。共有ユニットも含め、各ユニットは自分の中身を自分の `composition` で組み立てるから
+  です。アプリの `composition` はユニットを組み合わせるので、ユニットの `composition` も import しますが、別の
+  アプリのものは import しません。entry ファイルが import するのは、自分のユニットの `composition` だけです。
 - ほかのユニットの import は、その層のモジュールを名指し、ユニット全体は名指しません。層の外のコードから何を読むかは
   見えないからです。
 
