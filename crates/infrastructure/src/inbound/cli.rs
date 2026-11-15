@@ -42,7 +42,8 @@ const CHECK_HELP: &str = "\
 Check the layers and the records, and exit non-zero when one breaks the rules
 
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
-layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view), that each layer imports only \
+layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view; in each unit, when the \
+declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
 what the layer table allows or a person approved in .config/rotproof-approved.toml (each approval printed on every run, and one that matches nothing failing), that only \
 infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
@@ -113,6 +114,7 @@ enum Command {
     /// a CI workflow that installs the pinned Rotproof (from PyPI with requirements-dev.txt for python, from npm with
     /// the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
+    /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), and docs/index.md and the
     /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
     /// Never overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing

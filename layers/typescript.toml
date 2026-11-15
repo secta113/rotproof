@@ -21,6 +21,16 @@ no_view = { layers = ["presentation"], extensions = ["tsx", "jsx"], goes = "keep
 # The entry file, where Vite's React starter (`npm create vite -- --template react-ts`) puts it and `index.html` loads
 # it: moving it would mean editing `index.html` too
 entry = "src/main.tsx"
+# What `rotproof create` writes into an entry file a unit declares that is not there: a file with no code, whose doc
+# comment says what it is. A unit's entry may be named otherwise than `src/main.tsx`, so the text is the layout's
+entry_text = '''
+/**
+ * The entry file: it calls `composition` to build the program, and starts it. No layer.
+ */
+export {};
+'''
+# The one manifest of a package, which a project that declares units keeps to the root of a unit
+manifest = "package.json"
 # The rest of the starter moves: said in the finding for code outside the layers
 where_code_goes = "a screen (Vite's App.tsx) goes in src/ui/pages; a style (index.css, App.css) or an image the UI shows (assets/) in src/ui/atoms"
 

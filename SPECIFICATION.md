@@ -75,6 +75,10 @@ only what is missing: a layer that is neither present nor declared absent, the p
 knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
 overwrites a file it does not generate, apart from adding the fields the declaration lacks (below), and never moves or
 deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
+A project that declares units (see "Units") also gets each entry file its units declare that is missing, made from
+one text for the stack (the entry file's docstring or doc comment, and in Rust `fn main() {}`), whatever the file is
+named; the entry file of a project of one unit stays the project's to write, but in Rust, where it is the root
+package's `src/main.rs`.
 
 The project's files are written once, as a starting point, and are the project's from then on:
 
@@ -332,8 +336,35 @@ declaration and the layout alone, before the tree is looked at:
 - a name in a unit's `absent` the layout does not have, as at the top for a project of one unit;
 - an `absent` at the top, once units are declared.
 
-What `rotproof check` checks of the tree holds in each unit as it does in a project of one: every layer present or
-declared absent in the unit's own `absent`, no code outside the layers of a unit, and each unit's entry files.
+What `rotproof check` checks of the tree holds in each unit as it does in a project of one, and a finding about a unit
+names it (`domain of unit billing is missing: ...`), which a project that declares no unit never sees:
+
+- The unit is there (`unit billing is missing: packages/billing/src/billing/`, which says all about it: its layers are
+  not judged), and so is each entry file it declares (`the entry apps/cli/__main__.py of unit cli is missing`). The
+  entry of a project of one unit stays optional, as it was.
+- Every layer of the unit is present or in the `absent` of that unit, and no layer in it is there; the levels of a layer
+  are judged by the layer of their own unit. Each unit holds at least one layer, so the floor is each unit's.
+- No code sits outside the layers of a unit: every code file in its `path` is in a layer, or is one of its own entry
+  files, or sits in a path the layout says is no layer (`tests/` in Python), or in a path `unchecked` keeps, or in the
+  `path` of a unit inside it, which is that unit's to judge. A Python unit whose `path` is not the root may hold an
+  `__init__.py` directly in it, read as a place that imports no layer; no other file, and none in a TypeScript or a
+  Rust unit (`index.ts` at the top of a unit is code outside its layers). What the layout says of where code goes
+  (a screen goes in `src/ui/pages`) is left out of a finding about a unit, whose directories are its own.
+- Code in no unit's path fails too, as code outside the layers (`code outside the layers: helper.py (it is in no
+  unit: ...)`), so that moving a file out of every unit does not escape the checks: the layout's scope is walked as in
+  a project of one unit (Python: the whole project, TypeScript: `src/`, Rust: `crates/` and the `src/` of the root
+  package), and a code file there that is in no unit's `path`, is no unit's entry file, is not in a path that is no
+  layer (`tests/` in the scope, and in the root of each unit, where a package keeps its own) and is not kept by
+  `unchecked` fails. A unit at the root of the project holds every path. A unit whose `path` is outside the scope (a
+  monorepo's `packages/billing/src/billing` in TypeScript) is walked all the same.
+- A path in `unchecked` neither holds nor sits in a layer, and does not hold a unit: `unchecked = ["packages/billing"]`
+  would switch the unit off. A path inside a unit's `path` and outside its layers is what `unchecked` is for.
+- A manifest (`pyproject.toml` in Python, `package.json` in TypeScript, `Cargo.toml` in Rust, in any case: the one
+  kind of the stack) belongs to the unit whose `root` holds its directory, and a manifest elsewhere is a package no
+  unit says it is: `apps/x/package.json is a manifest outside every unit's root: declare the unit whose root is apps/x
+  (root = "apps/x"), or list apps/x in unchecked`. The manifest at the root of the project (a workspace's), one in a
+  layer (a Rust layer is a crate of its own), and one in a path `unchecked` keeps are not counted. A project that
+  declares no unit is not asked, so a project that is one package with others of tooling in it is read as before.
 
 A knowledge document that records why the code is divided so follows the table `.config/rotproof.toml::unit` (see
 The records), and is read again when a unit changes, not when `areas` or `files` does.
@@ -478,6 +509,10 @@ changed is in the commits, what was measured and decided along the way in the ta
   and the finding says where code goes, while what Cargo keeps outside `src/` in the root package (`build.rs`,
   `tests/`, `benches/`, `examples/`) and `xtask/` are not looked at. A path in `unchecked` exists and neither holds nor sits in a layer, so a layer cannot be switched
   off by listing it. At least one layer is present: with every layer declared absent, nothing would be checked.
+  A project that declares units (see "Units") is checked unit by unit: each unit's `path` and entry files are there, and
+  each of its layers is present or in its own `absent`, with at least one present; its code outside the layers is
+  looked for in its `path` up to the units inside it, and in the scope of the stack outside every unit's `path`; and
+  every manifest of the stack outside the root of every unit fails.
   A layer with levels holds only its levels: code beside them fails, apart from the layer's own file
   (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
   (a design value, one behaviour, a provider of a theme), is an atom, and what a screen holds and decides goes in

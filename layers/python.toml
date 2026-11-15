@@ -16,6 +16,16 @@ language = "python"
 uis = ["atomic"]
 # The entry file, which `python .` runs
 entry = "__main__.py"
+# What `rotproof create` writes into an entry file a unit declares that is not there: a file with no code, whose
+# docstring says what it is. A unit's entry may be named otherwise than `__main__.py`, so the text is the layout's
+entry_text = '''
+"""The entry file: it calls `composition` to build the program, and starts it. No layer.
+"""
+'''
+# The one manifest of a package, which a project that declares units keeps to the root of a unit
+manifest = "pyproject.toml"
+# What a unit's own directory holds besides its layers and nests: its package's `__init__.py`, which imports no layer
+unit_files = ["__init__.py"]
 
 [layer]
 path = "{name}"

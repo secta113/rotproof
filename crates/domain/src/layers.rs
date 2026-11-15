@@ -157,6 +157,18 @@ pub struct Layout {
     /// `entry` allows. `None` while this stack has none
     #[serde(default)]
     pub entry: Option<String>,
+    /// What `rotproof create` writes into an entry file that a unit declares and the tree lacks, whatever the file is
+    /// named: the layout's entry file has no code of its own to copy (Python and TypeScript write none at the root),
+    /// so the text is here. `None` while this stack has no entry file
+    #[serde(default)]
+    pub entry_text: Option<String>,
+    /// What a package's manifest is named: `pyproject.toml`, `package.json`, `Cargo.toml`, as [`Layout::code`] says
+    /// one. A project that declares units keeps one to the root of each
+    pub manifest: String,
+    /// The code files a unit's own directory holds besides its layers, the nested units and its entry files, by name:
+    /// a Python package's `__init__.py`, which imports no layer. Empty while this stack has none
+    #[serde(default)]
+    pub unit_files: Vec<String>,
     /// Where code outside the layers goes in this stack, said in the finding for it
     #[serde(default)]
     pub where_code_goes: Option<String>,
@@ -398,7 +410,7 @@ impl Layout {
 
     /// A path of this layout, which every layout writes from the root and inside its `scope`, moved to the directory
     /// `base` in place of the scope.
-    fn moved(&self, path: &str, base: &str) -> String {
+    pub fn moved(&self, path: &str, base: &str) -> String {
         let inside = if self.scope.is_empty() {
             path
         } else {
@@ -434,6 +446,31 @@ impl Layout {
             Some(also) => named_by(&also.code, file_name),
             None => self.is_code(file_name),
         }
+    }
+
+    /// The text of an entry file `rotproof create` makes, with no leading blank line.
+    pub fn entry_file(&self) -> Option<&str> {
+        self.entry_text.as_deref().map(str::trim_start)
+    }
+
+    /// Whether a file name is a package's manifest in this stack, in any case.
+    pub fn is_manifest(&self, file_name: &str) -> bool {
+        named_by(&self.manifest, file_name)
+    }
+
+    /// Whether a code file of this name may sit in a unit's own directory, in any case ([`Layout::unit_files`]).
+    pub fn is_unit_file(&self, file_name: &str) -> bool {
+        self.unit_files
+            .iter()
+            .any(|own| own.eq_ignore_ascii_case(file_name))
+    }
+
+    /// The paths that are not layers ([`Layout::not_layers`]) of a unit whose layers sit in `base`.
+    pub fn not_layers_in(&self, base: &str) -> Vec<String> {
+        self.not_layers
+            .iter()
+            .map(|path| self.moved(path, base))
+            .collect()
     }
 
     /// Whether the file named `name`, in a project of this layout, has comments to read. Not every code file has them,
@@ -633,6 +670,35 @@ mod tests {
                     layout.code, "Cargo.toml",
                     "{stack}: code a Rust layout reads"
                 );
+            }
+            // What a unit moves from the scope to its own directory is in the scope, and the files a unit's directory
+            // holds are code that the unit's own check would otherwise find outside the layers
+            for path in &layout.not_layers {
+                assert!(
+                    layout.scope.is_empty() || within(path, &layout.scope),
+                    "{stack}: {path} is not in the scope {}",
+                    layout.scope
+                );
+            }
+            assert!(!layout.manifest.is_empty(), "{stack}: no manifest");
+            assert_eq!(
+                layout.entry.is_some(),
+                layout.entry_file().is_some(),
+                "{stack}: an entry file and its text go together"
+            );
+            if let Some(file) = layout
+                .files
+                .iter()
+                .find(|f| Some(&f.path) == layout.entry.as_ref())
+            {
+                assert_eq!(
+                    layout.entry_file(),
+                    Some(file.text.trim_start()),
+                    "{stack}: the text of the entry file it writes with the project"
+                );
+            }
+            for file in &layout.unit_files {
+                assert!(layout.is_code(file), "{stack}: {file} is no code");
             }
             // A directory besides the scope holds no layer, so the code in it is outside every layer, and the entry
             // file in it is the one code there that is not

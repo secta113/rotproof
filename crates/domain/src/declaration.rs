@@ -366,8 +366,9 @@ pub struct Declared {
     /// The places of every unit, a unit's together, in the order of `units`
     pub places: Vec<Place>,
     /// What `absent` names in a layer the declared UI leaves out (`ui` with `ui = "none"`): it says nothing, and the
-    /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs
-    pub left_out: Vec<String>,
+    /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs. Each
+    /// is the name of the unit that lists it ("" for the implicit unit) and the name it lists
+    pub left_out: Vec<(String, String)>,
     /// How a comment that keeps the first marker names its issue, from `todo_link`: `None` when it is not declared
     pub todo_link: Option<TodoLink>,
 }
@@ -450,7 +451,7 @@ impl Declared {
             .iter()
             .flat_map(|unit| unit.places(&layout, &table))
             .collect();
-        let mut left_out: Vec<String> = Vec::new();
+        let mut left_out: Vec<(String, String)> = Vec::new();
         for unit in &units {
             for name in unit
                 .absent
@@ -469,8 +470,8 @@ impl Declared {
                             declaration.stack
                         )
                     });
-                } else if !(unit.declared && left_out.contains(name)) {
-                    left_out.push(name.clone());
+                } else if !left_out.contains(&(unit.name.clone(), name.clone())) {
+                    left_out.push((unit.name.clone(), name.clone()));
                 }
             }
         }
@@ -703,7 +704,14 @@ mod tests {
         // absent naming a layer the UI leaves out reads, so an upgrade still runs, and is kept for the check to name
         let left = declared("stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"ui\", \"presentation.display\"]\n")
             .unwrap();
-        assert_eq!(left.left_out, ["ui", "presentation.display"]);
+        let names = |declared: &Declared| -> Vec<String> {
+            declared
+                .left_out
+                .iter()
+                .map(|(_, name)| name.clone())
+                .collect()
+        };
+        assert_eq!(names(&left), ["ui", "presentation.display"]);
         assert_eq!(
             declared("stack = \"python\"\nareas = []\n").unwrap_err(),
             [
@@ -1066,13 +1074,18 @@ absent = [\"domain\", \"application\"]
     }
 
     #[test]
-    fn what_a_unit_lacks_that_the_ui_leaves_out_is_kept_to_be_named_once() {
+    fn what_a_unit_lacks_that_the_ui_leaves_out_is_kept_with_the_unit_that_lists_it() {
         let text = with_units(
             "python",
             "[[unit]]\nname = \"a\"\npath = \"a\"\nabsent = [\"ui\"]\n\n[[unit]]\nname = \"b\"\npath = \"b\"\nabsent = [\"ui\", \"presentation\"]\n",
         );
         let declared = Declared::new(parse_declaration(&text).unwrap()).unwrap();
-        assert_eq!(declared.left_out, ["ui", "presentation"]);
+        let kept: Vec<(&str, &str)> = declared
+            .left_out
+            .iter()
+            .map(|(unit, name)| (unit.as_str(), name.as_str()))
+            .collect();
+        assert_eq!(kept, [("a", "ui"), ("b", "ui"), ("b", "presentation")]);
     }
 
     #[test]

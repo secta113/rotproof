@@ -24,6 +24,16 @@ language = "rust"
 # The entry file, of the root package. Cargo compiles it against what the package's `Cargo.toml` declares, so that
 # manifest is what the direction check reads for it
 entry = "src/main.rs"
+# What `rotproof create` writes into an entry file a unit declares that is not there: the text of `src/main.rs` below,
+# whatever the entry is named
+entry_text = '''
+//! The entry file: it calls `composition` to build the program, and starts it. No layer.
+
+fn main() {}
+'''
+# The one manifest of a package, which a project that declares units keeps to the root of a unit (or a layer, which is a
+# crate of its own)
+manifest = "Cargo.toml"
 # Where the rest of the root package's `src/` goes, said in the finding for code outside the layers (a crate in
 # `crates/` that no layer is, too)
 where_code_goes = "a rule of the program goes in crates/domain, a use case in crates/application, what wires them in crates/composition; src/main.rs is the one file of the root package's src/ that is no layer"

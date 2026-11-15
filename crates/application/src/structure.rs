@@ -6,7 +6,8 @@ use std::io;
 use crate::layers::read;
 use crate::tree::{code_files, exactly};
 use domain::declaration::{DECLARATION, Declared};
-use domain::structure::{Seen, listed, named, problems as judged};
+use domain::paths::file_name;
+use domain::structure::{Seen, declares_units, listed, named, problems as judged};
 use protocol::outbound::Tree;
 
 /// What the structure check found.
@@ -65,6 +66,15 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
         let code = code_files(tree, &dir, |name| layout.is_code_in(&dir, name))?;
         seen.code.insert(dir, code);
     }
+    // Every manifest of the tree, which only a project that declares units is judged by: it is where a package that no
+    // unit says it is shows
+    if declares_units(&declared) {
+        seen.manifests = tree
+            .files("")?
+            .into_iter()
+            .filter(|path| layout.is_manifest(file_name(path)))
+            .collect();
+    }
     Ok(Structure {
         found: judged(&declared, layout, &seen),
         skipped: None,
@@ -77,6 +87,51 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
 mod tests {
     use super::*;
     use crate::tree::fake::Fake;
+
+    #[test]
+    fn the_manifests_of_the_whole_tree_are_read_when_units_are_declared_and_only_then() {
+        let layers = [
+            "domain/__init__.py",
+            "infrastructure/__init__.py",
+            "infrastructure/inbound/__init__.py",
+            "infrastructure/outbound/__init__.py",
+        ];
+        let absent = "absent = [\"composition\", \"application\", \"protocol\"]\n";
+        let declaration = format!(
+            "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n{absent}"
+        );
+        let mut files: Vec<(String, &str)> = layers
+            .iter()
+            .map(|layer| (format!("a/{layer}"), ""))
+            .collect();
+        files.extend([
+            ("pyproject.toml".to_string(), ""),
+            ("a/pyproject.toml".to_string(), ""),
+            ("tools/pyproject.toml".to_string(), ""),
+            (".config/rotproof.toml".to_string(), &declaration),
+        ]);
+        let files: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+        let found = problems(&Fake::new(&files)).unwrap().found;
+        assert_eq!(
+            found,
+            [
+                "tools/pyproject.toml is a manifest outside every unit's root: declare the unit whose root is \
+                 tools (root = \"tools\"), or list tools in unchecked in .config/rotproof.toml"
+            ]
+        );
+        // The same stray manifest in a project of one unit is no finding
+        let one = format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\n{absent}");
+        let mut files: Vec<(String, &str)> =
+            layers.iter().map(|layer| (layer.to_string(), "")).collect();
+        files.extend([
+            ("tools/pyproject.toml".to_string(), ""),
+            (".config/rotproof.toml".to_string(), &one),
+        ]);
+        let files: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+        let found = problems(&Fake::new(&files)).unwrap().found;
+        // `tools/` holds code of no layer only through its manifest, which is no code
+        assert!(found.is_empty(), "{found:#?}");
+    }
 
     #[test]
     fn the_tree_is_read_through_the_port_alone() {

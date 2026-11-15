@@ -8,6 +8,11 @@ pub fn within(path: &str, prefix: &str) -> bool {
     path == prefix || path.starts_with(&format!("{prefix}/"))
 }
 
+/// Whether `path` is `dir` or inside it, the root ("") holding every path.
+pub fn inside(path: &str, dir: &str) -> bool {
+    dir.is_empty() || within(path, dir)
+}
+
 /// The directory of a path from the root: "" for one at the root.
 pub fn parent(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
@@ -86,6 +91,15 @@ mod tests {
         assert!(within("domain/x.py", "domain"));
         assert!(!within("domains/x.py", "domain"));
         assert!(!within("domain", "domain/x.py"));
+    }
+
+    #[test]
+    fn the_root_holds_every_path() {
+        assert!(inside("a/b.py", ""));
+        assert!(inside("", ""));
+        assert!(inside("a/b.py", "a"));
+        assert!(!inside("ab/c.py", "a"));
+        assert!(!inside("", "a"));
     }
 
     #[test]

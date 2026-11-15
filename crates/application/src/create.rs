@@ -69,6 +69,9 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
         made.added = added;
     }
     write_layers(out, &layers, &mut made)?;
+    if mode != Layers::Leave {
+        write_entries(tree, out, &declared, &mut made)?;
+    }
     write_records(tree, out, &mut made)?;
     write_guide(tree, out, &declared, &mut made)?;
     write_project(tree, out, &declared, name, &mut made)?;
@@ -129,6 +132,33 @@ fn write_layers(out: &dyn Writer, layers: &[&Place], made: &mut Made) -> Result<
         for (path, text) in &place.files {
             write(out, path, text, made)?;
         }
+    }
+    Ok(())
+}
+
+/// The entry files the declared units name that are not there, each with the layout's text for an entry file: an
+/// upgrade, which makes no layer, makes no code either. The implicit unit's entry is not made here: it is the root
+/// package's file in Rust, and optional elsewhere.
+fn write_entries(
+    tree: &dyn Tree,
+    out: &dyn Writer,
+    declared: &Declared,
+    made: &mut Made,
+) -> Result<(), String> {
+    let Some(text) = declared
+        .layout
+        .as_ref()
+        .and_then(|layout| layout.entry_file())
+    else {
+        return Ok(());
+    };
+    let entries = declared
+        .units
+        .iter()
+        .filter(|unit| unit.declared)
+        .flat_map(|unit| &unit.entries);
+    for entry in entries.filter(|entry| tree.found(entry).is_none()) {
+        write(out, entry, text, made)?;
     }
     Ok(())
 }
@@ -299,6 +329,39 @@ mod tests {
             let made = create(&tree, &tree, "project", true).unwrap();
             assert_eq!(made.added.len(), added, "{declaration}");
             assert_eq!(tree.reads_of(DECLARATION), 1, "{declaration}");
+        }
+    }
+
+    #[test]
+    fn the_entry_files_a_unit_declares_are_made_from_the_layouts_text_and_never_over_one_that_is_there()
+     {
+        for (stack, path, unit_path) in [
+            ("python", "bin/run.py", "app"),
+            ("typescript", "apps/web/src/main.tsx", "packages/app/src"),
+            ("rust", "apps/cli/src/main.rs", "crates/app"),
+        ] {
+            let declaration = format!(
+                "stack = \"{stack}\"\nareas = [\"a\"]\nui = \"none\"\n\n[[unit]]\nname = \"app\"\npath = \"{unit_path}\"\n\
+                 entry = \"{path}\"\nabsent = [\"application\", \"protocol\", \"domain\"]\n\n[[unit]]\nname = \"lib\"\n\
+                 path = \"{}\"\n",
+                unit_path.replace("app", "lib")
+            );
+            let text = layout(stack, "none")
+                .unwrap()
+                .entry_file()
+                .unwrap()
+                .to_string();
+            // Made once, with the layout's text whatever the entry is named, and by `create` alone: an upgrade makes
+            // no code
+            let tree = Fake::new(&[(DECLARATION, &declaration)]);
+            refresh(&tree, &tree, "project").unwrap();
+            assert!(tree.text(path).is_none(), "{stack}");
+            let made = create(&tree, &tree, "project", true).unwrap();
+            assert_eq!(tree.text(path).as_deref(), Some(text.as_str()), "{stack}");
+            assert!(made.written.iter().any(|w| w == path), "{stack}");
+            let tree = Fake::new(&[(DECLARATION, &declaration), (path, "mine\n")]);
+            create(&tree, &tree, "project", true).unwrap();
+            assert_eq!(tree.text(path).as_deref(), Some("mine\n"), "{stack}");
         }
     }
 }

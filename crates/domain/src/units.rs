@@ -8,7 +8,7 @@
 
 use crate::declaration::{UnitDeclaration, unreadable};
 use crate::layers::{Language, Layout, Place, Table, UnitTag};
-use crate::paths::{Miswritten, file_name, miswritten, within};
+use crate::paths::{Miswritten, file_name, inside, miswritten, within};
 
 /// One unit: where its layers sit, and what it is to the others.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,11 +118,6 @@ fn written(path: &str) -> String {
     } else {
         path.trim_end_matches('/').to_string()
     }
-}
-
-/// Whether `path` is `dir` or inside it, the root ("") holding every path.
-fn inside(path: &str, dir: &str) -> bool {
-    dir.is_empty() || within(path, dir)
 }
 
 /// What a message shows of a path that may be the root.

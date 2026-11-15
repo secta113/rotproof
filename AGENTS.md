@@ -95,7 +95,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `crossing.rs` | What `rotproof init` says when an upgrade crosses a version that changed what the layers are (the onion table, the split of the screens into `ui` and `presentation`): the versions, what each moved and where each retired layer's code goes, and whether an upgrade crosses one. Nothing moves; a project does it by hand |
 | `direction.rs` | The direction check: every layer imports only what `layers/table.toml` allows (Python, TypeScript, Rust), judged once an import is resolved to a place; between units, what each kind of unit (shared, an app, neither) may import of another and where an import lands (a place, or a unit's code outside its layers); the cycles among shared units; and where Cargo looks for a workspace |
 | `modules.rs` | The levels inside a Rust crate: the module each file of `src/` is, every path it names from `crate`, `super`, `self` or a dependency on another layer, or from a name bound to one with `as`, judged by the level it lands in, the crate's root holding only its levels' modules, and no `#[path]` |
-| `layers.rs` | The layer definitions in `layers/`: the table, and one layout per stack with the places it makes, and the questions asked of them (a layer or a level of one, where a layer lives, whether the layout leaves a layer out, which files are code in each directory it looks in, which have comments to read) |
+| `layers.rs` | The layer definitions in `layers/`: the table, and one layout per stack with the places it makes, and the questions asked of them (a layer or a level of one, where a layer lives, whether the layout leaves a layer out, which files are code in each directory it looks in, which are a package's manifest, which a unit's own directory may hold, which have comments to read) |
 | `declaration.rs` | A project's declaration, `.config/rotproof.toml`: what it says, read as it is and against the layout it names (`Declared`, which also says whether a path is in `unchecked`, and what `todo_link` means: an optional key, one of two values, failing with `stack = "none"`, and written by no command, the specification alone describes it), its `[[unit]]` tables (`UnitDeclaration`, the units `Declared` holds and the places of each), the fields `rotproof create` adds to it and the text `rotproof init` writes (with a commented example of units at its end), and what an upgrade reads from it and sets in it (`files`, `declined`) |
 | `units.rs` | The units of a project, the parts of its code that each hold the layers: a unit's name, where its layers and its manifest sit, whether it is shared, its entry files and what it lacks, the tag its places carry, the one implicit unit of a project that declares none, whose layers sit in the layout's scope with the layout's entry file, and the units a declaration names with every reason they cannot be read, from the declaration and the layout alone |
 | `links.rs` | Whether a link in a record resolves: by its target alone (no URL is checked, no path on one machine, no `\`, nothing above the repository), then by the exact names of its files, to a heading that is there, and to a definition in a `.py` file |
@@ -105,12 +105,12 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `hook.rs` | The settings file that `rotproof create` writes for Claude Code (the rule that denies editing the approvals file), and the commands of the stop hook and the time hook Rotproof wrote before, which `rotproof init` takes out |
 | `guide.rs` | The guide `.rotproof/AGENTS.md`, which `rotproof create` rewrites: how to run Rotproof, the section on the layers with their table, the rules of units (the same for every project of a stack) and what each rule of the code says in the stack's language, and the records |
 | `project.rs` | The project's files `rotproof create` writes once, outside `docs/` |
-| `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way, judged from the paths it names and the code files of the directories it lists |
+| `structure.rs` | The structure check: the tree agrees with `.config/rotproof.toml`, either way, unit by unit when units are declared (each unit's path, entry files, layers and code outside them, and the manifests outside every unit's root), judged from the paths it names, the code files of the directories it lists and the manifests of the tree |
 | `frontmatter.rs` | Splitting a document into frontmatter and the sections of its body |
 | `markdown.rs` | What GitHub renders as text, headings and their anchors as GitHub computes them, and links |
 | `sentence.rs` | The first sentence of a paragraph, as the index shows it: the paragraph read as markdown reads it, in any language, with no sentence ending inside parentheses or inline code |
 | `rust.rs` | Reading Rust source with a scanner of Rotproof's own: its comments, past strings and character literals, the code alone with both blanked, and its tokens, the paths it names, the names it binds with `as`, the items of a module it names through its `use`, its modules with a body and its attributes, and, in `rust/`, its outline |
-| `paths.rs` | Paths from the root with `/`: the parent, the name, a join, without `.` and `..`, whether one sits in another, whether the declaration writes one from the root, and the paths in messages |
+| `paths.rs` | Paths from the root with `/`: the parent, the name, a join, without `.` and `..`, whether one sits in another (the root holding every path), whether the declaration writes one from the root, and the paths in messages |
 | `text.rs` | The line at a position in a text, for messages |
 
 | Module of `crates/domain/src/rust/` | Content |
@@ -124,7 +124,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `bundle.rs` | Reading `docs/knowledge/` from the tree |
 | `check.rs` | `rotproof check`: every check run against one repository, each with its floor, and what each found printed under its heading; the comments tied to an issue (`todo_link`) go into the report apart from the findings |
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |
-| `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
+| `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, the entry files its units declare, and adding the fields the declaration lacks; and the same without making a layer, for an upgrade |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly (and whether it is a file), where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
 | `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
@@ -137,7 +137,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared |
 | `finding.rs` | A finding or a warning of `rotproof check`, made from what a check found and the heading it is printed under |
 | `records.rs` | The checks of the records, read from the tree: the areas, the floor, the links of `docs/knowledge/` and the log, the log, the knowledge documents and the generated files |
-| `structure.rs` | The structure check, read from the tree |
+| `structure.rs` | The structure check, read from the tree: the paths the rules name by their exact names, the code files of the directories they list, and, for a project that declares units, every manifest of the tree |
 
 | Module of `crates/application/src/direction/` | Content |
 |---|---|

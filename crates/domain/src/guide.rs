@@ -76,7 +76,7 @@ fn layers_section(layout: &Layout) -> String {
     .concat();
     LAYERS_TEXT
         .replace("{direction}\n", direction)
-        .replace("{units}", &units(layout.language))
+        .replace("{units}", &units(layout))
         .replace("{rules}", &rules)
         .replace("{not_layers}", &not_layers(layout))
         .replace("{table}", &rows(layout))
@@ -86,8 +86,8 @@ fn layers_section(layout: &Layout) -> String {
 /// The rules of the units, which a project that declares `[[unit]]` is held to: the same in every stack but for where
 /// a unit sits and how one unit names another's layer, which are said in the stack's language. The guide is the same
 /// for every project of a stack, so no unit of the project is named.
-fn units(language: Language) -> String {
-    let (at, names) = match language {
+fn units(layout: &Layout) -> String {
+    let (at, names) = match layout.language {
         Language::Python => (
             "Put the layers in `packages/<unit>/src/<unit>` in a monorepo, or in `<unit>` at the root in a modular\n  \
              monolith. Python imports a unit as the name of its directory, so the directory is named as the unit is.",
@@ -108,7 +108,23 @@ fn units(language: Language) -> String {
             "A crate depends on the crate of the layer it imports, and that is a layer of the unit.",
         ),
     };
-    UNITS_TEXT.replace("{where}", at).replace("{names}", names)
+    // What the top of a unit may hold besides its entry files is the layout's `unit_files`
+    let own = match layout.unit_files.as_slice() {
+        [] => String::new(),
+        files => format!(
+            " and its own {}, which imports no layer",
+            files
+                .iter()
+                .map(|file| format!("`{file}`"))
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ),
+    };
+    UNITS_TEXT
+        .replace("{where}", at)
+        .replace("{names}", names)
+        .replace("{own}", &own)
+        .replace("{manifest}", &layout.manifest)
 }
 
 /// The table of the layers: each place of the layout, where it lives and what it may import, and the entry file.
@@ -233,6 +249,8 @@ mod tests {
                 "{units}",
                 "{where}",
                 "{names}",
+                "{own}",
+                "{manifest}",
             ] {
                 assert!(
                     !text.contains(placeholder),

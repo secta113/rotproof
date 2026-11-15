@@ -4286,3 +4286,222 @@ fn follows_pins_the_units_of_the_declaration_and_the_check_fails_when_a_unit_cha
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// A Python modular monolith of three units, made by `rotproof create` and kept: `core` is shared, in a package of its
+/// own with its manifest (`root`), `billing` is not, and `app` is an app that holds only `composition` and
+/// `infrastructure`, with its entry file outside its path, which `rotproof create` makes. Each unit's own `__init__.py`
+/// is there, and the manifest of the project at the root.
+fn modular_monolith() -> tempfile::TempDir {
+    let root = declared(&format!(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
+         path = \"packages/core/src/core\"\nroot = \"packages/core\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
+         path = \"modules/billing\"\n\n[[unit]]\nname = \"app\"\npath = \"modules/app\"\nentry = \"bin/run.py\"\n\
+         absent = [\"domain\", \"application\", \"protocol\"]\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let r = root.path();
+    let out = create(&["--root", &root_arg(r), "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    for file in [
+        "pyproject.toml",
+        "packages/core/pyproject.toml",
+        "packages/core/src/core/__init__.py",
+        "modules/billing/__init__.py",
+    ] {
+        fs::write(r.join(file), "").unwrap();
+    }
+    root
+}
+
+/// What `rotproof check` prints under the structure heading, and whether it passed.
+fn structure_findings(root: &Path) -> (bool, String) {
+    let out = run(&["--root", &root_arg(root), "check"]);
+    let said = stdout(&out);
+    let findings = said
+        .split("the tree matches .config/rotproof.toml:\n")
+        .nth(1)
+        .map(|rest| rest.split("\n\n").next().unwrap_or(rest))
+        .unwrap_or("")
+        .trim_end()
+        .to_string();
+    (out.status.success(), findings)
+}
+
+#[test]
+fn a_modular_monolith_of_three_units_passes_and_each_new_finding_names_its_unit() {
+    let root = modular_monolith();
+    let r = root.path();
+    // `create` made the entry file the app declares, outside its path, and the check passes right after it
+    let entry = fs::read_to_string(r.join("bin/run.py")).unwrap();
+    assert!(
+        entry.starts_with("\"\"\"The entry file: it calls `composition`"),
+        "{entry}"
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // What is moved out of the project's tree to be put back is kept beside it, not in it: in the tree it would be
+    // code in no unit
+    let kept = tempfile::tempdir().unwrap();
+
+    // Whatever a unit lacks is its own: a layer taken from one unit is missing there, and in no other
+    let layer = r.join("modules/billing/domain");
+    let backup = kept.path().join("domain");
+    fs::rename(&layer, &backup).unwrap();
+    let (passed, found) = structure_findings(r);
+    assert!(!passed);
+    assert_eq!(
+        found,
+        "  domain of unit billing is missing: modules/billing/domain/ (run `rotproof create`, or name it in the \
+         absent of the unit in .config/rotproof.toml)"
+    );
+    fs::rename(&backup, &layer).unwrap();
+
+    // A layer the unit declares absent that is there
+    fs::create_dir_all(r.join("modules/app/domain")).unwrap();
+    fs::write(r.join("modules/app/domain/__init__.py"), "").unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(
+        found,
+        "  domain of unit app is declared absent, but modules/app/domain/ exists: remove one or the other"
+    );
+    fs::remove_dir_all(r.join("modules/app/domain")).unwrap();
+
+    // The floor is each unit's: with no layer left in billing, it says so, and the other units are not asked
+    fs::rename(r.join("modules/billing"), kept.path().join("billing")).unwrap();
+    fs::create_dir_all(r.join("modules/billing")).unwrap();
+    fs::write(r.join("modules/billing/__init__.py"), "").unwrap();
+    let (_, found) = structure_findings(r);
+    assert!(
+        found.starts_with("  composition of unit billing is missing: modules/billing/composition/"),
+        "{found}"
+    );
+    assert!(
+        found.ends_with(
+            "  no layer is present in unit billing: the python layout has modules/billing/composition/, \
+             modules/billing/infrastructure/, modules/billing/application/, modules/billing/protocol/, \
+             modules/billing/domain/"
+        ),
+        "{found}"
+    );
+    assert!(
+        !found.contains("of unit core") && !found.contains("of unit app"),
+        "{found}"
+    );
+    fs::remove_dir_all(r.join("modules/billing")).unwrap();
+
+    // A unit that is not there says it all
+    let (_, found) = structure_findings(r);
+    assert_eq!(
+        found,
+        "  unit billing is missing: modules/billing/ (make it with rotproof create, or take the unit out of \
+         .config/rotproof.toml)"
+    );
+    fs::rename(kept.path().join("billing"), r.join("modules/billing")).unwrap();
+
+    // An entry file that is not there, outside the unit's path as it is
+    fs::remove_file(r.join("bin/run.py")).unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(found, "  the entry bin/run.py of unit app is missing");
+    fs::write(r.join("bin/run.py"), "").unwrap();
+
+    // Code in no unit's path fails as code outside the layers, wherever it was moved to; the paths that are no layer
+    // (a package keeps its `tests/` in its root) and what `unchecked` keeps do not
+    fs::create_dir_all(r.join("scripts")).unwrap();
+    fs::create_dir_all(r.join("packages/core/tests")).unwrap();
+    for file in ["helper.py", "scripts/a.py", "packages/core/tests/test_a.py"] {
+        fs::write(r.join(file), "").unwrap();
+    }
+    let (_, found) = structure_findings(r);
+    let said = |what: &str| {
+        format!(
+            "  code outside the layers: {what} (it is in no unit: move it into a layer of one, or list it in unchecked \
+             in .config/rotproof.toml)"
+        )
+    };
+    assert_eq!(found, format!("{}\n{}", said("helper.py"), said("scripts")));
+    // A file taken out of a unit's path is found the same, and its place in the unit is not the one to blame
+    fs::rename(r.join("helper.py"), r.join("modules/helper.py")).unwrap();
+    fs::remove_dir_all(r.join("scripts")).unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(found, said("modules"));
+    fs::remove_file(r.join("modules/helper.py")).unwrap();
+    let (passed, found) = structure_findings(r);
+    assert!(passed, "{found}");
+
+    // Code in a unit's path outside its layers fails there, and `unchecked` keeps it, but cannot switch the unit off
+    fs::write(r.join("modules/billing/helpers.py"), "").unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(
+        found,
+        "  code outside the layers of unit billing: modules/billing/helpers.py (move it into a layer, or list it in \
+         unchecked in .config/rotproof.toml)"
+    );
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    let with_unchecked = |path: &str| {
+        declaration.replace(
+            "ui = \"none\"\n",
+            &format!("ui = \"none\"\nunchecked = [\"{path}\"]\n"),
+        )
+    };
+    let write = |text: &str| fs::write(r.join(".config/rotproof.toml"), text).unwrap();
+    write(&with_unchecked("modules/billing/helpers.py"));
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    write(&with_unchecked("modules/billing"));
+    let (passed, found) = structure_findings(r);
+    assert!(!passed);
+    assert_eq!(
+        found.lines().next().unwrap(),
+        "  unchecked lists modules/billing, which holds the unit billing (modules/billing/): a unit cannot be \
+         switched off"
+    );
+    write(&declaration);
+    fs::remove_file(r.join("modules/billing/helpers.py")).unwrap();
+
+    // A package's manifest belongs to a unit by its root: below a root and in a layer it does, and elsewhere it is a
+    // package no unit says it is
+    fs::create_dir_all(r.join("packages/core/docs")).unwrap();
+    fs::write(r.join("packages/core/docs/pyproject.toml"), "").unwrap();
+    fs::write(r.join("modules/billing/domain/pyproject.toml"), "").unwrap();
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::create_dir_all(r.join("tools")).unwrap();
+    fs::write(r.join("tools/pyproject.toml"), "").unwrap();
+    let (_, found) = structure_findings(r);
+    assert_eq!(
+        found,
+        "  tools/pyproject.toml is a manifest outside every unit's root: declare the unit whose root is tools (root \
+         = \"tools\"), or list tools in unchecked in .config/rotproof.toml"
+    );
+    write(&with_unchecked("tools"));
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn a_project_that_declares_no_unit_is_not_asked_for_manifests_or_given_the_name_of_a_unit() {
+    let root = clean_repo();
+    let r = root.path();
+    fs::create_dir_all(r.join("tools")).unwrap();
+    fs::write(r.join("tools/pyproject.toml"), "").unwrap();
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::remove_dir_all(r.join("domain")).unwrap();
+    let (passed, found) = structure_findings(r);
+    assert!(!passed);
+    assert!(
+        found.starts_with(
+            "  domain is missing: domain/ (run `rotproof create`, or declare it in absent in"
+        ),
+        "{found}"
+    );
+    assert!(
+        !found.contains("unit") && !found.contains("manifest"),
+        "{found}"
+    );
+}
