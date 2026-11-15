@@ -48,7 +48,7 @@ pub fn problems(
     let mut direction = match layout.language {
         Language::Python => python::python(tree, parsers, layout, &places, &entries),
         Language::TypeScript => typescript::typescript(tree, parsers, layout, &places, &entries),
-        Language::Rust => rust::rust(tree, parsers, layout, &places, &entries),
+        Language::Rust => rust::rust(tree, parsers, layout, &places, &entries, &declared.units),
     }?;
     // A cycle of shared units is no import of a file but the shape of them all, so it is a problem, which no approval
     // covers, and not a forbidden import

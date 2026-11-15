@@ -6,22 +6,25 @@ use std::io;
 use super::{Direction, layer_files};
 use crate::tree::{code_files, is_file, read_code};
 use domain::code::{Dependency as ManifestDependency, Manifest, Origin};
-use domain::direction::{Forbidden, edge, judged, place_of, workspace_dirs};
+use domain::direction::{Forbidden, Landing, edge, judged_landing, landing_of, workspace_dirs};
 use domain::layers::{Layout, Place};
 use domain::modules::{Dependency, judged_crate};
 use domain::paths::{join, parent};
 use domain::rust::is_source as is_rust;
+use domain::units::Unit;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
-/// The direction check of a Rust project: every dependency the manifest of a crate in a layer declares, judged by the
-/// place the path it comes from sits in, and then the levels inside each crate.
-pub(super) fn rust(
+/// The direction check of a Rust project: every dependency the manifest of a crate in a layer, or of the package of an
+/// entry file of any unit, declares, judged by the place (or the unit's code outside its layers) the path it comes
+/// from lands in, and then the levels inside each crate.
+pub(super) fn rust<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     layout: &Layout,
-    places: &[&Place],
-    entries: &[Place],
+    places: &[&'a Place],
+    entries: &'a [Place],
+    units: &'a [Unit],
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
@@ -30,11 +33,20 @@ pub(super) fn rust(
     // Each manifest's dependencies that land in a place, by the name the crate's code uses
     let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
     let mut crates = layer_files(tree, layout, places, str::to_string)?;
-    crates.extend(
-        entries
-            .iter()
-            .filter_map(|entry| entry_manifest(tree, entry)),
-    );
+    for entry in entries.iter().filter(|entry| is_file(tree, &entry.path)) {
+        match manifests.package_of(tree, parent(&entry.path), &mut found)? {
+            // Entry files of one package, `src/main.rs` and `src/bin/w.rs`, are read through its manifest once
+            Some(path) => {
+                if !crates
+                    .iter()
+                    .any(|(at, from)| *at == path && from.unit.name == entry.unit.name)
+                {
+                    crates.push((path, entry));
+                }
+            }
+            None => found.push(no_package(entry)),
+        }
+    }
     for (path, from) in crates {
         let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
             continue;
@@ -45,21 +57,25 @@ pub(super) fn rust(
             else {
                 continue;
             };
-            let Some(to) = place_of(&target, places) else {
+            let Some(to) = landing_of(&target, places, units) else {
                 continue;
             };
             let name = &dependency.name;
-            depends
-                .entry(path.clone())
-                .or_default()
-                .push((name.clone(), to));
-            forbidden.extend(judged(
+            // What the levels of a crate are judged by is a crate of a place, not the code of a unit beside its layers
+            if let Landing::Place(to) = to {
+                depends
+                    .entry(path.clone())
+                    .or_default()
+                    .push((name.clone(), to));
+            }
+            forbidden.extend(judged_landing(
                 &path,
                 dependency.line,
                 name,
                 &format!("depends on {name} ({target}{through})"),
                 from,
                 to,
+                false,
             ));
             edges.extend(edge(&path, dependency.line, name, from, to));
         }
@@ -72,11 +88,18 @@ pub(super) fn rust(
     })
 }
 
-/// The manifest of the package of the entry file, with the entry as its place, when it is there as a file. Cargo
-/// compiles the entry file against what that manifest declares.
-fn entry_manifest<'a>(tree: &dyn Tree, entry: &'a Place) -> Option<(String, &'a Place)> {
-    let manifest = join(parent(parent(&entry.path)), "Cargo.toml");
-    is_file(tree, &manifest).then_some((manifest, entry))
+/// The finding for an entry file that is there and has no package to be compiled in: what it imports is not read.
+fn no_package(entry: &Place) -> String {
+    let of = if entry.unit.name.is_empty() {
+        String::new()
+    } else {
+        format!(" of unit {}", entry.unit.name)
+    };
+    format!(
+        "{}: the entry{of} has no Cargo.toml with a [package] from its directory up to the root, so what it imports is \
+         not checked",
+        entry.path
+    )
 }
 
 /// The levels inside each crate that has them, which its manifest cannot tell apart: its code is read, and judged with
@@ -149,6 +172,29 @@ impl<'p> Manifests<'p> {
             parsers,
             read: BTreeMap::new(),
         }
+    }
+
+    /// The manifest of the package an entry file in `dir` is compiled in, as Cargo finds it: the first `Cargo.toml`
+    /// from `dir` up to the root that declares a `[package]` (a manifest of a workspace alone builds nothing), by its
+    /// path from the root. A manifest that cannot be read is the one found, said once in `found`. `None` when there
+    /// is none.
+    fn package_of(
+        &mut self,
+        tree: &dyn Tree,
+        dir: &str,
+        found: &mut Vec<String>,
+    ) -> io::Result<Option<String>> {
+        for at in workspace_dirs(dir) {
+            let path = join(&at, "Cargo.toml");
+            if !is_file(tree, &path) {
+                continue;
+            }
+            match self.read(tree, &path, found)? {
+                Some(manifest) if !manifest.is_package => {}
+                _ => return Ok(Some(path)),
+            }
+        }
+        Ok(None)
     }
 
     /// The manifest at `path`, from the root: `None`, with a finding, when it cannot be read as TOML or UTF-8.
@@ -292,5 +338,291 @@ mod tests {
         // The levels are those of the unit the dependency is in
         assert!(dependencies[1].levels.iter().all(|l| l.unit.name == "b"));
         assert!(!dependencies[1].levels.is_empty());
+    }
+
+    use crate::direction::problems;
+    use crate::tree::fake::Fake;
+    use domain::declaration::{Declared, parse_declaration};
+    use infrastructure::outbound::readers::Readers;
+
+    /// The text of the manifest of a package `name` with the path dependencies `deps` (name, path from its directory).
+    fn package(name: &str, deps: &[(&str, &str)]) -> String {
+        let mut text =
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[dependencies]\n");
+        for (dep, path) in deps {
+            text.push_str(&format!("{dep} = {{ path = \"{path}\" }}\n"));
+        }
+        text
+    }
+
+    /// The units of a test project: name, path, whether it is shared, and its entry files.
+    type Units<'a> = &'a [(&'a str, &'a str, bool, &'a [&'a str])];
+
+    /// A Rust project of `units`, with `files`.
+    fn project(units: Units, files: &[(&str, &str)]) -> (Fake, Declared) {
+        let mut declared = Declared::new(
+            parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n").unwrap(),
+        )
+        .unwrap();
+        let layout = declared.layout.clone().unwrap();
+        declared.units = units
+            .iter()
+            .map(|(name, path, shared, entries)| Unit {
+                name: name.to_string(),
+                path: path.to_string(),
+                root: path.to_string(),
+                shared: *shared,
+                entries: entries.iter().map(|e| e.to_string()).collect(),
+                absent: Vec::new(),
+                declared: true,
+            })
+            .collect();
+        declared.places = declared
+            .units
+            .iter()
+            .flat_map(|unit| unit.places(&layout, &table()))
+            .collect();
+        (Fake::new(files), declared)
+    }
+
+    /// The problems and the details of the forbidden imports the check finds.
+    fn details(tree: &Fake, declared: &Declared) -> (Vec<String>, Vec<String>) {
+        let found = problems(tree, &Readers, declared).unwrap();
+        let forbidden = found.forbidden.into_iter().map(|f| f.detail).collect();
+        (found.problems, forbidden)
+    }
+
+    const UNITS: Units = &[
+        ("core", "packages/core", true, &[]),
+        ("billing", "packages/billing", false, &[]),
+        ("shipping", "packages/shipping", false, &[]),
+        ("cli", "apps/cli", false, &["apps/cli/src/main.rs"]),
+    ];
+
+    #[test]
+    fn a_crate_of_a_unit_that_is_not_shared_depends_on_no_crate_of_another_such_unit() {
+        let (tree, declared) = project(
+            UNITS,
+            &[
+                (
+                    "packages/shipping/infrastructure/Cargo.toml",
+                    &package(
+                        "shipping_infrastructure",
+                        &[("billing_protocol", "../../billing/protocol")],
+                    ),
+                ),
+                (
+                    "packages/billing/protocol/Cargo.toml",
+                    &package("billing_protocol", &[]),
+                ),
+            ],
+        );
+        let (problems, forbidden) = details(&tree, &declared);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(
+            forbidden,
+            [
+                "packages/shipping/infrastructure/Cargo.toml:6: depends on billing_protocol \
+                 (packages/billing/protocol), in protocol of unit billing; shipping imports no unit that is not \
+                 shared, and billing is not: an app's composition wires the two"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_crate_depends_on_the_crates_of_a_shared_unit_as_on_its_own_and_on_no_application() {
+        let (tree, declared) = project(
+            UNITS,
+            &[
+                (
+                    "packages/billing/infrastructure/Cargo.toml",
+                    &package(
+                        "billing_infrastructure",
+                        &[
+                            ("core_protocol", "../../core/protocol"),
+                            ("core_domain", "../../core/domain"),
+                        ],
+                    ),
+                ),
+                (
+                    "packages/billing/infrastructure/src/inbound/mod.rs",
+                    "use core_protocol::inbound::Commands;\nuse core_protocol::outbound::Port;\n\
+                     use ::core_protocol as p;\nuse p::outbound::Q;\n",
+                ),
+                (
+                    "packages/billing/infrastructure/src/lib.rs",
+                    "pub mod inbound;\n",
+                ),
+                (
+                    "packages/billing/application/Cargo.toml",
+                    &package(
+                        "billing_application",
+                        &[("core_application", "../../core/application")],
+                    ),
+                ),
+                (
+                    "packages/core/application/Cargo.toml",
+                    &package("core_application", &[]),
+                ),
+                (
+                    "packages/core/domain/Cargo.toml",
+                    &package("core_domain", &[]),
+                ),
+                (
+                    "packages/core/protocol/Cargo.toml",
+                    &package("core_protocol", &[]),
+                ),
+                (
+                    "packages/core/protocol/src/lib.rs",
+                    "pub mod inbound;\npub mod outbound;\n",
+                ),
+                ("packages/core/protocol/src/inbound/mod.rs", ""),
+                ("packages/core/protocol/src/outbound/mod.rs", ""),
+            ],
+        );
+        let (problems, forbidden) = details(&tree, &declared);
+        assert!(problems.is_empty(), "{problems:?}");
+        // The crate may depend on the shared unit's `protocol` and `domain` as `infrastructure` does on its own, and
+        // read its `protocol::inbound`; its use of `protocol::outbound` fails by the level it is in, and its
+        // `application` may not depend on the shared unit's
+        assert_eq!(
+            forbidden,
+            [
+                "packages/billing/application/Cargo.toml:6: depends on core_application \
+                 (packages/core/application), in application of unit core; application never imports another \
+                 unit's application: composition passes a shared unit's use cases in",
+                "packages/billing/infrastructure/src/inbound/mod.rs:2: uses core_protocol::outbound::Port, in \
+                 protocol.outbound of unit core; infrastructure.inbound may import `protocol.inbound`",
+                // A name bound with `as` to the crate of another unit, through a path with a leading `::`, is judged
+                "packages/billing/infrastructure/src/inbound/mod.rs:4: uses core_protocol::outbound::Q through \
+                 `p`, in protocol.outbound of unit core; infrastructure.inbound may import `protocol.inbound`",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_entry_files_of_a_package_are_read_through_its_manifest_wherever_they_sit_in_it() {
+        let both: Units = &[
+            ("billing", "packages/billing", false, &[]),
+            (
+                "cli",
+                "apps/cli",
+                false,
+                &["apps/cli/src/main.rs", "apps/cli/src/bin/w.rs"],
+            ),
+        ];
+        let (tree, declared) = project(
+            both,
+            &[
+                (
+                    "apps/cli/Cargo.toml",
+                    &package(
+                        "cli",
+                        &[
+                            ("cli_composition", "composition"),
+                            ("billing_domain", "../../packages/billing/domain"),
+                        ],
+                    ),
+                ),
+                ("apps/cli/src/main.rs", "fn main() {}\n"),
+                ("apps/cli/src/bin/w.rs", "fn main() {}\n"),
+                (
+                    "apps/cli/composition/Cargo.toml",
+                    &package("cli_composition", &[]),
+                ),
+                (
+                    "packages/billing/domain/Cargo.toml",
+                    &package("billing_domain", &[]),
+                ),
+            ],
+        );
+        // The manifest is the one of `apps/cli`, and its dependency is judged once for the two entry files
+        let (problems, forbidden) = details(&tree, &declared);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(forbidden.len(), 1, "{forbidden:?}");
+        assert!(
+            forbidden[0].starts_with(
+                "apps/cli/Cargo.toml:7: depends on billing_domain (packages/billing/domain), in domain of unit \
+                 billing;"
+            ),
+            "{forbidden:?}"
+        );
+        // An entry file in `src/bin/` alone is read all the same
+        let bin: Units = &[
+            ("billing", "packages/billing", false, &[]),
+            ("cli", "apps/cli", false, &["apps/cli/src/bin/w.rs"]),
+        ];
+        let (tree, declared) = project(
+            bin,
+            &[
+                (
+                    "apps/cli/Cargo.toml",
+                    &package(
+                        "cli",
+                        &[("billing_domain", "../../packages/billing/domain")],
+                    ),
+                ),
+                ("apps/cli/src/bin/w.rs", "fn main() {}\n"),
+                (
+                    "packages/billing/domain/Cargo.toml",
+                    &package("billing_domain", &[]),
+                ),
+            ],
+        );
+        let (problems, forbidden) = details(&tree, &declared);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(forbidden.len(), 1, "{forbidden:?}");
+    }
+
+    #[test]
+    fn an_entry_file_with_no_package_from_its_directory_up_to_the_root_is_a_problem() {
+        let bin: Units = &[("cli", "apps/cli", false, &["apps/cli/src/bin/w.rs"])];
+        let (tree, declared) = project(
+            bin,
+            &[
+                ("apps/cli/src/bin/w.rs", "fn main() {}\n"),
+                // Neither a workspace alone nor a manifest below the entry's directory builds the entry
+                ("Cargo.toml", "[workspace]\nmembers = [\"apps/*\"]\n"),
+                ("apps/cli/src/bin/other/Cargo.toml", &package("other", &[])),
+            ],
+        );
+        let (problems, forbidden) = details(&tree, &declared);
+        assert_eq!(
+            problems,
+            [
+                "apps/cli/src/bin/w.rs: the entry of unit cli has no Cargo.toml with a [package] from its \
+                 directory up to the root, so what it imports is not checked"
+            ]
+        );
+        assert!(forbidden.is_empty());
+        // The implicit unit names no unit
+        let declared = Declared::new(
+            parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n").unwrap(),
+        )
+        .unwrap();
+        let domain = package("domain", &[]);
+        let tree = Fake::new(&[
+            ("src/main.rs", "fn main() {}\n"),
+            ("crates/domain/Cargo.toml", &domain),
+        ]);
+        let (problems, _) = details(&tree, &declared);
+        assert_eq!(
+            problems,
+            [
+                "src/main.rs: the entry has no Cargo.toml with a [package] from its directory up to the root, so \
+                 what it imports is not checked"
+            ]
+        );
+        // With the package at the root, the walk from `src/` finds it
+        let root = package("rotproof", &[]);
+        let tree = Fake::new(&[
+            ("src/main.rs", "fn main() {}\n"),
+            ("Cargo.toml", &root),
+            ("crates/domain/Cargo.toml", &domain),
+        ]);
+        assert_eq!(details(&tree, &declared), (vec![], vec![]));
+        // An entry file that is not there says nothing
+        let tree = Fake::new(&[("crates/domain/Cargo.toml", &domain)]);
+        assert_eq!(details(&tree, &declared), (vec![], vec![]));
     }
 }

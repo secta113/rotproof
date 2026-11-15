@@ -555,9 +555,16 @@ changed is in the commits, what was measured and decided along the way in the ta
   that lands nowhere, where Cargo fails too, or outside the root is not judged. A renamed dependency (`package`) is
   placed by its path all the same. `[dev-dependencies]` serve the tests and are not judged; dependencies from a
   registry or git are not judged. A `Cargo.toml` that is not UTF-8 or
-  TOML fails, and so does a dependency taken from a workspace that does not declare it. The root `Cargo.toml` is read
-  for the entry file, `src/main.rs` of the root package. Not seen: `[patch]` and `[replace]`, and source files taken
-  from another crate's directory (`include!`, `[lib] path`).
+  TOML fails, and so does a dependency taken from a workspace that does not declare it. An entry file is read through
+  the manifest of its package: the first `Cargo.toml` with a `[package]` from the entry's directory up to the root
+  (the root package's for `src/main.rs`, and for `src/bin/w.rs` of a unit's package the unit's), so the entry files of
+  every unit are read; an entry file that is there and has none fails, since what it imports is not checked (in a
+  project that declares no unit too), and one that is not there says nothing. A dependency on another unit's crate is
+  judged by the rules between units (below): in a project that declares units, `shipping_infrastructure` depending on
+  `billing_protocol`, both not shared, fails, a shared unit's `core_protocol` may be depended on as `protocol` is, and
+  `application` never depends on another unit's `application`; the levels of that crate are judged with the same rules
+  where its code names them. Not seen: `[patch]` and `[replace]`, and source files taken from another crate's
+  directory (`include!`, `[lib] path`).
 - **The levels of a crate import only what the table allows** (Rust): a level is a module of its layer's crate,
   which the manifest cannot tell apart, so the code of `src/` is read. Every path from `crate`, `super`, `self` or a
   dependency on another layer, in a `use`, an expression or the tokens of a macro, is judged by the level it lands in

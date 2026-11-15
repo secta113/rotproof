@@ -9,7 +9,8 @@
 //!   `workspace = true`. One from a registry or git names no place in the project. A dependency renamed with `package`
 //!   is found by its path all the same.
 //! - **Its workspace:** `[package] workspace` when set, whether the manifest declares `[workspace]`, and the entries
-//!   of `[workspace.dependencies]`.
+//!   of `[workspace.dependencies]`; and whether it declares a `[package]`, which a manifest of a virtual workspace does
+//!   not.
 //!
 //! Not read: `[patch]` and `[replace]`, which can point a dependency from a registry to a path, and source files
 //! taken from another crate's directory (`#[path]`, `include!`, `[lib] path`).
@@ -77,6 +78,7 @@ pub fn read(source: &str) -> Result<Manifest, (usize, String)> {
         .unwrap_or_default();
     Ok(Manifest {
         dependencies,
+        is_package: table(top.get("package")).is_some(),
         workspace: table(top.get("package"))
             .and_then(|p| p.get("workspace"))
             .and_then(Item::as_str)
@@ -171,7 +173,7 @@ unix_tests = { path = \"../unix\" }
              serde = \"1\"\n",
         )
         .unwrap();
-        assert!(manifest.is_workspace);
+        assert!(manifest.is_workspace && !manifest.is_package);
         assert_eq!(manifest.workspace, None);
         assert_eq!(
             manifest.workspace_dependencies,
@@ -181,7 +183,7 @@ unix_tests = { path = \"../unix\" }
             ])
         );
         let member = read("[package]\nname = \"a\"\nworkspace = \"../..\"\n").unwrap();
-        assert!(!member.is_workspace);
+        assert!(!member.is_workspace && member.is_package);
         assert_eq!(member.workspace.as_deref(), Some("../.."));
     }
 

@@ -208,6 +208,9 @@ pub struct Dependency {
 pub struct Manifest {
     /// Every dependency read that comes from a path or from the workspace, in the order written
     pub dependencies: Vec<Dependency>,
+    /// Whether the manifest declares a package (`[package]`): a manifest that declares only `[workspace]` builds no
+    /// crate
+    pub is_package: bool,
     /// `[package] workspace`: the workspace's directory, from the manifest's directory
     pub workspace: Option<String>,
     /// Whether the manifest declares a workspace

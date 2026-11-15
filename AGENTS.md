@@ -144,7 +144,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `mod.rs` | The direction check, read from the tree: `problems` reads the places of the declared layout and hands them to the reader of the language, with what the three share (the code files of the layers, the entry files, and the finding for a file a reader gave up on), and adds a finding for each cycle among the shared units, from the imports between them that the readers collect |
 | `python.rs` | The direction check of a Python project: every import of a `.py` file in a layer and of the entry file, as the module it names |
 | `typescript.rs` | The direction check of a TypeScript project: every import of a source file in a layer and of the entry file, resolved to a path through the aliases, judged by the place that path sits in |
-| `rust.rs` | The direction check of a Rust project: each dependency of a crate resolved to the path it comes from (through its workspace too), judged by the place that path sits in, and then the levels inside each crate |
+| `rust.rs` | The direction check of a Rust project: each dependency of a crate resolved to the path it comes from (through its workspace too), judged by the place, or the unit's code outside its layers, that path lands in, the entry files of every unit read through the first `Cargo.toml` with a `[package]` above them, and then the levels inside each crate |
 
 ## How this repository differs from what Rotproof keeps
 
