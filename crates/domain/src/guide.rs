@@ -456,6 +456,31 @@ mod tests {
     }
 
     #[test]
+    fn a_vocabulary_of_values_is_allowed_twice_with_the_three_rules_that_keep_it_from_a_third_copy()
+    {
+        for stack in known_stacks().iter().filter(|s| **s != RECORDS_ONLY) {
+            let text = guide(stack, layout(stack, &fullest_ui(stack)).as_ref());
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            for rule in [
+                "may be written twice, in `protocol.inbound` and in the unit's own `domain`, and no more",
+                "a third copy is born where the values are needed at run time",
+                // 1: the type comes from the run-time values
+                "builds its type from its run-time values",
+                "`typeof KINDS[number]` from an `as const` array",
+                // 2: `protocol.inbound` gives the values, and nobody lists them again
+                "`protocol.inbound` gives those values, not only the type",
+                "never write a list of their own",
+                // 3: the conversion fails the type checker for a kind that is missing
+                "`application` converts between the two copies exhaustively",
+                "fails the type checker",
+            ] {
+                assert!(text.contains(rule), "{stack}: {rule}");
+            }
+        }
+        assert!(!guide(RECORDS_ONLY, None).contains("vocabulary"));
+    }
+
+    #[test]
     fn a_repository_of_records_only_has_no_section_on_layers() {
         let text = guide(RECORDS_ONLY, None);
         assert!(!text.contains("## The layers"));

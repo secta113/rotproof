@@ -17,6 +17,12 @@
   `infrastructure.inbound` calls only the input ports, and a connection in `infrastructure.outbound` implements an
   output port. `composition` alone builds the implementations and wires them, and the entry file only calls it. Define
   a port only when it is called, with only the methods called.
+- **A vocabulary of values (the kinds an entry may have) may be written twice, in `protocol.inbound` and in the unit's
+  own `domain`, and no more:** a third copy is born where the values are needed at run time. So each copy builds its
+  type from its run-time values (in TypeScript, `typeof KINDS[number]` from an `as const` array; a Python `Enum` and a
+  Rust `enum` are one already); `protocol.inbound` gives those values, not only the type, and entry points, the UI and
+  tests use them and never write a list of their own; and `application` converts between the two copies exhaustively,
+  so that a kind missing on either side fails the type checker (a `switch` with an exhaustiveness check).
 - **A part goes in the layer whose concept it speaks.** No layer holds general-purpose parts: a general procedure comes
   from the standard library or an external one, and wanting to write one's own is a sign of a concept not named yet.
 - **An import the table forbids passes only as an approval, and an approval is asked for by the user.** Fix a
