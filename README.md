@@ -166,7 +166,20 @@ names the code it describes. A document belongs to one area, so first declare on
 areas = ["pricing"]
 ```
 
-Create `docs/knowledge/rates.md`:
+Start `docs/knowledge/rates.md` with `rotproof new`, which writes the frontmatter, the part that is easy to write
+wrongly, and nothing under it:
+
+```sh
+rotproof new rates
+```
+
+```text
+wrote docs/knowledge/rates.md (area: pricing)
+```
+
+It then prints what to ask to write the body: why it is so, what was considered and dropped, how it should behave, and
+what one must know that lies outside the code. The `description` is left empty, so `rotproof check` fails until it is
+written. Write the description and the body, and change the title:
 
 ```markdown
 ---
@@ -371,7 +384,8 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   Rotproof never moves or rewrites a record: from 1.0 it reads no records of work, and those of an older project stay
   where they are, as they are. Once a knowledge
   document is reviewed against its code, `rotproof follows` (the keys named) writes the hashes in its `follows`: the
-  review is the person's or the agent's, and pinning only records it. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
+  review is the person's or the agent's, and pinning only records it. `rotproof new` starts a document with the
+  frontmatter, which is easy to write wrongly, and an empty description that the check fails on, and no body. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
   `rotproof check` fails on: it only takes away, so nothing passes that failed before. Code it never moves: when the
   layer table changes (0.4.0, 1.0.0-rc.3), `rotproof init` says where each layer's code goes, and the person moves
   it.

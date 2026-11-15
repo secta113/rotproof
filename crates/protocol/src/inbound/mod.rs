@@ -186,6 +186,32 @@ pub struct Pinned {
     pub written: bool,
 }
 
+/// A new knowledge document, as `rotproof new` is asked for it.
+#[derive(Debug, Clone, Default)]
+pub struct NewDocument {
+    /// The file's name in `docs/knowledge/` without `.md`
+    pub slug: String,
+    /// The area it is tagged with. `None`: the only area the declaration lists
+    pub area: Option<String>,
+    /// What it follows, each key as `rotproof follows` takes it, pinned at its hash now
+    pub follows: Vec<String>,
+    /// Whether it is an alarm, which gets `# When` and `# Do`
+    pub alarm: bool,
+    /// The strings of an alarm's `match`
+    pub matches: Vec<String>,
+}
+
+/// What `rotproof new` wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Started {
+    /// The document, from the root, with `/`
+    pub path: String,
+    /// The area it is tagged with
+    pub area: String,
+    /// Each key it follows, with the hash it was pinned at
+    pub follows: Vec<(String, String)>,
+}
+
 /// An approval `rotproof approve --prune` removed: what it kept, and in which file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Removed {
@@ -231,4 +257,8 @@ pub trait Commands {
     fn prune(&self, root: &Path) -> Result<Vec<Removed>, String>;
     /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
+    /// Write a new knowledge document with its frontmatter and nothing else but an alarm's two headings, the
+    /// `description` empty so that the check fails until it is written, and each key it follows pinned. `Err`, writing
+    /// nothing, when the slug is not one, the file is there already, the area is not one, or a key is not there.
+    fn start(&self, root: &Path, document: &NewDocument) -> Result<Started, String>;
 }

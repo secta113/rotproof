@@ -58,7 +58,9 @@ mod tests {
 
     #[test]
     fn the_skill_names_every_command_that_runs_in_a_session_and_none_that_is_gone() {
-        for command in ["check", "init", "create", "index", "follows", "guide"] {
+        for command in [
+            "check", "init", "create", "index", "follows", "new", "guide",
+        ] {
             assert!(SKILL.contains(&format!("`rotproof {command}")), "{command}");
         }
         for gone in ["stop-hook", "time-hook", "--reviewed"] {

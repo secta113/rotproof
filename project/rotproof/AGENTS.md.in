@@ -35,8 +35,9 @@ Open work is no record here: it is kept in issues. The rest of `docs/` is the pr
   how to run or operate it). It is no summary of how the code works: the code says that, and a copy goes stale. When
   a person gives a reason or corrects you, or a decision of the task binds the changes after it, ask the person
   whether to keep it, and write what they answer rather than what the code suggests; do not write one for every
-  change. How a document is written is in `docs/knowledge/rules.md`, which Rotproof writes; the project's own rules
-  go in another guide beside it.
+  change. Start one with `rotproof new <slug>`, which writes the frontmatter and prints what to ask, and write the
+  description and the body from the answers; how a document is written is in `docs/knowledge/rules.md`, which
+  Rotproof writes, and the project's own rules go in another guide beside it.
 - **A finding is never left in a comment.** Fix it now, write it as one line in the task's issue (an issue of its
   own when it outlives the task), or let it go, and take the comment out. `rotproof check` fails on `TODO`, `FIXME`,
   `XXX`, `HACK` and `NOTE` in comments in the code. A comment says why the code beside it is written so, without the

@@ -1,15 +1,16 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which keeps a
-//! forbidden import for a reason it is given), `rotproof guide`, `rotproof index` and `rotproof follows`, and the help
-//! that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and
-//! how it exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a
-//! project's Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
+//! forbidden import for a reason it is given), `rotproof guide`, `rotproof index`, `rotproof follows` and
+//! `rotproof new` (which starts a knowledge document), and the help that leads from one to the next. Each command is
+//! a call of an input port of `protocol.inbound`; what it prints and how it exits are decided here. A command line
+//! that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0,
+//! says they are gone and exits 1; no command of that name is left.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use protocol::inbound::{
-    Commands, Initialized, LinkedTodo, Made, Moving, MovingFile, Names, Warning,
+    Commands, Initialized, LinkedTodo, Made, Moving, MovingFile, Names, NewDocument, Warning,
 };
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
@@ -36,6 +37,27 @@ Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotp
 its --root is not a directory, `rotproof create` would make layers
 without --yes, `rotproof init` leaves an update of the project's files to a person,
 or `rotproof approve` is given no reason, or an import that is not forbidden.";
+
+/// What `rotproof new` asks, for a document of knowledge: what the code cannot tell, which only a person or the task
+/// can. The text is here and not in a file Rotproof writes, so that what an agent is told to ask is what the command it
+/// ran printed.
+const QUESTIONS: &str = "\
+Write the body from what the person or the task has said, not from what the code does (the code says that). Ask for
+each of these, answer in your own words, and leave out a question nobody can answer rather than a heading with nothing
+under it:
+  1. Why is it so, and not another way?
+  2. What was considered and dropped, and why?
+  3. How should it behave, where the code says only how it does?
+  4. What outside the code does one need to know (what a service promises, the data in production, how to run or
+     operate it)?";
+
+/// What `rotproof new --alarm` asks: the two headings an alarm has, in the words they are searched by.
+const ALARM_QUESTIONS: &str = "\
+Write the two headings from what was seen, as it was seen, not in other words (whoever meets the message searches
+docs/ for it):
+  # When  What is seen, and where: the message, the exit code or the status as they were observed, and the job or the
+          command whose output shows them. Say each wording when a version of a tool changes it.
+  # Do    What to do then. Usually: open an issue for the work, and say what to look at first.";
 
 /// The long help of `rotproof check`. `{markers}` becomes the words the marker check fails on, taken from the check:
 /// written here, they would be a comment that holds them, and a list that could drift from the check.
@@ -224,6 +246,43 @@ enum Command {
         #[arg(required = true)]
         keys: Vec<String>,
     },
+    /// Start a knowledge document: write docs/knowledge/<slug>.md with its frontmatter, and print what to ask
+    ///
+    /// Writes the frontmatter of a new document, which is the part that is easy to write wrongly (`type`, a `title`
+    /// made from the slug, the one area it is tagged with, `status: stable`), and nothing under it: the body is yours
+    /// to write from what a person or the task says. The `description` is left empty, so `rotproof check` fails until
+    /// it is written, and the document cannot be committed half done; change the title too when the slug says less
+    /// than a title would. The slug is the file's name without .md (lower-case words and digits joined by hyphens,
+    /// never index, log or rules), and it never changes once the file exists, as commit messages and other documents
+    /// refer to it. --area names the area the document is tagged with, one of the areas of .config/rotproof.toml, and
+    /// may be left out when it lists only one. Each --follows KEY, repeated for more, is a key as `rotproof follows`
+    /// takes it (a file, a definition `file::Name.Name`, a table of a .toml file, or a directory), pinned at its hash
+    /// now exactly as `rotproof follows` would pin it: run it once the document says what the code does, as the pin
+    /// says it was reviewed; a key that is not there writes nothing. --alarm writes what an alarm needs: `# When` and
+    /// `# Do`, empty so that the check fails until each is written, and --match STRING, repeated for more, the strings
+    /// of `match` (each as it appears in what is seen; with none, the field is left out). Prints the file written, each
+    /// key with its hash, and the questions to ask to write the body. It never writes over a document, and does not
+    /// write the index: run `rotproof index` once the description is written. Exits 2, writing nothing, when the slug
+    /// is not one, a document of that name is there already (by Windows' reading of names too), the area is not one the
+    /// declaration lists or is left out when it lists more than one, docs/knowledge/ is not there, a key is not a form
+    /// follows takes, names what is not there or cannot be read, or --match is given without --alarm or holds a string
+    /// that cannot be written.
+    New {
+        /// The file's name in docs/knowledge/ without .md: lower-case words joined by hyphens
+        slug: String,
+        /// The area the document is tagged with. Needed when the declaration lists more than one
+        #[arg(long)]
+        area: Option<String>,
+        /// A key the document follows, pinned at its hash now; repeat it for more
+        #[arg(long = "follows", value_name = "KEY")]
+        follows: Vec<String>,
+        /// The document is an alarm: it gets `# When` and `# Do`
+        #[arg(long)]
+        alarm: bool,
+        /// A string of an alarm's `match`, as it appears in what is seen; repeat it for more
+        #[arg(long = "match", value_name = "STRING", requires = "alarm")]
+        matches: Vec<String>,
+    },
 }
 
 /// The command line as clap reads it, with the long help of `rotproof check` naming the markers of the check.
@@ -282,6 +341,22 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         },
         Command::Follows { document, keys } => {
             follows(commands, root, &document, &keys).map(|()| true)
+        }
+        Command::New {
+            slug,
+            area,
+            follows,
+            alarm,
+            matches,
+        } => {
+            let document = NewDocument {
+                slug,
+                area,
+                follows,
+                alarm,
+                matches,
+            };
+            new_document(commands, root, &document).map(|()| true)
         }
     };
     match result {
@@ -699,6 +774,39 @@ fn follows(
             pinned.doc
         );
     }
+    Ok(())
+}
+
+/// Write the new document, say what was written, and print what to ask to write it.
+fn new_document(
+    commands: &dyn Commands,
+    root: &Path,
+    document: &NewDocument,
+) -> Result<(), String> {
+    let started = commands.start(root, document)?;
+    println!("wrote {} (area: {})", started.path, started.area);
+    for (key, hash) in &started.follows {
+        println!("  follows {key}: {hash}");
+    }
+    println!();
+    println!(
+        "{}",
+        if document.alarm {
+            ALARM_QUESTIONS
+        } else {
+            QUESTIONS
+        }
+    );
+    println!();
+    println!(
+        "next: write the description (one sentence: what the document tells), and the title if the slug says less, then \
+         run `rotproof index`; `rotproof check` fails until the description is written{}",
+        if document.alarm {
+            ", and both headings"
+        } else {
+            ""
+        }
+    );
     Ok(())
 }
 

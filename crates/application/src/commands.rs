@@ -9,7 +9,9 @@ use domain::layers::RECORDS_ONLY;
 use domain::markers::{MARKERS, either};
 use domain::readers::FILE;
 use domain::version::VERSION;
-use protocol::inbound::{Commands, Indexed, Initialized, Made, Names, Pinned, Removed, Report};
+use protocol::inbound::{
+    Commands, Indexed, Initialized, Made, Names, NewDocument, Pinned, Removed, Report, Started,
+};
 use protocol::outbound::{Files, Machine};
 
 use crate::readers::Change;
@@ -154,5 +156,10 @@ impl Commands for Rotproof<'_> {
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String> {
         let files = self.machine.files(root);
         crate::follows::pin(&*files, &*files, self.machine.parsers(), document, keys)
+    }
+
+    fn start(&self, root: &Path, document: &NewDocument) -> Result<Started, String> {
+        let files = self.machine.files(root);
+        crate::scaffold::start(&*files, &*files, self.machine.parsers(), document)
     }
 }
