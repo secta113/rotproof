@@ -305,6 +305,33 @@ pub fn fullest_ui(stack: &str) -> String {
         .unwrap_or_else(|| NO_UI.to_string())
 }
 
+/// The UI a new declaration for `stack` gets from `--ui`, and the one `rotproof guide --stack` shows when it is named.
+/// Named, it is one the stack offers; not named, it is [`NO_UI`] where the stack offers nothing else, and asked for
+/// where it does: a project with screens and one without both start from the same command, and a default would make
+/// the layers of one of them. A repository of records only has no UI.
+pub fn chosen_ui(stack: &str, ui: Option<&str>) -> Result<String, String> {
+    let Some(offered) = uis(stack) else {
+        if let Some(ui) = ui {
+            return Err(format!(
+                "stack {stack:?} has no layers, so it has no UI: run it without --ui {ui}"
+            ));
+        }
+        return Ok(String::new());
+    };
+    match ui {
+        Some(ui) if offered.iter().any(|u| u == ui) => Ok(ui.to_string()),
+        Some(ui) => Err(format!(
+            "unknown UI {ui:?} for the {stack} stack (known: {})",
+            offered.join(", ")
+        )),
+        None if offered == [NO_UI] => Ok(NO_UI.to_string()),
+        None => Err(format!(
+            "name the UI with --ui ({}): \"none\" for a project with no screens",
+            offered.join(", ")
+        )),
+    }
+}
+
 impl Layout {
     /// Every place of this layout, layers first in the table's order, each followed by its levels: where it lives, and
     /// what the table says it may import. The checks, the documentation of each layer and Rotproof's guide all read

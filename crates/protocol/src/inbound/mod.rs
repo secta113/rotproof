@@ -180,8 +180,8 @@ pub trait Commands {
     fn create(&self, root: &Path, yes: bool) -> Result<Made, String>;
     /// Every broken rule.
     fn check(&self, root: &Path) -> Result<Report, String>;
-    /// The guide of `stack`, or of the stack the project declares.
-    fn guide(&self, root: &Path, stack: Option<&str>) -> Result<String, String>;
+    /// The guide of `stack`, with the layers of `ui` when it is named too, or of the stack the project declares.
+    fn guide(&self, root: &Path, stack: Option<&str>, ui: Option<&str>) -> Result<String, String>;
     /// Write every index file, and find the items to measure again now.
     fn index(&self, root: &Path) -> Result<Indexed, String>;
     /// The findings an approval of `import` by `file` would keep, as `rotproof check` says them. `Err` when the import

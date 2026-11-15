@@ -9,9 +9,10 @@ use domain::layers::known_stacks;
 use domain::project::stale_map;
 use protocol::outbound::Tree;
 
-/// The guide `rotproof guide` prints: for `stack` when it is named, otherwise for the stack the project in `tree`
-/// declares. `Err` when the stack is unknown, or none is named and the declaration cannot be read.
-pub fn guide_for(tree: &dyn Tree, stack: Option<&str>) -> Result<String, String> {
+/// The guide `rotproof guide` prints: for `stack` when it is named, with the layers of `ui` when that is named too,
+/// otherwise for the stack the project in `tree` declares. `Err` when the stack is unknown, the UI is one `rotproof
+/// init` would refuse for it, or no stack is named and the declaration cannot be read.
+pub fn guide_for(tree: &dyn Tree, stack: Option<&str>, ui: Option<&str>) -> Result<String, String> {
     let stack = match stack {
         Some(stack) => stack.to_string(),
         None => {
@@ -32,7 +33,7 @@ pub fn guide_for(tree: &dyn Tree, stack: Option<&str>) -> Result<String, String>
             }
         }
     };
-    guide_named(&stack)
+    guide_named(&stack, ui)
 }
 
 /// Where the project's own map is, from the root

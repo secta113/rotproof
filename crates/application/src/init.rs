@@ -25,7 +25,7 @@ use domain::crossing::{
     ONION, PORTS_MOVED, PRESENTATION, PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, retired,
 };
 use domain::declaration::{DECLARATION, Declared, Fields, declaration_text, fields, with_files};
-use domain::layers::{NO_UI, known_stacks, layout, uis};
+use domain::layers::{NO_UI, chosen_ui, known_stacks, layout};
 use domain::tree::Written;
 use domain::units_doc::{self, DOCUMENT, FILE, KEY};
 use domain::upgrade::{FIRST, Update, pending};
@@ -64,33 +64,6 @@ pub fn init(
     out.write(DECLARATION, &declaration_text(stack, &ui))
         .map_err(|e| format!("{DECLARATION}: {e}"))?;
     Ok(Initialized::Declared(DECLARATION))
-}
-
-/// The UI a new declaration for `stack` gets from `--ui`. Named, it is one the stack offers; not named, it is
-/// [`NO_UI`] where the stack offers nothing else, and asked for where it does: a project with screens and one without
-/// both start from the same command, and a default would make the layers of one of them. A repository of records only
-/// has no UI.
-fn chosen_ui(stack: &str, ui: Option<&str>) -> Result<String, String> {
-    let Some(offered) = uis(stack) else {
-        if let Some(ui) = ui {
-            return Err(format!(
-                "stack {stack:?} has no layers, so it has no UI: run it without --ui {ui}"
-            ));
-        }
-        return Ok(String::new());
-    };
-    match ui {
-        Some(ui) if offered.iter().any(|u| u == ui) => Ok(ui.to_string()),
-        Some(ui) => Err(format!(
-            "unknown UI {ui:?} for the {stack} stack (known: {})",
-            offered.join(", ")
-        )),
-        None if offered == [NO_UI] => Ok(NO_UI.to_string()),
-        None => Err(format!(
-            "name the UI with --ui ({}): \"none\" for a project with no screens",
-            offered.join(", ")
-        )),
-    }
 }
 
 /// Bring the project's files up to `running`.

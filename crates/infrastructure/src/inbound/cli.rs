@@ -140,12 +140,17 @@ enum Command {
     ///
     /// Prints the guide of the stack the project declares, or of the stack named with --stack, which needs no project:
     /// how to run Rotproof, the layers of the stack with where each lives and what it may import, and the rules of the
-    /// records. The same text `rotproof create` writes to .rotproof/AGENTS.md. Exits 2 for an unknown stack, or when
-    /// no stack is named and the declaration cannot be read.
+    /// records. The same text `rotproof create` writes to .rotproof/AGENTS.md. With --stack, --ui picks the UI, as
+    /// for `rotproof init` (with python and typescript, atomic or none; the layers of the fullest UI the stack offers
+    /// without it). Exits 2 for an unknown stack or UI, or when no stack is named and the declaration cannot be read.
     Guide {
         /// python, typescript, rust, or none (records only). Without it, the stack in .config/rotproof.toml
         #[arg(long)]
         stack: Option<String>,
+        /// The UI of the layers to show, as for `rotproof init`: atomic or none with python and typescript. Needs
+        /// --stack
+        #[arg(long, requires = "stack")]
+        ui: Option<String>,
     },
     /// Approve on a terminal a forbidden import, or the knowledge documents whose followed code changed (--reviewed);
     /// or remove the approvals that match nothing (--prune)
@@ -253,10 +258,14 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         }
         Command::Create { yes } => create(commands, &names, root, yes).map(|()| true),
         Command::Check => check(commands, &names, root),
-        Command::Guide { stack } => commands.guide(root, stack.as_deref()).map(|text| {
-            print!("{text}");
-            true
-        }),
+        Command::Guide { stack, ui } => {
+            commands
+                .guide(root, stack.as_deref(), ui.as_deref())
+                .map(|text| {
+                    print!("{text}");
+                    true
+                })
+        }
         Command::Index => index(commands, root).map(|()| true),
         Command::Approve {
             file,

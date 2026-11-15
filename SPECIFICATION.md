@@ -40,6 +40,7 @@ rotproof --root <repository> approve --prune  # remove the approvals that match 
 rotproof --root <repository> approve --reviewed  # re-pin the knowledge documents whose followed code changed
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
+rotproof guide --stack typescript --ui none  # the same for the layers of that UI (the values of init's --ui), with no project
 ```
 
 `--root` defaults to the current directory. The declaration is read from `<repository>/.config/rotproof.toml`, and the

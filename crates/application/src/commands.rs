@@ -96,8 +96,8 @@ impl Commands for Rotproof<'_> {
             .map_err(|e| e.to_string())
     }
 
-    fn guide(&self, root: &Path, stack: Option<&str>) -> Result<String, String> {
-        crate::project::guide_for(&*self.machine.files(root), stack)
+    fn guide(&self, root: &Path, stack: Option<&str>, ui: Option<&str>) -> Result<String, String> {
+        crate::project::guide_for(&*self.machine.files(root), stack, ui)
     }
 
     fn index(&self, root: &Path) -> Result<Indexed, String> {

@@ -939,6 +939,58 @@ areas = [\"a\"]
 }
 
 #[test]
+fn guide_takes_the_ui_with_a_stack_as_init_does_and_needs_no_project() {
+    let root = tempfile::tempdir().unwrap();
+    let arg = root_arg(root.path());
+    let guide = |args: &[&str]| run(&[&["--root", &arg, "guide"], args].concat());
+    let none = guide(&["--stack", "typescript", "--ui", "none"]);
+    let atomic = guide(&["--stack", "typescript", "--ui", "atomic"]);
+    assert!(none.status.success() && atomic.status.success());
+    assert!(
+        stdout(&atomic).contains("| `ui.pages` |")
+            && stdout(&atomic).contains("| `presentation.models` |"),
+        "{}",
+        stdout(&atomic)
+    );
+    assert!(
+        !stdout(&none).contains("| `ui.pages` |") && !stdout(&none).contains("| `presentation"),
+        "{}",
+        stdout(&none)
+    );
+    // Without --ui it is the fullest, as before
+    let fullest = guide(&["--stack", "typescript"]);
+    assert_eq!(stdout(&fullest), stdout(&atomic));
+    // The values and the checks of init, in its words, and an exit of 2
+    for (args, says) in [
+        (
+            &["--stack", "typescript", "--ui", "x"][..],
+            "unknown UI \"x\" for the typescript stack (known: atomic, none)",
+        ),
+        (
+            &["--stack", "rust", "--ui", "atomic"][..],
+            "unknown UI \"atomic\" for the rust stack (known: none)",
+        ),
+        (
+            &["--stack", "none", "--ui", "none"][..],
+            "stack \"none\" has no layers, so it has no UI",
+        ),
+    ] {
+        let out = guide(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(says),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.stdout.is_empty(), "{args:?}");
+    }
+    // A UI means a stack: the declaration's is not the one to pick it for
+    let out = guide(&["--ui", "none"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--stack"));
+}
+
+#[test]
 fn create_respects_absent_and_leaves_what_it_does_not_own() {
     let root = declared(
         "stack = \"python\"\nareas = [\"a\"]\nui = \"atomic\"\nabsent = [\"ui.templates\", \"infrastructure\"]\n",

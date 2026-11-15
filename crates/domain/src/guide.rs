@@ -8,7 +8,8 @@
 //! module puts the section together, and knows no rule but the layers'.
 
 use crate::layers::{
-    Language, Layout, RECORDS_ONLY, fullest_ui, importable, known_stacks, layout, listed, table,
+    Language, Layout, RECORDS_ONLY, chosen_ui, fullest_ui, importable, known_stacks, layout,
+    listed, table,
 };
 
 /// Rotproof's guide, from the root
@@ -22,12 +23,23 @@ const UI_TEXT: &str = include_str!("../../../project/rotproof/ui.md.in");
 const DIRECTION_IMPORTS: &str = include_str!("../../../project/rotproof/direction-imports.md.in");
 const DIRECTION_CARGO: &str = include_str!("../../../project/rotproof/direction-cargo.md.in");
 
-/// The guide for the stack named `stack`. `Err` when the stack is unknown.
-pub fn guide_named(stack: &str) -> Result<String, String> {
+/// The guide for the stack named `stack`, with the layers of the UI `ui` when it is named, and of the fullest one the
+/// stack offers when it is not. `Err` when the stack is unknown, or the UI is one `rotproof init` would refuse for it.
+pub fn guide_named(stack: &str, ui: Option<&str>) -> Result<String, String> {
+    if !known_stacks().contains(&stack) {
+        return Err(format!(
+            "unknown stack {stack:?} (known: {})",
+            known_stacks().join(", ")
+        ));
+    }
+    let ui = match ui {
+        Some(_) => chosen_ui(stack, ui)?,
+        None => fullest_ui(stack),
+    };
     if stack == RECORDS_ONLY {
         return Ok(guide(stack, None));
     }
-    match layout(stack, &fullest_ui(stack)) {
+    match layout(stack, &ui) {
         Some(layout) => Ok(guide(stack, Some(&layout))),
         None => Err(format!(
             "unknown stack {stack:?} (known: {})",
@@ -261,6 +273,33 @@ mod tests {
             }
             assert!(text.contains(env!("CARGO_PKG_VERSION")));
         }
+    }
+
+    #[test]
+    fn a_named_stack_gets_the_guide_of_the_ui_named_or_of_the_fullest_and_the_ui_is_judged_as_init_does()
+     {
+        let of = |ui: &str| guide("typescript", layout("typescript", ui).as_ref());
+        assert_eq!(guide_named("typescript", Some("none")), Ok(of("none")));
+        assert_eq!(guide_named("typescript", Some("atomic")), Ok(of("atomic")));
+        assert_eq!(guide_named("typescript", None), Ok(of("atomic")));
+        assert_ne!(of("none"), of("atomic"));
+        assert_eq!(guide_named("rust", Some("none")), guide_named("rust", None));
+        assert_eq!(guide_named("none", None), Ok(guide(RECORDS_ONLY, None)));
+        // The checks of `rotproof init --ui`, in its words
+        for (stack, ui) in [("typescript", "x"), ("python", ""), ("rust", "atomic")] {
+            let said = guide_named(stack, Some(ui)).unwrap_err();
+            assert!(said.starts_with("unknown UI"), "{stack} {ui}: {said}");
+        }
+        assert!(
+            guide_named("none", Some("none"))
+                .unwrap_err()
+                .contains("has no layers")
+        );
+        assert!(
+            guide_named("cobol", Some("none"))
+                .unwrap_err()
+                .starts_with("unknown stack")
+        );
     }
 
     #[test]
