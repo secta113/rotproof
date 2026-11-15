@@ -64,10 +64,12 @@ fn channel(stack: &str) -> Channel {
 }
 
 /// The project's files `rotproof create` writes once, for the project named `name` (its directory's name): path from
-/// the root -> text, and what was not written for the stack, and why.
+/// the root -> text, and what was not written for the stack, and why. `crates` are the directories of the crates the
+/// project has, which the workspace of a Rust project lists as its members.
 pub fn project_files<'a>(
     declared: &'a Declared,
     name: &str,
+    crates: &[String],
 ) -> (Vec<(&'a str, String)>, Option<String>) {
     let stack = declared.declaration.stack.as_str();
     let fill = |text: &str| {
@@ -99,12 +101,18 @@ pub fn project_files<'a>(
         (".gitignore", gitignore.to_string()),
         (".gitattributes", GITATTRIBUTES_TEXT.to_string()),
     ];
-    // What the stack's toolchain needs at the root: the workspace and the root package of a Rust project
+    // What the stack's toolchain needs at the root: the workspace and the root package of a Rust project, and with
+    // units the workspace alone. The workspace lists the crates one to a line
     if let Some(layout) = &declared.layout {
-        files.extend(layout.files.iter().map(|file| {
+        let members = members(crates);
+        let units = !declared.declaration.units.is_empty();
+        files.extend(layout.root_files(units).iter().map(|file| {
             (
                 file.path.as_str(),
-                file.text.trim_start().replace("{package}", &package(name)),
+                file.text
+                    .trim_start()
+                    .replace("{package}", &package(name))
+                    .replace("{members}", &members),
             )
         }));
     }
@@ -127,6 +135,20 @@ pub fn project_files<'a>(
         }
     }
     (files, None)
+}
+
+/// The members of a workspace, as the array holds them: each crate's directory on a line of its own, and nothing for a
+/// project with none.
+fn members(crates: &[String]) -> String {
+    let lines: String = crates
+        .iter()
+        .map(|dir| format!("\n    \"{dir}\","))
+        .collect();
+    if lines.is_empty() {
+        lines
+    } else {
+        format!("{lines}\n")
+    }
 }
 
 /// The project's name as a package name, which Cargo takes only of letters, digits, `-` and `_`: every other
@@ -230,7 +252,7 @@ mod tests {
                 units: Vec::new(),
             })
             .unwrap();
-            let (files, not_written) = project_files(&declared, "x");
+            let (files, not_written) = project_files(&declared, "x", &[]);
             // Only the pin npm keeps in package.json, the project's own file, is left to the project
             assert_eq!(
                 channel(stack) == Channel::Npm,
@@ -245,5 +267,48 @@ mod tests {
             );
             assert!(files.iter().any(|(path, _)| *path == ".gitignore"));
         }
+    }
+
+    #[test]
+    fn the_workspace_of_a_rust_project_names_its_crates_and_has_no_package_with_units() {
+        use crate::declaration::parse_declaration;
+        let crates = [
+            "crates/a/domain".to_string(),
+            "crates/a/protocol".to_string(),
+        ];
+        let workspace = |declaration: &str| {
+            let declared = Declared::new(parse_declaration(declaration).unwrap()).unwrap();
+            let (files, _) = project_files(&declared, "my-app", &crates);
+            files
+                .into_iter()
+                .map(|(path, text)| (path.to_string(), text))
+                .filter(|(path, _)| path == "Cargo.toml" || path == "src/main.rs")
+                .collect::<Vec<_>>()
+        };
+        let one = workspace(
+            "stack = \"rust\"\nareas = []
+ui = \"none\"\n",
+        );
+        assert_eq!(one.len(), 2);
+        assert!(one[0].1.contains("name = \"my-app\"") && one[0].1.contains("composition = "));
+        assert!(
+            one[0]
+                .1
+                .contains("members = [\n    \"crates/a/domain\",\n    \"crates/a/protocol\",\n]\n")
+        );
+        let units = workspace(
+            "stack = \"rust\"\nareas = []
+ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
+        );
+        assert_eq!(
+            units,
+            [(
+                "Cargo.toml".to_string(),
+                "[workspace]\nmembers = [\n    \"crates/a/domain\",\n    \"crates/a/protocol\",\n]\nresolver = \"3\"\n"
+                    .to_string()
+            )]
+        );
+        // No crate, no member
+        assert_eq!(members(&[]), "");
     }
 }

@@ -37,7 +37,8 @@ pub fn init(
     running: &str,
 ) -> Result<Initialized, String> {
     if tree.found(DECLARATION).is_some() {
-        return upgrade(tree, out, stack, ui, name, running).map(Initialized::Upgraded);
+        return upgrade(tree, out, stack, ui, name, running)
+            .map(|upgraded| Initialized::Upgraded(Box::new(upgraded)));
     }
     let Some(stack) = stack else {
         return Err(format!(

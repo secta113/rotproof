@@ -4505,3 +4505,279 @@ fn a_project_that_declares_no_unit_is_not_asked_for_manifests_or_given_the_name_
         "{found}"
     );
 }
+
+/// The names of the packages `cargo metadata` finds in the workspace at `root`, sorted. Panics, saying why, when Cargo
+/// refuses the workspace.
+fn workspace_packages(root: &Path) -> Vec<String> {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let out = Command::new(cargo)
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--offline",
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let metadata = String::from_utf8_lossy(&out.stdout).into_owned();
+    // A package is the one object that has a name and then a version: a dependency or a target has none
+    let mut names: Vec<String> = metadata
+        .split("{\"name\":\"")
+        .skip(1)
+        .filter_map(|part| {
+            let (name, rest) = part.split_once('"')?;
+            rest.starts_with(",\"version\":").then(|| name.to_string())
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+const RUST_LAYERS: [&str; 5] = [
+    "application",
+    "composition",
+    "domain",
+    "infrastructure",
+    "protocol",
+];
+
+/// The declaration of a Rust project of two units: `core`, shared, whose crates sit in `crates/core`, and `cli`, an
+/// app that holds `composition` and `infrastructure` only, whose crates sit in `apps/cli/crates` and whose entry file
+/// is `entry`, in the package at `apps/cli` (its `root`).
+fn rust_units(entry: &str) -> String {
+    format!(
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
+         path = \"crates/core\"\nshared = true\n\n[[unit]]\nname = \"cli\"\npath = \"apps/cli/crates\"\n\
+         root = \"apps/cli\"\nentry = \"{entry}\"\nabsent = [\"application\", \"protocol\", \"domain\"]\n",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+#[test]
+fn a_rust_project_that_declares_units_gets_the_crates_of_each_named_for_its_unit_and_passes_its_check()
+ {
+    let root = declared(&rust_units("apps/cli/src/main.rs"));
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let layers = [
+        ("core", "crates/core", &RUST_LAYERS[..]),
+        (
+            "cli",
+            "apps/cli/crates",
+            &["composition", "infrastructure"][..],
+        ),
+    ];
+    for (unit, base, layers) in layers {
+        for layer in layers {
+            let manifest =
+                fs::read_to_string(r.join(format!("{base}/{layer}/Cargo.toml"))).unwrap();
+            assert!(
+                manifest.contains(&format!("name = \"{unit}_{layer}\"\n")),
+                "{unit} {layer}: {manifest}"
+            );
+            assert!(r.join(format!("{base}/{layer}/src/lib.rs")).is_file());
+        }
+        // The unit's directory holds crates, and is none itself
+        assert!(!r.join(format!("{base}/Cargo.toml")).exists());
+    }
+    // The levels are modules of their crate, in the unit's directory
+    assert!(r.join("crates/core/protocol/src/inbound/mod.rs").is_file());
+    // The entry file of the app, in the package that holds it, which depends on the app's own `composition`
+    assert!(r.join("apps/cli/src/main.rs").is_file());
+    let package = fs::read_to_string(r.join("apps/cli/Cargo.toml")).unwrap();
+    assert!(package.contains("name = \"cli\"\n"), "{package}");
+    assert!(
+        package.contains("cli_composition = { path = \"crates/composition\" }"),
+        "{package}"
+    );
+    // The units replace the implicit one: no crate of the project's own, and no root package or entry file
+    assert!(!r.join("crates/domain").exists() && !r.join("src/main.rs").exists());
+    // The workspace names each crate, which a glob over `crates/` could not: it would match `crates/core`
+    let workspace = fs::read_to_string(r.join("Cargo.toml")).unwrap();
+    assert!(
+        !workspace.contains("[package]") && !workspace.contains('*'),
+        "{workspace}"
+    );
+    let mut have: Vec<String> = workspace
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix('"')?.strip_suffix("\","))
+        .map(String::from)
+        .collect();
+    have.sort();
+    let mut want: Vec<String> = layers
+        .iter()
+        .flat_map(|(_, base, layers)| layers.iter().map(move |layer| format!("{base}/{layer}")))
+        .chain(["apps/cli".to_string()])
+        .collect();
+    want.sort();
+    assert_eq!(have, want, "{workspace}");
+    // Cargo reads it, and finds a crate for each layer of each unit and the app's package, no two named alike
+    let mut crates: Vec<String> = layers
+        .iter()
+        .flat_map(|(unit, _, layers)| layers.iter().map(move |layer| format!("{unit}_{layer}")))
+        .chain(["cli".to_string()])
+        .collect();
+    crates.sort();
+    assert_eq!(workspace_packages(r), crates);
+    // What it made is what the check expects of the units, with nothing a person has to move first
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // A second run has nothing to make, and writes nothing
+    let before = tree(r);
+    let second = create(&["--root", &arg, "create"]);
+    assert!(second.status.success(), "{}", stdout(&second));
+    assert!(
+        stdout(&second).contains("nothing to make"),
+        "{}",
+        stdout(&second)
+    );
+    assert_eq!(tree(r), before);
+}
+
+#[test]
+fn a_rust_entry_file_with_no_place_for_its_package_fails_create_before_it_writes_anything() {
+    for (entry, said) in [
+        (
+            "apps/cli/main.rs",
+            "a Rust entry file is <dir>/src/main.rs, so that its package is <dir>/Cargo.toml",
+        ),
+        ("src/main.rs", "at the root, where the workspace is"),
+    ] {
+        let root = declared(&rust_units(entry));
+        let r = root.path();
+        let out = create(&["--root", &root_arg(r), "create", "--yes"]);
+        assert_eq!(out.status.code(), Some(2), "{entry}");
+        let said_by = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(said_by.contains(said), "{entry}: {said_by}");
+        // Nothing was written: only the declaration is there
+        assert_eq!(
+            tree(r)
+                .iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            [".config/rotproof.toml"],
+            "{entry}"
+        );
+    }
+}
+
+#[test]
+fn a_rust_workspace_that_exists_gets_the_crates_of_a_unit_and_loses_the_glob_that_would_match_it() {
+    // A project made by an older Rotproof: its workspace is the glob over `crates/`, and it declares no unit
+    let older = "[package]\nname = \"older\"\nversion = \"0.1.0\"\nedition = \"2024\"\npublish = false\n\n\
+                 [dependencies]\ncomposition = { path = \"crates/composition\" }\n\n\
+                 [workspace]\nmembers = [\"crates/*\"]\nresolver = \"3\"\n";
+    let root = declared(
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"application\", \"infrastructure\", \"protocol\"]\n",
+    );
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::write(r.join("Cargo.toml"), older).unwrap();
+    fs::create_dir_all(r.join("src")).unwrap();
+    fs::write(r.join("src/main.rs"), "fn main() {}\n").unwrap();
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // It keeps working, and untouched: the glob matches the crates it made
+    assert_eq!(fs::read_to_string(r.join("Cargo.toml")).unwrap(), older);
+    assert!(
+        !stdout(&out).contains("changed Cargo.toml"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(workspace_packages(r), ["composition", "domain", "older"]);
+
+    // The project nests its crates in a unit: the glob would match `crates/billing`, which holds no manifest
+    declare(
+        r,
+        concat!(
+            "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"",
+            env!("CARGO_PKG_VERSION"),
+            "\"\n\n[[unit]]\nname = \"billing\"\npath = \"crates/billing\"\n\
+             absent = [\"application\", \"infrastructure\", \"protocol\"]\n"
+        ),
+    );
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains(
+            "changed Cargo.toml: replaced \"crates/*\" in members with the crates it matched, since it would match \
+             crates/billing, which has no Cargo.toml"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "changed Cargo.toml: added to members: crates/billing/composition, crates/billing/domain"
+        ),
+        "{said}"
+    );
+    let workspace = fs::read_to_string(r.join("Cargo.toml")).unwrap();
+    assert!(!workspace.contains("crates/*"), "{workspace}");
+    // The rest of the manifest is as it was written
+    assert!(
+        workspace.starts_with(&older[..older.find("members").unwrap()]),
+        "{workspace}"
+    );
+    assert!(workspace.ends_with("resolver = \"3\"\n"), "{workspace}");
+    assert_eq!(
+        workspace_packages(r),
+        [
+            "billing_composition",
+            "billing_domain",
+            "composition",
+            "domain",
+            "older"
+        ]
+    );
+    // Said once: a second run changes nothing more
+    let out = create(&["--root", &arg, "create"]);
+    assert!(
+        !stdout(&out).contains("changed Cargo.toml"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(fs::read_to_string(r.join("Cargo.toml")).unwrap(), workspace);
+}
+
+#[test]
+fn a_python_or_typescript_project_that_declares_units_gets_layers_and_no_manifest() {
+    for (stack, unit_path) in [
+        ("python", "packages/billing/src/billing"),
+        ("typescript", "packages/billing/src"),
+    ] {
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{version}\"\n\n[[unit]]\nname = \"billing\"\n\
+             path = \"{unit_path}\"\n",
+            version = env!("CARGO_PKG_VERSION")
+        ));
+        let r = root.path();
+        let out = create(&["--root", &root_arg(r), "create", "--yes"]);
+        assert!(out.status.success(), "{stack}: {}", stdout(&out));
+        assert!(r.join(unit_path).join("domain").is_dir(), "{stack}");
+        for manifest in [
+            "pyproject.toml",
+            "package.json",
+            "Cargo.toml",
+            "packages/billing/pyproject.toml",
+            "packages/billing/package.json",
+        ] {
+            assert!(!r.join(manifest).exists(), "{stack}: {manifest}");
+        }
+    }
+}

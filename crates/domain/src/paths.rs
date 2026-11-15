@@ -32,6 +32,21 @@ pub fn join(dir: &str, path: &str) -> String {
     }
 }
 
+/// The path to `to` from the directory `from`, both from the root ("" is the root): `..` up to the directory they
+/// share, then down. `.` when they are the same.
+pub fn relative(from: &str, to: &str) -> String {
+    let from: Vec<&str> = from.split('/').filter(|part| !part.is_empty()).collect();
+    let to: Vec<&str> = to.split('/').filter(|part| !part.is_empty()).collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut path = vec![".."; from.len() - shared];
+    path.extend(&to[shared..]);
+    if path.is_empty() {
+        ".".to_string()
+    } else {
+        path.join("/")
+    }
+}
+
 /// Why a path written in the declaration is not fit to be read as it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Miswritten {
@@ -91,6 +106,22 @@ mod tests {
         assert!(within("domain/x.py", "domain"));
         assert!(!within("domains/x.py", "domain"));
         assert!(!within("domain", "domain/x.py"));
+    }
+
+    #[test]
+    fn a_path_is_named_from_a_directory_by_climbing_to_the_one_they_share() {
+        assert_eq!(
+            relative("apps/cli", "apps/cli/crates/composition"),
+            "crates/composition"
+        );
+        assert_eq!(
+            relative("apps/cli", "crates/core/domain"),
+            "../../crates/core/domain"
+        );
+        assert_eq!(relative("apps/cli", "apps/web"), "../web");
+        assert_eq!(relative("", "crates/a"), "crates/a");
+        assert_eq!(relative("a/b", ""), "../..");
+        assert_eq!(relative("a", "a"), ".");
     }
 
     #[test]

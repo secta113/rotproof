@@ -73,12 +73,13 @@ Run `rotproof create` when a project starts, and again after you change `.config
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
 (below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, and the index files and the
 knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
-overwrites a file it does not generate, apart from adding the fields the declaration lacks (below), and never moves or
-deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
+overwrites a file it does not generate, apart from adding the fields the declaration lacks (below) and, in a Rust
+project, adding the crates it makes to the workspace's `members` when none names them (see "Units"), and never moves
+or deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
 A project that declares units (see "Units") also gets each entry file its units declare that is missing, made from
 one text for the stack (the entry file's docstring or doc comment, and in Rust `fn main() {}`), whatever the file is
-named; the entry file of a project of one unit stays the project's to write, but in Rust, where it is the root
-package's `src/main.rs`.
+named, and in Rust the package that holds it (`Cargo.toml` beside its `src/`); the entry file of a project of one unit
+stays the project's to write, but in Rust, where it is the root package's `src/main.rs`.
 
 The project's files are written once, as a starting point, and are the project's from then on:
 
@@ -92,8 +93,8 @@ The project's files are written once, as a starting point, and are the project's
 | `.claude/settings.json` | The rule that denies Claude Code editing the approvals file (see "Approving a forbidden import") |
 | `requirements-dev.txt` | `python`: Rotproof pinned with `==` |
 | `.github/workflows/ci.yml` | `python`: installs `requirements-dev.txt` and runs `rotproof check`, with a time limit. `typescript`: installs what `package.json` and its lockfile pin (`npm ci`) and runs `npx --no -- rotproof check`, which never downloads another Rotproof, with a time limit. `rust` and `none`: pins Rotproof's version in `ROTPROOF_VERSION`, takes the Linux archive of that GitHub Release, checks it against the release's `SHA256SUMS`, and runs `rotproof check`, with a time limit |
-| `Cargo.toml` | `rust`: the workspace, whose members are the crates in `crates/`, so `cargo build` builds every layer present, and its root package, which depends on `composition` |
-| `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program |
+| `Cargo.toml` | `rust`: the workspace, whose members are the crates of the layers present, each named on a line of its own (no glob: see "Units"), so `cargo build` builds every layer present, and its root package, which depends on `composition`. A project that declares units has the workspace alone |
+| `src/main.rs` | `rust`: the entry file, which calls `composition` and starts the program. A project that declares units has none: an entry file is a unit's own |
 
 A project that does not write Python needs no Python for Rotproof: `rust` and `none` pin only the version, as
 Rotproof's GitHub Releases are immutable, so a version names one binary, as on PyPI. A binary cannot know the hash of
@@ -316,7 +317,21 @@ that reason: a key written after one belongs to it. Once the project declares un
 and must be empty: each unit says what it lacks in its own `absent`, which names the same layers and levels, and an
 app, which holds only `composition` and `infrastructure`, lacks the rest. `unchecked` is the project's, and so is
 every other field above the tables; `stack = "none"` has no layers and so no units. A unit `rotproof create` makes is
-made as the one unit is, in the directory of its `path`.
+made as the one unit is, in the directory of its `path`, and it makes the layers alone: a Python or TypeScript unit
+gets no `pyproject.toml` or `package.json`, which are the project's. A Rust unit's layers are crates, each named for its
+unit (`billing_domain` for the layer `domain` of the unit `billing`, against `domain` in a project with no unit), since
+Cargo refuses two crates of one name; the unit's directory holds the crates and has no manifest of its own. The root
+`Cargo.toml` it writes then is a workspace with no package, naming each crate in `members` (a glob such as
+`crates/*` would match the directory of a unit and fail in Cargo), and `src/main.rs` is not written. The entry file
+of a unit is `<dir>/src/main.rs` in Rust, and `rotproof create` makes with it the package that holds it, `<dir>/Cargo.toml`
+(named for the unit, and for the unit and its directory from its second entry on), which depends on the unit's own
+`composition` by path and which `members` names; an entry file declared in another form, that is not there, fails the
+run before anything is written, and one that is there is the project's, with its package. When the root `Cargo.toml` is
+there already, `rotproof create` changes `members` and nothing else of it, only to add the crates and packages it made
+that no member names, and to replace the member `crates/*`, the glob Rotproof wrote before units, with the crates it
+matched once it would match a directory that has no `Cargo.toml`; it says each change (`changed Cargo.toml: ...`). A
+project made by an older Rotproof that declares no unit keeps its glob, and `rotproof create` leaves its `Cargo.toml`
+as it is.
 
 A declaration that cannot be read as it is written fails every check, saying every reason at once, from the
 declaration and the layout alone, before the tree is looked at:

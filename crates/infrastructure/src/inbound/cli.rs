@@ -117,7 +117,10 @@ enum Command {
     /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), and docs/index.md and the
     /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
-    /// Never overwrites another file, and never moves or deletes one. Run it when a project starts, and after editing
+    /// Never overwrites another file, and never moves or deletes one, except that in a rust project it adds the
+    /// crates it makes to the members of the workspace in Cargo.toml when none names them, and replaces the member
+    /// `crates/*` with the crates it matched when it would match a directory that has no Cargo.toml, as a unit's
+    /// does, and says each change. Run it when a project starts, and after editing
     /// the declaration; after upgrading Rotproof, `rotproof init` does what it does, without making a layer.
     /// Makes layers only with --yes: without it, a run that would make one lists them, writes nothing and exits 2, so
     /// the layers the project does not have are declared absent first. Exits 2 too when the declaration cannot be read
@@ -395,6 +398,9 @@ fn report_made(names: &Names, made: &Made) {
     for field in &made.added {
         println!("added to {}: {field}", names.declaration);
     }
+    for (path, what) in &made.changed {
+        println!("changed {path}: {what}");
+    }
     if let Some(why) = &made.not_written {
         println!("not written: {why}");
     }
@@ -407,13 +413,15 @@ fn report_made(names: &Names, made: &Made) {
 fn create(commands: &dyn Commands, names: &Names, root: &Path, yes: bool) -> Result<(), String> {
     let made = commands.create(root, yes)?;
     report_made(names, &made);
-    if made.written.is_empty() {
+    // A changed file is written too, and told of above
+    let wrote = !made.written.is_empty() || !made.changed.is_empty();
+    if !wrote {
         println!(
             "nothing to make: the tree has what {} declares",
             names.declaration
         );
     }
-    if !made.written.is_empty() {
+    if wrote {
         println!("next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md");
     }
     Ok(())

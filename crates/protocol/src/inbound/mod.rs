@@ -28,6 +28,9 @@ pub struct Made {
     pub left_out: Vec<(String, String)>,
     /// The fields added to the declaration, as `name = value`
     pub added: Vec<String>,
+    /// What was changed in a file that was there, from the root: the one change
+    /// `rotproof create` makes to a file it wrote once (the members of a Rust workspace), as a line to tell
+    pub changed: Vec<(String, String)>,
     /// What the stack does not have Rotproof write yet, and why
     pub not_written: Option<String>,
 }
@@ -37,7 +40,8 @@ pub struct Made {
 pub enum Initialized {
     /// The declaration was written, at this path
     Declared(&'static str),
-    Upgraded(Upgraded),
+    /// Boxed: it holds what `rotproof create` made too, and is far the larger of the two
+    Upgraded(Box<Upgraded>),
 }
 
 /// What an upgrade of the project's files did.

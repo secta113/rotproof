@@ -20,6 +20,7 @@ pub mod layers;
 pub mod links;
 pub mod markdown;
 pub mod markers;
+pub mod members;
 pub mod modules;
 pub mod paths;
 pub mod project;
