@@ -1459,6 +1459,35 @@ fn each_difference_from_the_declaration_fails() {
                 )
             }),
         ),
+        // `moving` is judged as `unchecked` is: it cannot switch a layer off, and it names a path that is there
+        (
+            "moving lists domain, which holds or sits in the layer domain",
+            Box::new(|r| {
+                declare(
+                    r,
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"domain\"]\n",
+                )
+            }),
+        ),
+        (
+            "moving lists \"./legacy\": write a path from the root",
+            Box::new(|r| {
+                plant_file(r, "legacy/old.py");
+                declare(
+                    r,
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"./legacy\"]\n",
+                );
+            }),
+        ),
+        (
+            "moving lists legacy, which does not exist: remove it",
+            Box::new(|r| {
+                declare(
+                    r,
+                    "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"legacy\"]\n",
+                )
+            }),
+        ),
         // The floor: with every layer declared absent, nothing would be checked
         (
             "no layer is present",
@@ -2516,6 +2545,57 @@ fn code_that_is_not_the_projects_is_not_looked_at() {
     let out = run(&["--root", &root_arg(r), "check"]);
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     assert!(stdout(&out).contains("ci.py"), "{}", stdout(&out));
+}
+
+#[test]
+fn code_in_a_path_that_is_moving_is_kept_out_of_the_checks_of_the_layers_and_the_markers() {
+    let root = clean_repo();
+    let r = root.path();
+    let declare_moving = |moving: &str| {
+        declare(
+            r,
+            &format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [{moving}]\n"),
+        )
+    };
+    write_file(r, "legacy/order.py", "# TODO: split this\nimport domain\n");
+    write_file(r, "old.py", "# FIXME: and this\n");
+    // Not listed: code outside the layers, and its marker, fail
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("code outside the layers: legacy"),
+        "{}",
+        stdout(&out)
+    );
+    // Listed, a directory with a `/` at its end and a file: neither fails, and a layer's own marker still does
+    declare_moving("\"legacy/\", \"old.py\"");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    write_file(r, "domain/model.py", "# TODO: split this\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("domain/model.py:1"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(
+        !stdout(&out).contains("legacy/order.py"),
+        "{}",
+        stdout(&out)
+    );
+    // A repository of records only has no code to move
+    declare(
+        r,
+        "stack = \"none\"\nareas = [\"a\"]\nmoving = [\"legacy\"]\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("moving must be empty"),
+        "{}",
+        stdout(&out)
+    );
 }
 
 #[test]

@@ -3,21 +3,21 @@
 //! - Every layer of the stack's layout is present or declared absent, and no layer declared absent is present.
 //!   `absent` names no layer the declared UI leaves out.
 //! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`), the entry file and
-//!   the paths the project lists in `unchecked`. Where code is looked for is the layout's `scope`, and its `also_code`
-//!   (the root package's `src/` in Rust). A path in `unchecked` exists and holds no layer, so a layer cannot be
-//!   switched off by listing it.
+//!   the paths the project lists in `unchecked` or `moving`. Where code is looked for is the layout's `scope`, and its
+//!   `also_code` (the root package's `src/` in Rust). A path in `unchecked` or `moving` exists and holds no layer, so a
+//!   layer cannot be switched off by listing it.
 //! - A project that declares units is read unit by unit, and every finding about a layer, a view or code outside the
 //!   layers names its unit (`domain of unit billing is missing: ...`); a project that declares none is one unit, and
 //!   nothing names it. Each declared unit's path and entry files are there, each unit holds a layer, and the code of
 //!   a unit is what is in its path outside its layers, the unit's own entry files, the paths that are not layers, what
-//!   `unchecked` keeps and the paths of the units inside it (those are judged by their own). Code of the layout's
-//!   scope that is in no unit's path fails as code outside the layers, so that a file moved out of every unit does not
-//!   escape. A unit's own directory
-//!   holds the code files the layout allows there (a Python package's `__init__.py`), unless its path is the root.
-//!   A path in `unchecked` does not hold a unit, so a unit cannot be switched off either.
+//!   `unchecked` and `moving` keep and the paths of the units inside it (those are judged by their own). Code of the
+//!   layout's scope that is in no unit's path fails as code outside the layers, so that a file moved out of every unit
+//!   does not escape. A unit's own directory holds the code files the layout allows there (a Python package's
+//!   `__init__.py`), unless its path is the root. A path in `unchecked` or `moving` does not hold a unit, so a unit
+//!   cannot be switched off either.
 //! - Only when units are declared, a package's manifest (the layout's `manifest`) sits at the root of a unit or
-//!   below it, at the root of the project, in a layer (a Rust layer is a crate), or in a path `unchecked` keeps; one
-//!   anywhere else belongs to no unit, which says that a package of the project has none declared.
+//!   below it, at the root of the project, in a layer (a Rust layer is a crate), or in a path `unchecked` or `moving`
+//!   keeps; one anywhere else belongs to no unit, which says that a package of the project has none declared.
 //! - A layer with levels (`ui`) holds only its levels: code in it beside them fails, except the files the layout
 //!   makes for the layer itself. A part there would have no place among the levels, and an import through it
 //!   (`atoms → ui/helpers.py → domain`) would pass every direct check of the direction.
@@ -80,6 +80,7 @@ pub fn named(declared: &Declared) -> Vec<String> {
         .iter()
         .map(|p| p.path.clone())
         .chain(declared.unchecked().map(String::from))
+        .chain(declared.moving().map(String::from))
         .chain(declared_units.clone().map(|unit| unit.path.clone()))
         .chain(declared_units.flat_map(|unit| unit.entries.clone()))
         .collect()
@@ -289,21 +290,26 @@ fn places_of(declared: &Declared, unit: &Unit, seen: &Seen) -> Vec<String> {
     found
 }
 
-/// How `unchecked` is written, one finding for each path that is not fit to be read as it is, and the paths that are:
-/// the ones that switch the check of code off.
+/// How `unchecked` and `moving` are written, one finding for each path that is not fit to be read as it is, and the
+/// paths that are: the ones that switch the check of code off. The two fields are judged alike: they differ in what
+/// `rotproof check` says of the code in them, not in what they keep out of the checks.
 fn unchecked_paths<'a>(declared: &'a Declared, seen: &Seen) -> (Vec<String>, Vec<&'a str>) {
     let mut found = Vec::new();
     let mut kept = Vec::new();
-    for path in declared.unchecked() {
+    let listed = declared
+        .unchecked()
+        .map(|path| ("unchecked", path))
+        .chain(declared.moving().map(|path| ("moving", path)));
+    for (field, path) in listed {
         if let Some(why) = miswritten(path) {
             found.push(match why {
                 Miswritten::Backslash => format!(
-                    "unchecked lists {path:?}: separate a path with /, which every platform reads"
+                    "{field} lists {path:?}: separate a path with /, which every platform reads"
                 ),
                 // `./scripts` would never equal the paths Rotproof compares it with, and would switch nothing off
                 // silently
                 Miswritten::NotFromRoot => format!(
-                    "unchecked lists {path:?}: write a path from the root, such as scripts or src/generated"
+                    "{field} lists {path:?}: write a path from the root, such as scripts or src/generated"
                 ),
             });
         } else if let Some(unit) = declared
@@ -311,19 +317,20 @@ fn unchecked_paths<'a>(declared: &'a Declared, seen: &Seen) -> (Vec<String>, Vec
             .iter()
             .find(|unit| unit.declared && within(&unit.path, path))
         {
-            // What sits in a unit's path outside its layers is the code `unchecked` is for; the unit itself is not
+            // What sits in a unit's path outside its layers is the code `unchecked` and `moving` are for; the unit
+            // itself is not
             found.push(format!(
-                "unchecked lists {path}, which holds the unit {} ({}/): a unit cannot be switched off",
+                "{field} lists {path}, which holds the unit {} ({}/): a unit cannot be switched off",
                 unit.name, unit.path
             ));
         } else if let Some(place) = declared.overlapped(path) {
             found.push(format!(
-                "unchecked lists {path}, which holds or sits in the layer {} ({}/): a layer cannot be switched off",
+                "{field} lists {path}, which holds or sits in the layer {} ({}/): a layer cannot be switched off",
                 place.name, place.path
             ));
         } else if !seen.present(path) {
             found.push(format!(
-                "unchecked lists {path}, which does not exist: remove it"
+                "{field} lists {path}, which does not exist: remove it"
             ));
         } else {
             kept.push(path);
@@ -523,7 +530,7 @@ fn manifests(declared: &Declared, seen: &Seen) -> Vec<String> {
                     .iter()
                     .any(|unit| unit.declared && inside(dir, &unit.root))
                 || declared.places.iter().any(|p| within(dir, &p.path))
-                || declared.is_unchecked(path))
+                || declared.is_not_checked(path))
         })
         .map(|path| {
             let dir = parent(path);
@@ -667,6 +674,33 @@ mod tests {
             ]
         );
         assert_eq!(kept, ["scripts"]);
+    }
+
+    #[test]
+    fn moving_is_read_as_unchecked_is_and_the_finding_names_the_field() {
+        let declared = declared(
+            "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"scripts\"]\nmoving = [\"a\\\\b\", \
+             \"./legacy\", \"domain/x\", \"gone/\", \"legacy/\"]\n",
+        );
+        let mut seen = Seen::default();
+        for path in named(&declared) {
+            seen.named.insert(path, Ok(()));
+        }
+        seen.named
+            .insert("gone".into(), Err("missing: gone".into()));
+        let (found, kept) = unchecked_paths(&declared, &seen);
+        assert_eq!(
+            found,
+            [
+                "moving lists \"a\\\\b\": separate a path with /, which every platform reads",
+                "moving lists \"./legacy\": write a path from the root, such as scripts or src/generated",
+                "moving lists domain/x, which holds or sits in the layer domain (domain/): a layer cannot be \
+                 switched off",
+                "moving lists gone, which does not exist: remove it",
+            ]
+        );
+        // The paths of both fields are kept, so the code in either is outside no layer
+        assert_eq!(kept, ["scripts", "legacy"]);
     }
 
     #[test]

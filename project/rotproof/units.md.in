@@ -13,9 +13,9 @@
 - **The tree is checked in each unit, and a manifest belongs to a unit.** Each unit's layers are present or named in its
   own `absent`, and code in its `path` outside them fails, but for its entry files{own}. Code in no unit's path fails
   too, in the places the stack looks for code, as does a path that is no layer only where the stack says (`tests/`).
-  `unchecked` keeps code out of the check, never a unit. A `{manifest}` belongs to the unit whose `root` holds its directory; the one at the root of
-  the project, one in a layer and one in a path of `unchecked` are not counted, and any other fails: declare the unit
-  whose root it is, or list its directory in `unchecked`.
+  `unchecked` and `moving` keep code out of the check, never a unit. A `{manifest}` belongs to the unit whose `root` holds its directory; the one at the root of
+  the project, one in a layer and one in a path of `unchecked` or `moving` are not counted, and any other fails: declare the unit
+  whose root it is, or list its directory in `unchecked` (or in `moving`, for code that is to go into a layer).
 - **A unit imports only the layers of its own unit, by the table, and no other unit unless it is shared.** A shared
   unit may be imported by any unit, imports only shared units, and never in a cycle. Only direct imports are judged.
 - **Into a shared unit, a layer imports what its own layer may import by the table, the same name in the other unit.**

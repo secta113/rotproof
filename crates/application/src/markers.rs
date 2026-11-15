@@ -41,7 +41,7 @@ pub fn problems(
         paths.extend(code_files(tree, &scope, |name| layout.has_comments(name))?);
     }
     for path in paths {
-        if declared.is_unchecked(&path) {
+        if declared.is_not_checked(&path) {
             continue;
         }
         let Some(source) = read_code(tree, &path, "comments", &mut found.markers.found)? else {

@@ -52,6 +52,12 @@ pub struct Declaration {
     pub absent: Vec<String>,
     #[serde(default)]
     pub unchecked: Vec<String>,
+    /// Paths of the project's own code that is not in a layer yet. Rotproof does not check it, as it does not check
+    /// `unchecked`, and no deadline is set for it; it is a field of its own because `unchecked` is for what is never
+    /// moved (generated or vendored code), and what is still to move is counted. Optional, and never written by
+    /// `rotproof create`
+    #[serde(default)]
+    pub moving: Vec<String>,
     /// How the reference of an issue is written in a comment that keeps the first marker of the marker check, one of
     /// [`TodoLink::KNOWN`]. Optional, and never written by `rotproof init` or `rotproof create`: absent, every marker
     /// fails. Read as a string so that an unknown value reaches the check that names it. A declaration that holds the
@@ -384,7 +390,10 @@ pub fn declaration_text(stack: &str, ui: &str) -> String {
          absent = []\n\n\
          # Paths outside the layers that Rotproof does not look into, such as \"scripts\" (helper scripts, generated\n\
          # or vendored code). A path that holds a layer, or does not exist, fails\n\
-         unchecked = []\n{upgrades}{}",
+         unchecked = []\n\n\
+         # Paths of the project's own code that is not in a layer yet, such as \"legacy\". Rotproof does not check it\n\
+         # and sets no date. A path that holds a layer, or does not exist, fails\n\
+         moving = []\n{upgrades}{}",
         units_comment(stack)
     )
 }
@@ -415,6 +424,7 @@ impl Declared {
             for (field, values) in [
                 ("absent", &declaration.absent),
                 ("unchecked", &declaration.unchecked),
+                ("moving", &declaration.moving),
             ] {
                 if !values.is_empty() {
                     found.push(format!(
@@ -585,7 +595,16 @@ impl Declared {
             .map(|path| path.trim_end_matches('/'))
     }
 
-    /// The layer or level a path in `unchecked` holds or sits in. Such a path switches nothing off: a layer cannot be.
+    /// The paths in `moving`, as compared: without a `/` at the end.
+    pub fn moving(&self) -> impl Iterator<Item = &str> {
+        self.declaration
+            .moving
+            .iter()
+            .map(|path| path.trim_end_matches('/'))
+    }
+
+    /// The layer or level a path in `unchecked` or `moving` holds or sits in. Such a path switches nothing off: a
+    /// layer cannot be.
     pub fn overlapped(&self, path: &str) -> Option<&Place> {
         self.places
             .iter()
@@ -598,6 +617,19 @@ impl Declared {
         self.unchecked()
             .filter(|skip| self.overlapped(skip).is_none())
             .any(|skip| within(path, skip))
+    }
+
+    /// Whether the file at `path` sits in a path the project lists in `moving`, with the same limit as
+    /// [`Declared::is_unchecked`]: a path that holds or sits in a layer switches nothing off.
+    pub fn is_moving(&self, path: &str) -> bool {
+        self.moving()
+            .filter(|moving| self.overlapped(moving).is_none())
+            .any(|moving| within(path, moving))
+    }
+
+    /// Whether no check reads the file at `path`: it sits in a path of `unchecked` or of `moving`.
+    pub fn is_not_checked(&self, path: &str) -> bool {
+        self.is_unchecked(path) || self.is_moving(path)
     }
 }
 
@@ -927,6 +959,30 @@ mod tests {
         .unwrap();
         assert!(!declared.is_unchecked("domain/song.py"));
         assert!(!declared.is_unchecked("ui/atoms/gen/x.py"));
+    }
+
+    #[test]
+    fn a_path_in_moving_is_not_checked_as_one_in_unchecked_is_and_is_not_the_same_field() {
+        let declared = Declared::new(
+            parse_declaration(
+                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"gen\"]\nmoving = [\"legacy/\", \"old.py\", \"domain\"]\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(declared.is_moving("legacy/a/b.py"));
+        assert!(declared.is_moving("old.py"));
+        assert!(!declared.is_moving("legacy2/a.py"));
+        // A layer is read all the same, whatever lists it
+        assert!(!declared.is_moving("domain/song.py"));
+        // The two fields keep their own paths, and either keeps a file out of every check
+        assert!(!declared.is_unchecked("legacy/a.py") && !declared.is_moving("gen/x.py"));
+        assert!(declared.is_not_checked("gen/x.py") && declared.is_not_checked("legacy/a.py"));
+        assert!(!declared.is_not_checked("domain/song.py"));
+        assert_eq!(
+            declared.moving().collect::<Vec<_>>(),
+            ["legacy", "old.py", "domain"]
+        );
     }
 
     #[test]
