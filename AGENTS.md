@@ -140,12 +140,16 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `environment.rs` | The environment check, read from the tree: the code of every layer but `infrastructure`, and the entry file, read by the reader of its language |
 | `markers.rs` | The checks of the comments, read from the tree: every code file walked, and its comments read by the reader of its language, for the marker check and the suppression check |
 | `index.rs` | `rotproof index`: every index file written from the frontmatter |
-| `init.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version, and, for a project that declares units, drafting once the knowledge document that follows them (with the links the direction check read, and the index written again) |
 | `project.rs` | `rotproof guide`: the guide for a stack, named or declared; and what the map of the project's own `AGENTS.md` has gone behind on, for `rotproof check` and `rotproof init` to say |
 | `finding.rs` | A finding or a warning of `rotproof check`, made from what a check found and the heading it is printed under |
 | `readers.rs` | The list of who reads each shared unit, read from the tree: the direction check's reads rendered, compared with the file by `rotproof check`, which names the names that changed under its finding, and written or taken away by `rotproof index` and `rotproof create` |
 | `records.rs` | The checks of the records, read from the tree: the areas, the floor, the links of `docs/knowledge/` and the log, the log, the knowledge documents and the generated files |
 | `structure.rs` | The structure check, read from the tree: the paths the rules name by their exact names, the code files of the directories they list, and, for a project that declares units, every manifest of the tree |
+
+| Module of `crates/application/src/init/` | Content |
+|---|---|
+| `mod.rs` | `rotproof init`: writing a project's declaration, or, when it exists, upgrading the project's files to the running version, and, for a project that declares units, drafting once the knowledge document that follows them (with the links the direction check read, and the index written again) |
+| `crossing.rs` | What an upgrade tells a project that crosses a table that changed what the layers are (the onion table, the split of the screens into `ui` and `presentation`): where the code of each retired layer goes and what the screens move, read from the tree to say which applies. Nothing moves |
 
 | Module of `crates/application/src/direction/` | Content |
 |---|---|
