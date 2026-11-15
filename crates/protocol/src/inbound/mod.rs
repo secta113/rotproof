@@ -212,6 +212,28 @@ pub struct Started {
     pub follows: Vec<(String, String)>,
 }
 
+/// One entry of the log, as `rotproof log` is given it.
+#[derive(Debug, Clone, Default)]
+pub struct LogEntry {
+    /// The task
+    pub title: String,
+    /// The task's issue, `owner/repo#n`, when it has one
+    pub issue: Option<String>,
+    /// What went wrong, the cause and the workaround; `None` when nothing did. At least one
+    pub problems: Vec<String>,
+    /// What to do differently next time, and where it was recorded if it became a rule. At least one
+    pub lessons: Vec<String>,
+}
+
+/// What `rotproof log` wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Logged {
+    /// The log, from the root, with `/`
+    pub path: String,
+    /// The day the entry is under, as the clock gives it: `YYYY-MM-DD`
+    pub day: String,
+}
+
 /// An approval `rotproof approve --prune` removed: what it kept, and in which file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Removed {
@@ -261,4 +283,8 @@ pub trait Commands {
     /// `description` empty so that the check fails until it is written, and each key it follows pinned. `Err`, writing
     /// nothing, when the slug is not one, the file is there already, the area is not one, or a key is not there.
     fn start(&self, root: &Path, document: &NewDocument) -> Result<Started, String>;
+    /// Add `entry` to `docs/log.md`, at the top under the heading of today, the day the clock gives, made when it is
+    /// not there. `Err`, writing nothing, when a field is empty or not in the form the log has it, the log is not
+    /// there, or the entry would break a rule the log kept.
+    fn log(&self, root: &Path, entry: &LogEntry) -> Result<Logged, String>;
 }

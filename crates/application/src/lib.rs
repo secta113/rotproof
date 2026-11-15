@@ -18,6 +18,7 @@ pub mod index;
 pub mod init;
 pub mod layers;
 pub mod links;
+pub mod log;
 pub mod markers;
 pub mod project;
 pub mod readers;

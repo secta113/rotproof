@@ -49,11 +49,21 @@ Open work is no record here: it is kept in issues. The rest of `docs/` is the pr
   issue you created or looked up, never one made up to pass the check: `rotproof check` does not look at whether the
   issue exists. Whether a project declares `todo_link` is a person's decision: never add, remove or change it in
   `.config/rotproof.toml` to pass the check.
-- **When a task is done, add one entry to `docs/log.md`, under a `## YYYY-MM-DD` heading for the day, newest first.**
-  The log is a flat list of entries under the dates (OKF 0.2, section 9): one list item per task, with its fields as
-  nested items, and no other headings. `rotproof check` fails on anything else. An entry keeps only what is found
-  nowhere else, searchable in the repository when something breaks: what changed is in the commits, what was
+- **When a task is done, add one entry to `docs/log.md` with `rotproof log`, which reads the day from the clock and
+  writes the entry under that day's `## YYYY-MM-DD` heading, newest first.** Never write the day or the entry by
+  hand. The log is a flat list of entries under the dates (OKF 0.2, section 9): one list item per task, with its
+  fields as nested items, and no other headings. `rotproof check` fails on anything else. An entry keeps only what is
+  found nowhere else, searchable in the repository when something breaks: what changed is in the commits, what was
   measured and decided along the way in the task's issue, and what still holds in `docs/knowledge/`.
+
+  ```sh
+  rotproof log --title "<Task name>" --issue <owner/repo#n> \
+    --problem "<What went wrong>" --lesson "<What to do differently>"
+  ```
+
+  `--issue` is left out when the task has none. `--problem` and `--lesson` are each needed, and `--problem None`
+  says that nothing went wrong, so that a field forgotten is told from one with nothing in it; repeat either for a
+  list, and write each value on one line. It writes:
 
   ```markdown
   * **<Task name>**

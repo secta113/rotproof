@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 821983bc. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 6af7bb04. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -262,6 +262,19 @@ wrote docs/knowledge/rates.md
 
 `rotproof check` は通ります。コードを変えたコミットには、読み直した文書が一緒に入ります。
 
+タスクが終わったら、`rotproof log` がその記録を `docs/log.md` に足します。今日の日付を時計から読み、その日の見出しの
+いちばん上に書きます。見出しが無ければ作ります。
+
+```sh
+rotproof log --title "Round the converted price" --issue acme/shop#12 --problem None \n  --lesson "The rate is passed in, so a test of convert needs no feed"
+```
+
+```text
+wrote docs/log.md: the entry is under ## 2026-11-16
+```
+
+`--problem` と `--lesson` はどちらも必須で、書くことが無いときは `None` と書きます。どちらも繰り返すと一覧になります。
+
 ### ここから先
 
 プロジェクトをコミットしてください。作られた CI のワークフローは push のたびに `rotproof check` を実行し、
@@ -391,7 +404,8 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
   どれもそのために実行するコマンドの中でのことです。Rotproof は記録を動かしたり書き換えたりしません。1.0 からは
   作業の記録を読まず、古いプロジェクトの記録は、あった場所にそのまま残ります。knowledge の文書をコードに照らして
   読み直したら、`rotproof follows`（キーを名指す）が、その `follows` にハッシュを書きます。読み直すのは人かエージェントで、固定はそれを記録するだけです。`rotproof new` は、書き間違えやすい frontmatter と、
-  check が失敗する空の description だけを書いて文書を始め、本文は書きません。`rotproof approve --prune` は、
+  check が失敗する空の description だけを書いて文書を始め、本文は書きません。`rotproof log` は、今日の日付を時計から読み、
+  その日の見出しの下に記録を足します。`rotproof approve --prune` は、
   どの禁じられた import にも合わない承認を取り除きます。`rotproof check` はそういう承認があると失敗します。
   取り除くだけなので、前に落ちていたものが通ることはありません。Rotproof はコードを動かしません。層の表が変わるとき
   （0.4.0、1.0.0-rc.3）、`rotproof init` は各層のコードの行き先を言い、動かすのは人です。

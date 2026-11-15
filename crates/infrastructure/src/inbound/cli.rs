@@ -1,16 +1,17 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which keeps a
-//! forbidden import for a reason it is given), `rotproof guide`, `rotproof index`, `rotproof follows` and
-//! `rotproof new` (which starts a knowledge document), and the help that leads from one to the next. Each command is
-//! a call of an input port of `protocol.inbound`; what it prints and how it exits are decided here. A command line
-//! that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a project's Claude Code settings before 1.0,
-//! says they are gone and exits 1; no command of that name is left.
+//! forbidden import for a reason it is given), `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof new`
+//! (which starts a knowledge document) and `rotproof log` (which adds an entry to the log), and the help that leads
+//! from one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and how it
+//! exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a
+//! project's Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use protocol::inbound::{
-    Commands, Initialized, LinkedTodo, Made, Moving, MovingFile, Names, NewDocument, Warning,
+    Commands, Initialized, LinkedTodo, LogEntry, Made, Moving, MovingFile, Names, NewDocument,
+    Warning,
 };
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
@@ -283,6 +284,34 @@ enum Command {
         #[arg(long = "match", value_name = "STRING", requires = "alarm")]
         matches: Vec<String>,
     },
+    /// Add an entry to docs/log.md: the task, its issue, what went wrong and what was learned
+    ///
+    /// Run it when a task is done, in place of writing the entry by hand: it reads today from the clock of the machine
+    /// (the day there, in its own zone), puts the entry at the top under the heading `## YYYY-MM-DD` of that day, makes
+    /// the heading in its place when the log has none (the days stay newest first), so that the log need not be read
+    /// first to place the entry. The entry has the form the guide gives:
+    /// `* **<task>**`, and under it `**Issue**`, `**Problems**` and `**Lessons**`. --title is the task; --issue, which
+    /// may be left out when the task has none, is its issue as `owner/repo#n`. --problem and --lesson are each needed
+    /// at least once, so that a field forgotten is told from one with nothing to say: write `--problem None` when
+    /// nothing went wrong. Repeat either to give a list. A line break in a value becomes a space, so a value never
+    /// opens a line of its own; a value that is empty or opens an HTML comment is refused. The log keeps its line
+    /// endings and its byte order mark, and the rest of it is as it was. Exits 2, writing nothing, when a value is not
+    /// as above or --problem or --lesson is not given, docs/log.md is not there, or the entry would break a rule the
+    /// log kept (`rotproof check` finds the same).
+    Log {
+        /// The task
+        #[arg(long)]
+        title: String,
+        /// The task's issue, as `owner/repo#n`; leave it out when there is none
+        #[arg(long, value_name = "OWNER/REPO#N")]
+        issue: Option<String>,
+        /// What went wrong, the cause and the workaround; `None` when nothing did. Repeat it for a list
+        #[arg(long = "problem", value_name = "TEXT", required = true)]
+        problems: Vec<String>,
+        /// What to do differently next time, and where it was recorded if it became a rule. Repeat it for a list
+        #[arg(long = "lesson", value_name = "TEXT", required = true)]
+        lessons: Vec<String>,
+    },
 }
 
 /// The command line as clap reads it, with the long help of `rotproof check` naming the markers of the check.
@@ -357,6 +386,20 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
                 matches,
             };
             new_document(commands, root, &document).map(|()| true)
+        }
+        Command::Log {
+            title,
+            issue,
+            problems,
+            lessons,
+        } => {
+            let entry = LogEntry {
+                title,
+                issue,
+                problems,
+                lessons,
+            };
+            log(commands, root, &entry).map(|()| true)
         }
     };
     match result {
@@ -807,6 +850,17 @@ fn new_document(
             ""
         }
     );
+    Ok(())
+}
+
+/// Add the entry to the log, and say under which day it went.
+fn log(commands: &dyn Commands, root: &Path, entry: &LogEntry) -> Result<(), String> {
+    let logged = commands.log(root, entry)?;
+    println!(
+        "wrote {}: the entry is under ## {}",
+        logged.path, logged.day
+    );
+    println!("next: run `rotproof check`");
     Ok(())
 }
 

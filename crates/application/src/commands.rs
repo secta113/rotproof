@@ -10,7 +10,8 @@ use domain::markers::{MARKERS, either};
 use domain::readers::FILE;
 use domain::version::VERSION;
 use protocol::inbound::{
-    Commands, Indexed, Initialized, Made, Names, NewDocument, Pinned, Removed, Report, Started,
+    Commands, Indexed, Initialized, LogEntry, Logged, Made, Names, NewDocument, Pinned, Removed,
+    Report, Started,
 };
 use protocol::outbound::{Files, Machine};
 
@@ -161,5 +162,10 @@ impl Commands for Rotproof<'_> {
     fn start(&self, root: &Path, document: &NewDocument) -> Result<Started, String> {
         let files = self.machine.files(root);
         crate::scaffold::start(&*files, &*files, self.machine.parsers(), document)
+    }
+
+    fn log(&self, root: &Path, entry: &LogEntry) -> Result<Logged, String> {
+        let files = self.machine.files(root);
+        crate::log::write(&*files, &*files, self.machine.now(), entry)
     }
 }

@@ -40,6 +40,8 @@ rotproof --root <repository> approve --prune  # remove the approvals that match 
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof --root <repository> new <slug> [--area <area>] [--follows <key>]... [--alarm [--match <string>]...]
                                      # start a knowledge document: its frontmatter, the description left empty
+rotproof --root <repository> log --title <task> [--issue <owner/repo#n>] --problem <text>... --lesson <text>...
+                                     # add an entry to the log, under today's heading
 rotproof guide                       # print the guide `rotproof create` writes for the stack and the UI the declaration has
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
 rotproof guide --stack typescript --ui none  # the same for the layers of that UI (the values of init's --ui), with no project
@@ -703,6 +705,26 @@ The log holds one entry per task, under the day's `## YYYY-MM-DD` heading, newes
 wrong and what was learned, which is found nowhere else, and searchable in the repository when something breaks. What
 changed is in the commits, what was measured and decided along the way in the task's issue, and what still holds in
 `knowledge/`.
+
+`rotproof log` adds the entry, so that nobody writes a day from memory or reads the whole log to place one. It reads
+today from the clock of the machine (the day there, in its own zone: the check compares the days of the log with the
+latest day anywhere, so a day written in any zone passes), writes the entry at the top under the `## YYYY-MM-DD`
+heading of that day, and makes the heading when there is none, above the first heading of an older day, so the days
+stay newest first. The entry has the form of the guide, `* **<task>**` with `**Issue**`, `**Problems**` and
+`**Lessons**` as nested items, the issue left out when there is none:
+
+```sh
+rotproof log --title <task> [--issue <owner/repo#n>] --problem <text>... --lesson <text>...
+```
+
+`--title` is the task. `--issue` is `owner/repo#n`. `--problem` and `--lesson` are each needed at least once, so that
+a field forgotten is told from one with nothing in it: `--problem None` says that nothing went wrong. A field given
+more than once is a list under its label, and given once it stays on the label's line. A line break in a value
+becomes a space, so a value never opens a line of its own, and a value that is empty or opens an HTML comment (which
+would hide the rest of the log) is refused. The log keeps its line endings and its byte order mark, and the rest of
+its text is as it was. It exits 2, writing nothing, when a value is not as above, `docs/log.md` is not there, or the
+entry would break a rule the log kept: a heading of a day inside a comment or a code block, where no place for the
+entry can be told, is one.
 
 ## What `rotproof check` checks
 

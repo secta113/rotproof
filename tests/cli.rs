@@ -6218,3 +6218,243 @@ fn new_refuses_what_it_cannot_write_correctly_and_writes_nothing() {
     assert!(out.status.success(), "{}", error_of(&out));
     assert!(started_text(root.path(), "a").contains("tags: [billing]\n"));
 }
+
+/// Today as the machine's clock gives it, which is what `rotproof log` reads: the day in the machine's own zone.
+fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+#[test]
+fn log_adds_an_entry_under_todays_heading_that_the_check_accepts() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    // A log as it is when the project starts, with the days of earlier work under it
+    fs::write(
+        root.path().join("docs/log.md"),
+        "# Log\n\n## 2026-10-04\n\n* **Earlier**\n  * **Problems**: None\n  * **Lessons**: L\n",
+    )
+    .unwrap();
+    let day = today();
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "Start the log",
+        "--issue",
+        "acme/app#4",
+        "--problem",
+        "None",
+        "--lesson",
+        "Write the entry with the command",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    assert!(
+        stdout(&out).contains(&format!("wrote docs/log.md: the entry is under ## {day}")),
+        "{}",
+        stdout(&out)
+    );
+    let log = fs::read_to_string(root.path().join("docs/log.md")).unwrap();
+    assert_eq!(
+        log,
+        format!(
+            "# Log\n\n## {day}\n\n* **Start the log**\n  * **Issue**: acme/app#4\n  * **Problems**: None\n  * \
+             **Lessons**: Write the entry with the command\n\n## 2026-10-04\n\n* **Earlier**\n  * **Problems**: None\n  \
+             * **Lessons**: L\n"
+        )
+    );
+    // A second entry of the day goes above the first, under the same heading, and lists are lists
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "A second task",
+        "--problem",
+        "The first thing\nthat went wrong",
+        "--problem",
+        "The second",
+        "--lesson",
+        "One lesson",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let log = fs::read_to_string(root.path().join("docs/log.md")).unwrap();
+    assert_eq!(log.matches(&format!("## {day}")).count(), 1, "{log}");
+    assert!(
+        log.contains(&format!(
+            "## {day}\n\n* **A second task**\n  * **Problems**:\n    * The first thing that went wrong\n    * The \
+             second\n  * **Lessons**: One lesson\n\n* **Start the log**\n"
+        )),
+        "{log}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn log_keeps_the_line_endings_and_the_byte_order_mark_of_the_log() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    fs::write(
+        root.path().join("docs/log.md"),
+        "\u{feff}# Log\r\n\r\n## 2026-10-04\r\n\r\n* **Earlier**\r\n",
+    )
+    .unwrap();
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "T",
+        "--problem",
+        "None",
+        "--lesson",
+        "L",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let raw = fs::read(root.path().join("docs/log.md")).unwrap();
+    let text = String::from_utf8(raw).unwrap();
+    assert!(text.starts_with('\u{feff}'), "{text:?}");
+    assert!(!text.replace("\r\n", "").contains('\n'), "{text:?}");
+    assert!(
+        text.contains(&format!("## {}\r\n\r\n* **T**\r\n", today())),
+        "{text:?}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn log_adds_to_the_heading_of_today_when_the_log_has_one() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    let day = today();
+    fs::write(
+        root.path().join("docs/log.md"),
+        format!("# Log\n\n## {day}\n\n* **Earlier today**\n"),
+    )
+    .unwrap();
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "T",
+        "--problem",
+        "None",
+        "--lesson",
+        "L",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let log = fs::read_to_string(root.path().join("docs/log.md")).unwrap();
+    assert_eq!(
+        log,
+        format!(
+            "# Log\n\n## {day}\n\n* **T**\n  * **Problems**: None\n  * **Lessons**: L\n\n* **Earlier today**\n"
+        )
+    );
+}
+
+#[test]
+fn log_refuses_what_the_log_does_not_have_and_writes_nothing() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    // No log yet
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "T",
+        "--problem",
+        "None",
+        "--lesson",
+        "L",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        error_of(&out).contains("docs/log.md is not there"),
+        "{}",
+        error_of(&out)
+    );
+    assert!(!root.path().join("docs/log.md").exists());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    let before = tree(root.path());
+    for (args, says) in [
+        // A field forgotten is not a field with nothing in it: --problem None says the second
+        (vec!["log", "--title", "T", "--lesson", "L"], "--problem"),
+        (vec!["log", "--title", "T", "--problem", "None"], "--lesson"),
+        (vec!["log", "--problem", "None", "--lesson", "L"], "--title"),
+        (
+            vec!["log", "--title", " ", "--problem", "None", "--lesson", "L"],
+            "--title is empty",
+        ),
+        (
+            vec!["log", "--title", "T", "--problem", "", "--lesson", "L"],
+            "--problem is empty",
+        ),
+        (
+            vec![
+                "log",
+                "--title",
+                "T",
+                "--problem",
+                "None",
+                "--lesson",
+                "a <!-- b",
+            ],
+            "--lesson holds `<!--`",
+        ),
+        (
+            vec![
+                "log",
+                "--title",
+                "T",
+                "--issue",
+                "4",
+                "--problem",
+                "None",
+                "--lesson",
+                "L",
+            ],
+            "--issue",
+        ),
+    ] {
+        let mut all = vec!["--root", arg.as_str()];
+        all.extend(args.iter().copied());
+        let out = run(&all);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(
+            error_of(&out).contains(says),
+            "{args:?}: {}",
+            error_of(&out)
+        );
+        assert_eq!(tree(root.path()), before, "{args:?}");
+    }
+    // A log whose heading is hidden in a comment leaves no place that can be told
+    fs::write(
+        root.path().join("docs/log.md"),
+        format!("# Log\n\n<!--\n## {}\n-->\n", today()),
+    )
+    .unwrap();
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "T",
+        "--problem",
+        "None",
+        "--lesson",
+        "L",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        error_of(&out).contains("cannot be told"),
+        "{}",
+        error_of(&out)
+    );
+}

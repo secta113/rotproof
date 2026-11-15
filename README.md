@@ -255,6 +255,20 @@ wrote docs/knowledge/rates.md
 
 `rotproof check` passes. The commit that changes the code now holds the reviewed document beside it.
 
+When a task is done, `rotproof log` adds its entry to `docs/log.md`. It reads today from the clock and writes the entry
+at the top under that day's heading, making the heading when there is none:
+
+```sh
+rotproof log --title "Round the converted price" --issue acme/shop#12 --problem None \
+  --lesson "The rate is passed in, so a test of convert needs no feed"
+```
+
+```text
+wrote docs/log.md: the entry is under ## 2026-11-16
+```
+
+`--problem` and `--lesson` are each needed, and `None` says there was nothing to say; repeat either for a list.
+
 ### Where to go from here
 
 Commit the project. The CI workflow it made runs `rotproof check` on every push, and `requirements-dev.txt` pins
@@ -385,7 +399,8 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   where they are, as they are. Once a knowledge
   document is reviewed against its code, `rotproof follows` (the keys named) writes the hashes in its `follows`: the
   review is the person's or the agent's, and pinning only records it. `rotproof new` starts a document with the
-  frontmatter, which is easy to write wrongly, and an empty description that the check fails on, and no body. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
+  frontmatter, which is easy to write wrongly, and an empty description that the check fails on, and no body.
+  `rotproof log` adds an entry to the log under today's heading, read from the clock. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
   `rotproof check` fails on: it only takes away, so nothing passes that failed before. Code it never moves: when the
   layer table changes (0.4.0, 1.0.0-rc.3), `rotproof init` says where each layer's code goes, and the person moves
   it.
