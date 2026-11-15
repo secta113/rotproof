@@ -9,6 +9,7 @@ use std::path::Path;
 
 use domain::code::{Aliases, Import, Manifest, Source};
 use domain::definitions::Definition;
+use domain::dependencies::Listing;
 use domain::layers::Language;
 use domain::schema::Time;
 
@@ -76,6 +77,9 @@ pub trait Parsers {
     fn typescript_aliases(&self, tree: &dyn Tree, roots: &[String]) -> io::Result<Aliases>;
     /// A crate's `Cargo.toml`, or `Err` with the line of the first error and what the parser says.
     fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)>;
+    /// What the manifest of a package of `language` lists as dependencies, and its package's name: a `pyproject.toml`,
+    /// a `package.json` or a `Cargo.toml`. `Err` with the line of the first error and what the parser says.
+    fn listing(&self, language: Language, source: &str) -> Result<Listing, (usize, String)>;
 }
 
 /// A project's files, read and written: what a command that writes takes.

@@ -10,6 +10,7 @@ pub mod code;
 pub mod crossing;
 pub mod declaration;
 pub mod definitions;
+pub mod dependencies;
 pub mod direction;
 pub mod environment;
 pub mod follows;

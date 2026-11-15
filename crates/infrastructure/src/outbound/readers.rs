@@ -4,6 +4,7 @@ use std::io;
 
 use domain::code::{Aliases, Import, Manifest, Source};
 use domain::definitions::Definition;
+use domain::dependencies::Listing;
 use domain::layers::Language;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -40,5 +41,13 @@ impl Parsers for Readers {
 
     fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)> {
         crate::outbound::cargo::read(source)
+    }
+
+    fn listing(&self, language: Language, source: &str) -> Result<Listing, (usize, String)> {
+        match language {
+            Language::Python => crate::outbound::pyproject::read(source),
+            Language::TypeScript => crate::outbound::typescript::dependencies::read(source),
+            Language::Rust => crate::outbound::cargo::listing(source),
+        }
     }
 }

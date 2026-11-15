@@ -22,6 +22,7 @@
 //! the environment both look for.
 
 mod aliases;
+pub mod dependencies;
 mod environment;
 mod outline;
 mod packages;

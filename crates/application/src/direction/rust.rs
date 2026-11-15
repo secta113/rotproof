@@ -38,21 +38,7 @@ pub(super) fn rust<'a>(
     let mut manifests = Manifests::new(parsers);
     // Each manifest's dependencies that land in a place, by the name the crate's code uses
     let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
-    let mut crates = layer_files(tree, layout, places, str::to_string)?;
-    for entry in entries.iter().filter(|entry| is_file(tree, &entry.path)) {
-        match manifests.package_of(tree, parent(&entry.path), &mut found)? {
-            // Entry files of one package, `src/main.rs` and `src/bin/w.rs`, are read through its manifest once
-            Some(path) => {
-                if !crates
-                    .iter()
-                    .any(|(at, from)| *at == path && from.unit.name == entry.unit.name)
-                {
-                    crates.push((path, entry));
-                }
-            }
-            None => found.push(no_package(entry)),
-        }
-    }
+    let crates = crates(tree, layout, places, entries, &mut manifests, &mut found)?;
     for (path, from) in crates {
         let Some(manifest) = manifests.read(tree, &path, &mut found)? else {
             continue;
@@ -106,6 +92,35 @@ pub(super) fn rust<'a>(
         links,
         moving: None,
     })
+}
+
+/// The manifest of every crate the check reads, by its path from the root, each with the place its code is in: the
+/// crate of each layer, and the package of the entry files of each unit, read once for all the entry files it holds.
+/// An entry file with no package is a finding in `found`.
+pub(crate) fn crates<'a>(
+    tree: &dyn Tree,
+    layout: &Layout,
+    places: &[&'a Place],
+    entries: &'a [Place],
+    manifests: &mut Manifests<'_>,
+    found: &mut Vec<String>,
+) -> io::Result<Vec<(String, &'a Place)>> {
+    let mut crates = layer_files(tree, layout, places, str::to_string)?;
+    for entry in entries.iter().filter(|entry| is_file(tree, &entry.path)) {
+        match manifests.package_of(tree, parent(&entry.path), found)? {
+            // Entry files of one package, `src/main.rs` and `src/bin/w.rs`, are read through its manifest once
+            Some(path) => {
+                if !crates
+                    .iter()
+                    .any(|(at, from)| *at == path && from.unit.name == entry.unit.name)
+                {
+                    crates.push((path, entry));
+                }
+            }
+            None => found.push(no_package(entry)),
+        }
+    }
+    Ok(crates)
 }
 
 /// The names the crate whose manifest is `manifest` reads of the crates of shared units it depends on (`shared`: the
@@ -237,13 +252,13 @@ fn dependencies_of<'a>(
 
 /// Every manifest read by the Rust check, by its path from the root, so a workspace is read once for all its members
 /// and a manifest that cannot be read is said once.
-struct Manifests<'p> {
+pub(crate) struct Manifests<'p> {
     parsers: &'p dyn Parsers,
     read: BTreeMap<String, Option<Manifest>>,
 }
 
 impl<'p> Manifests<'p> {
-    fn new(parsers: &'p dyn Parsers) -> Self {
+    pub(crate) fn new(parsers: &'p dyn Parsers) -> Self {
         Manifests {
             parsers,
             read: BTreeMap::new(),

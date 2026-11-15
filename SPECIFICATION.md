@@ -10,8 +10,8 @@ writes changes this file in the same commit.
 Rotproof makes the layer directories, checks that they are where the project declares them, and checks their
 direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
 the levels inside a crate, from the paths its code names. From the same reading of the code it checks that only
-`infrastructure` reads the environment variables, and that no comment switches the type checker off (see "What
-`rotproof check` checks"). A project made of several parts that each hold the layers declares them as units, and all
+`infrastructure` reads the environment variables, that no comment switches the type checker off, and that the manifest
+of each package lists the dependencies its code imports, no more and no fewer (see "What `rotproof check` checks"). A project made of several parts that each hold the layers declares them as units, and all
 of this holds in each unit, with the imports between units judged too (see "Units").
 
 The records live in `docs/`, which is a bundle in [OKF 0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format)
@@ -275,6 +275,10 @@ unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look 
 moving = ["legacy"]      # optional: paths of the project's own code that is not in a layer yet (see below)
 todo_link = "number"     # optional, number | key: a TODO may stay when it names its issue (see below)
 approved_max = 3         # optional, a count: the most approvals the project holds (see "Approving a forbidden import")
+
+[dependencies]           # optional: what the manifests and the tree cannot say (see "What `rotproof check` checks")
+imports = { dotenv = "python-dotenv" }  # Python only: the distribution an import is of
+without_import = ["openpyxl"]           # dependencies the code uses without importing them
 ```
 
 `todo_link` and `approved_max` are the two keys of the declaration that `rotproof init` and `rotproof create` never
@@ -295,6 +299,17 @@ it is to count it and say which files to move first (see "The code that is movin
 `moving = []` into a declaration it makes, `rotproof create` adds it to none, and a Rotproof older than the one that
 brought it cannot read a declaration that holds it, as for `todo_link`. A repository with `stack = "none"` has no code
 to move, so `moving` must be empty there.
+
+`[dependencies]` is the table that tells the check of the dependencies (see "What `rotproof check` checks") what the
+manifests and the tree cannot: `imports` maps the name of an import to the distribution that provides it, as the code
+writes the name (`dotenv`), and a dotted name covers the modules below it (`google.cloud.storage`), the longest entry
+winning; and `without_import` lists the dependencies the code uses without importing them, as the manifest lists them
+(`openpyxl`, which `pandas` loads). `imports` is Python's: an import and a dependency are one name in the other stacks,
+so it fails there, and so does either with `stack = "none"`, which has no code. A name that `without_import` lists and no
+manifest of the project lists as a runtime dependency fails, so the table does not keep what is gone. `rotproof init` and
+`rotproof create` write neither, a project adds the table by hand, and a Rotproof older than the one that brought it
+cannot read a declaration that holds it, as for `todo_link`. The verdict is decided from this table and the tree alone:
+nothing is installed, so it is the same on every machine and in CI.
 
 What the layers are is written once, in `layers/table.toml`, on the onion architecture:
 
@@ -888,6 +903,38 @@ entry can be told, is one.
   `__init__.py` directly in a unit's directory is read as a place that imports no layer: it may import none, and the
   code of another unit outside its layers fails there as everywhere. A relative import is a path, and lands where the
   path does; it is named by its full dotted name in a finding and in an approval.
+- **The manifests list the dependencies the code imports, both ways** (Python): the manifest of a package says in the
+  tree what its code depends on, and is compared with it as a layer is with the table, from the tree and the declaration
+  alone. The manifest is the `pyproject.toml` at the root of each unit, and at the root of the project when it declares
+  none; the code is what the direction check reads (the layers, the entry file, a unit's `__init__.py`) and the tests,
+  the code files in `tests/` of the unit's directory or its root, which are no layer. A path in `unchecked` or `moving` is not
+  read. A unit with no `pyproject.toml` at its root is not compared with one, and a `pyproject.toml` that cannot be read as
+  UTF-8 or TOML fails. What is listed is read as the tools that write the file say: `[project] dependencies` and the
+  keys of `[tool.poetry.dependencies]` are the runtime dependencies (each a PEP 508 string, whose distribution is cut
+  out of its extras, version and marker), each list of `[project.optional-dependencies]` is optional, and each group of
+  `[dependency-groups]`, `[tool.uv] dev-dependencies`, `[tool.pdm.dev-dependencies]`, and Poetry's dev tables is for
+  development. Names compare as PEP 503 says (case and runs of `-`, `_` and `.` count for nothing). Then, in each
+  manifest:
+  1. **an import of a package the manifest does not list fails**, once for the package, at its first import, with how
+     many more there are; the extras a dependency brings are no dependency of the package, so importing what one brings
+     fails as well. A package is the distribution an import is of: the entry of `imports` under `[dependencies]` of the
+     declaration that covers it, or else the one named like its first part, and the message says to map it when it may
+     be another. An import of another unit needs that unit's package, by the `name` its own `pyproject.toml` gives, or
+     by the name of the unit when it has none; an import of a module of the unit itself, of the standard library, or of
+     the project outside every layer needs nothing. The standard library is the union of Python 3.10 to 3.14; a module
+     of the project outside the layers is a directory or a `.py` file of its name in a directory above the importing
+     file, in the directory that holds a unit, or in the root and the path of a unit;
+  2. **the code of a layer uses runtime and optional dependencies only**: an import of one a group of
+     `[dependency-groups]` alone lists fails, and says to move it, or to import it in a test; a test uses all of them;
+  3. **a runtime dependency that no code imports fails**, and one that only tests import fails too, and says to move it
+     to a development group. An optional or development dependency is never judged unused: `ruff` and `mypy` are
+     imported by nothing. A dependency the code uses without importing it is listed in `without_import`, which
+     counts as an import; the package of the manifest itself is no dependency of it.
+
+  When the project has a `.venv` (at the root of the manifest, or of the project), the message of a missing dependency
+  names the distribution the environment provides the module as, from the metadata of each `*.dist-info` (the top-level
+  names its `RECORD` installs), and the lines to add. This only words the message: the environment is ignored by git and
+  differs from one machine to another, so the verdict never reads it.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,
@@ -1011,7 +1058,7 @@ entry can be told, is one.
   edited, or no longer what the code says, with the names that changed under it (see "Who reads the shared units").
 
 What a check finds file by file (the layers' imports, the markers, `NOTE`, the environment variables and the
-type-checker suppressions) is listed in the byte order of the whole path, written with `/` from the root and compared
+type-checker suppressions; the dependencies by manifest, each in the order of the files that need it) is listed in the byte order of the whole path, written with `/` from the root and compared
 as bytes compare: `Beta.py`, `_under.py`, `alpha.py`, and `mid2.py` before `mid2/x.py`, since `.` comes before `/`. It
 is the same on every operating system, whatever order its file system lists files in, so two machines that run the
 check on the same tree print the same lines in the same order. The list of linked `TODO` comments keeps the order it

@@ -338,6 +338,7 @@ mod tests {
                 approved_max: None,
                 files: None,
                 declined: Vec::new(),
+                dependencies: Default::default(),
                 units: Vec::new(),
             })
             .unwrap();
@@ -455,6 +456,7 @@ ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
                     approved_max: None,
                     files: None,
                     declined: Vec::new(),
+                    dependencies: Default::default(),
                     units: Vec::new(),
                 })
                 .unwrap();

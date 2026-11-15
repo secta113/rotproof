@@ -119,7 +119,7 @@ fn read_moving<'a>(
 
 /// The path a module is looked up at, from the root, and whether a unit named it: a module whose first part is the
 /// name of a unit is in the directory that holds the unit, and any other is a path from the root.
-fn path_of(module: &[String], imported: &BTreeMap<&str, &str>) -> (String, bool) {
+pub(crate) fn path_of(module: &[String], imported: &BTreeMap<&str, &str>) -> (String, bool) {
     match module
         .first()
         .and_then(|first| imported.get(first.as_str()))
@@ -142,7 +142,7 @@ fn at_root(to: Landing, units: &[Unit]) -> bool {
 /// The code files that sit directly in the directory of a unit and belong to its package (`__init__.py`), each as a
 /// place that imports no layer. A unit at the root has none: its package file is the project's, and a unit whose
 /// directory is not there is the structure check's to say.
-fn package_files(
+pub(crate) fn package_files(
     tree: &dyn Tree,
     layout: &Layout,
     table: &Table,

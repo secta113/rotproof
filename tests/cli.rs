@@ -6458,3 +6458,68 @@ fn log_refuses_what_the_log_does_not_have_and_writes_nothing() {
         error_of(&out)
     );
 }
+
+#[test]
+fn a_python_manifest_is_compared_with_what_the_code_imports_either_way() {
+    let root = repo_with_ui("python", "");
+    let r = root.path();
+    let arg = root_arg(r);
+    write_file(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\", \"python-dotenv\"]\n",
+    );
+    write_file(
+        r,
+        "application/pay.py",
+        "import os\nimport requests\nfrom dotenv import load_dotenv\n",
+    );
+    // `dotenv` is taken for the distribution named like it, and `python-dotenv` is imported by nothing
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains("the manifests list the dependencies the code imports"),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "application/pay.py:3: imports dotenv.load_dotenv, which needs the package dotenv, and pyproject.toml \
+             does not list it: add it to dependencies in [project]"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "pyproject.toml:3: lists the dependency python-dotenv, which no code imports"
+        ),
+        "{said}"
+    );
+    // The declaration says which distribution the import is of, and the manifest agrees with the code
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    write_file(
+        r,
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nimports = {{ dotenv = \"python-dotenv\" }}\n"),
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // A development dependency serves a test, and a layer may not use it
+    write_file(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\", \"python-dotenv\"]\n\
+         [dependency-groups]\ndev = [\"pytest\"]\n",
+    );
+    write_file(r, "tests/test_pay.py", "import pytest\n");
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    write_file(r, "domain/rule.py", "import pytest\n");
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains(
+            "domain/rule.py:1: imports pytest, which pyproject.toml:5 lists for development only"
+        ),
+        "{said}"
+    );
+}

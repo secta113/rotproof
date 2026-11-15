@@ -76,10 +76,63 @@ pub struct Declaration {
     /// The updates of the project's files it declines, by name (`upgrade.rs`)
     #[serde(default)]
     pub declined: Vec<String>,
+    /// What the declaration says of the dependencies the manifests list (`dependencies.rs`): the distribution each
+    /// import of Python is of, and the dependencies the code uses without importing them. Optional, and never written
+    /// by `rotproof init` or `rotproof create`
+    #[serde(default)]
+    pub dependencies: DependenciesDeclaration,
     /// The units the code is made of, each a `[[unit]]` table. None: the whole project is one unit. Read as the file
     /// says, and checked against the layout in [`Declared::new`]
     #[serde(default, rename = "unit")]
     pub units: Vec<UnitDeclaration>,
+}
+
+/// What is wrong with the `[dependencies]` of a declaration of a stack with code: `imports` is Python's, since an
+/// import and a dependency are one name in the others, and a name is written once as the manifest lists it.
+fn dependency_problems(declaration: &Declaration) -> Vec<String> {
+    let dependencies = &declaration.dependencies;
+    let mut found = Vec::new();
+    if declaration.stack != "python" && !dependencies.imports.is_empty() {
+        found.push(format!(
+            "{DECLARATION}: imports under [dependencies] says which distribution a Python import is of, and the {} \
+             stack imports a package by the name its manifest lists: take it out",
+            declaration.stack
+        ));
+    }
+    for (name, distribution) in &dependencies.imports {
+        if name.is_empty() || name.split('.').any(str::is_empty) || distribution.trim().is_empty() {
+            found.push(format!(
+                "{DECLARATION}: imports under [dependencies] maps {name:?} to {distribution:?}: write an import name \
+                 (dotted when it is a package below another, as in google.cloud.storage) and the distribution that \
+                 provides it"
+            ));
+        }
+    }
+    for name in &dependencies.without_import {
+        if name.trim().is_empty() {
+            found.push(format!(
+                "{DECLARATION}: without_import under [dependencies] lists an empty name: write the name the \
+                 manifest lists"
+            ));
+        }
+    }
+    found
+}
+
+/// The `[dependencies]` table of the declaration: what the manifests and the tree cannot say, which the check of the
+/// dependencies reads (`dependencies.rs`). The verdict is decided from this and the tree alone.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependenciesDeclaration {
+    /// Python only: the distribution each import is of, by the name the code imports (`dotenv = "python-dotenv"`).
+    /// A name may be dotted, and covers the modules below it (`google.cloud.storage`). An import that is not here is of
+    /// the distribution named like its first part
+    #[serde(default)]
+    pub imports: std::collections::BTreeMap<String, String>,
+    /// The dependencies the code uses without importing them, by the name the manifest lists: a package another one
+    /// loads (`openpyxl` for `pandas`), a driver chosen by name, a `-sys` crate. They are never unused
+    #[serde(default)]
+    pub without_import: Vec<String>,
 }
 
 /// One `[[unit]]` of the declaration: a part of the code that holds the layers.
@@ -448,6 +501,13 @@ impl Declared {
                     "{DECLARATION}: stack = \"none\" has no layers, so it has no units: take out [[unit]]"
                 ));
             }
+            let dependencies = &declaration.dependencies;
+            if !dependencies.imports.is_empty() || !dependencies.without_import.is_empty() {
+                found.push(format!(
+                    "{DECLARATION}: stack = \"none\" has no code, so it has no dependencies to judge: take out \
+                     [dependencies]"
+                ));
+            }
             if !found.is_empty() {
                 return Err(found);
             }
@@ -522,6 +582,7 @@ impl Declared {
             }
         }
         found.extend(levels_without_their_layer(&units, &places));
+        found.extend(dependency_problems(&declaration));
         let todo_link = declaration.todo_link.as_deref().and_then(|value| {
             let link = TodoLink::parse(value);
             if link.is_none() {

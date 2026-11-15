@@ -97,6 +97,10 @@ fn code(
             .chain(sorted.forbidden.iter().map(|f| f.detail.clone())),
     ));
     report.findings.extend(under(
+        crate::dependencies::HEADING,
+        crate::dependencies::problems(tree, parsers, declared)?,
+    ));
+    report.findings.extend(under(
         "every approval matches a forbidden import",
         approvals
             .problems

@@ -6,6 +6,7 @@
 pub mod cargo;
 pub mod disk;
 pub mod git;
+pub mod pyproject;
 pub mod python;
 pub mod readers;
 pub mod typescript;
