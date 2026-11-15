@@ -459,6 +459,29 @@ changed is in the commits, what was measured and decided along the way in the ta
   `protocol::outbound::Port` does), and so is a name bound to such a name; the file is read as one scope, so a name
   bound twice stands for both. Not seen: a path a macro builds from pieces, and a name bound in one file and used
   through another.
+- **Imports between units follow the units' rules** (every language): the units are the parts of the code that each
+  hold the layers (see Units); a project that declares none is one unit, and none of this applies. An import inside a
+  unit is judged as above. An import into another unit is judged by what each is, first:
+  1. the code of another unit outside its layers fails (`imports billing, in the unit billing outside its layers`):
+     import the module of a layer, such as `billing.protocol.inbound`;
+  2. a shared unit imports only shared units (`the shared unit core imports only shared units, and billing is not
+     shared`);
+  3. a unit that is not shared is imported by the `composition` of an app, which is a unit with an entry, and by no
+     other place, nor by an app's `composition` into another app: it reads the places of a unit with no entry as far
+     as it reads its own, so `composition` wires the units and nothing else does;
+  4. a shared unit is read as if its place sat in the importer's own unit, so the table decides, with two more
+     rules: `application` never imports another unit's `application` (`composition` passes a shared unit's use cases
+     in), and the `composition` of a shared unit is imported by the `composition` of an app alone.
+
+  The entry file reads the `composition` of its own unit and nothing of another unit. Only direct imports are
+  judged, and what these rules allow is closed under chaining except through an entry file, which imports a
+  `composition` that wires what the entry file may not import. A forbidden import between units is approved as any
+  other. The shared units that import each other, one way round or more, fail once each, as one finding that names
+  the units in a cycle and the first import of each step (`the shared units import each other in a cycle: core →
+  steps → core (core/application/x.py:3 imports steps.domain.a; steps/domain/b.py:1 imports core.domain.c)`); it is
+  no import of a file, so no approval covers it. In Python, a name that is a layer's alone (`domain`) that fails in
+  another unit also says where the unit's own is: Python finds `domain` from where the program starts, and the
+  unit's own layer is `billing.domain`.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,

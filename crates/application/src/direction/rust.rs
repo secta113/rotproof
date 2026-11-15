@@ -6,7 +6,7 @@ use std::io;
 use super::{Direction, layer_files};
 use crate::tree::{code_files, is_file, read_code};
 use domain::code::{Dependency as ManifestDependency, Manifest, Origin};
-use domain::direction::{Forbidden, judged, place_of, workspace_dirs};
+use domain::direction::{Forbidden, edge, judged, place_of, workspace_dirs};
 use domain::layers::{Layout, Place};
 use domain::modules::{Dependency, judged_crate};
 use domain::paths::{join, parent};
@@ -25,6 +25,7 @@ pub(super) fn rust(
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
+    let mut edges = Vec::new();
     let mut manifests = Manifests::new(parsers);
     // Each manifest's dependencies that land in a place, by the name the crate's code uses
     let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
@@ -60,12 +61,14 @@ pub(super) fn rust(
                 from,
                 to,
             ));
+            edges.extend(edge(&path, dependency.line, name, from, to));
         }
     }
     forbidden.extend(levels(tree, places, &depends, &mut found)?);
     Ok(Direction {
         problems: found,
         forbidden,
+        edges,
     })
 }
 

@@ -5,7 +5,7 @@ use std::io;
 use super::{Direction, entry_files, layer_files, misread};
 use crate::tree::{read_code, resolved};
 use domain::code::module_parts;
-use domain::direction::{judged, place_of};
+use domain::direction::{edge, judged, place_of};
 use domain::layers::{Layout, Place};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -21,6 +21,7 @@ pub(super) fn python(
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
+    let mut edges = Vec::new();
     let mut files = layer_files(tree, layout, places, |path| module_parts(path).join("/"))?;
     files.extend(entry_files(tree, entries));
     for (path, from) in files {
@@ -44,10 +45,12 @@ pub(super) fn python(
                 from,
                 to,
             ));
+            edges.extend(edge(&path, line, &dotted, from, to));
         }
     }
     Ok(Direction {
         problems: found,
         forbidden,
+        edges,
     })
 }

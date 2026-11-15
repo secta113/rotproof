@@ -6,7 +6,7 @@ use super::{Direction, entry_files, layer_files, misread};
 use crate::code::lands;
 use crate::tree::{read_code, resolved};
 use domain::code::is_source;
-use domain::direction::{judged, place_of};
+use domain::direction::{edge, judged, place_of};
 use domain::layers::{Layout, Place};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -21,6 +21,7 @@ pub(super) fn typescript(
     entries: &[Place],
 ) -> io::Result<Direction> {
     let mut forbidden = Vec::new();
+    let mut edges = Vec::new();
     let aliases = parsers.typescript_aliases(tree)?;
     let mut found: Vec<String> = aliases
         .problems
@@ -56,10 +57,12 @@ pub(super) fn typescript(
                 from,
                 to,
             ));
+            edges.extend(edge(&path, line, &specifier, from, to));
         }
     }
     Ok(Direction {
         problems: found,
         forbidden,
+        edges,
     })
 }
