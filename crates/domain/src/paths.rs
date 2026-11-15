@@ -27,6 +27,31 @@ pub fn join(dir: &str, path: &str) -> String {
     }
 }
 
+/// Why a path written in the declaration is not fit to be read as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Miswritten {
+    /// It holds a `\`
+    Backslash,
+    /// It is not from the root with `/`: it starts with `/`, holds a `:`, or has an empty, `.` or `..` part, so it
+    /// would never equal the paths Rotproof compares it with
+    NotFromRoot,
+}
+
+/// Whether `path`, as the declaration writes it (`unchecked`, a unit's `path`), is fit to be compared with the paths
+/// Rotproof reads, and if not, why.
+pub fn miswritten(path: &str) -> Option<Miswritten> {
+    if path.contains('\\') {
+        Some(Miswritten::Backslash)
+    } else if path.starts_with('/')
+        || path.contains(':')
+        || path.split('/').any(|part| matches!(part, "" | "." | ".."))
+    {
+        Some(Miswritten::NotFromRoot)
+    } else {
+        None
+    }
+}
+
 /// A path from the root without `.`, `..` or empty parts. `None` when it climbs above the root.
 pub fn normalize(path: &str) -> Option<String> {
     let mut parts: Vec<&str> = Vec::new();
@@ -76,6 +101,15 @@ mod tests {
         assert_eq!(join("src", "x.py"), "src/x.py");
         assert_eq!(join("", "x.py"), "x.py");
         assert_eq!(join("src", "../x.py"), "src/../x.py");
+    }
+
+    #[test]
+    fn a_path_is_written_from_the_root_with_slashes() {
+        assert_eq!(miswritten("packages/billing/src"), None);
+        assert_eq!(miswritten("a\\b"), Some(Miswritten::Backslash));
+        for path in ["./a", "a/./b", "../a", "/a", "a//b", "C:/a", "", "a/.."] {
+            assert_eq!(miswritten(path), Some(Miswritten::NotFromRoot), "{path:?}");
+        }
     }
 
     #[test]

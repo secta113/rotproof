@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::crossing::{ONION, retired};
 use crate::declaration::{DECLARATION, Declared};
 use crate::layers::{Layout, Place};
-use crate::paths::{join, within};
+use crate::paths::{Miswritten, join, miswritten, within};
 
 /// What the structure check reads from the tree.
 #[derive(Debug, Default)]
@@ -171,18 +171,17 @@ fn unchecked_paths<'a>(declared: &'a Declared, seen: &Seen) -> (Vec<String>, Vec
     let mut found = Vec::new();
     let mut kept = Vec::new();
     for path in declared.unchecked() {
-        if path.contains('\\') {
-            found.push(format!(
-                "unchecked lists {path:?}: separate a path with /, which every platform reads"
-            ));
-        } else if path.starts_with('/')
-            || path.contains(':')
-            || path.split('/').any(|part| matches!(part, "" | "." | ".."))
-        {
-            // `./scripts` would never equal the paths Rotproof compares it with, and would switch nothing off silently
-            found.push(format!(
-                "unchecked lists {path:?}: write a path from the root, such as scripts or src/generated"
-            ));
+        if let Some(why) = miswritten(path) {
+            found.push(match why {
+                Miswritten::Backslash => format!(
+                    "unchecked lists {path:?}: separate a path with /, which every platform reads"
+                ),
+                // `./scripts` would never equal the paths Rotproof compares it with, and would switch nothing off
+                // silently
+                Miswritten::NotFromRoot => format!(
+                    "unchecked lists {path:?}: write a path from the root, such as scripts or src/generated"
+                ),
+            });
         } else if let Some(place) = declared.overlapped(path) {
             found.push(format!(
                 "unchecked lists {path}, which holds or sits in the layer {} ({}/): a layer cannot be switched off",

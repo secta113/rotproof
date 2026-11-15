@@ -4080,3 +4080,209 @@ fn follows_pins_a_table_of_a_toml_file_and_the_check_fails_when_only_that_table_
         stdout(&out)
     );
 }
+
+/// The declaration of a Python monorepo of two units, its fields above the tables and `shared` as `shared`.
+fn two_units(shared: &str) -> String {
+    format!(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
+         path = \"packages/core/src/core\"\nshared = {shared}\n\n[[unit]]\nname = \"billing\"\n\
+         path = \"packages/billing/src/billing\"\n",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+#[test]
+fn a_project_that_declares_units_gets_the_layers_of_each_and_is_checked_as_one() {
+    let root = declared(&two_units("true"));
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    for unit in ["core", "billing"] {
+        for layer in ["domain", "composition", "infrastructure/inbound"] {
+            let made = format!("packages/{unit}/src/{unit}/{layer}/__init__.py");
+            assert!(r.join(&made).is_file(), "{made}");
+        }
+    }
+    // No unit is implicit: the layers of the root are not made
+    assert!(!r.join("domain").exists());
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // What a unit lacks is its own: a layer deleted from one unit is missing there, not in the other
+    fs::remove_dir_all(r.join("packages/billing/src/billing/application")).unwrap();
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains("packages/billing/src/billing/application/"),
+        "{said}"
+    );
+    assert!(
+        !said.contains("packages/core/src/core/application/"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_declaration_of_units_that_cannot_be_read_says_every_reason() {
+    for (declaration, said) in [
+        (
+            two_units("false").replace("name = \"billing\"", "name = \"core\""),
+            vec!["two units are named \"core\""],
+        ),
+        (
+            two_units("false")
+                .replace("packages/core/src/core", "packages/billing/src/billing")
+                .replace("name = \"billing\"", "name = \"Bad Name\""),
+            vec![
+                "unit name \"Bad Name\" is not a name: start with a lowercase letter, then lowercase letters, digits \
+                 and _",
+                "units \"core\" and \"Bad Name\" both have path \"packages/billing/src/billing\"",
+            ],
+        ),
+        (
+            two_units("true").replace(
+                "shared = true\n",
+                "shared = true\nentry = \"packages/core/src/core/__main__.py\"\n",
+            ),
+            vec![
+                "unit \"core\" is shared and declares entry: an app (a unit with entry) wires the units",
+            ],
+        ),
+        (
+            two_units("false").replace("ui = \"none\"\n", "ui = \"none\"\nabsent = [\"domain\"]\n"),
+            vec![
+                "absent lists [\"domain\"], and the project declares units: name what each unit lacks in its own",
+            ],
+        ),
+        (
+            two_units("false") + "absent = [\"domainx\"]\n",
+            vec![
+                "unit \"billing\" names \"domainx\" in absent, which the python layout does not have",
+            ],
+        ),
+    ] {
+        let root = declared(&declaration);
+        let arg = root_arg(root.path());
+        for command in [&["create"][..], &["check"]] {
+            let mut args = vec!["--root", &arg];
+            args.extend(command);
+            let out = run(&args);
+            let all = format!("{}{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
+            let all = all.split_whitespace().collect::<Vec<_>>().join(" ");
+            for line in &said {
+                let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(all.contains(&line), "{command:?}: {line}\n{all}");
+            }
+            assert!(!out.status.success(), "{command:?}: {declaration}");
+        }
+        assert!(!root.path().join("packages").exists(), "{declaration}");
+    }
+    // A repository of records only has no units
+    let root = declared(&format!(
+        "stack = \"none\"\nareas = [\"a\"]\nfiles = \"{}\"\n[[unit]]\nname = \"a\"\npath = \"a\"\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    let said = stdout(&out);
+    assert!(
+        said.contains("stack = \"none\" has no layers, so it has no units: take out [[unit]]"),
+        "{said}"
+    );
+}
+
+#[test]
+fn follows_pins_the_units_of_the_declaration_and_the_check_fails_when_a_unit_changes_not_the_fields_above()
+ {
+    let root = declared(&two_units("false"));
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success(),
+        "create"
+    );
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    let doc = r.join("docs/knowledge/units.md");
+    fs::write(
+        &doc,
+        "---\ntype: Knowledge\ntitle: Units\ndescription: Why the code is in two units.\ntags: [a]\nstatus: stable\n---\n\n\
+         # Why two\n\nThey are bought apart.\n",
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+    let key = ".config/rotproof.toml::unit";
+    let out = run(&["--root", &arg, "follows", "knowledge/units.md", key]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pinned = fs::read_to_string(&doc).unwrap();
+    assert!(
+        pinned.contains(&format!("follows:\n  {key}: \"")),
+        "{pinned}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // The fields above the tables are not the tables: `areas` and `files` change, and the document still holds
+    let before = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    declare(
+        r,
+        &before
+            .replace("areas = [\"a\"]", "areas = [\"a\", \"b\"]")
+            .replace(
+                &format!("files = \"{}\"", env!("CARGO_PKG_VERSION")),
+                &format!("files = \"{}\"\ndeclined = []", env!("CARGO_PKG_VERSION")),
+            ),
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // A unit is: the document is to be read again
+    declare(r, &before.replace("shared = false", "shared = true"));
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(&format!(
+            "follows {key}, which changed since the document was last reviewed"
+        )),
+        "{said}"
+    );
+    // Reviewing it pins the new units, and the check passes again
+    let out = run(&["--root", &arg, "follows", "knowledge/units.md", key]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // A project with no unit has no such table, as a definition that is not there is said
+    declare(
+        r,
+        &format!(
+            "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
+    let out = run(&["--root", &arg, "follows", "knowledge/units.md", key]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&format!("{key}: not there")),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

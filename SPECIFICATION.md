@@ -286,6 +286,81 @@ A level is declared absent by its dotted name (`absent = ["ui.templates"]`). Fil
 hidden files are not looked at, so a virtual environment or a build directory is not code. A code file is matched in any
 case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 
+A project made of several parts that each hold the layers declares them as units, with `[[unit]]` tables (see
+"Units"); without them the whole project is one unit, which is what the rest of this file describes.
+
+## Units
+
+A project is one unit unless it says otherwise: its layers sit where its stack puts them, and every rule above is
+about them. A project made of several parts that each hold the layers, such as the packages of a monorepo or the
+modules of a modular monolith, declares them in `.config/rotproof.toml`, one `[[unit]]` table for each. Each unit
+then holds the layers by itself, and the project holds none of its own: the units replace the one implicit unit.
+
+```toml
+[[unit]]
+name = "billing"                       # required: a lowercase letter, then lowercase letters, digits and _
+path = "packages/billing/src/billing"  # required: where its layers sit directly, from the root ("." is the root)
+shared = true                          # optional, false by default: any unit may import it
+entry = ["apps/cli/__main__.py"]       # optional, a path or a list: the unit is an app, which wires the others
+root = "packages/billing"              # optional, `path` by default: where the unit's manifest is
+absent = ["domain"]                    # optional: the layers or levels this unit does not have
+```
+
+`rotproof init` writes a commented example at the end of the declaration, after `files` and `declined`, so that a
+project that takes it out of the comment leaves them above the tables. The `[[unit]]` tables come last in the file for
+that reason: a key written after one belongs to it. Once the project declares units, `absent` at the top is no unit's
+and must be empty: each unit says what it lacks in its own `absent`, which names the same layers and levels, and an
+app, which holds only `composition` and `infrastructure`, lacks the rest. `unchecked` is the project's, and so is
+every other field above the tables; `stack = "none"` has no layers and so no units. A unit `rotproof create` makes is
+made as the one unit is, in the directory of its `path`.
+
+A declaration that cannot be read as it is written fails every check, saying every reason at once, from the
+declaration and the layout alone, before the tree is looked at:
+
+- a name that is not `[a-z][a-z0-9_]*`, or two units with the same name;
+- a `path` or `root` that is not written from the root with `/` as `unchecked` is (`./a`, `/a`, `a/../b`, `C:/a`, a
+  `\`, an empty one), and two units with the same `path`;
+- a `root` that is neither the `path` nor a directory above it;
+- a unit inside a layer of another unit (a unit sits beside the layers of the unit around it, however deep, and nowhere
+  in them), and a unit whose directory is named like a layer or like a path that is no layer (`tests`), which the
+  unit around it would read as one;
+- in Python, a unit whose name is not the name of the directory of its `path`, since Python imports a unit as that
+  name (a unit at the root has none to name it);
+- an `entry` that is not written from the root, is no code of the stack, lies inside the path of a unit other than
+  the one that declares it (the innermost unit that holds an entry is its own, or none), or is declared by two units;
+- a unit that is `shared` and has an `entry`: an app is imported by none, and a shared unit by all;
+- a name in a unit's `absent` the layout does not have, as at the top for a project of one unit;
+- an `absent` at the top, once units are declared.
+
+What `rotproof check` checks of the tree holds in each unit as it does in a project of one: every layer present or
+declared absent in the unit's own `absent`, no code outside the layers of a unit, and each unit's entry files.
+
+A knowledge document that records why the code is divided so follows the table `.config/rotproof.toml::unit` (see
+The records), and is read again when a unit changes, not when `areas` or `files` does.
+
+### What a unit may import
+
+A unit imports the layers of its own unit as the table says. Only direct imports are judged, as everywhere. Between
+units, the rules are these, applied to an import from one unit's layer into another unit's, from the top:
+
+1. An import that lands in the directory of another unit outside its layers fails: what is read from it afterwards
+   cannot be seen. The module of a layer is named (`billing.protocol.inbound`), never the unit as a whole.
+2. A unit that is not shared is imported by no other, except that the `composition` of an app wires the units: it
+   imports every layer of the units it wires, as it imports its own, and never another app's.
+3. A shared unit imports shared units only.
+4. Into a shared unit, a layer imports what the table lets it import, the layers of the other unit standing where those
+   of its own do (`infrastructure.inbound` imports `protocol.inbound` of a shared unit), except that `application`
+   never imports another unit's `application`, which `composition` passes in as use cases, and that the `composition`
+   of a unit is imported by the `composition` of an app alone.
+5. An entry file imports the `composition` of its own unit alone.
+6. Shared units do not import each other in a cycle. This finding names the cycle and the imports that close it, and
+   cannot be approved.
+
+An import across units that the rules forbid is approved as any other forbidden import is
+(`rotproof approve <file> <import>`), except for the cycle. Only direct imports are judged across units too, and a chain
+of allowed imports across units can reach a layer that one import could not, through the `composition` of an app,
+which is the one place that wires the units.
+
 ## The records
 
 ```

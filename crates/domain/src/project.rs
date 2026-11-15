@@ -227,6 +227,7 @@ mod tests {
                 todo_link: None,
                 files: None,
                 declined: Vec::new(),
+                units: Vec::new(),
             })
             .unwrap();
             let (files, not_written) = project_files(&declared, "x");
