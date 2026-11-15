@@ -939,6 +939,47 @@ areas = [\"a\"]
 }
 
 #[test]
+fn guide_without_a_stack_prints_what_create_writes_for_the_declared_ui() {
+    for (stack, ui) in [
+        ("typescript", "none"),
+        ("typescript", "atomic"),
+        ("python", "none"),
+        ("python", "atomic"),
+        ("rust", "none"),
+    ] {
+        let root = declared(&format!(
+            "stack = \"{stack}\"\nareas = [\"a\"]\nui = \"{ui}\"\n"
+        ));
+        let arg = root_arg(root.path());
+        assert!(
+            create(&["--root", &arg, "create", "--yes"])
+                .status
+                .success(),
+            "{stack} {ui}"
+        );
+        let written = fs::read_to_string(root.path().join(".rotproof/AGENTS.md")).unwrap();
+        let out = run(&["--root", &arg, "guide"]);
+        assert!(out.status.success(), "{stack} {ui}");
+        assert_eq!(stdout(&out), written, "{stack} {ui}");
+        // Named with the same stack and UI, it is the same text
+        let named = run(&["--root", &arg, "guide", "--stack", stack, "--ui", ui]);
+        assert_eq!(stdout(&named), written, "{stack} {ui}");
+    }
+    // The two UIs of a stack are two texts, so the comparison above says something
+    let ts = |ui: &str| {
+        let root = declared(&format!(
+            "stack = \"typescript\"\nareas = [\"a\"]\nui = \"{ui}\"\n"
+        ));
+        stdout(&run(&["--root", &root_arg(root.path()), "guide"]))
+    };
+    assert_ne!(ts("none"), ts("atomic"));
+    // A declaration from before `ui` has the fullest the stack offers, as the guide of a stack alone does
+    let root = declared("stack = \"typescript\"\nareas = [\"a\"]\n");
+    let out = run(&["--root", &root_arg(root.path()), "guide"]);
+    assert_eq!(stdout(&out), ts("atomic"));
+}
+
+#[test]
 fn guide_takes_the_ui_with_a_stack_as_init_does_and_needs_no_project() {
     let root = tempfile::tempdir().unwrap();
     let arg = root_arg(root.path());

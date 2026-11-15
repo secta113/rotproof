@@ -10,15 +10,17 @@ use domain::project::stale_map;
 use protocol::outbound::Tree;
 
 /// The guide `rotproof guide` prints: for `stack` when it is named, with the layers of `ui` when that is named too,
-/// otherwise for the stack the project in `tree` declares. `Err` when the stack is unknown, the UI is one `rotproof
-/// init` would refuse for it, or no stack is named and the declaration cannot be read.
+/// otherwise for the stack and the UI the project in `tree` declares, which is the text `rotproof create` writes for
+/// it (a declaration with no `ui`, written before there was one, has the fullest the stack offers). `Err` when the
+/// stack is unknown, the UI is one `rotproof init` would refuse for it, or no stack is named and the declaration
+/// cannot be read.
 pub fn guide_for(tree: &dyn Tree, stack: Option<&str>, ui: Option<&str>) -> Result<String, String> {
-    let stack = match stack {
-        Some(stack) => stack.to_string(),
+    let (stack, ui) = match stack {
+        Some(stack) => (stack.to_string(), ui.map(str::to_string)),
         None => {
             let stacks = known_stacks().join(", ");
             match declaration(tree).map_err(|e| e.to_string())? {
-                Some(Ok(declaration)) => declaration.stack,
+                Some(Ok(declaration)) => (declaration.stack, declaration.ui),
                 None => {
                     return Err(format!(
                         "no {DECLARATION} here: name a stack with --stack ({stacks})"
@@ -33,7 +35,7 @@ pub fn guide_for(tree: &dyn Tree, stack: Option<&str>, ui: Option<&str>) -> Resu
             }
         }
     };
-    guide_named(&stack, ui)
+    guide_named(&stack, ui.as_deref())
 }
 
 /// Where the project's own map is, from the root
