@@ -144,8 +144,8 @@ that has a declaration:
   nothing when its file is as the update leaves it already. It writes the file back with the line endings and the
   byte order mark it had. What it cannot do without a person (its file is not in a form Rotproof can read),
   `rotproof init` says, exits 2 and leaves `files` as it was: do it by hand, or decline the update by its name in
-  `declined`, and run `rotproof init` again. When its file is missing, the same run writes the file as
-  `rotproof create` does now, with what every update adds, and the update asks for nothing.
+  `declined`, and run `rotproof init` again. When its file is missing, the update has nothing to take out, and
+  asks for nothing.
 
 | Update | Version | File | What it does |
 |---|---|---|---|
