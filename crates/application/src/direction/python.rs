@@ -215,7 +215,7 @@ mod tests {
             unit(
                 "cli",
                 "cli",
-                &format!("entry = \"cli/__main__.py\"\n{APP_ABSENT}"),
+                &format!("entry = [\"cli/__main__.py\"]\n{APP_ABSENT}"),
             ),
         ]
     }
@@ -340,7 +340,7 @@ mod tests {
             unit(
                 "cli",
                 "apps/cli/src/cli",
-                &format!("entry = \"apps/cli/__main__.py\"\nroot = \"apps/cli\"\n{APP_ABSENT}"),
+                &format!("entry = [\"apps/cli/__main__.py\"]\nroot = \"apps/cli\"\n{APP_ABSENT}"),
             ),
         ];
         let (forbidden, problems) = check(
@@ -502,7 +502,11 @@ mod tests {
             unit("core", "packages/core/src/core", "shared = true\n"),
             unit("billing", "packages/billing/src/billing", ""),
             // An app, whose composition wires the units: it may read a layer of another, and the unit as a whole not
-            unit("shipping", "shipping", "entry = \"shipping/__main__.py\"\n"),
+            unit(
+                "shipping",
+                "shipping",
+                "entry = [\"shipping/__main__.py\"]\n",
+            ),
         ];
         let layers: &[(&str, &[&str])] = &[
             ("packages/core/src/core", ALL),
@@ -571,7 +575,7 @@ mod tests {
             unit(
                 "cli",
                 "cli",
-                &format!("entry = \"cli/__main__.py\"\n{APP_ABSENT}"),
+                &format!("entry = [\"cli/__main__.py\"]\n{APP_ABSENT}"),
             ),
         ];
         let layers: &[(&str, &[&str])] = &[

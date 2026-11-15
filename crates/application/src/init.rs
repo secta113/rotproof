@@ -924,7 +924,7 @@ mod tests {
             "stack = \"python\"\nareas = {areas}\nui = \"none\"\nfiles = \"{}\"\ndeclined = []\n\n\
              [[unit]]\nname = \"core\"\npath = \"core\"\nshared = true\n\n\
              [[unit]]\nname = \"billing\"\npath = \"billing\"\n\n\
-             [[unit]]\nname = \"cli\"\npath = \"cli\"\nentry = \"cli/main.py\"\n",
+             [[unit]]\nname = \"cli\"\npath = \"cli\"\nentry = [\"cli/main.py\"]\n",
             domain::version::VERSION
         )
     }

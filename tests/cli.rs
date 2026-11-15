@@ -4230,7 +4230,7 @@ fn a_declaration_of_units_that_cannot_be_read_says_every_reason() {
         (
             two_units("true").replace(
                 "shared = true\n",
-                "shared = true\nentry = \"packages/core/src/core/__main__.py\"\n",
+                "shared = true\nentry = [\"packages/core/src/core/__main__.py\"]\n",
             ),
             vec![
                 "unit \"core\" is shared and declares entry: an app (a unit with entry) wires the units",
@@ -4384,7 +4384,7 @@ fn modular_monolith() -> tempfile::TempDir {
     let root = declared(&format!(
         "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
          path = \"packages/core/src/core\"\nroot = \"packages/core\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
-         path = \"modules/billing\"\n\n[[unit]]\nname = \"app\"\npath = \"modules/app\"\nentry = \"bin/run.py\"\n\
+         path = \"modules/billing\"\n\n[[unit]]\nname = \"app\"\npath = \"modules/app\"\nentry = [\"bin/run.py\"]\n\
          absent = [\"domain\", \"application\", \"protocol\"]\n",
         env!("CARGO_PKG_VERSION")
     ));
@@ -4749,7 +4749,7 @@ fn rust_units(entry: &str) -> String {
     format!(
         "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"core\"\n\
          path = \"crates/core\"\nshared = true\n\n[[unit]]\nname = \"cli\"\npath = \"apps/cli/crates\"\n\
-         root = \"apps/cli\"\nentry = \"{entry}\"\nabsent = [\"application\", \"protocol\", \"domain\"]\n",
+         root = \"apps/cli\"\nentry = [\"{entry}\"]\nabsent = [\"application\", \"protocol\", \"domain\"]\n",
         env!("CARGO_PKG_VERSION")
     )
 }
@@ -4985,7 +4985,7 @@ fn npm_workspaces() -> tempfile::TempDir {
         "stack = \"typescript\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"db\"\n\
          path = \"packages/db/src\"\nroot = \"packages/db\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
          path = \"packages/billing/src\"\nroot = \"packages/billing\"\n\n[[unit]]\nname = \"web\"\n\
-         path = \"apps/web/src\"\nroot = \"apps/web\"\nentry = \"apps/web/src/main.ts\"\n\
+         path = \"apps/web/src\"\nroot = \"apps/web\"\nentry = [\"apps/web/src/main.ts\"]\n\
          absent = [\"domain\", \"application\", \"protocol\"]\n",
         env!("CARGO_PKG_VERSION")
     ));

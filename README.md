@@ -320,7 +320,7 @@ root = "packages/shipping"
 [[unit]]
 name = "cli"
 path = "apps/cli/cli"
-entry = "apps/cli/__main__.py"        # an app: its composition wires the other units
+entry = ["apps/cli/__main__.py"]        # an app: its composition wires the other units
 absent = ["application", "protocol", "domain"]   # an app holds only composition and infrastructure
 ```
 

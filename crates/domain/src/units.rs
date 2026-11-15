@@ -6,7 +6,7 @@
 //! declares some (`[[unit]]` in `.config/rotproof.toml`) has those and no implicit one: [`declared`] makes them from
 //! what the declaration says, and says every reason it cannot be read, from the declaration and the layout alone.
 
-use crate::declaration::{UnitDeclaration, unreadable};
+use crate::declaration::{Entries, UnitDeclaration, unreadable};
 use crate::layers::{Language, Layout, Place, Table, UnitTag};
 use crate::paths::{Miswritten, file_name, inside, miswritten, parent, within};
 use crate::python_stdlib::is_standard_library;
@@ -269,6 +269,11 @@ fn own(
         )));
     }
     let example = layout.entry.as_deref().map_or("main", file_name);
+    if let Entries::One(entry) = &declaration.entry {
+        found.push(unreadable(&format!(
+            "unit {name:?} has entry {entry:?}, a string: write it as an array, entry = [{entry:?}]"
+        )));
+    }
     let mut entries = Vec::new();
     for entry in &declaration.entry.to_vec() {
         if miswritten(entry).is_some() {
@@ -552,23 +557,42 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_is_a_string_or_a_list_and_a_unit_has_none_by_default() {
+    fn an_entry_is_an_array_and_a_unit_has_none_by_default() {
         let entries = |more: &str| {
             read("python", &unit("cli", "cli", more)).unwrap()[0]
                 .entries
                 .clone()
         };
         assert_eq!(
-            entries("entry = \"cli/__main__.py\"\n"),
-            ["cli/__main__.py"]
-        );
-        assert_eq!(
             entries("entry = [\"cli/__main__.py\"]\n"),
             ["cli/__main__.py"]
         );
+        assert_eq!(
+            entries("entry = [\"cli/__main__.py\", \"cli/other.py\"]\n"),
+            ["cli/__main__.py", "cli/other.py"]
+        );
         assert!(entries("").is_empty() && entries("entry = []\n").is_empty());
-        // Neither a string nor a list of them, and a field Rotproof does not know
-        for more in ["entry = 1\n", "colour = \"red\"\n"] {
+        // A string is refused, with how to write it and the unit it is in, and the path is judged all the same
+        assert_eq!(
+            read(
+                "python",
+                &unit("cli", "cli", "entry = \"cli/__main__.py\"\n")
+            ),
+            Err(vec![
+                "unit \"cli\" has entry \"cli/__main__.py\", a string: write it as an array, \
+                 entry = [\"cli/__main__.py\"]"
+                    .to_string()
+            ])
+        );
+        let both = read("python", &unit("cli", "cli", "entry = \"cli/run.sh\"\n")).unwrap_err();
+        assert_eq!(both.len(), 2, "{both:?}");
+        assert!(
+            both[0].contains("a string: write it as an array"),
+            "{both:?}"
+        );
+        assert!(both[1].contains("no code of the python stack"), "{both:?}");
+        // Not an array of strings either, and a field Rotproof does not know
+        for more in ["entry = 1\n", "entry = [1]\n", "colour = \"red\"\n"] {
             let text = format!(
                 "stack = \"python\"\nareas = []\nui = \"none\"\n{}",
                 unit("a", "a", more)
@@ -889,18 +913,18 @@ mod tests {
     #[test]
     fn an_entry_is_code_of_the_stack_written_from_the_root_in_its_own_unit() {
         let ts = |more: &str| read("typescript", &unit("a", "apps/a/src", more));
-        assert!(ts("entry = \"apps/a/src/main.tsx\"\n").is_ok());
+        assert!(ts("entry = [\"apps/a/src/main.tsx\"]\n").is_ok());
         // Beside the unit's directory is in no other unit's either
-        assert!(ts("entry = \"apps/a/main.tsx\"\n").is_ok());
+        assert!(ts("entry = [\"apps/a/main.tsx\"]\n").is_ok());
         assert!(
             read(
                 "rust",
-                &unit("a", "apps/a", "entry = \"apps/a/src/bin/w.rs\"\n")
+                &unit("a", "apps/a", "entry = [\"apps/a/src/bin/w.rs\"]\n")
             )
             .is_ok()
         );
         assert_eq!(
-            fails("typescript", &unit("a", "p", "entry = \"./main.tsx\"\n")),
+            fails("typescript", &unit("a", "p", "entry = [\"./main.tsx\"]\n")),
             [
                 "unit \"a\" has entry \"./main.tsx\": write a path from the root, such as apps/cli/main.tsx"
             ]
@@ -913,13 +937,13 @@ mod tests {
             ["unit \"a\" declares entry \"a/run.sh\", which is no code of the python stack"]
         );
         assert_eq!(
-            fails("rust", &unit("a", "a", "entry = \"a/lib.py\"\n")),
+            fails("rust", &unit("a", "a", "entry = [\"a/lib.py\"]\n")),
             ["unit \"a\" declares entry \"a/lib.py\", which is no code of the rust stack"]
         );
         // In the path of another unit
         let tables = format!(
             "{}\n{}",
-            unit("a", "apps/a", "entry = \"apps/b/src/main.rs\"\n"),
+            unit("a", "apps/a", "entry = [\"apps/b/src/main.rs\"]\n"),
             unit("b", "apps/b/src", "")
         );
         assert_eq!(
@@ -932,13 +956,13 @@ mod tests {
         let tables = format!(
             "{}\n{}",
             unit("a", ".", ""),
-            unit("b", "apps/b", "entry = \"apps/b/src/main.rs\"\n")
+            unit("b", "apps/b", "entry = [\"apps/b/src/main.rs\"]\n")
         );
         assert!(read("rust", &tables).is_ok());
         let tables = format!(
             "{}\n{}",
             unit("a", ".", ""),
-            unit("b", "apps/b", "entry = \"main.rs\"\n")
+            unit("b", "apps/b", "entry = [\"main.rs\"]\n")
         );
         assert_eq!(
             fails("rust", &tables),
@@ -946,7 +970,7 @@ mod tests {
         );
         let tables = format!(
             "{}\n{}",
-            unit("cli", "apps/cli", "entry = \"apps/main.rs\"\n"),
+            unit("cli", "apps/cli", "entry = [\"apps/main.rs\"]\n"),
             unit("web", "apps/web", "entry = [\"apps/main.rs\"]\n")
         );
         assert_eq!(
@@ -957,7 +981,7 @@ mod tests {
 
     #[test]
     fn a_shared_unit_is_not_an_app() {
-        let more = "shared = true\nentry = \"core/src/main.ts\"\n";
+        let more = "shared = true\nentry = [\"core/src/main.ts\"]\n";
         assert_eq!(
             fails("typescript", &unit("core", "core/src", more)),
             [
@@ -1007,7 +1031,7 @@ mod tests {
             unit(
                 "Bad",
                 "./a",
-                "shared = true\nentry = \"x.txt\"\nabsent = [\"nowhere\"]\n"
+                "shared = true\nentry = [\"x.txt\"]\nabsent = [\"nowhere\"]\n"
             ),
             unit("b", "b", "root = \"c\"\n")
         );

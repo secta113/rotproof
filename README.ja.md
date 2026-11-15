@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 3b9c78db. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 8ba3d039. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -328,7 +328,7 @@ root = "packages/shipping"
 [[unit]]
 name = "cli"
 path = "apps/cli/cli"
-entry = "apps/cli/__main__.py"        # an app: its composition wires the other units
+entry = ["apps/cli/__main__.py"]        # an app: its composition wires the other units
 absent = ["application", "protocol", "domain"]   # an app holds only composition and infrastructure
 ```
 

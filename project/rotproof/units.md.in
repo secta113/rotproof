@@ -2,7 +2,7 @@
   monolith), declares them as units: one `[[unit]]` in `.config/rotproof.toml` for each.** Without `[[unit]]` the
   whole project is one unit, and the rules about units below are not in play. A unit has a `name` (a lowercase
   letter, then lowercase letters, digits and `_`) and the `path`, from the root, where its layers sit directly. It
-  may also have `shared = true`, `entry` (one file or a list: the unit is an app), `root` (where its manifest is:
+  may also have `shared = true`, `entry` (an array of files, even for one: the unit is an app), `root` (where its manifest is:
   `path` itself or a directory above it, and `path` when left out) and its own `absent`. Once units are declared the
   top-level `absent` must be empty: each unit says what it lacks in its own, and an app, which holds only
   `composition` and `infrastructure`, lacks the rest. A unit sits beside the layers of the unit around it, never in

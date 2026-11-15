@@ -831,7 +831,7 @@ mod tests {
     /// entry file is outside its path.
     const MONOLITH: &str = "stack = \"python\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"core\"\n\
         path = \"packages/core/core\"\nroot = \"packages/core\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
-        path = \"modules/billing\"\n\n[[unit]]\nname = \"app\"\npath = \"modules/app\"\nentry = \"bin/run.py\"\n\
+        path = \"modules/billing\"\n\n[[unit]]\nname = \"app\"\npath = \"modules/app\"\nentry = [\"bin/run.py\"]\n\
         absent = [\"domain\", \"application\", \"protocol\"]\n";
 
     /// The tree of [`MONOLITH`] with `extra` files added and `without` taken out.
@@ -1044,7 +1044,7 @@ mod tests {
     #[test]
     fn a_unit_holds_its_own_init_unless_its_path_is_the_root_and_its_entry_is_no_stray_code() {
         let declaration = "stack = \"python\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n\
-            entry = \"a/main.py\"\n";
+            entry = [\"a/main.py\"]\n";
         let mut files = python_unit("a", &[]);
         files.extend(["a/__init__.py", "a/main.py"].map(String::from));
         assert_eq!(judge(declaration, &files), Vec::<String>::new());
@@ -1228,7 +1228,7 @@ mod tests {
         );
         // Rust: the layers are crates of a unit, and the root package's `src/` holds the entry of an app only
         let declaration = "stack = \"rust\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
-            path = \"crates/billing\"\nentry = \"src/main.rs\"\n";
+            path = \"crates/billing\"\nentry = [\"src/main.rs\"]\n";
         let mut files: Vec<String> = [
             "composition",
             "infrastructure",

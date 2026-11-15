@@ -406,7 +406,7 @@ ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
             "stack = \"python\"\nareas = []\nui = \"none\"\n\
              [[unit]]\nname = \"core\"\npath = \"packages/core/src/core\"\nshared = true\n\
              absent = [\"composition\", \"infrastructure\", \"application\", \"protocol\"]\n\
-             [[unit]]\nname = \"cli\"\npath = \"apps/cli/src/cli\"\nentry = \"apps/cli/src/cli/__main__.py\"\n\
+             [[unit]]\nname = \"cli\"\npath = \"apps/cli/src/cli\"\nentry = [\"apps/cli/src/cli/__main__.py\"]\n\
              absent = [{cli_absent}]\n"
         );
         Declared::new(crate::declaration::parse_declaration(&text).unwrap()).unwrap()

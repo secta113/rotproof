@@ -82,7 +82,7 @@ pub struct UnitDeclaration {
     /// Whether any unit may import it
     #[serde(default)]
     pub shared: bool,
-    /// The files the program starts from, when the unit is an app: one path, or a list of them
+    /// The files the program starts from, when the unit is an app: an array of paths, even for one
     #[serde(default)]
     pub entry: Entries,
     /// The directory, from the root, where the unit's manifest is: its `path` when it says none
@@ -93,7 +93,10 @@ pub struct UnitDeclaration {
     pub absent: Vec<String>,
 }
 
-/// The `entry` of a unit, as one string or as a list of them.
+/// The `entry` of a unit: an array of paths, which is the one way to write it. A string reads as `One` only so that the
+/// declaration can be refused with how to write it (`entry = ["x"]`), naming the unit, as `Unit` does; a project
+/// would otherwise hold two ways to write one thing, and a document that follows the units would fail when one was
+/// changed for the other.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum Entries {
@@ -201,7 +204,7 @@ const UNITS_COMMENT: &str = "\n\
 # [[unit]]\n\
 # name = \"cli\"\n\
 # path = \"{cli}\"\n\
-# entry = \"{entry}\"   # an app: its composition wires the units\n";
+# entry = [\"{entry}\"]   # an app: its composition wires the units\n";
 
 /// [`UNITS_COMMENT`] for `stack`: where a unit's layers and manifest sit, and its entry, depend on it.
 fn units_comment(stack: &str) -> String {
@@ -995,7 +998,7 @@ absent = [\"application\"]
 [[unit]]
 name = \"cli\"
 path = \"apps/cli/src/cli\"
-entry = \"apps/cli/__main__.py\"
+entry = [\"apps/cli/__main__.py\"]
 absent = [\"domain\", \"application\"]
 ";
 

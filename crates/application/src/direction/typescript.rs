@@ -170,7 +170,7 @@ mod tests {
     const DECLARATION: &str = "stack = \"typescript\"\nareas = []\nui = \"none\"\n\
         [[unit]]\nname = \"billing\"\npath = \"packages/billing/src\"\nroot = \"packages/billing\"\n\
         [[unit]]\nname = \"db\"\npath = \"packages/db/src\"\nroot = \"packages/db\"\nshared = true\n\
-        [[unit]]\nname = \"web\"\npath = \"apps/web/src\"\nroot = \"apps/web\"\nentry = \"apps/web/src/main.ts\"\n";
+        [[unit]]\nname = \"web\"\npath = \"apps/web/src\"\nroot = \"apps/web\"\nentry = [\"apps/web/src/main.ts\"]\n";
 
     const DB: &str = "{ \"name\": \"@acme/db\", \"exports\": { \".\": \"./src/index.ts\", \
         \"./client\": { \"types\": \"./src/infrastructure/outbound/client.ts\", \"default\": \"./dist/client.js\" }, \

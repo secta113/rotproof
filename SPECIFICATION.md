@@ -310,7 +310,7 @@ then holds the layers by itself, and the project holds none of its own: the unit
 name = "billing"                       # required: a lowercase letter, then lowercase letters, digits and _
 path = "packages/billing/src/billing"  # required: where its layers sit directly, from the root ("." is the root)
 shared = true                          # optional, false by default: any unit may import it
-entry = ["apps/cli/__main__.py"]       # optional, a path or a list: the unit is an app, which wires the others
+entry = ["apps/cli/__main__.py"]       # optional, an array even for one path: the unit is an app, which wires the others
 root = "packages/billing"              # optional, `path` by default: where the unit's manifest is
 absent = ["domain"]                    # optional: the layers or levels this unit does not have
 ```
@@ -352,6 +352,8 @@ declaration and the layout alone, before the tree is looked at:
   billing (a/billing, b/billing)`), which Python cannot tell apart; and a unit whose directory is named like a module
   of Python's standard library (`queue`, `string`: every name of `sys.stdlib_module_names` in Python 3.10 to 3.14), for
   Python would import the unit or the module depending on how the program starts;
+- an `entry` written as a string (`entry = "apps/cli/main.py"`): it is an array even for one path, `entry =
+  ["apps/cli/main.py"]`, so that there is one way to write it;
 - an `entry` that is not written from the root, is no code of the stack, lies inside the path of a unit other than
   the one that declares it (the innermost unit that holds an entry is its own, or none), or is declared by two units;
 - a unit that is `shared` and has an `entry`: an app is imported by none, and a shared unit by all;
@@ -571,8 +573,8 @@ a unit changes and not when `areas` or `files` does (the file as a key fails for
 not as it is written: its heading and then each field on a line, `key = value`, in the byte order of the keys (a dotted
 key written out in full), strings in double quotes with `\`, `"` and the control characters escaped, arrays and inline
 tables on one line (an inline table's keys in order), so a comment, a blank line, the quotes of a string, how an array
-is wrapped, and the order of the keys leave the hash as it was, while a value written as another one (`entry = "x"` for
-`entry = ["x"]`) is another value. A name is bare keys joined by
+is wrapped, and the order of the keys leave the hash as it was, while a value written as another one (`a = "x"` for
+`a = ["x"]`) is another value, which is why a unit's `entry` has one way to be written (see "Units"). A name is bare keys joined by
 dots (letters, digits, `-` and `_`). A table with no heading of its own (a value, `unit = [{ ... }]`, or one made by a
 dotted key) is not named, so it is "not there"; a `.toml` file that is not TOML cannot be read, which the check says as
 it says it of a Python file that does not parse. A `.toml` file is no code of a directory: `src/` is hashed on the same

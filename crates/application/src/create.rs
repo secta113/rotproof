@@ -482,7 +482,7 @@ mod tests {
         ] {
             let declaration = format!(
                 "stack = \"{stack}\"\nareas = [\"a\"]\nui = \"none\"\n\n[[unit]]\nname = \"app\"\npath = \"{unit_path}\"\n\
-                 entry = \"{path}\"\nabsent = [\"application\", \"protocol\", \"domain\"]\n\n[[unit]]\nname = \"lib\"\n\
+                 entry = [\"{path}\"]\nabsent = [\"application\", \"protocol\", \"domain\"]\n\n[[unit]]\nname = \"lib\"\n\
                  path = \"{}\"\n",
                 unit_path.replace("app", "lib")
             );
@@ -597,7 +597,7 @@ mod tests {
         format!(
             "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n\n[[unit]]\nname = \"core\"\npath = \"crates/core\"\n\
              shared = true\n\n[[unit]]\nname = \"cli\"\npath = \"apps/cli/crates\"\nroot = \"apps/cli\"\n\
-             entry = \"{entry}\"\nabsent = [\"application\", \"protocol\", \"domain\"]\n"
+             entry = [\"{entry}\"]\nabsent = [\"application\", \"protocol\", \"domain\"]\n"
         )
     }
 

@@ -220,7 +220,7 @@ fn headings(source: &str) -> Result<Vec<Heading>, String> {
 /// indentation, the quotes a key or string was written in and the order of the keys are not in it, so a change that
 /// leaves every key with the value it had (a comment, a reflow, `'x'` for `"x"`, `[ "a" ]` for `["a"]`) leaves the
 /// hash. A value written as another one is another value, even where a reader of the file takes both for the same
-/// (`entry = "x"` and `entry = ["x"]`). The tables below it are their own headings.
+/// (`a = "x"` and `a = ["x"]`). The tables below it are their own headings.
 fn canonical(path: &[String], array: bool, table: &Table) -> String {
     let name: Vec<String> = path.iter().map(|key| canonical_key(key)).collect();
     let name = name.join(".");
