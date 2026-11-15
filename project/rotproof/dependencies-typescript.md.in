@@ -1,0 +1,10 @@
+- **`package.json` lists what the code imports, both ways.** `rotproof check` compares the manifest at the root of each
+  unit (the root of the project when it declares none) with the imports of the files in `src/`, and installs nothing: it
+  fails on an import of a package, or of another unit by its `name`, that the manifest does not list, and on a package in
+  `dependencies` that no file imports. A package of `devDependencies` may be imported anywhere, since a test cannot be
+  told from the code of a layer, and is never judged unused; neither are `peerDependencies`, `optionalDependencies` and
+  `@types/*`. A unit below the root of the project may use the `devDependencies` of the root's `package.json`, which npm
+  hoists. A subpath is the package it is in (`lodash/fp` is `lodash`, `@shop/kernel/utils` is `@shop/kernel`), and
+  `node:` names and Node's builtins (`fs`, `path`) are not packages. List under `without_import` in `[dependencies]` of
+  `.config/rotproof.toml` a package the code uses without importing it. Fix a missing dependency by listing it in
+  `package.json`, and an unused one by taking it out; never list a package only to pass the check.

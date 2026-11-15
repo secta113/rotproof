@@ -169,6 +169,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | Module of `crates/application/src/dependencies/` | Content |
 |---|---|
 | `mod.rs` | The dependencies check, read from the tree: each language's manifests read through the port and compared, by the rules in `domain::dependencies`, with what the code imports, and the entries of `without_import` that no manifest lists |
+| `typescript.rs` | The dependencies check of a TypeScript project: the `package.json` of each unit against the imports of its source files, each placed where the direction check places it (a file of the project, another unit's package through its `name`, or a package of npm, Node's builtins left out), with the `devDependencies` of the project's own manifest usable in every unit |
 | `python.rs` | The dependencies check of a Python project: the `pyproject.toml` of each unit against the imports of its layers, entry file, package file and tests, each import placed in its own unit, another unit, the standard library, a module of the project, or a package, whose distribution the declaration maps |
 | `venv.rs` | What a `.venv` provides, from the metadata of the distributions installed in it, to word the hint of a message: never the verdict |
 

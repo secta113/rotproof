@@ -30,12 +30,15 @@ use std::collections::BTreeSet;
 use crate::layers::Language;
 
 const GUIDE_PYTHON: &str = include_str!("../../../project/rotproof/dependencies-python.md.in");
+const GUIDE_TYPESCRIPT: &str =
+    include_str!("../../../project/rotproof/dependencies-typescript.md.in");
 
 /// What the guide says of this rule in the section on the layers, for a project in `language`.
 pub fn guide(language: Language) -> &'static str {
     match language {
         Language::Python => GUIDE_PYTHON,
-        Language::TypeScript | Language::Rust => "",
+        Language::TypeScript => GUIDE_TYPESCRIPT,
+        Language::Rust => "",
     }
 }
 

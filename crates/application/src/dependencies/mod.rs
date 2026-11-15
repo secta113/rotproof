@@ -7,6 +7,7 @@
 //! place only, Python's `.venv` (`venv.rs`), and only to word the hint of a message.
 
 mod python;
+mod typescript;
 mod venv;
 
 use std::collections::BTreeSet;
@@ -49,7 +50,10 @@ pub fn problems(
         Language::Python => python::python(
             tree, parsers, declared, layout, &places, &entries, &mut found,
         )?,
-        Language::TypeScript | Language::Rust => Read::default(),
+        Language::TypeScript => typescript::typescript(
+            tree, parsers, declared, layout, &places, &entries, &mut found,
+        )?,
+        Language::Rust => Read::default(),
     };
     if read.any {
         for name in

@@ -935,6 +935,31 @@ entry can be told, is one.
   names the distribution the environment provides the module as, from the metadata of each `*.dist-info` (the top-level
   names its `RECORD` installs), and the lines to add. This only words the message: the environment is ignored by git and
   differs from one machine to another, so the verdict never reads it.
+- **The manifests list the dependencies the code imports, both ways** (TypeScript): the manifest is the `package.json`
+  at the root of each unit, and at the root of the project when it declares none; the code is the source files the
+  direction check reads (the layers and the entry files in `src/`), with the imports it collects (`import`, `export ...
+  from`, `import(...)` and `require(...)` with a literal string). A unit with no `package.json` at its root is not compared
+  with one, and one that cannot be read as UTF-8 or JSON fails. The runtime dependencies are `dependencies`; the
+  optional ones `peerDependencies` and `optionalDependencies`; the development ones `devDependencies`. An import is
+  placed as the direction check places it: a relative path, one from the root, an alias of `paths` and a module under
+  a `baseUrl` are files of the project and need nothing; a specifier that starts with the `name` of another unit's
+  `package.json` (`@shop/kernel/domain`, wherever it lands, or if its subpath is not exported) needs that package,
+  which the importing unit's manifest lists by that name (`"@shop/kernel": "workspace:*"`); `node:` names, a path, a
+  subpath import (`#name`) and a scheme (`npm:`, `virtual:`) need nothing; any other specifier needs the package it
+  names, without its subpath (`lodash/fp` is `lodash`, `@shop/kernel/utils` is `@shop/kernel`). A name Node reads as
+  a builtin without `node:` (`fs`, `path/posix`, `buffer`) is Node's, unless the manifest lists a package of that
+  name, which then is used. Then, in each manifest:
+  1. **an import of a package the manifest does not list fails**, once for the package with how many more imports there
+     are of it; any kind of dependency lists it. A unit below the root of the project may also use the
+     `devDependencies` of the project's own `package.json`, which npm hoists to every package of the workspace;
+  2. **a package in `dependencies` that no source file imports fails**, unless `without_import` lists it. The
+     development, peer and optional dependencies are never judged unused, nor is `@types/*`, which declares types and
+     is imported by nothing.
+
+  A development dependency may be imported anywhere, since a test sits in `src/` and cannot be told from the code of a
+  layer (the tests of a TypeScript project are not read apart: see the layers). `imports` of the declaration is not
+  used: an import and a dependency are one name. Not read: a file outside `src/` (`vite.config.ts`, a test beside it),
+  so a package only that file imports is listed in `devDependencies`, or in `without_import`.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,

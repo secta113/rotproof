@@ -5746,7 +5746,8 @@ fn npm_workspaces() -> tempfile::TempDir {
          path = \"packages/db/src\"\nroot = \"packages/db\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
          path = \"packages/billing/src\"\nroot = \"packages/billing\"\n\n[[unit]]\nname = \"web\"\n\
          path = \"apps/web/src\"\nroot = \"apps/web\"\nentry = [\"apps/web/src/main.ts\"]\n\
-         absent = [\"domain\", \"application\", \"protocol\"]\n",
+         absent = [\"domain\", \"application\", \"protocol\"]\n\n[dependencies]\n\
+         without_import = [\"@acme/db\", \"@acme/billing\", \"react\"]\n",
         env!("CARGO_PKG_VERSION")
     ));
     let r = root.path();
@@ -5777,12 +5778,12 @@ fn npm_workspaces() -> tempfile::TempDir {
     write_file(
         r,
         "packages/billing/package.json",
-        "{ \"name\": \"@acme/billing\", \"private\": true }\n",
+        "{ \"name\": \"@acme/billing\", \"private\": true, \"dependencies\": { \"@acme/db\": \"*\" } }\n",
     );
     write_file(
         r,
         "apps/web/package.json",
-        "{ \"name\": \"@acme/web\", \"private\": true }\n",
+        "{ \"name\": \"@acme/web\", \"private\": true, \"dependencies\": { \"@acme/billing\": \"*\", \"react\": \"*\" } }\n",
     );
     root
 }
@@ -6520,6 +6521,62 @@ fn a_python_manifest_is_compared_with_what_the_code_imports_either_way() {
         said.contains(
             "domain/rule.py:1: imports pytest, which pyproject.toml:5 lists for development only"
         ),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_typescript_manifest_is_compared_with_what_the_code_imports_either_way() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let arg = root_arg(r);
+    write_file(
+        r,
+        "package.json",
+        "{\n  \"name\": \"shop\",\n  \"dependencies\": {\n    \"react\": \"^18\",\n    \"lodash\": \"^4\"\n  }\n}\n",
+    );
+    write_file(
+        r,
+        "src/application/pay.ts",
+        "import React from \"react\";\nimport z from \"zod\";\nimport { readFile } from \"node:fs\";\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "src/application/pay.ts:2: imports zod, which needs the package zod, and package.json does not list it: \
+             add it to dependencies"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains("package.json:5: lists the dependency lodash, which no code imports"),
+        "{said}"
+    );
+    // The manifest says what the code does: the dependency used without an import is in the declaration
+    write_file(
+        r,
+        "package.json",
+        "{\n  \"name\": \"shop\",\n  \"dependencies\": {\n    \"react\": \"^18\",\n    \"zod\": \"^3\",\n    \"lodash\": \"^4\"\n  }\n}\n",
+    );
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    write_file(
+        r,
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nwithout_import = [\"lodash\"]\n"),
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // A name that no manifest lists is no use of the table
+    write_file(
+        r,
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nwithout_import = [\"lodash\", \"gone\"]\n"),
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains("without_import under [dependencies] lists gone, which no manifest lists as a dependency"),
         "{said}"
     );
 }
