@@ -485,6 +485,15 @@ An import of a unit's code outside its layers is no read of a name, nor is an im
 when at least one unit is shared, and is not otherwise: `rotproof index` takes away a list that is left when no unit is
 shared any more, and `rotproof check` fails while it is there.
 
+When the list is there and is not what the code says, the finding names what changed in the names, a line each under
+it, so that a person sees which import moved the list and does not run `rotproof index` unread: the shared unit and
+the name, as `core: core.domain.rank is read now, by billing` for a name the list lacks, `core: core.domain.old is
+read no more (was read by steps)` for a name that no unit reads now, and `core: core.domain.score is read by billing,
+steps (was billing)` for a name whose readers are not the ones listed; a unit that is shared no more but is still in the
+list is `<unit> is listed, and is shared no more`. The lines are in the order of the unit's name and then the name's,
+the first ten are said and the rest counted (`and 26 more`). They are read from the rows of the list's tables, so
+nothing else that was edited in it is named, and a list that is missing says none.
+
 ### The document of the units
 
 The rules above say what a unit may import. Why the code is split into these units, and why each edge between them
@@ -888,7 +897,7 @@ changed is in the commits, what was measured and decided along the way in the ta
 - **The list of who reads the shared units equals what `rotproof index` writes:** `.rotproof/readers.md` is there, as
   written from the imports of the code now, when a unit is shared, and is not there when none is (see "Who reads the
   shared units"). It fails as ``out of date, run `rotproof index`: .rotproof/readers.md``, for a list that is missing,
-  edited, or no longer what the code says.
+  edited, or no longer what the code says, with the names that changed under it (see "Who reads the shared units").
 
 What a check finds file by file (the layers' imports, the markers, `NOTE`, the environment variables and the
 type-checker suppressions) is listed in the byte order of the whole path, written with `/` from the root and compared

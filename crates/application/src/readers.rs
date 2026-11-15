@@ -6,7 +6,7 @@ use crate::direction::problems as direction;
 use crate::layers::read;
 use crate::tree::{exactly, read_text};
 use domain::declaration::Declared;
-use domain::readers::{FILE, Read, render};
+use domain::readers::{FILE, Read, changes, render};
 use protocol::outbound::{Parsers, Tree, Writer};
 
 /// What the list needed done.
@@ -19,7 +19,8 @@ pub enum Change {
 }
 
 /// Whether the list in `tree` is not what Rotproof writes for `declared` and `reads`: the finding, which says what to
-/// run. It is the list that is out of date when it is missing, or there with no unit shared.
+/// run, and under it what changed in the names when there is a list to compare with. It is the list that is out of
+/// date when it is missing, or there with no unit shared.
 pub fn problems(tree: &dyn Tree, declared: &Declared, reads: &[Read]) -> Vec<String> {
     let expected = render(&declared.units, reads);
     let found = exactly(tree, FILE)
@@ -28,7 +29,17 @@ pub fn problems(tree: &dyn Tree, declared: &Declared, reads: &[Read]) -> Vec<Str
     match (&expected, &found) {
         (None, None) => Vec::new(),
         (Some(text), Some(Some(found))) if text == found => Vec::new(),
-        _ => vec![format!("out of date, run `rotproof index`: {FILE}")],
+        _ => {
+            let mut said = format!("out of date, run `rotproof index`: {FILE}");
+            // What changed in the names, under the finding, when there is a list to compare with and a list to write
+            if let (Some(_), Some(Some(written))) = (&expected, &found) {
+                for change in changes(&declared.units, reads, written) {
+                    said.push('\n');
+                    said.push_str(&change);
+                }
+            }
+            vec![said]
+        }
     }
 }
 
@@ -170,7 +181,14 @@ mod tests {
         tree.write("steps/application/more.py", "import core.domain.rank\n")
             .unwrap();
         let found = reads(&tree, &declared);
-        assert_eq!(problems(&tree, &declared, &found), said);
+        // The finding says which name changed, under it
+        assert_eq!(
+            problems(&tree, &declared, &found),
+            [format!(
+                "{}\ncore: core.domain.rank is read by billing, steps (was billing)",
+                said[0]
+            )]
+        );
         assert_eq!(
             refresh(&tree, &Readers, &tree).unwrap(),
             Some(Change::Written)
@@ -180,9 +198,15 @@ mod tests {
                 .unwrap()
                 .contains("| `core.domain.rank` | billing, steps |")
         );
-        // The file is not what is written, however it differs
+        // The file is not what is written, however it differs: with no table of its own, every name is new in it
         tree.write(FILE, "edited\n").unwrap();
-        assert_eq!(problems(&tree, &declared, &found), said);
+        let edited = problems(&tree, &declared, &found);
+        assert_eq!(edited.len(), 1);
+        assert!(edited[0].starts_with(&said[0]), "{edited:?}");
+        assert!(
+            edited[0].contains("\ncore: core.domain.rank is read now, by billing, steps\n"),
+            "{edited:?}"
+        );
     }
 
     #[test]

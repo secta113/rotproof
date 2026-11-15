@@ -5058,6 +5058,23 @@ fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
         "{}",
         stdout(&out)
     );
+    // Another unit reading the name is said under the finding, with the shared unit it is of
+    write_file(
+        r,
+        "apps/web/src/composition/more.ts",
+        "import type { Run } from '@acme/db/protocol/inbound';\nexport type M = Run;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "  out of date, run `rotproof index`: .rotproof/readers.md\n    db: \
+             packages/db/src/protocol/inbound/index: Run is read by billing, web (was billing)\n"
+        ),
+        "{said}"
+    );
+    fs::remove_file(r.join("apps/web/src/composition/more.ts")).unwrap();
     let listed = fs::read_to_string(r.join(".rotproof/readers.md")).unwrap();
     assert!(
         listed.ends_with(
