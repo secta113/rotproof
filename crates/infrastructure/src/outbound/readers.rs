@@ -39,8 +39,8 @@ impl Parsers for Readers {
         crate::outbound::typescript::read(source, path)
     }
 
-    fn typescript_aliases(&self, tree: &dyn Tree) -> io::Result<Aliases> {
-        crate::outbound::typescript::aliases(tree)
+    fn typescript_aliases(&self, tree: &dyn Tree, roots: &[String]) -> io::Result<Aliases> {
+        crate::outbound::typescript::aliases(tree, roots)
     }
 
     fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)> {

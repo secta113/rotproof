@@ -1,5 +1,5 @@
 //! Reading TypeScript and JavaScript with oxc. [`read`] gives what a file imports, its comments and its reads of the
-//! environment; the outline and the aliases are read apart, by a module each in `typescript/`.
+//! environment; the outline, the aliases and the packages are read apart, by a module each in `typescript/`.
 //!
 //! - **What a file imports** (here): `import` (`import type` too), `export ... from`, `import("...")` and
 //!   `require("...")` with a literal string, `import x = require("...")`, and `import("...")` in a type. A specifier
@@ -12,6 +12,9 @@
 //! - **The aliases an import resolves through** ([`aliases`], in `aliases.rs`): `compilerOptions.paths` and `baseUrl`
 //!   of the `tsconfig*.json` files at the root and the local files they extend. Where an import lands through them is
 //!   the rule of `code.rs` ([`Aliases::resolve`](domain::code::Aliases::resolve)).
+//! - **The packages of the units** ([`aliases`] too, from `packages.rs`): the `name`, `exports`, `types` and `main` of
+//!   the `package.json` at each unit's root, which an import of the package resolves through after the aliases
+//!   ([`Aliases::package`](domain::code::Aliases::package)).
 //!
 //! The imports and the comments stay here because they are what [`read`] returns: a module for them would hold the
 //! visitor and leave `read` calling it. Here too is what more than one reader needs: how a file is parsed
@@ -21,8 +24,8 @@
 mod aliases;
 mod environment;
 mod outline;
+mod packages;
 
-pub use aliases::aliases;
 pub use outline::outline;
 
 use oxc_allocator::Allocator;
@@ -34,10 +37,24 @@ use oxc_ast_visit::{Visit, walk};
 use oxc_parser::{Parser, ParserReturn};
 use oxc_span::SourceType;
 
-use domain::code::Source;
+use std::io;
+
+use domain::code::{Aliases, Source};
 use domain::text::line_of;
+use protocol::outbound::Tree;
 
 use environment::environment;
+
+/// The aliases an import resolves through in the project in `tree`: those of its `tsconfig*.json` files, and the
+/// packages of the units whose roots are `roots` (from the root of the project). An error is a file that cannot be
+/// read at all.
+pub fn aliases(tree: &dyn Tree, roots: &[String]) -> io::Result<Aliases> {
+    let mut aliases = aliases::aliases(tree)?;
+    let (packages, problems) = packages::packages(tree, roots)?;
+    aliases.packages = packages;
+    aliases.problems.extend(problems);
+    Ok(aliases)
+}
 
 /// Read one file, whose path from the root says how: `.tsx` with JSX, `.d.ts` as declarations.
 pub fn read(source: &str, path: &str) -> Source<String> {

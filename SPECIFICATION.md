@@ -552,13 +552,27 @@ changed is in the commits, what was measured and decided along the way in the ta
   [oxc](https://oxc.rs/). The place of an import is the path it lands on, whether or not a file is there: a relative
   specifier from the file, one starting with `/` from the root (as Vite reads it), and any other through
   `compilerOptions.paths` of the `tsconfig*.json` files at the root (and the local files they extend), then through
-  their `baseUrl` when a module is there; otherwise it names a package, which is not judged. The path is placed where
+  their `baseUrl` when a module is there, then through the package of a unit when it starts with the `name` of the
+  `package.json` at a unit's `root` (see below); otherwise it names a package, which is not judged. The path is placed where
   it lands as the operating system that runs the check resolves it: on Windows, `../Infrastructure/db`,
   `../infrastructure./db` and a short name (`../INFRAS~1/db`) land in `infrastructure`, as Vite builds them, and
   links are followed everywhere. A `tsconfig*.json` that
   cannot be read, or a `paths` entry with more than one `*`, fails rather than leaving its aliases unjudged. Two
   limits: only the first target of a `paths` entry is used, and a config extended from a package is not read, so an
-  alias defined only there is taken for a package.
+  alias defined only there is taken for a package. A project that declares units reads the `package.json` at the `root`
+  of each unit (the root of the project too, when a unit's root is there), and an import through a package's `name`
+  and a subpath (`@acme/db/client`) is placed where that package says it lands, then judged between units as any
+  import is: the package without `exports` takes the subpath as a path in the package (`@acme/db/src/domain`), and
+  the package itself is its `types`, or its `main`, or its root; with `exports` (a string, a map of subpaths, a pattern
+  with one `*`, a map of conditions, a list), only the subpaths it lists are the package's, each an exact key or the
+  pattern with the longest prefix, and among conditions the first of `types`, `import` and `default` that leads to a
+  path is taken. An import of a subpath a package with `exports` does not list (or lists as `null`) fails as `imports
+  @acme/db/domain, which packages/db/package.json does not export, so it is not checked`, which no approval covers,
+  since Node and tsc fail it too; a `package.json` that cannot be read as JSON, or whose `exports` is not a string, a
+  list or a map, fails too, and a package with no `name` is no package an import names. Limits: the `tsconfig` of a
+  unit is not read (its `paths` are not applied; only those at the project's root are), `imports` (`#name`) and a
+  condition other than the three are not read, and an import that lands outside every unit's path (a package
+  whose `exports` point to build output such as `./dist/client.js`) is not judged.
 - **The layers import only what the table allows** (Rust): a crate is compiled only against the crates its
   `Cargo.toml` declares, so the declarations are read instead of `use`: every dependency in `[dependencies]` and
   `[build-dependencies]` (and `build_dependencies`), under `[target.<cfg>]` too, of the `Cargo.toml` files in the

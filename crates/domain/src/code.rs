@@ -4,14 +4,25 @@
 //! The readers wrap parsers (Ruff for Python, oxc for TypeScript, toml_edit for a `Cargo.toml`) and give what a file
 //! imports, its comments and its first syntax error; the checks judge those values and never see a parser. The
 //! rules on the values are here too: the module a Python file is, which files are TypeScript source, the alias an
-//! entry of `compilerOptions.paths` makes, and where a TypeScript import lands through the project's aliases.
+//! entry of `compilerOptions.paths` makes, where a TypeScript import lands through the project's aliases, and where
+//! one lands through the `package.json` of a unit's package.
 //!
 //! Where a TypeScript import lands is a path from the root, found without asking whether a file is there: the place of
 //! an import is its directory. A relative specifier resolves against the file's directory, and one that starts with
 //! `/` against the root, as Vite reads it. Another resolves through the aliases (`compilerOptions.paths`), then
-//! through a `baseUrl` when a module is there; otherwise it names a package, which no layer is. A query
-//! (`./logo.svg?url`) is not part of the path. Whether a module is under a `baseUrl` is the one question asked of the
-//! tree: [`Aliases::resolve`] gives the paths to ask about, and the caller asks.
+//! through a `baseUrl` when a module is there, then through the name of a unit's package ([`Aliases::package`]);
+//! otherwise it names a package that is no unit's, which no layer is. A query (`./logo.svg?url`) is not part of the
+//! path. Whether a module is under a `baseUrl` is the one question asked of the tree: [`Aliases::resolve`] gives the
+//! paths to ask about, and the caller asks.
+//!
+//! A unit's package is read from the `package.json` at the unit's `root`: `name` is what an import starts with, and
+//! the rest of the specifier is a subpath of the package. With `exports`, only a subpath it lists is the package's,
+//! each key an exact subpath or a pattern with one `*`, the longest prefix winning as in Node, and a target a path
+//! from the package's root, or conditions among which the first of `types`, `import` and `default` that leads to a
+//! path is taken. An import of a subpath it does not list names no file Node or tsc would find, so it is a finding of
+//! its own, never a path ([`Reach::Unlisted`]). Without `exports`, a subpath is a path in the package, and the
+//! package itself is its `types`, or its `main`, or its root. Not read: a `tsconfig` of the unit, `imports`
+//! (`#name`), and a condition other than the three.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -84,6 +95,8 @@ pub struct Aliases {
     pub paths: Vec<Alias>,
     /// The `baseUrl` directories, from the root
     pub base_urls: BTreeSet<String>,
+    /// The package of each unit that has a `package.json` with a name, once for each root
+    pub packages: Vec<Package>,
     /// What could not be read, each with the config it is in: the aliases it would give are not known
     pub problems: Vec<String>,
 }
@@ -96,6 +109,114 @@ pub enum Landing {
     /// The first of these paths (from the root, under each `baseUrl` in turn) where a module is, by
     /// [`module_files`]; a package when there is none
     UnderBaseUrl(Vec<String>),
+}
+
+/// What an `exports` entry leads to, as `package.json` writes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    /// A path from the package's root, written `./...`, with a `*` where a pattern's match goes
+    Path(String),
+    /// Conditions, each with what it leads to, in the order written
+    Conditions(Vec<(String, Target)>),
+    /// A list, of which the first that leads to a path is taken
+    Any(Vec<Target>),
+    /// `null`: the subpath is not exported
+    Nothing,
+}
+
+/// The conditions Rotproof takes, in the order it tries them: `types` is what tsc reads, `import` what an import
+/// takes, and `default` what is left. Any other (`node`, `require`, `browser`) is passed over.
+const CONDITIONS: [&str; 3] = ["types", "import", "default"];
+
+impl Target {
+    /// The path this leads to, `star` put where the pattern's `*` was, from the package's root; `None` when it leads
+    /// to none: `null`, a path that is not written `./...`, or none of the three conditions.
+    fn path(&self, star: &str) -> Option<String> {
+        match self {
+            Target::Path(path) => path.strip_prefix("./").map(|rest| rest.replace('*', star)),
+            Target::Conditions(conditions) => CONDITIONS.iter().find_map(|wanted| {
+                conditions
+                    .iter()
+                    .find(|(name, _)| name == wanted)
+                    .and_then(|(_, target)| target.path(star))
+            }),
+            Target::Any(targets) => targets.iter().find_map(|target| target.path(star)),
+            Target::Nothing => None,
+        }
+    }
+}
+
+/// The package of a unit, from its `package.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Package {
+    /// `name`: what an import of the package starts with
+    pub name: String,
+    /// The directory the `package.json` is in, from the root
+    pub root: String,
+    /// The `package.json`, from the root, for the message
+    pub config: String,
+    /// `exports` as its entries, each a key (`.` or `./subpath`, with at most one `*`) and what it leads to: a string
+    /// or a map of conditions alone is the entry `.`. `None` when the package has no `exports`
+    pub exports: Option<Vec<(String, Target)>>,
+    /// `types` (or `typings`) and `main`, as written, from the root of the package
+    pub types: Option<String>,
+    pub main: Option<String>,
+}
+
+/// Where an import through a unit's package lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reach {
+    /// A path from the root, or `None` for one above the root
+    At(Option<String>),
+    /// The package has `exports` and the subpath is not among them (or is `null`, or leads to no path by the three
+    /// conditions): Node and tsc fail it, and where it would land is not known
+    Unlisted {
+        /// The `package.json`, from the root
+        config: String,
+    },
+}
+
+impl Package {
+    /// Where the subpath `sub` of this package (`protocol/inbound`; "" for the package itself) lands.
+    pub fn reach(&self, sub: &str) -> Reach {
+        let at = |path: &str| Reach::At(normalize(&join(&self.root, path)));
+        let Some(exports) = &self.exports else {
+            let main = self.types.as_deref().or(self.main.as_deref()).unwrap_or("");
+            return at(if sub.is_empty() { main } else { sub });
+        };
+        let key = if sub.is_empty() {
+            ".".to_string()
+        } else {
+            format!("./{sub}")
+        };
+        match export_for(exports, &key).and_then(|(target, star)| target.path(&star)) {
+            Some(path) => at(&path),
+            None => Reach::Unlisted {
+                config: self.config.clone(),
+            },
+        }
+    }
+}
+
+/// The entry of `exports` that `key` is, and the text a `*` of its key matched: an exact key first, then the pattern
+/// with the longest part before its `*`, as Node chooses.
+fn export_for<'a>(exports: &'a [(String, Target)], key: &str) -> Option<(&'a Target, String)> {
+    if let Some((_, target)) = exports.iter().find(|(name, _)| name == key)
+        && !key.contains('*')
+    {
+        return Some((target, String::new()));
+    }
+    exports
+        .iter()
+        .filter(|(name, _)| name.matches('*').count() == 1)
+        .filter_map(|(name, target)| {
+            let (before, after) = name.split_once('*')?;
+            let star = key.strip_prefix(before)?.strip_suffix(after)?;
+            // `*` matches at least one character
+            (!star.is_empty()).then(|| (before.len(), name.len(), target, star.to_string()))
+        })
+        .max_by_key(|(before, length, _, _)| (*before, *length))
+        .map(|(_, _, target, star)| (target, star))
 }
 
 impl Alias {
@@ -153,6 +274,25 @@ impl Aliases {
                 .filter_map(|base| normalize(&join(base, specifier)))
                 .collect(),
         )
+    }
+
+    /// Where `specifier` lands through the package of a unit whose name it starts with (the longest, when two do), or
+    /// `None` when it names no such package. It is tried after `paths` and `baseUrl`, as tsc does.
+    pub fn package(&self, specifier: &str) -> Option<Reach> {
+        let specifier = specifier.split('?').next().unwrap_or(specifier);
+        self.packages
+            .iter()
+            .filter_map(|package| {
+                let rest = specifier.strip_prefix(&package.name)?;
+                let sub = if rest.is_empty() {
+                    rest
+                } else {
+                    rest.strip_prefix('/')?
+                };
+                Some((package, sub))
+            })
+            .max_by_key(|(package, _)| package.name.len())
+            .map(|(package, sub)| package.reach(sub))
     }
 
     /// The target of the alias in `paths` that maps `specifier`: the one with the longest prefix, as in TypeScript.

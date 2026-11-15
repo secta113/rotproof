@@ -54,7 +54,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `mod.rs` | The level's role, and `Local`: the `Machine` Rotproof runs on, from the modules below and the local clock |
 | `python.rs` | Reading Python with Ruff's parser: imports, as the modules they name, comments, the reads of the environment, the functions and classes a file defines, and the outline of a file (every function and class with its names and range) |
-| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, which it reads itself, with how a file is parsed and the text of a literal string, which the readers in `typescript/` share; and `read`, which gives the imports, the comments and the reads of the environment |
+| `typescript.rs` | Reading TypeScript and JavaScript with oxc: imports and comments, which it reads itself, with how a file is parsed and the text of a literal string, which the readers in `typescript/` share; `read`, which gives the imports, the comments and the reads of the environment; and `aliases`, which joins the aliases of the `tsconfig` files with the packages of the units |
 | `cargo.rs` | Reading a crate's `Cargo.toml` with toml_edit: the dependencies it declares on a path or its workspace, and its workspace |
 | `readers.rs` | `Parsers` with the readers above |
 | `disk.rs` | `Tree` and `Writer` on the file system (`Tree::files` gives the paths in the byte order of the whole path, which a check does not sort again), the project's `.gitignore` files kept, the project's name, and the project a directory sits in |
@@ -65,6 +65,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `environment.rs` | The reads of the environment in a TypeScript or JavaScript file: `process.env` (the global, `globalThis.process`, or a name the file imports `process` as) and `import.meta.env`, each as a member or taken apart, and `env` imported from `process`, with what Vite sets itself passing |
 | `outline.rs` | The outline of a TypeScript or JavaScript file (a function, class, interface, type, enum or namespace, a variable, and their members, each with its names and range), and `Err` when oxc gives up on the file |
 | `aliases.rs` | The aliases of the project: the `tsconfig*.json` files at the root and the local files they extend, read as JSON with comments, and each entry of `paths` made into an alias |
+| `packages.rs` | The packages of the units: the `package.json` at each unit's root, with its `name`, `exports` (a string, subpaths, a pattern with one `*`, conditions, a list, `null`), `types` and `main`, and what of it cannot be read |
 
 | Module of `crates/protocol/src/` | Content |
 |---|---|
@@ -88,7 +89,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `definitions.rs` | The outline of a file as its definitions (names and range), and the one rule that selects the pieces of a name from it and joins them into the text a key of `follows` hashes, for every language |
 | `records.rs` | The rules of the records `rotproof check` runs on what it read: the files under `docs/knowledge/` Rotproof would not read, the log's structure, its days that have not come (against the latest day it is anywhere), and the floor of the bundle |
 | `tree.rs` | How Rotproof reads a file's text, how it writes the text back as the file was written (its line endings and byte order mark), and how Windows reads a name |
-| `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, the alias an entry of `paths` makes, and where a TypeScript import lands |
+| `code.rs` | What the readers give, as plain values: the module a Python file is, which files are TypeScript source, the alias an entry of `paths` makes, where a TypeScript import lands, and, through the `package.json` of a unit's package, where one of its subpaths lands or that it does not export it |
 | `upgrade.rs` | Upgrading a project's files: the named updates a later version brings to the files `rotproof create` writes once, which of them a project takes between the version its files are up to and the running one, what each does to its file and what a person is told when it cannot, and what `rotproof check` finds in `files` and `declined` |
 | `settings.rs` | The edits those updates make to Claude Code's settings, `.claude/settings.json`, as JSON: the deny rule added and the hooks taken out, each matched exactly, with the other keys and their order kept |
 | `version.rs` | A version as SemVer writes and orders it (pre-releases included), and the version of Rotproof that runs |
@@ -127,7 +128,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `commands.rs` | `protocol::inbound::Commands` implemented: each command opens the project at its root through the `Machine` `composition` passes in, and runs its use case |
 | `create.rs` | `rotproof create`: making the layers and the records skeleton a project lacks, the entry files its units declare (in Rust each with the package that holds it), and adding the fields the declaration lacks, and, in a Rust project, the crates it made to the members of the workspace that is there; and the same without making a layer, for an upgrade |
 | `tree.rs` | Reading a project's files through `Tree`: a path read name by name and compared exactly (and whether it is a file), where an import's path lands as the operating system resolves it, the code files of a directory, and the text of a file, with how it was written |
-| `code.rs` | Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl` |
+| `code.rs` | Where a TypeScript import lands: through `paths`, then a `baseUrl` where the tree has a module, then the package of a unit |
 | `layers.rs` | Reading a project's `.config/rotproof.toml` |
 | `links.rs` | Whether a link in a record resolves, read from the tree: the file it names looked up and read |
 | `follows.rs` | What a knowledge document follows, read from the tree and hashed as it is now, the re-pin of `rotproof approve --reviewed`, and the pin of `rotproof follows` |
@@ -144,7 +145,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 |---|---|
 | `mod.rs` | The direction check, read from the tree: `problems` reads the places of the declared layout and hands them to the reader of the language, with what the three share (the code files of the layers, the entry files, and the finding for a file a reader gave up on), and adds a finding for each cycle among the shared units, from the imports between them that the readers collect |
 | `python.rs` | The direction check of a Python project: every import of a `.py` file in a layer and of the entry file, as the module it names |
-| `typescript.rs` | The direction check of a TypeScript project: every import of a source file in a layer and of the entry file, resolved to a path through the aliases, judged by the place that path sits in |
+| `typescript.rs` | The direction check of a TypeScript project: every import of a source file in a layer and of the entry file, resolved to a path through the aliases and the packages of the units, judged by the place that path sits in or the unit it is in outside its layers; an import of a subpath a package does not export is a problem |
 | `rust.rs` | The direction check of a Rust project: each dependency of a crate resolved to the path it comes from (through its workspace too), judged by the place, or the unit's code outside its layers, that path lands in, the entry files of every unit read through the first `Cargo.toml` with a `[package]` above them, and then the levels inside each crate |
 
 ## How this repository differs from what Rotproof keeps

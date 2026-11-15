@@ -4781,3 +4781,142 @@ fn a_python_or_typescript_project_that_declares_units_gets_layers_and_no_manifes
         }
     }
 }
+
+/// A TypeScript monorepo as npm workspaces lay it out, with no `npm install`: the `package.json` files are written,
+/// and nothing is in `node_modules`. `db` is shared and exports what it lets other units import, `billing` is a
+/// package with no `exports`, and `web` is an app that holds only `composition` and `infrastructure`, its entry file
+/// made by `rotproof create`.
+fn npm_workspaces() -> tempfile::TempDir {
+    let root = declared(&format!(
+        "stack = \"typescript\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[[unit]]\nname = \"db\"\n\
+         path = \"packages/db/src\"\nroot = \"packages/db\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
+         path = \"packages/billing/src\"\nroot = \"packages/billing\"\n\n[[unit]]\nname = \"web\"\n\
+         path = \"apps/web/src\"\nroot = \"apps/web\"\nentry = \"apps/web/src/main.ts\"\n\
+         absent = [\"domain\", \"application\", \"protocol\"]\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let r = root.path();
+    let out = create(&["--root", &root_arg(r), "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        r.join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    write_file(
+        r,
+        "package.json",
+        "{ \"name\": \"acme\", \"private\": true, \"workspaces\": [\"packages/*\", \"apps/*\"] }\n",
+    );
+    write_file(
+        r,
+        "packages/db/package.json",
+        "{\n  \"name\": \"@acme/db\",\n  \"exports\": {\n    \"./protocol/*\": \"./src/protocol/*/index.ts\",\n    \
+         \"./client\": { \"types\": \"./src/infrastructure/outbound/client.ts\", \"default\": \"./dist/client.js\" },\n    \
+         \"./internal/*\": null\n  }\n}\n",
+    );
+    write_file(
+        r,
+        "packages/db/src/infrastructure/outbound/client.ts",
+        "export const client = 1;\n",
+    );
+    write_file(
+        r,
+        "packages/billing/package.json",
+        "{ \"name\": \"@acme/billing\", \"private\": true }\n",
+    );
+    write_file(
+        r,
+        "apps/web/package.json",
+        "{ \"name\": \"@acme/web\", \"private\": true }\n",
+    );
+    root
+}
+
+#[test]
+fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
+    let root = npm_workspaces();
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // What passes: the use cases of a unit import the `protocol.inbound` of a shared one, by the name of its package
+    write_file(
+        r,
+        "packages/billing/src/application/invoice.ts",
+        "import type { Run } from '@acme/db/protocol/inbound';\nimport { f } from '../domain';\nexport const x = 1;\n",
+    );
+    write_file(
+        r,
+        "packages/db/src/protocol/inbound/index.ts",
+        "export type Run = number;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // The domain of a unit reaching the infrastructure of another, which a package of a third party it was taken for
+    // let through: `@acme/db/client` is exported as src/infrastructure/outbound/client.ts
+    write_file(
+        r,
+        "packages/billing/src/domain/song.ts",
+        "import { client } from '@acme/db/client';\nexport const y = client;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    assert!(
+        said.contains(
+            "packages/billing/src/domain/song.ts:1: imports @acme/db/client \
+             (packages/db/src/infrastructure/outbound/client.ts), in infrastructure.outbound of unit db; domain imports \
+             no other layer"
+        ),
+        "{said}"
+    );
+    assert_eq!(said.matches(": imports ").count(), 1, "{said}");
+
+    // A subpath the package does not export is not checked, and that fails: it is no file Node or tsc finds either
+    write_file(
+        r,
+        "packages/billing/src/domain/song.ts",
+        "import { a } from '@acme/db/domain';\nimport { b } from '@acme/db/internal/x';\nexport const y = 1;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    for line in [
+        "packages/billing/src/domain/song.ts:1: imports @acme/db/domain, which packages/db/package.json does not \
+         export, so it is not checked",
+        "packages/billing/src/domain/song.ts:2: imports @acme/db/internal/x, which packages/db/package.json does \
+         not export, so it is not checked",
+    ] {
+        assert!(said.contains(line), "{line}:\n{said}");
+    }
+
+    // The composition of the app wires a unit that is not shared, and a name that is no unit's package is a package
+    write_file(
+        r,
+        "packages/billing/src/domain/song.ts",
+        "export const y = 1;\n",
+    );
+    write_file(
+        r,
+        "apps/web/src/composition/index.ts",
+        "import { y } from '@acme/billing/src/domain/song';\nimport React from 'react';\nexport const z = y;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // The entry file reads the composition of its own unit alone
+    write_file(
+        r,
+        "apps/web/src/main.ts",
+        "import { y } from '@acme/billing/src/domain/song';\nexport const w = y;\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(!out.status.success(), "{said}");
+    assert!(
+        said.contains("apps/web/src/main.ts:1: imports @acme/billing/src/domain/song"),
+        "{said}"
+    );
+}

@@ -71,9 +71,10 @@ pub trait Parsers {
     ) -> Result<Vec<Definition>, (usize, String)>;
     /// A TypeScript or JavaScript file, whose path from the root says how to read it: every specifier it imports.
     fn typescript(&self, source: &str, path: &str) -> Source<String>;
-    /// The aliases of the TypeScript project in `tree`, from its `tsconfig*.json` files. An error is a config that
-    /// cannot be read at all.
-    fn typescript_aliases(&self, tree: &dyn Tree) -> io::Result<Aliases>;
+    /// The aliases of the TypeScript project in `tree`, from its `tsconfig*.json` files, and the packages of its units,
+    /// from the `package.json` in each of `roots` (directories from the root). An error is a file that cannot be read
+    /// at all.
+    fn typescript_aliases(&self, tree: &dyn Tree, roots: &[String]) -> io::Result<Aliases>;
     /// A crate's `Cargo.toml`, or `Err` with the line of the first error and what the parser says.
     fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)>;
 }
