@@ -68,7 +68,12 @@ Check the layers and the records, and exit non-zero when one breaks the rules
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
 layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view; in each unit, when the \
 declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
-what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that only \
+what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that the manifest of each package \
+(the pyproject.toml of a Python unit, the package.json of a TypeScript one, the Cargo.toml of a crate, whose [dependencies] no path of its code names) lists the dependencies its code imports (a package imported and not \
+listed fails, and so does a runtime dependency no code imports; development dependencies are never judged unused, and \
+in Python the code of a layer uses runtime dependencies only; the distribution an import is of and a dependency used without an \
+import are said in [dependencies] of the declaration; nothing is installed, and what a .venv provides only words a \
+message), that only \
 infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \

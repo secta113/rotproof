@@ -32,15 +32,16 @@ entry_text = '''
 fn main() {}
 '''
 # What `rotproof create` writes beside the `src/` of an entry file a unit declares, when it is not there: Cargo compiles
-# a file as a crate only through a manifest above it. `{package}` is its name, the unit's, and `{dependencies}` is the
-# `[dependencies]` table that names the unit's own `composition` by path, which an entry file calls
+# a file as a crate only through a manifest above it. `{package}` is its name, the unit's. It lists no dependency: the
+# entry file calls the unit's own `composition` once the person who writes the call adds it, and a dependency the code
+# does not name fails the check of the dependencies
 entry_package = '''
 [package]
 name = "{package}"
 version = "0.1.0"
 edition = "2024"
 publish = false
-{dependencies}'''
+'''
 # The one manifest of a package, which a project that declares units keeps to the root of a unit (or a layer, which is a
 # crate of its own)
 manifest = "Cargo.toml"
@@ -58,9 +59,6 @@ name = "{package}"
 version = "0.1.0"
 edition = "2024"
 publish = false
-
-[dependencies]
-composition = { path = "crates/composition" }
 
 [workspace]
 members = [{members}]

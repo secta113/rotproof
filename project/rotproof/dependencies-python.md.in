@@ -1,0 +1,12 @@
+- **`pyproject.toml` lists what the code imports, both ways.** `rotproof check` compares the manifest at the root of
+  each unit (the root of the project when it declares none) with the imports of the layers, the entry file and the
+  tests (`tests/`), and installs nothing: it fails on an import of a package, or of another unit by the name its own
+  manifest gives (`[project] name`), that the manifest does not list, and on a runtime dependency (`[project]
+  dependencies`) that no code imports. The code of a layer uses runtime dependencies only, and a test uses those and the
+  development ones (`[dependency-groups]`), which are never judged unused: put `pytest`, `ruff` and the like there. Names
+  compare as PEP 503 says. An import is of the distribution named like it; when it is another (`dotenv` is
+  `python-dotenv`), write `dotenv = "python-dotenv"` under `imports` in `[dependencies]` of `.config/rotproof.toml`, and
+  list under `without_import` there a dependency the code uses without importing it (`openpyxl`, which `pandas` loads).
+  The message says which, and names the distribution the environment in `.venv` has when there is one, which only words
+  the hint: the verdict is the same on every machine. Fix a missing dependency by listing it in `pyproject.toml`, and an
+  unused one by taking it out; never list a package only to pass the check.

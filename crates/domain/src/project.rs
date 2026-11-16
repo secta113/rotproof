@@ -338,6 +338,7 @@ mod tests {
                 approved_max: None,
                 files: None,
                 declined: Vec::new(),
+                dependencies: Default::default(),
                 units: Vec::new(),
             })
             .unwrap();
@@ -379,7 +380,7 @@ mod tests {
 ui = \"none\"\n",
         );
         assert_eq!(one.len(), 2);
-        assert!(one[0].1.contains("name = \"my-app\"") && one[0].1.contains("composition = "));
+        assert!(one[0].1.contains("name = \"my-app\"") && !one[0].1.contains("[dependencies]"));
         assert!(
             one[0]
                 .1
@@ -455,6 +456,7 @@ ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
                     approved_max: None,
                     files: None,
                     declined: Vec::new(),
+                    dependencies: Default::default(),
                     units: Vec::new(),
                 })
                 .unwrap();

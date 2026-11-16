@@ -12,16 +12,81 @@
 //!   of `[workspace.dependencies]`; and whether it declares a `[package]`, which a manifest of a virtual workspace does
 //!   not.
 //!
+//! [`listing`] reads the same file for the dependencies check: every dependency of every kind, from a registry, git or
+//! a path alike, by the name the code uses, with the line it is written on.
+//!
 //! Not read: `[patch]` and `[replace]`, which can point a dependency from a registry to a path, and source files
 //! taken from another crate's directory (`#[path]`, `include!`, `[lib] path`).
 
 use toml_edit::{Document, Item, TableLike};
 
 use domain::code::{Dependency, Manifest, Origin};
+use domain::dependencies::rust::normalize;
+use domain::dependencies::{Dep, Kind, Listing};
 use domain::text::line_of;
 
 /// The tables of dependencies that are read, at the top or under `[target.<cfg>]`.
 const READ: [&str; 3] = ["dependencies", "build-dependencies", "build_dependencies"];
+
+/// The tables [`listing`] reads, with the kind each lists: the build dependencies are optional, as only a build script
+/// uses them, which the check does not read.
+const LISTED: [(&str, Kind); 5] = [
+    ("dependencies", Kind::Runtime),
+    ("build-dependencies", Kind::Optional),
+    ("build_dependencies", Kind::Optional),
+    ("dev-dependencies", Kind::Development),
+    ("dev_dependencies", Kind::Development),
+];
+
+/// Every dependency a manifest lists, by the name its crate's code uses (`serde-json` is `serde_json`), and the name of
+/// its package. `Err` with the line of the first error and what the parser says. A `[workspace.dependencies]` entry
+/// is no dependency of a crate, and is not listed.
+pub fn listing(source: &str) -> Result<Listing, (usize, String)> {
+    let document = Document::parse(source).map_err(|e| {
+        (
+            line_of(source, e.span().map_or(0, |span| span.start)),
+            e.message().trim().to_string(),
+        )
+    })?;
+    let top = document.as_table();
+    let mut deps = Vec::new();
+    let mut add = |tables: &dyn TableLike| {
+        for (table, kind) in LISTED {
+            let Some(entries) = tables.get(table).and_then(Item::as_table_like) else {
+                continue;
+            };
+            for (name, item) in entries.iter() {
+                let at = entries
+                    .get_key_value(name)
+                    .and_then(|(key, _)| key.span())
+                    .or_else(|| item.span())
+                    .map_or(0, |span| span.start);
+                deps.push(Dep {
+                    name: normalize(name),
+                    shown: name.to_string(),
+                    line: line_of(source, at),
+                    kind,
+                    group: String::new(),
+                });
+            }
+        }
+    };
+    add(top);
+    if let Some(targets) = top.get("target").and_then(Item::as_table_like) {
+        for (_, target) in targets.iter() {
+            if let Some(target) = target.as_table_like() {
+                add(target);
+            }
+        }
+    }
+    let name = top
+        .get("package")
+        .and_then(Item::as_table_like)
+        .and_then(|package| package.get("name"))
+        .and_then(Item::as_str)
+        .map(normalize);
+    Ok(Listing { name, deps })
+}
 
 /// Read one manifest, or `Err` with the line of the first error and what the parser says.
 pub fn read(source: &str) -> Result<Manifest, (usize, String)> {

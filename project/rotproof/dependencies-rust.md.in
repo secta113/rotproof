@@ -1,0 +1,6 @@
+- **A crate's `Cargo.toml` lists nothing its code does not name.** Cargo stops a crate that names a crate it does not
+  list, and `rotproof check` fails on the other half: a dependency in `[dependencies]` (`[target.<cfg>.dependencies]` too)
+  that no `use` or path in the `src/`, `tests/`, `benches/` and `examples/` of the crate names (`-` and `_` are one name,
+  and a rename with `package` is named as it is written). `[dev-dependencies]` and `[build-dependencies]` are not judged.
+  List under `without_import` in `[dependencies]` of `.config/rotproof.toml` a crate the code uses without naming it (a
+  `-sys` crate that is only linked). Fix an unused dependency by taking it out; never keep one only to pass the check.

@@ -3,8 +3,8 @@
 //! the shared units.
 
 mod moving;
-mod python;
-mod rust;
+pub(crate) mod python;
+pub(crate) mod rust;
 mod typescript;
 
 use std::io;
@@ -50,12 +50,7 @@ pub fn problems(
         // A repository of records only: the structure check already says that the layers were not checked
         return Ok(Direction::default());
     };
-    // Only the places that are there: an import of a layer declared absent names a module the project does not have
-    let places: Vec<&Place> = declared
-        .places
-        .iter()
-        .filter(|p| !declared.is_absent(p) && exactly(tree, &p.path).is_ok())
-        .collect();
+    let places = present_places(tree, declared);
     let entries = declared.entries(&table());
     let mut moving = Moving::list(tree, layout, declared)?;
     let mut direction = match layout.language {
@@ -92,10 +87,20 @@ pub fn problems(
     Ok(direction)
 }
 
+/// The places of `declared` that are there. An import of a layer declared absent names a module the project does not
+/// have, so it is not judged.
+pub(crate) fn present_places<'a>(tree: &dyn Tree, declared: &'a Declared) -> Vec<&'a Place> {
+    declared
+        .places
+        .iter()
+        .filter(|p| !declared.is_absent(p) && exactly(tree, &p.path).is_ok())
+        .collect()
+}
+
 /// The code files in the layers, each with the place it sits in. `placed_by` turns a file's path into the path its
 /// place is looked up by: the path itself, or for Python the one its module is named by. A file that sits in no place
 /// is left out.
-fn layer_files<'a>(
+pub(crate) fn layer_files<'a>(
     tree: &dyn Tree,
     layout: &Layout,
     places: &[&'a Place],
@@ -114,7 +119,7 @@ fn layer_files<'a>(
 
 /// The entry files that are there as files, each with itself as its place. They are code outside the layers, so the
 /// walk of the layers does not find them.
-fn entry_files<'a>(tree: &dyn Tree, entries: &'a [Place]) -> Vec<(String, &'a Place)> {
+pub(crate) fn entry_files<'a>(tree: &dyn Tree, entries: &'a [Place]) -> Vec<(String, &'a Place)> {
     entries
         .iter()
         .filter(|entry| is_file(tree, &entry.path))

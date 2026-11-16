@@ -10,6 +10,7 @@ pub mod check;
 pub mod code;
 pub mod commands;
 pub mod create;
+pub mod dependencies;
 pub mod direction;
 pub mod environment;
 pub mod finding;

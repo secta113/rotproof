@@ -19,6 +19,12 @@ If LLM agents write the code of a repository, these are the things nobody has to
   are declared as units: every import between them is checked, so a part reaches another only through the layers that
   may be reached, and a shared part that collects what no one needs shows in a list that the diff displays (see
   "Units").
+- **A manifest lists what the code imports.** The `pyproject.toml` of a Python unit and the `package.json` of a
+  TypeScript one are compared with its imports, without installing anything: a package imported and not listed
+  fails, and so does a runtime dependency nothing imports, a crate's `[dependencies]` too in Rust, where Cargo
+  stops the missing ones. In Python the code of a layer uses runtime dependencies
+  only, and a test both; the distribution an import is of (`dotenv` is `python-dotenv`) and a dependency used without an
+  import are said in the declaration, and the verdict is the same on every machine.
 - **What the code cannot say stays true.** The reasons behind the code are kept in knowledge documents that name the
   code they describe, each pinned to it by a hash. When that code changes, `rotproof check` fails until someone reads
   the document against it and pins it again.

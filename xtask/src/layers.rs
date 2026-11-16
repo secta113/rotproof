@@ -1,5 +1,6 @@
 //! Rotproof's own layers, checked by Rotproof's library as `rotproof check` checks a project's: every layer of the Rust
-//! layout is a crate in `crates/`, each crate depends only on the layers the table allows, and no comment in `crates/`
+//! layout is a crate in `crates/`, each crate depends only on the layers the table allows and lists no dependency its
+//! code does not name, and no comment in `crates/`
 //! or in `xtask/` holds a marker (xtask is outside the layers, where the Rust layout does not look).
 //!
 //! Rotproof keeps no `.config/rotproof.toml` and no `docs/`: its records are kept outside the repository. So the
@@ -109,6 +110,13 @@ pub fn problems(root: &Path) -> Result<Vec<String>, String> {
             .into_iter()
             .chain(direction.forbidden.into_iter().map(|f| f.detail))
             .map(|why| format!("direction: {why}")),
+    );
+    // Each crate lists only the crates its code names: Cargo stops the ones it lacks
+    found.extend(
+        application::dependencies::problems(&tree, &Readers, &declared)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|why| format!("dependencies: {why}")),
     );
     found.extend(
         application::environment::problems(&tree, &Readers, &declared)

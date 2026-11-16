@@ -805,8 +805,7 @@ mod tests {
                 assert!(
                     layout.language == Language::Rust
                         && package.contains("[package]")
-                        && package.contains("name = \"{package}\"")
-                        && package.contains("{dependencies}"),
+                        && package.contains("name = \"{package}\""),
                     "{stack}: {package}"
                 );
             }
@@ -853,14 +852,16 @@ mod tests {
                     "{stack}: the entry file {path} sits in a layer"
                 );
                 if layout.language == Language::Rust {
-                    // Read through the manifest of its package, which the layout writes with it
+                    // Read through the manifest of its package, which the layout writes with it. It lists no
+                    // dependency: the entry file calls `composition` once it is written to, and one it does not name
+                    // fails the check of the dependencies
                     let manifest = layout.files.iter().find(|f| f.path == "Cargo.toml");
                     assert!(
                         path == "src/main.rs"
                             && layout.files.iter().any(|f| &f.path == path)
                             && manifest.is_some_and(|m| m.text.contains("[package]")
-                                && m.text.contains("composition = ")),
-                        "{stack}: the entry file {path} has no package that depends on composition"
+                                && !m.text.contains("[dependencies]")),
+                        "{stack}: the entry file {path} has no package, or the package lists a dependency"
                     );
                 } else {
                     assert!(
