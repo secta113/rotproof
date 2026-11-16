@@ -172,6 +172,7 @@ fn b() { env::var(); }
             parent: parent.map(String::from),
             role: String::new(),
             imports: Vec::new(),
+            lacks: Vec::new(),
             below: Vec::new(),
             files: Vec::new(),
             unit: UnitTag::default(),

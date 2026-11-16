@@ -44,7 +44,7 @@ use crate::units::Unit;
 pub struct Seen {
     /// Each path [`named`] gives: `Ok` when an entry has that exact name, otherwise what to say
     pub named: BTreeMap<String, Result<(), String>>,
-    /// The code files (by the layout's [`Layout::is_code`]) in each directory [`listed`] gives, from the root
+    /// The code files (by the layout's [`Layout::is_code_in`]) in each directory [`listed`] gives, from the root
     pub code: BTreeMap<String, Vec<String>>,
     /// Every manifest (by the layout's [`Layout::is_manifest`]) in the tree, from the root: read only when the project
     /// declares units
@@ -458,7 +458,7 @@ fn outside_levels(declared: &Declared, seen: &Seen) -> Vec<String> {
     for (layer, levels) in with_levels(declared, seen) {
         // Where a part of the UI goes needs saying; elsewhere the levels say it by their names
         let goes = if layer.name == "ui" {
-            where_ui_parts_go(&declared.places, &layer.unit.name)
+            where_ui_parts_go(declared, &layer.unit.name)
         } else {
             let paths: Vec<String> = levels.iter().map(|l| format!("{}/", l.path)).collect();
             paths.join(" or ")
@@ -577,27 +577,57 @@ fn beside_levels(code: &[String], layer: &Place, levels: &[&Place]) -> BTreeSet<
 }
 
 /// Where each kind of part shared by the whole UI goes in the unit `unit`, for the message on code beside the levels.
-/// Few readers know that Atomic Design counts parts that render nothing as atoms, so the message says it.
-fn where_ui_parts_go(places: &[Place], unit: &str) -> String {
+/// Few readers know that Atomic Design counts parts that render nothing as atoms, so the message says it. A level the
+/// unit declares absent is not offered.
+fn where_ui_parts_go(declared: &Declared, unit: &str) -> String {
     let path = |name: &str| {
-        &places
+        let place = declared
+            .places
             .iter()
             .find(|p| p.name == name && p.unit.name == unit)
-            .unwrap_or_else(|| panic!("every layout with ui has {name}: a test reads them"))
-            .path
+            .unwrap_or_else(|| panic!("every layout with ui has {name}: a test reads them"));
+        (!declared.is_absent(place)).then(|| format!("{}/", place.path))
     };
-    format!(
-        "a part that knows no project concept, visible or not (a design value, one behaviour, a provider of a theme), \
-         goes in {}/; one that shows the values of a screen, such as a provider of the signed-in user, in {}/ or \
-         above; one that uses a model in {}/; what a screen holds and decides, which draws nothing, in {}/, and the \
-         plain data it hands the view in {}/; anything else in the layer whose concept it speaks, or it comes from a \
-         library",
-        path("ui.atoms"),
-        path("ui.organisms"),
-        path("ui.pages"),
-        path("presentation.models"),
-        path("presentation.display"),
-    )
+    let (models, display) = (path("presentation.models"), path("presentation.display"));
+    let screen = match (&models, &display) {
+        (Some(models), Some(display)) => Some(format!(
+            "what a screen holds and decides, which draws nothing, in {models}, and the plain data it hands the view \
+             in {display}"
+        )),
+        (Some(models), None) => Some(format!(
+            "what a screen holds and decides, which draws nothing, in {models}"
+        )),
+        (None, Some(display)) => Some(format!("the plain data a view shows in {display}")),
+        (None, None) => None,
+    };
+    let pages = path("ui.pages").map(|pages| {
+        if models.is_some() {
+            format!("one that uses a model in {pages}")
+        } else {
+            format!("a screen in {pages}")
+        }
+    });
+    let clauses: Vec<String> = [
+        path("ui.atoms").map(|atoms| {
+            format!(
+                "a part that knows no project concept, visible or not (a design value, one behaviour, a provider of \
+                 a theme), goes in {atoms}"
+            )
+        }),
+        path("ui.organisms").map(|organisms| {
+            format!(
+                "one that shows the values of a screen, such as a provider of the signed-in user, in {organisms} or \
+                 above"
+            )
+        }),
+        pages,
+        screen,
+        Some("anything else in the layer whose concept it speaks, or it comes from a library".to_string()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    clauses.join("; ")
 }
 
 #[cfg(test)]
@@ -807,6 +837,57 @@ mod tests {
             found[2],
             "code in infrastructure outside its levels: infrastructure/shared.py (move it into a level or a \
              layer: infrastructure/inbound/ or infrastructure/outbound/)"
+        );
+    }
+
+    #[test]
+    fn where_a_part_of_the_ui_goes_names_no_level_the_unit_declares_absent() {
+        let said = |absent: &str| {
+            let declared = declared(&format!(
+                "stack = \"python\"\nareas = []\nui = \"atomic\"\nabsent = [{absent}]\n"
+            ));
+            let mut seen = Seen::default();
+            for path in named(&declared) {
+                seen.named.insert(path, Ok(()));
+            }
+            let layout = declared.layout.as_ref().unwrap();
+            for dir in listed(&declared, layout, &seen) {
+                seen.code.insert(dir, Vec::new());
+            }
+            seen.code.insert("ui".into(), vec!["ui/y.py".into()]);
+            let found = outside_levels(&declared, &seen);
+            assert_eq!(found.len(), 1, "{found:#?}");
+            found[0].clone()
+        };
+        let all = said("");
+        assert!(
+            all.contains(
+                "one that uses a model in ui/pages/; what a screen holds and decides, which draws nothing, in \
+                 presentation/models/, and the plain data it hands the view in presentation/display/; anything else"
+            ),
+            "{all}"
+        );
+        let none = said("\"presentation\"");
+        assert!(!none.contains("presentation"), "{none}");
+        assert!(
+            none.contains("or above; a screen in ui/pages/; anything else"),
+            "{none}"
+        );
+        let no_display = said("\"presentation.display\"");
+        assert!(!no_display.contains("presentation/display"), "{no_display}");
+        assert!(
+            no_display.contains(
+                "one that uses a model in ui/pages/; what a screen holds and decides, which draws nothing, in \
+                 presentation/models/; anything else"
+            ),
+            "{no_display}"
+        );
+        let no_models = said("\"presentation.models\"");
+        assert!(
+            no_models.contains(
+                "a screen in ui/pages/; the plain data a view shows in presentation/display/;"
+            ),
+            "{no_models}"
         );
     }
 

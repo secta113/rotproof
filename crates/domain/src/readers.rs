@@ -368,6 +368,7 @@ Read by no unit.
             parent: None,
             role: String::new(),
             imports: Vec::new(),
+            lacks: Vec::new(),
             below: Vec::new(),
             files: Vec::new(),
             unit: UnitTag {
