@@ -1,10 +1,10 @@
 //! The dependencies check of a TypeScript project: what each `package.json` lists, against what the source files of its
 //! unit import.
 //!
-//! The files are those the direction check reads: every source file in a layer, and the entry files. A test cannot be
-//! told from the code of a layer (it sits in `src/`), so `devDependencies` may be used anywhere, and a unit below the
-//! root of the project may use those of the project's own `package.json` too, which npm hoists to every package. An
-//! import is one of
+//! The files are those the direction check reads: every source file in a layer, and the entry files; and the tests, the
+//! files that the layout names as such (`*.test.*`, `__tests__/`), wherever they sit in the unit's `path`. A test uses
+//! `devDependencies` and the code of a layer does not, and a unit below the root of the project may use those of the
+//! project's own `package.json` too, which npm hoists to every package. An import is one of
 //!
 //! - **a file of the project**: a relative path, one from the root, an alias of `paths` or a module under a `baseUrl`:
 //!   nothing is needed;
@@ -22,7 +22,7 @@ use std::io;
 use super::{Read, listing, without_import};
 use crate::code::lands;
 use crate::direction::{entry_files, layer_files};
-use crate::tree::read_code;
+use crate::tree::{code_files, read_code};
 use domain::code::{Aliases, Package, Reach, is_source};
 use domain::declaration::Declared;
 use domain::dependencies::typescript::{Specifier, specifier};
@@ -131,11 +131,35 @@ pub(super) fn typescript(
         .map(|unit| unit.root.clone())
         .collect();
     let aliases = parsers.typescript_aliases(tree, &roots)?;
-    let mut files = layer_files(tree, layout, places, str::to_string)?;
-    files.extend(entry_files(tree, entries));
+    let mut files: Vec<(String, String)> = layer_files(tree, layout, places, str::to_string)?
+        .into_iter()
+        .map(|(path, place)| (path, place.unit.name.clone()))
+        .collect();
+    files.extend(
+        entry_files(tree, entries)
+            .into_iter()
+            .map(|(path, place)| (path, place.unit.name.clone())),
+    );
+    // The tests that sit in no layer (`src/helpers.test.ts`) are read as tests too, in the unit that holds their path
+    // closest: no check but this one reads them, since structure and direction leave a test alone
+    for unit in units {
+        for path in code_files(tree, &unit.path, is_source)? {
+            let held = units
+                .iter()
+                .filter(|other| within(&path, &other.path))
+                .max_by_key(|other| other.path.len());
+            if layout.is_test_file(&path)
+                && held.is_some_and(|held| held.name == unit.name)
+                && !declared.is_not_checked(&path)
+                && !files.iter().any(|(read, _)| *read == path)
+            {
+                files.push((path, unit.name.clone()));
+            }
+        }
+    }
     let mut uses: BTreeMap<String, Vec<domain::dependencies::Use>> = BTreeMap::new();
-    for (path, place) in files.iter().filter(|(path, _)| is_source(path)) {
-        let Some(unit) = units.iter().find(|unit| unit.name == place.unit.name) else {
+    for (path, unit_name) in files.iter().filter(|(path, _)| is_source(path)) {
+        let Some(unit) = units.iter().find(|unit| unit.name == *unit_name) else {
             continue;
         };
         let manifest = manifest_of(unit);
@@ -166,7 +190,7 @@ pub(super) fn typescript(
                     line,
                     shown: import.specifier,
                     package,
-                    test: false,
+                    test: layout.is_test_file(path),
                     unit: named,
                 });
         }
@@ -247,9 +271,10 @@ mod tests {
                     "import { x } from \"./b\";\nimport fp from \"lodash/fp\";\nimport * as fs from \"node:fs\";\n\
                      import path from \"path\";\nimport React from \"react\";\nimport { y } from \"../domain\";\n",
                 ),
+                ("src/application/b.ts", "export const x = 1;\n"),
                 (
-                    "src/application/b.ts",
-                    "import { test } from \"vitest\";\nexport const x = 1;\n",
+                    "src/application/b.test.ts",
+                    "import { test } from \"vitest\";\nimport { x } from \"./b\";\n",
                 ),
             ]),
         );
@@ -316,15 +341,70 @@ import _ from \"lodash\";
     }
 
     #[test]
-    fn a_development_dependency_is_used_anywhere_and_never_unused_and_types_are_not_imported() {
+    fn a_development_dependency_is_used_by_a_test_alone_and_never_unused_and_types_are_not_imported()
+     {
+        let uses = "import React from \"react\";\nimport _ from \"lodash\";\n";
+        let tests = [
+            // By its name, beside the code, in a directory of tests, and in no layer
+            ("src/domain/a.test.ts", "import { test } from \"vitest\";\n"),
+            (
+                "src/domain/b.spec.tsx",
+                "import { test } from \"vitest\";\n",
+            ),
+            (
+                "src/domain/__tests__/c.ts",
+                "import { test } from \"vitest\";\n",
+            ),
+            ("src/helper.test.ts", "import { test } from \"vitest\";\n"),
+        ];
+        let mut files = vec![("package.json", PACKAGE), ("src/domain/a.ts", uses)];
+        files.extend(tests);
+        let found = check("", &with(&files));
+        assert!(found.is_empty(), "{found:#?}");
+        // The code of a layer does not: the first import is said, with how many more there are
+        let mut files = vec![
+            ("package.json", PACKAGE),
+            ("src/domain/a.ts", uses),
+            (
+                "src/domain/b.ts",
+                "import { test } from \"vitest\";\nimport { it } from \"vitest\";\n",
+            ),
+            (
+                "src/main.tsx",
+                "import { test } from \"vitest\";\nimport { y } from \"./domain\";\n",
+            ),
+        ];
+        files.extend(tests);
+        let found = check("", &with(&files));
+        assert_eq!(
+            found,
+            [
+                "src/domain/b.ts:1: imports vitest, which package.json:8 lists for development only (2 more imports \
+                 of it): the code of a layer uses runtime dependencies only, so move vitest to dependencies, or \
+                 import it in a test alone (a file named *.test.* or *.spec.*, or in __tests__/)"
+            ]
+        );
+        // A file outside `src/` is not read: `vite.config.ts` imports what it needs
+        let mut files = vec![
+            ("package.json", PACKAGE),
+            ("src/domain/a.ts", uses),
+            (
+                "vite.config.ts",
+                "import { defineConfig } from \"vitest/config\";\n",
+            ),
+        ];
+        files.extend(tests);
+        let found = check("", &with(&files));
+        assert!(found.is_empty(), "{found:#?}");
+        // A test in a path `unchecked` keeps is not read
         let found = check(
-            "",
+            "unchecked = [\"src/legacy\"]\n",
             &with(&[
-                ("package.json", PACKAGE),
                 (
-                    "src/domain/a.ts",
-                    "import { test } from \"vitest\";\nimport React from \"react\";\nimport _ from \"lodash\";\n",
+                    "package.json",
+                    "{ \"name\": \"shop\", \"dependencies\": {} }",
                 ),
+                ("src/legacy/a.test.ts", "import z from \"zod\";\n"),
             ]),
         );
         assert!(found.is_empty(), "{found:#?}");
@@ -372,7 +452,12 @@ import _ from \"lodash\";
                 ("packages/billing/src/domain/index.ts", ""),
                 (
                     "packages/billing/src/application/index.ts",
-                    "import { m } from \"@shop/kernel/domain\";\nimport { test } from \"vitest\";\nimport x from \"leftpad\";\n",
+                    "import { m } from \"@shop/kernel/domain\";\nimport x from \"leftpad\";\n",
+                ),
+                // The root's development dependencies are the tests' of every package
+                (
+                    "packages/billing/src/application/index.test.ts",
+                    "import { test } from \"vitest\";\n",
                 ),
             ]
         };
@@ -393,6 +478,24 @@ import _ from \"lodash\";
             ),
         );
         assert!(found.is_empty(), "{found:#?}");
+        // The code of a layer does not use them: the line is the root's, which the finding does not give
+        let mut with_code = files(
+            "{ \"name\": \"@shop/billing\", \"dependencies\": { \"leftpad\": \"1\", \"@shop/kernel\": \"workspace:*\" } }",
+        );
+        with_code.push((
+            "packages/billing/src/domain/clock.ts",
+            "import { vi } from \"vitest\";\n",
+        ));
+        let found = check(declaration, &with_code);
+        assert_eq!(
+            found,
+            [
+                "packages/billing/src/domain/clock.ts:1: imports vitest, which the manifest of the project's root \
+                 lists for development only: the code of a layer uses runtime dependencies only, so list vitest in \
+                 dependencies of packages/billing/package.json, or import it in a test alone (a file named *.test.* \
+                 or *.spec.*, or in __tests__/)"
+            ]
+        );
     }
 
     #[test]

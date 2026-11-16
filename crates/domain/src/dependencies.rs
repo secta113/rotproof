@@ -10,9 +10,10 @@
 //! - **Unused:** the manifest lists a runtime dependency that no code imports. A dependency the code uses without an
 //!   import (a driver a library loads by name, what `pandas` uses) is listed in `without_import` of the declaration.
 //!   Development dependencies are not judged: they hold tools (`ruff`, `mypy`) that nothing imports.
-//! - **Runtime and development:** code in a layer uses runtime dependencies only, and a test uses both. Where a test
-//!   cannot be told from the code of a layer (a TypeScript test sits in `src/`), a development dependency may be
-//!   used anywhere.
+//! - **Runtime and development:** code in a layer uses runtime dependencies only, and a test uses both. A Python test
+//!   is a file of `tests/`, and a TypeScript one a file the layout names as a test (`*.test.*`, `__tests__/`); Rust,
+//!   where Cargo keeps `[dev-dependencies]` apart, is not judged. A package of `@types/` is types, erased when the
+//!   code is built, and may be named anywhere.
 //! - **What is not a dependency:** the standard library and the project's own modules, which the readers in
 //!   `application` tell apart; what is left of an import is the package it needs, as [`Use::package`] names it.
 //!
@@ -27,7 +28,7 @@ pub mod typescript;
 
 use std::collections::BTreeSet;
 
-use crate::layers::Language;
+use crate::layers::{Language, NO_UI, layout};
 
 const GUIDE_PYTHON: &str = include_str!("../../../project/rotproof/dependencies-python.md.in");
 const GUIDE_TYPESCRIPT: &str =
@@ -137,10 +138,11 @@ impl Rules {
                 dev_everywhere: false,
                 tests: true,
             },
+            // A test is told by its name, as the layout says (`*.test.*`, `__tests__/`)
             Language::TypeScript => Rules {
                 missing: true,
-                dev_everywhere: true,
-                tests: false,
+                dev_everywhere: false,
+                tests: true,
             },
             // Cargo stops a crate that uses one it does not list, and a dependency of tests is listed apart
             Language::Rust => Rules {
@@ -184,7 +186,8 @@ pub fn judge(
             continue;
         }
         if let Some(dep) = listing.find(package, &[Kind::Development]) {
-            if rules.dev_everywhere {
+            // Types are erased when the code is built, so a package of them is no dependency of the code that names it
+            if rules.dev_everywhere || types_only(language, package) {
                 continue;
             }
             let outside: Vec<&&Use> = places.iter().filter(|used| !used.test).collect();
@@ -271,16 +274,29 @@ impl Problem {
                 dep,
                 first,
                 more: n,
-            } => format!(
-                "{}:{}: imports {}, which {manifest}:{} lists for development only{}: the code of a layer uses \
-                 runtime dependencies only, so move {} to {runtime}, or import it in a test alone",
-                first.file,
-                first.line,
-                first.shown,
-                dep.line,
-                more(*n),
-                dep.shown
-            ),
+            } => {
+                // A dependency of the manifest of the root, which npm hoists to every package: no line of this manifest
+                let (lists, fix) = if dep.line == 0 {
+                    (
+                        "the manifest of the project's root".to_string(),
+                        format!("list {} in {runtime} of {manifest}", dep.shown),
+                    )
+                } else {
+                    (
+                        format!("{manifest}:{}", dep.line),
+                        format!("move {} to {runtime}", dep.shown),
+                    )
+                };
+                format!(
+                    "{}:{}: imports {}, which {lists} lists for development only{}: the code of a layer uses \
+                     runtime dependencies only, so {fix}, or import it in a test alone{}",
+                    first.file,
+                    first.line,
+                    first.shown,
+                    more(*n),
+                    what_a_test_is(language)
+                )
+            }
             Problem::Unused { dep } => match language {
                 Language::Rust => format!(
                     "{manifest}:{}: lists the dependency {} in [dependencies], and no `use` or path in the crate \
@@ -305,6 +321,23 @@ impl Problem {
             ),
         }
     }
+}
+
+/// What a message says of how a test is told, where the language tells one by its name: the names its layout gives,
+/// after a space. Nothing where a test is a place (Python's `tests/`) or Cargo keeps its own.
+fn what_a_test_is(language: Language) -> String {
+    let tests = match language {
+        Language::TypeScript => layout("typescript", NO_UI).and_then(|layout| layout.tests),
+        Language::Python | Language::Rust => None,
+    };
+    tests.map_or_else(String::new, |tests| {
+        let directories: Vec<String> = tests.directories.iter().map(|d| format!("{d}/")).collect();
+        format!(
+            " (a file named {}, or in {})",
+            tests.names.join(" or "),
+            directories.join(" or ")
+        )
+    })
 }
 
 /// Whether a dependency only declares types, which no code imports: `@types/node` for `node:fs`. TypeScript's.
@@ -403,8 +436,46 @@ mod tests {
             "domain/a.py:3: imports pytest, which pyproject.toml:9 lists for development only: the code of a layer \
              uses runtime dependencies only, so move pytest to dependencies in [project], or import it in a test alone"
         );
-        // In TypeScript the test is not told, so a development dependency serves everywhere
-        assert!(judge(Language::TypeScript, &listing, &both, &[]).is_empty());
+        // Rust keeps `[dev-dependencies]` apart, and is not judged
+        assert!(judge(Language::Rust, &listing, &both, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_development_dependency_serves_a_test_and_not_the_code_of_a_layer_in_typescript_too() {
+        let listed = listing(vec![
+            dep("vitest", 9, Kind::Development),
+            dep("@types/node", 10, Kind::Development),
+        ]);
+        let in_test = [used("vitest", "src/domain/a.test.ts", true)];
+        assert!(judge(Language::TypeScript, &listed, &in_test, &[]).is_empty());
+        let both = [
+            used("vitest", "src/domain/a.ts", false),
+            used("vitest", "src/domain/b.ts", false),
+            used("vitest", "src/domain/a.test.ts", true),
+        ];
+        let found = judge(Language::TypeScript, &listed, &both, &[]);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].said(Language::TypeScript, "package.json", None),
+            "src/domain/a.ts:3: imports vitest, which package.json:9 lists for development only (1 more import of \
+             it): the code of a layer uses runtime dependencies only, so move vitest to dependencies, or import it \
+             in a test alone (a file named *.test.* or *.spec.*, or in __tests__/)"
+        );
+        // A hoisted dependency has no line in the manifest it is judged for
+        let hoisted = listing(vec![dep("vitest", 0, Kind::Development)]);
+        let found = judge(Language::TypeScript, &hoisted, &both[..1], &[]);
+        assert!(
+            found[0]
+                .said(Language::TypeScript, "packages/a/package.json", None)
+                .contains(
+                    "which the manifest of the project's root lists for development only: the code of a layer uses \
+                     runtime dependencies only, so list vitest in dependencies of packages/a/package.json, or"
+                ),
+            "{found:?}"
+        );
+        // What declares types is erased when the code is built: it is named anywhere
+        let types = [used("@types/node", "src/domain/a.ts", false)];
+        assert!(judge(Language::TypeScript, &listed, &types, &[]).is_empty());
     }
 
     #[test]
@@ -431,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn a_runtime_dependency_only_tests_import_is_moved_to_development_in_python_alone() {
+    fn a_runtime_dependency_only_tests_import_is_moved_to_development_in_python_and_typescript() {
         let listing = listing(vec![dep("pytest", 4, Kind::Runtime)]);
         let uses = [used("pytest", "tests/a.py", true)];
         let found = judge(Language::Python, &listing, &uses, &[]);
@@ -446,7 +517,19 @@ mod tests {
             "pyproject.toml:4: lists the dependency pytest in dependencies in [project], and only tests import it: \
              move it to a group of [dependency-groups]"
         );
-        assert!(judge(Language::TypeScript, &listing, &uses, &[]).is_empty());
+        // Rust's tests are judged by Cargo
+        assert!(judge(Language::Rust, &listing, &uses, &[]).is_empty());
+        let uses = [used("vitest", "src/domain/a.test.ts", true)];
+        let listing = Listing {
+            name: None,
+            deps: vec![dep("vitest", 4, Kind::Runtime)],
+        };
+        let found = judge(Language::TypeScript, &listing, &uses, &[]);
+        assert_eq!(
+            found[0].said(Language::TypeScript, "package.json", None),
+            "package.json:4: lists the dependency vitest in dependencies, and only tests import it: move it to \
+             devDependencies"
+        );
     }
 
     #[test]

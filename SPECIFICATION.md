@@ -357,7 +357,7 @@ Where they live is written once per stack:
 | Stack | A layer is | A level is | The entry file | Code Rotproof looks at |
 |---|---|---|---|---|
 | `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/`; with `ui = "rendered"`, template files too (below) |
-| `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
+| `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/`, except the tests (below) |
 | `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no UI yet: `ui = "none"`) | `src/main.rs` of the root package | every crate in `crates/`, and every `.rs` file in `src/` of the root package but the entry file |
 
 `stack = "none"` declares a repository that keeps records only: `rotproof create` makes no layer, only `docs/`, the
@@ -380,6 +380,53 @@ case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 
 A project made of several parts that each hold the layers declares them as units, with `[[unit]]` tables (see
 "Units"); without them the whole project is one unit, which is what the rest of this file describes.
+
+### Tests
+
+A test is no code of a layer, and every rule reads it as one thing, whatever the stack: where a stack's tests sit decides
+only how Rotproof tells them.
+
+- **Python:** a file in `tests/` (at the root of the project, and in the directory and the root of each unit): a place
+  that is no layer (`not_layers` of the layout).
+- **TypeScript:** a file named as Vitest and Jest take tests by default, since a TypeScript project has no place for
+  tests outside `src/` and keeps them beside the code they test: a source file (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
+  `.jsx`, `.mjs` or `.cjs`) named `*.test.*` or `*.spec.*`, in any case, and any file, source or not, in a directory
+  named `__tests__`, at any depth. It is a test wherever it sits in `src/`: in a layer, beside the levels of one, or in
+  no layer. The names are the `tests` of `layers/typescript.toml`, which is data and not code; a project cannot
+  change them. A test whose name says nothing (`src/domain/songs.ts` that only a runner reads) is code of its layer.
+- **Rust:** a test is `#[cfg(test)]` code in a crate, or a file in the `tests/` of a crate or of the root package,
+  which Cargo keeps apart from `src/`: no name tells one, and what this section says of the two stacks above does not
+  apply.
+
+What a test is in each rule that follows, the same in Python and TypeScript:
+
+| Rule | A test |
+|---|---|
+| No code outside the layers, none beside the levels of a layer, and no view in `presentation` | is none of them, wherever it sits |
+| The layers import only what the table allows | its imports are not read, so it imports any layer and another test |
+| No code that is not a test imports a test | an import of a test fails, from a layer, the entry file and a unit's `__init__.py` |
+| The manifest lists what is imported | its imports are read, as a test's: it uses development dependencies too |
+| The code of a layer imports no development dependency | only a test may |
+| A runtime dependency only tests import fails | the imports of tests are the ones that count |
+| Only `infrastructure` reads the environment | it is not judged |
+| No marker (`TODO` and the like) in a comment, and no comment that switches the type checker off | its comments are read, as the code's |
+
+In Rust no name tells a test: `[dev-dependencies]` are never judged, a crate's `tests/` are read by the dependencies
+check with its `src/`, the environment check reads a crate's `tests/` as the rest of the crate (they sit in its
+directory), and the marker check reads them.
+
+A path in `unchecked` or `moving` is not read by any check, tests included. `rotproof check` prints, on every run and
+only for the TypeScript stack, how many source files it read as tests and by which names, apart from the findings and
+failing nothing:
+
+```text
+tests: 12 files read as tests (*.test.*, *.spec.*, __tests__/)
+```
+
+It is printed with a count of 0 too (`tests: 0 files read as tests (...)`), so that a project whose tests are named
+otherwise (`song.tests.ts`, a directory `test/`), and which Rotproof therefore reads as code, sees it on every run. The
+count is of source files outside `unchecked` and `moving`, each once (a non-source file in `__tests__/`, a snapshot or a
+fixture, is a test and is not counted).
 
 ### Views that are templates
 
@@ -840,9 +887,10 @@ entry can be told, is one.
   its code goes now. In Python with `ui = "rendered"`, a template (`.html`, `.htm`, `.jinja`, `.jinja2`, `.j2`) is code
   too, so one outside the levels of `ui` fails as code outside the layers (see "Views that are templates"). In
   TypeScript, a `.tsx` or `.jsx` file in `presentation` fails, by its extension alone (case
-  does not count): a view written with `createElement` in a `.ts` file passes, and so does a test outside `src/`,
-  which Rotproof does not read; a test in `presentation` that needs a JSX `wrapper` writes it with `createElement`,
-  or sits outside `src/`.
+  does not count): a view written with `createElement` in a `.ts` file passes, and so does a test, wherever it sits
+  (`useForm.test.tsx`, `__tests__/wrapper.tsx`: see "Tests"), and one outside `src/`, which Rotproof does not read.
+  A test is no code outside the layers and none beside the levels of a layer, in TypeScript as the files of `tests/`
+  are in Python.
 - **The layers import only what the table allows** (Python): every `import` and `from ... import` in the layers,
   relative ones and those inside functions or under `if TYPE_CHECKING:` included, and those of the entry file. A
   layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own
@@ -855,6 +903,13 @@ entry can be told, is one.
   importlib import import_module`) whose module is a string literal is an import of that module, read as one; a module
   that is not a literal (a variable, an f-string, a concatenation with `+`) or is relative (`".x"`) is built at run
   time and is not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be read.
+- **No code that is not a test imports a test** (Python): a layer, the entry file and a unit's `__init__.py` import
+  no module of `tests/` (at the root of the project, in the directory of a unit, and at its root), whatever the place
+  they would be in: `imports tests.helper, in tests/, which holds tests; code that is not a test imports no test: move
+  what it needs out of the test into a layer`. It is a forbidden import, approved as any other is by its file and its
+  import (`rotproof approve domain/model.py tests.helper --reason ...`). The files of `tests/` are read by no check of
+  the direction, so a test imports any layer, and another test. A project with no `tests/` directory has none to
+  import: `import tests` names a package of someone else's there.
 - **The layers import only what the table allows** (TypeScript): every `import` (`import type` too), `export ...
   from`, `import x = require(...)`, and `import(...)`, `import.meta.resolve(...)` and `require(...)` with a literal
   string, in the `.ts`, `.tsx`, `.js` and `.jsx` files (and `.mts`, `.cts`, `.mjs`, `.cjs`) of the layers, read with
@@ -891,7 +946,16 @@ entry can be told, is one.
   package an import names. Limits: the `tsconfig` of a
   unit is not read (its `paths` are not applied; only those at the project's root are), `imports` (`#name`) and a
   condition other than the three are not read, and an import that lands outside every unit's path (a package
-  whose `exports` point to build output such as `./dist/client.js`) is not judged.
+  whose `exports` point to build output such as `./dist/client.js`) is not judged. The imports of a test (a file named
+  `*.test.*` or `*.spec.*`, or in `__tests__/`: see "Tests") are not read: it is no code of a layer.
+- **No code that is not a test imports a test** (TypeScript): a file of a layer or the entry file whose import lands on
+  a test fails: `imports ../domain/song.test (src/domain/song.test), a test (*.test.*, *.spec.*, __tests__/); code that
+  is not a test imports no test: move what it needs out of the test into a layer`. The import lands on a test when
+  the path it resolves to (through the aliases and the packages of the units, as above) is in a directory named
+  `__tests__`, or is a file named as a test, or is written without its extension and a file named as a test is there
+  for it (`./song.test` for `song.test.ts`, `./__tests__` for the `index` in it). It is a forbidden import,
+  approved as any other is by its file and its import; a test importing a test, or code, passes. The import is judged
+  by this rule alone: a rule of the table that it would also break is not said, since a test is in no layer.
 - **The templates refer only to what the table allows** (Python, `ui = "rendered"`): every `{% extends %}`,
   `{% include %}`, `{% import %}` and `{% from %}` of the tags the template languages read have, with a literal name,
   in the templates of the levels of `ui`, judged by the level of the file it names under `ui/` as an import is. Which
@@ -1054,7 +1118,9 @@ entry can be told, is one.
   paths, and only for a project of the `python` stack.
 - **The manifests list the dependencies the code imports, both ways** (TypeScript): the manifest is the `package.json`
   at the root of each unit, and at the root of the project when it declares none; the code is the source files the
-  direction check reads (the layers and the entry files in `src/`), with the imports it collects (`import`, `export ...
+  direction check reads (the layers and the entry files in `src/`) and the tests (see "Tests": the files named
+  `*.test.*` or `*.spec.*`, or in `__tests__/`, wherever they sit in the `path` of the unit, in no layer too, outside
+  `unchecked` and `moving`), with the imports it collects (`import`, `export ...
   from`, `import(...)` and `require(...)` with a literal string). A unit with no `package.json` at its root is not compared
   with one, and one that cannot be read as UTF-8 or JSON fails. The runtime dependencies are `dependencies`; the
   optional ones `peerDependencies` and `optionalDependencies`; the development ones `devDependencies`. An import is
@@ -1069,14 +1135,19 @@ entry can be told, is one.
   1. **an import of a package the manifest does not list fails**, once for the package with how many more imports there
      are of it; any kind of dependency lists it. A unit below the root of the project may also use the
      `devDependencies` of the project's own `package.json`, which npm hoists to every package of the workspace;
-  2. **a package in `dependencies` that no source file imports fails**, unless `without_import` lists it. The
-     development, peer and optional dependencies are never judged unused, nor is `@types/*`, which declares types and
-     is imported by nothing.
+  2. **the code of a layer uses runtime and optional dependencies only**, as in Python: an import of a package that
+     only `devDependencies` lists (the unit's own, or the root's hoisted) by a file that is not a test fails, once for
+     the package with how many more imports there are, and says to move it to `dependencies` (to list it there, for the
+     root's), or to import it in a test alone (`imports vitest, which package.json:8 lists for development only: the
+     code of a layer uses runtime dependencies only, so move vitest to dependencies, or import it in a test alone (a
+     file named *.test.* or *.spec.*, or in __tests__/)`). A test uses all of them. The types of `@types/*`
+     may be named anywhere, since they are erased when the code is built;
+  3. **a package in `dependencies` that no source file imports fails**, unless `without_import` lists it, and one that
+     only tests import fails too, and says to move it to `devDependencies`. The development, peer and optional
+     dependencies are never judged unused, nor is `@types/*`, which declares types and is imported by nothing.
 
-  A development dependency may be imported anywhere, since a test sits in `src/` and cannot be told from the code of a
-  layer (the tests of a TypeScript project are not read apart: see the layers). `imports` of the declaration is not
-  used: an import and a dependency are one name. Not read: a file outside `src/` (`vite.config.ts`, a test beside it),
-  so a package only that file imports is listed in `devDependencies`, or in `without_import`.
+  `imports` of the declaration is not used: an import and a dependency are one name. Not read: a file outside `src/`
+  (`vite.config.ts`), so a package only that file imports is listed in `devDependencies`, or in `without_import`.
 - **The manifests list the dependencies the code imports, both ways** (Rust): Cargo stops a crate that names a crate its
   `Cargo.toml` does not list, so the other half is judged: a dependency in `[dependencies]` (`[target.<cfg>.dependencies]`
   too, from a registry, git or a path alike) that no code of the crate names fails. The crates are those the direction
@@ -1107,7 +1178,8 @@ entry can be told, is one.
   `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
   (`getattr(os, "environ")`, `from os import *`), in Rust a name bound in one file and used through another
   (`pub use std::env;` in one module, `reexport::env::var` in the next) and a path a macro builds from pieces, and the
-  code outside the layers (`tests/` in Python).
+  code outside the layers (`tests/` in Python) and the tests (in TypeScript, the files named `*.test.*` or
+  `*.spec.*`, or in `__tests__/`: see "Tests").
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
@@ -1125,7 +1197,7 @@ entry can be told, is one.
   what `rotproof create` writes, are there, and fail each on a line of its own, with the command that applies as for
   the guide.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
-  outside `unchecked` and `moving` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
+  outside `unchecked` and `moving` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`, the tests among them,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
   a crate's `tests/` and `build.rs` included, read by Rotproof's own scanner, which skips strings, raw strings and
   character literals as Rust's lexer does. The first four put off a finding: it is fixed now, written as one line in

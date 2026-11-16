@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 551da880. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at b1122a44. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -27,8 +27,9 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
 - **マニフェストが、コードの import と食い違いません。** Python のユニットの `pyproject.toml` と TypeScript のユニットの
   `package.json` を、何もインストールせずに import と突き合わせます。import しているのに書いていないパッケージは失敗し、
   どのコードも import しない実行時の依存も失敗します（Rust は、書いていない crate を Cargo が止めるので、crate の
-  `[dependencies]` の使われていないものを見ます）。Python では、層のコードが使えるのは実行時の依存だけで、テストは
-  両方を使えます。import 名と配布名の対応（`dotenv` は `python-dotenv`）と、import せずに使う依存は宣言に書き、
+  `[dependencies]` の使われていないものを見ます）。Python と TypeScript では、層のコードが使えるのは実行時の依存だけで、
+  テストは両方を使えます（Python では `tests/` のファイル、TypeScript では Vitest と Jest が既定で拾う `*.test.*`、
+  `*.spec.*`、`__tests__/` の中のファイルで、`rotproof check` が毎回その数を表示します）。import 名と配布名の対応（`dotenv` は `python-dotenv`）と、import せずに使う依存は宣言に書き、
   判定はどの環境でも同じです。
 - **Python のプロジェクトはロックされ、仮想環境は 1 つです。** 依存は `pyproject.toml` に書き（`requirements.txt` は
   数えません）、ロックファイル（`uv.lock`、`poetry.lock`、`pdm.lock`、`pylock.toml`）をコミットします。たまたまある

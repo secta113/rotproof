@@ -4,10 +4,10 @@ use std::io;
 
 use super::moving::Moving;
 use super::{Direction, entry_files, layer_files, misread};
-use crate::code::{lands, module_candidates};
+use crate::code::{is_test_module, lands, module_candidates};
 use crate::tree::{read_code, resolved};
 use domain::code::{Aliases, Reach, is_source, without_extension};
-use domain::direction::{Landing, Way, edge, judged_landing, landing_of};
+use domain::direction::{Landing, Way, edge, imports_test, judged_landing, landing_of};
 use domain::layers::{Layout, Place};
 use domain::paths::{join, parent, relative};
 use domain::readers::read_of;
@@ -49,7 +49,9 @@ pub(super) fn typescript<'a>(
     let mut files = layer_files(tree, layout, places, str::to_string)?;
     files.extend(entry_files(tree, entries));
     for (path, from) in files {
-        if !is_source(&path) {
+        // A test is no code of a layer: its imports are no layer's, as the imports of Python's `tests/` are read by no
+        // check
+        if !is_source(&path) || layout.is_test_file(&path) {
             continue;
         }
         let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
@@ -91,6 +93,17 @@ pub(super) fn typescript<'a>(
                 }
             };
             moving.read_by(from, || module_candidates(&target));
+            if is_test_module(tree, layout, &target) {
+                let patterns = layout.tests.as_ref().map(|tests| tests.patterns());
+                forbidden.push(imports_test(
+                    &path,
+                    line,
+                    &specifier,
+                    &format!("imports {specifier} ({target})"),
+                    &format!("a test ({})", patterns.unwrap_or_default().join(", ")),
+                ));
+                continue;
+            }
             let Some(to) = landing_of(&target, places, units) else {
                 continue;
             };
@@ -631,5 +644,68 @@ mod tests {
             "{found:?}"
         );
         assert_eq!(tree.reads_of("src/package.json"), 0);
+    }
+
+    #[test]
+    fn a_test_is_no_layers_code_so_what_it_imports_is_not_judged_and_what_imports_it_is() {
+        let declared = Declared::new(
+            parse_declaration("stack = \"typescript\"\nareas = []\nui = \"none\"\n").unwrap(),
+        )
+        .unwrap();
+        let tree = Fake::new(&[
+            ("src/domain/index.ts", ""),
+            ("src/application/index.ts", ""),
+            ("src/application/play.ts", ""),
+            // Tests import what their layer may not, and one another
+            (
+                "src/domain/song.test.ts",
+                "import { play } from \"../application/play\";\nimport { h } from \"./__tests__/helper\";\n",
+            ),
+            (
+                "src/domain/__tests__/helper.ts",
+                "import { play } from \"../../application/play\";\n",
+            ),
+            ("src/domain/__tests__/index.ts", ""),
+            (
+                "src/domain/song.spec.js",
+                "import { play } from \"../application/play.ts\";\n",
+            ),
+            // Code of a layer does not import one, by any spelling of it
+            (
+                "src/application/pay.ts",
+                "import { a } from \"../domain/song.test\";\nimport { b } from \"../domain/song.spec.js\";\n\
+                 import { c } from \"../domain/__tests__\";\nimport { d } from \"../domain/__tests__/helper.ts\";\n\
+                 import { e } from \"../domain/song.test.json\";\nimport { f } from \"../domain/song\";\n",
+            ),
+            // These are no tests: the name has to be whole, and a JSON file with a test's name is no source
+            ("src/domain/song.test.json", "{}"),
+            ("src/domain/song.ts", ""),
+        ]);
+        let found = problems(&tree, &Readers, &declared).unwrap();
+        assert!(found.problems.is_empty(), "{:?}", found.problems);
+        let said: Vec<&str> = found.forbidden.iter().map(|f| f.detail.as_str()).collect();
+        let at = |line: usize, import: &str, target: &str| {
+            format!(
+                "src/application/pay.ts:{line}: imports {import} ({target}), a test (*.test.*, *.spec.*, \
+                 __tests__/); code that is not a test imports no test: move what it needs out of the test into a \
+                 layer"
+            )
+        };
+        assert_eq!(
+            said,
+            [
+                at(1, "../domain/song.test", "src/domain/song.test"),
+                at(2, "../domain/song.spec.js", "src/domain/song.spec.js"),
+                at(3, "../domain/__tests__", "src/domain/__tests__"),
+                at(
+                    4,
+                    "../domain/__tests__/helper.ts",
+                    "src/domain/__tests__/helper.ts"
+                ),
+            ]
+        );
+        // Judged as the finding of an import is: an approval keeps it, by its file and import
+        assert_eq!(found.forbidden[0].file, "src/application/pay.ts");
+        assert_eq!(found.forbidden[0].import, "../domain/song.test");
     }
 }

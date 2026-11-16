@@ -22,8 +22,10 @@ If LLM agents write the code of a repository, these are the things nobody has to
 - **A manifest lists what the code imports.** The `pyproject.toml` of a Python unit and the `package.json` of a
   TypeScript one are compared with its imports, without installing anything: a package imported and not listed
   fails, and so does a runtime dependency nothing imports, a crate's `[dependencies]` too in Rust, where Cargo
-  stops the missing ones. In Python the code of a layer uses runtime dependencies
-  only, and a test both; the distribution an import is of (`dotenv` is `python-dotenv`) and a dependency used without an
+  stops the missing ones. In Python and TypeScript the code of a layer uses runtime dependencies
+  only, and a test both (a file in `tests/` in Python; in TypeScript a file named `*.test.*` or `*.spec.*`, or in
+  `__tests__/`, as Vitest and Jest take them by default, which `rotproof check` counts on every run); the distribution
+  an import is of (`dotenv` is `python-dotenv`) and a dependency used without an
   import are said in the declaration, and the verdict is the same on every machine.
 - **A Python project is locked, and has one virtual environment.** The dependencies are in `pyproject.toml` (a
   `requirements.txt` does not count) and a lock file is committed (`uv.lock`, `poetry.lock`, `pdm.lock` or

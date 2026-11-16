@@ -29,6 +29,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
     let structure = crate::structure::problems(tree)?;
     let mut report = Report {
         skipped: structure.skipped,
+        tests: structure.tests,
         ..Report::default()
     };
     report.findings.extend(under(

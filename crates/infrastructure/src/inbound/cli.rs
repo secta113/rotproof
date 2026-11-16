@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use protocol::inbound::{
     Commands, Initialized, LinkedTodo, LogEntry, Made, Moving, MovingFile, Names, NewDocument,
-    Templates, Warning,
+    Templates, TestFiles, Warning,
 };
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
@@ -71,8 +71,9 @@ layers, with ui = rendered in Python no template (.html, .htm, .jinja, .jinja2, 
 declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
 what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that the manifest of each package \
 (the pyproject.toml of a Python unit, the package.json of a TypeScript one, the Cargo.toml of a crate, whose [dependencies] no path of its code names) lists the dependencies its code imports (a package imported and not \
-listed fails, and so does a runtime dependency no code imports; development dependencies are never judged unused, and \
-in Python the code of a layer uses runtime dependencies only; the distribution an import is of and a dependency used without an \
+listed fails, and so does a runtime dependency no code imports or only tests import; development dependencies are never judged unused, and \
+the code of a layer uses runtime dependencies only, a test both (in Python a file in tests/, in TypeScript a file named \
+*.test.* or *.spec.* or in __tests__/); the distribution an import is of and a dependency used without an \
 import are said in [dependencies] of the declaration; nothing is installed, and what a .venv provides only words a \
 message), that a Python project is locked (a pyproject.toml at the root of each unit, a lock file in that directory or \
 above it: uv.lock, poetry.lock, pdm.lock or pylock.toml, committed; and no virtual environment but a .venv beside a lock \
@@ -101,7 +102,9 @@ rendered in Python, judges the references between templates ({% extends %}, {% i
 with a literal name, a path from the directory ui of the unit) by the level each file is in, as imports are, and prints \
 on every run the template languages and versions it reads them as (templates:); where a unit's pyproject.toml asks for \
 another version of the package of a language, the references are not read as it, or not judged at all, and it says so. \
-Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+A test is no code of a layer: its imports and its reads of the environment are not judged, and no code that is not a \
+test imports one (in Python a module of tests/, in TypeScript a file named *.test.* or *.spec.* or in __tests__/); in \
+TypeScript it prints on every run how many files it read as tests (tests:). Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
 cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
@@ -622,6 +625,11 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
             println!("{line}");
         }
     }
+    // How many files were read as tests, on every run: a name that matches nothing is seen as a zero, and not as tests
+    // that were read as code
+    if let Some(tests) = &report.tests {
+        println!("{}", test_line(tests));
+    }
     // A warning: printed on every run, under the heading of its kind, and failing nothing
     for (heading, details) in warnings(&report.warnings) {
         println!(
@@ -693,6 +701,15 @@ fn template_lines(templates: &Templates) -> Vec<String> {
             .map(|line| format!("templates: {line}")),
     );
     lines
+}
+
+/// What `check` prints of the files it read as tests: how many, and by which names. Nothing fails for it.
+fn test_line(tests: &TestFiles) -> String {
+    let count = match tests.count {
+        1 => "1 file read as a test".to_string(),
+        n => format!("{n} files read as tests"),
+    };
+    format!("tests: {count} ({})", tests.patterns.join(", "))
 }
 
 /// What `check` prints for the code that is moving: how much there is and that none of it is checked, then the files

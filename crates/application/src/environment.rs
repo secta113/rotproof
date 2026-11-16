@@ -31,10 +31,12 @@ pub fn problems(
     {
         // A crate's build script runs before Rust compiles it, and reads what Cargo sets for it
         let build_script = join(&layer.path, BUILD_SCRIPT);
+        // A test beside the code (a TypeScript `*.test.ts`) is judged no more than the files of Python's `tests/`
         files.extend(
             code_files(tree, &layer.path, |name| layout.has_comments(name))?
                 .into_iter()
-                .filter(|path| layout.language != Language::Rust || *path != build_script),
+                .filter(|path| layout.language != Language::Rust || *path != build_script)
+                .filter(|path| !layout.is_test_file(path)),
         );
     }
     files.extend(
@@ -212,6 +214,41 @@ const all = import.meta.env;
             ]
         );
         assert!(found[2].contains("cannot be read"));
+    }
+
+    #[test]
+    fn a_typescript_test_beside_the_code_is_not_judged_and_the_code_is() {
+        let tree = crate::tree::fake::Fake::new(&[
+            ("src/domain/index.ts", ""),
+            ("src/domain/a.ts", "export const a = process.env.A;\n"),
+            ("src/domain/a.test.ts", "export const a = process.env.A;\n"),
+            ("src/domain/a.spec.tsx", "export const a = process.env.A;\n"),
+            (
+                "src/domain/__tests__/helper.ts",
+                "export const a = import.meta.env.VITE_A;\n",
+            ),
+            // The name is the whole of what makes it one
+            ("src/domain/b.tests.ts", "export const a = process.env.A;\n"),
+        ]);
+        let declared = Declared::new(
+            domain::declaration::parse_declaration(
+                "stack = \"typescript\"\nareas = []\nui = \"none\"\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let found: Vec<String> = problems(&tree, &Readers, &declared)
+            .unwrap()
+            .iter()
+            .map(|finding| finding.lines().next().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "src/domain/a.ts:1: process.env",
+                "src/domain/b.tests.ts:1: process.env"
+            ]
+        );
     }
 
     #[test]

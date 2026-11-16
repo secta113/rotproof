@@ -17,6 +17,7 @@ use domain::layers::{Language, Layout, Place, table};
 use domain::moving::Order;
 use domain::readers::Read;
 use domain::templates::Premise;
+use domain::units::Unit;
 use domain::units_doc::Link;
 use moving::Moving;
 use protocol::outbound::Parsers;
@@ -129,6 +130,21 @@ pub(crate) fn entry_files<'a>(tree: &dyn Tree, entries: &'a [Place]) -> Vec<(Str
         .filter(|entry| is_file(tree, &entry.path))
         .map(|entry| (entry.path.clone(), entry))
         .collect()
+}
+
+/// The directories of the project that hold tests and are no layer (`tests/` in Python, at the root of the project and
+/// in the directory and the root of each unit), those that are there. An import that lands in one is an import of a
+/// test.
+pub(crate) fn test_dirs(tree: &dyn Tree, layout: &Layout, units: &[Unit]) -> Vec<String> {
+    let mut dirs = layout.not_layers_in(&layout.scope);
+    for unit in units {
+        dirs.extend(layout.not_layers_in(&unit.path));
+        dirs.extend(layout.not_layers_in(&unit.root));
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs.retain(|dir| exactly(tree, dir).is_ok_and(|(_, is_dir)| is_dir));
+    dirs
 }
 
 /// The finding for a file a reader gave up on at `line`: what it read before is judged, and the rest may be misread.

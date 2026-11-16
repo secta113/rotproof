@@ -13,12 +13,12 @@ use std::io;
 
 use super::moving::{Moving, python_files};
 use super::templates::templates;
-use super::{Direction, entry_files, layer_files, misread};
+use super::{Direction, entry_files, layer_files, misread, test_dirs};
 use crate::tree::{exactly, read_code, resolved};
 use domain::code::module_parts;
-use domain::direction::{Landing, Way, edge, judged_landing, landing_of};
+use domain::direction::{Landing, Way, edge, imports_test, judged_landing, landing_of};
 use domain::layers::{Layout, Place, Table, table};
-use domain::paths::join;
+use domain::paths::{join, within};
 use domain::readers::read_of;
 use domain::units::Unit;
 use domain::units_doc::link;
@@ -51,6 +51,8 @@ pub(super) fn python<'a>(
     );
     // Where each unit is looked up: the directory that holds it, by the name Python imports it as
     let imported: BTreeMap<&str, &str> = units.iter().filter_map(Unit::python_import).collect();
+    // The files read are the layers', the entry files' and the packages': none is a test, and no test is read
+    let tests = test_dirs(tree, layout, units);
     for (path, from) in files {
         let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
             continue;
@@ -63,10 +65,20 @@ pub(super) fn python<'a>(
             let (target, by_unit) = path_of(&module, &imported);
             let at = resolved(tree, &target);
             moving.read_by(from, || python_files(&at));
+            let dotted = module.join(".");
+            if let Some(dir) = tests.iter().find(|dir| within(&at, dir)) {
+                forbidden.push(imports_test(
+                    &path,
+                    line,
+                    &dotted,
+                    &format!("imports {dotted}"),
+                    &format!("in {dir}/, which holds tests"),
+                ));
+                continue;
+            }
             let Some(to) = landing_of(&at, places, units) else {
                 continue;
             };
-            let dotted = module.join(".");
             // A name that no unit gives, found in a layer of a unit at the root
             let bare = !by_unit && at_root(to, units);
             forbidden.extend(judged_landing(
@@ -802,6 +814,61 @@ mod tests {
                 "the shared units import each other in a cycle: core \u{2192} steps \u{2192} core \
                  (packages/core/src/core/application/x.py:1 imports steps.domain.a; \
                  packages/steps/src/steps/domain/b.py:1 imports core.domain.c)"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_layer_the_entry_file_and_the_package_of_a_unit_import_no_module_of_a_tests_directory() {
+        let (forbidden, problems) = check(
+            &monolith(),
+            MONOLITH,
+            &[
+                // The tests of a unit, and the tests of the project, where the program starts
+                ("billing/tests/helper.py", ""),
+                ("tests/helper.py", ""),
+                (
+                    "billing/application/pay.py",
+                    "from billing.tests import helper\nimport tests.helper\nfrom ..domain import invoice\n",
+                ),
+                ("billing/__init__.py", "from billing.tests import helper\n"),
+                ("cli/__main__.py", "import tests\n"),
+                // A test imports the code and the tests, which is no import of any layer
+                (
+                    "billing/tests/test_pay.py",
+                    "from billing.application import pay\nfrom billing.tests import helper\nimport tests.helper\n",
+                ),
+                // A name that is no directory of tests is another module
+                (
+                    "billing/application/other.py",
+                    "import testing\nimport tests_helper\n",
+                ),
+            ],
+        );
+        assert!(problems.is_empty(), "{problems:#?}");
+        let said = |file: &str, line: usize, import: &str, dir: &str| {
+            format!(
+                "{file}:{line}: imports {import}, in {dir}/, which holds tests; code that is not a test imports no \
+                 test: move what it needs out of the test into a layer"
+            )
+        };
+        assert_eq!(
+            forbidden,
+            [
+                said(
+                    "billing/__init__.py",
+                    1,
+                    "billing.tests.helper",
+                    "billing/tests"
+                ),
+                said(
+                    "billing/application/pay.py",
+                    1,
+                    "billing.tests.helper",
+                    "billing/tests"
+                ),
+                said("billing/application/pay.py", 2, "tests.helper", "tests"),
+                said("cli/__main__.py", 1, "tests", "tests"),
             ]
         );
     }

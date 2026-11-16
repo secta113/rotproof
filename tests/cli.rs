@@ -1968,9 +1968,10 @@ fn presentation_holds_no_view_in_typescript() {
     for planted in [
         "src/presentation/models/Form.tsx",
         "src/presentation/display/row.jsx",
-        // A test with a wrapper in JSX is a view all the same, and so is any case
-        "src/presentation/models/useForm.test.tsx",
+        // Any case
         "src/presentation/models/Form.TSX",
+        // A test whose name does not tell it is a test is a view all the same
+        "src/presentation/models/useForm.tests.tsx",
     ] {
         let root = repo_with_ui("typescript", "");
         plant_file(root.path(), planted);
@@ -2000,6 +2001,10 @@ fn presentation_holds_no_view_in_typescript() {
         "src/ui/pages/Home.tsx",
         "src/ui/atoms/Button.jsx",
         "src/composition/Providers.tsx",
+        // A test of a hook that needs a wrapper written in JSX is a test, as the file of Python's `tests/` is
+        "src/presentation/models/useForm.test.tsx",
+        "src/presentation/models/useForm.spec.jsx",
+        "src/presentation/models/__tests__/wrapper.tsx",
     ] {
         plant_file(root.path(), path);
     }
@@ -2017,6 +2022,379 @@ fn presentation_holds_no_view_in_typescript() {
     plant_file(root.path(), "src/presentation/Form.tsx");
     let said = stdout(&run(&["--root", &root_arg(root.path()), "check"]));
     assert!(!said.contains("a view in"), "{said}");
+}
+
+/// Writes `text` at `path` of `root`, making its directories.
+fn put(root: &Path, path: &str, text: &str) {
+    let full = root.join(path);
+    fs::create_dir_all(full.parent().unwrap()).unwrap();
+    fs::write(full, text).unwrap();
+}
+
+/// The `package.json` of a TypeScript project that lists `vitest` for development and `react` to run.
+const VITEST_PACKAGE: &str = "{\n  \"name\": \"shop\",\n  \"dependencies\": { \"react\": \"^18\" },\n  \
+                              \"devDependencies\": { \"vitest\": \"^2\", \"@types/node\": \"^22\" }\n}\n";
+
+/// A TypeScript project that keeps every rule and lists `vitest` for development, with `react` imported by its UI.
+fn typescript_with_vitest() -> tempfile::TempDir {
+    let root = repo_with_ui("typescript", "");
+    put(root.path(), "package.json", VITEST_PACKAGE);
+    put(
+        root.path(),
+        "src/ui/atoms/Button.tsx",
+        "import React from 'react';\nexport const Button = () => <p />;\n",
+    );
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    root
+}
+
+#[test]
+fn a_typescript_test_is_told_by_its_name_and_every_rule_reads_it_as_one_and_says_how_many() {
+    let root = typescript_with_vitest();
+    let r = root.path();
+    // Each file does what no code of a layer may, and sits where a test may: in a layer, in a directory of tests, and
+    // in no layer at all. A file under `__tests__/` is a test whatever it is called, and a JSON file is read by none
+    put(
+        r,
+        "src/domain/song.test.ts",
+        "import { test } from 'vitest';\nimport { play } from '../application/play';\n\
+         import { helper } from './__tests__/helper';\nexport const a = process.env.A;\n",
+    );
+    put(
+        r,
+        "src/domain/__tests__/helper.ts",
+        "import { db } from '../../infrastructure/db';\nexport const helper = import.meta.env.VITE_X;\n",
+    );
+    put(r, "src/domain/__tests__/fixture.json", "{}\n");
+    put(
+        r,
+        "src/helpers.spec.ts",
+        "import { test } from 'vitest';\nimport { Home } from './ui/pages/Home';\n",
+    );
+    put(
+        r,
+        "src/presentation/models/useForm.test.tsx",
+        "export const Wrapper = () => <p />;\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(
+        said,
+        "tests: 4 files read as tests (*.test.*, *.spec.*, __tests__/)\n\
+         the layers and every record keep the rules\n"
+    );
+    // One file is one: said in the singular
+    fs::remove_file(r.join("src/domain/song.test.ts")).unwrap();
+    fs::remove_file(r.join("src/domain/__tests__/helper.ts")).unwrap();
+    fs::remove_file(r.join("src/helpers.spec.ts")).unwrap();
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    assert!(
+        said.starts_with("tests: 1 file read as a test (*.test.*, *.spec.*, __tests__/)\n"),
+        "{said}"
+    );
+
+    // A test is code for the checks of comments, as the files of Python's `tests/` are
+    put(
+        r,
+        "src/domain/song.test.ts",
+        "// TODO: more\n// @ts-ignore\nexport const a = 1;\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains("  src/domain/song.test.ts:1\n    // TODO: more\n"),
+        "{said}"
+    );
+    assert!(
+        said.contains("  src/domain/song.test.ts:2\n    // @ts-ignore\n"),
+        "{said}"
+    );
+    assert!(said.starts_with("tests: 2 files read as tests"), "{said}");
+
+    // The same names in a path the project keeps out of the checks are not read, so not counted
+    put(r, "src/legacy/old.test.ts", "export const a = 1;\n");
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    assert!(said.starts_with("tests: 3 files read as tests"), "{said}");
+    declare(
+        r,
+        "stack = \"typescript\"\nareas = [\"a\"]\nui = \"atomic\"\nunchecked = [\"src/legacy\"]\n",
+    );
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    assert!(said.starts_with("tests: 2 files read as tests"), "{said}");
+
+    // Python and Rust tell no test by its name, and say nothing of tests
+    for stack in ["python", "rust"] {
+        let root = repo_with_ui(stack, "");
+        let said = stdout(&run(&["--root", &root_arg(root.path()), "check"]));
+        assert!(!said.contains("tests:"), "{stack}: {said}");
+    }
+}
+
+#[test]
+fn code_that_is_not_a_test_imports_no_test_in_typescript_and_in_python() {
+    let finding = |file: &str, line: usize, import: &str, target: &str| {
+        format!(
+            "{file}:{line}: imports {import} ({target}), a test (*.test.*, *.spec.*, __tests__/); code that is not a \
+             test imports no test: move what it needs out of the test into a layer"
+        )
+    };
+    // The import of a layer's code by a file named as a test is none of this, and a test importing a test passes
+    let root = typescript_with_vitest();
+    let r = root.path();
+    put(
+        r,
+        "src/domain/__tests__/helper.ts",
+        "export const helper = 1;\n",
+    );
+    put(r, "src/domain/song.test.ts", "export const song = 1;\n");
+    put(
+        r,
+        "src/application/play.test.ts",
+        "import { helper } from '../domain/__tests__/helper';\nimport { song } from '../domain/song.test';\n\
+         import { play } from './play';\n",
+    );
+    put(r, "src/application/play.ts", "export const play = 1;\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // Each form of an import of a test by code that is not one, planted and removed
+    for (path, text, line, import, target) in [
+        (
+            "src/application/play.ts",
+            "import { helper } from '../domain/__tests__/helper';\n",
+            1,
+            "../domain/__tests__/helper",
+            "src/domain/__tests__/helper",
+        ),
+        (
+            "src/application/play.ts",
+            "export const play = 1;\nimport { song } from '../domain/song.test';\n",
+            2,
+            "../domain/song.test",
+            "src/domain/song.test",
+        ),
+        (
+            "src/domain/song.ts",
+            "import { song } from './song.test.ts';\n",
+            1,
+            "./song.test.ts",
+            "src/domain/song.test.ts",
+        ),
+        (
+            "src/main.tsx",
+            "import { play } from './application/play.test';\n",
+            1,
+            "./application/play.test",
+            "src/application/play.test",
+        ),
+        // A package's entry that is a test, through an alias of `paths`
+        (
+            "src/ui/atoms/Button.tsx",
+            "import React from 'react';\nconst helper = import('@/domain/__tests__/helper');\n",
+            2,
+            "@/domain/__tests__/helper",
+            "src/domain/__tests__/helper",
+        ),
+    ] {
+        let original = fs::read_to_string(r.join(path)).ok();
+        put(
+            r,
+            "tsconfig.json",
+            "{ \"compilerOptions\": { \"paths\": { \"@/*\": [\"./src/*\"] } } }\n",
+        );
+        let kept = original.clone().unwrap_or_default();
+        put(r, path, &format!("{kept}{text}"));
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{path}: {said}");
+        let wanted = finding(path, line + kept.lines().count(), import, target);
+        assert!(
+            said.contains(&wanted),
+            "{path}: wanted\n{wanted}\nin\n{said}"
+        );
+        assert_eq!(said.matches(": imports ").count(), 1, "{path}: {said}");
+        // Put back, it passes
+        match original {
+            Some(original) => put(r, path, &original),
+            None => fs::remove_file(r.join(path)).unwrap(),
+        }
+        let out = run(&["--root", &root_arg(r), "check"]);
+        assert!(out.status.success(), "{path} put back: {}", stdout(&out));
+    }
+
+    // An approval keeps one, as it keeps any forbidden import
+    put(
+        r,
+        "src/application/play.ts",
+        "import { helper } from '../domain/__tests__/helper';\n",
+    );
+    let out = approve_with_git(
+        r,
+        Some("[user]\n\tname = Someone\n"),
+        &[
+            "src/application/play.ts",
+            "../domain/__tests__/helper",
+            "--reason",
+            "the helper is moved next week",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(stdout(&out).contains("approved in"), "{}", stdout(&out));
+
+    // Python: a layer, the entry file and a unit's package file import no module of `tests/`, and a test imports both
+    let root = repo_with_ui("python", "");
+    let r = root.path();
+    put(r, "tests/helper.py", "x = 1\n");
+    put(
+        r,
+        "tests/test_model.py",
+        "from tests import helper\nimport tests.helper\nfrom domain import model\n",
+    );
+    put(r, "domain/model.py", "x = 1\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let in_tests = |file: &str, line: usize, import: &str| {
+        format!(
+            "{file}:{line}: imports {import}, in tests/, which holds tests; code that is not a test imports no \
+             test: move what it needs out of the test into a layer"
+        )
+    };
+    for (path, text, import) in [
+        (
+            "domain/model.py",
+            "from tests import helper\n",
+            "tests.helper",
+        ),
+        ("domain/model.py", "import tests.helper\n", "tests.helper"),
+        (
+            "domain/model.py",
+            "from tests.helper import x\n",
+            "tests.helper.x",
+        ),
+        ("infrastructure/inbound/web.py", "import tests\n", "tests"),
+        ("__main__.py", "import tests.helper\n", "tests.helper"),
+    ] {
+        put(r, path, text);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{path}: {said}");
+        let wanted = in_tests(path, 1, import);
+        assert!(
+            said.contains(&wanted),
+            "{path}: wanted\n{wanted}\nin\n{said}"
+        );
+        assert_eq!(said.matches(": imports ").count(), 1, "{path}: {said}");
+        fs::remove_file(r.join(path)).unwrap();
+        put(r, "domain/model.py", "x = 1\n");
+    }
+    // A project with no `tests/` has no test to import: `tests` is a package of someone else's
+    fs::remove_dir_all(r.join("tests")).unwrap();
+    put(r, "domain/model.py", "import tests\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(
+        !stdout(&out).contains("which holds tests"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn only_a_test_imports_a_development_dependency_of_a_typescript_project() {
+    let root = typescript_with_vitest();
+    let r = root.path();
+    put(
+        r,
+        "src/domain/song.test.ts",
+        "import { test } from 'vitest';\n",
+    );
+    put(
+        r,
+        "src/domain/__tests__/helper.ts",
+        "import { vi } from 'vitest';\n",
+    );
+    put(
+        r,
+        "src/domain/song.ts",
+        "import type { Buffer } from '@types/node';\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // The code of a layer, the entry file and a file outside the layers that is no test
+    for (path, expected) in [
+        ("src/domain/song.ts", "src/domain/song.ts:1"),
+        ("src/main.tsx", "src/main.tsx:1"),
+    ] {
+        let original = fs::read_to_string(r.join(path)).unwrap_or_default();
+        put(r, path, "import { vi } from 'vitest';\n");
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{path}: {said}");
+        let wanted = format!(
+            "{expected}: imports vitest, which package.json:4 lists for development only: the code of a layer uses \
+             runtime dependencies only, so move vitest to dependencies, or import it in a test alone (a file named \
+             *.test.* or *.spec.*, or in __tests__/)"
+        );
+        assert!(
+            said.contains(&wanted),
+            "{path}: wanted\n{wanted}\nin\n{said}"
+        );
+        // Moved to `dependencies`, as the finding says, it passes
+        put(
+            r,
+            "package.json",
+            &VITEST_PACKAGE
+                .replace(
+                    "\"react\": \"^18\" }",
+                    "\"react\": \"^18\", \"vitest\": \"^2\" }",
+                )
+                .replace("\"vitest\": \"^2\", \"@types", "\"@types"),
+        );
+        let out = run(&["--root", &root_arg(r), "check"]);
+        assert!(out.status.success(), "{path} moved: {}", stdout(&out));
+        put(r, "package.json", VITEST_PACKAGE);
+        if original.is_empty() {
+            fs::remove_file(r.join(path)).unwrap();
+        } else {
+            put(r, path, &original);
+        }
+    }
+
+    // A runtime dependency that only tests import is moved to `devDependencies`, as in Python
+    put(
+        r,
+        "package.json",
+        &VITEST_PACKAGE.replace(
+            "\"react\": \"^18\" }",
+            "\"react\": \"^18\", \"left-pad\": \"1\" }",
+        ),
+    );
+    put(r, "src/domain/pad.test.ts", "import pad from 'left-pad';\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "package.json:3: lists the dependency left-pad in dependencies, and only tests import it: move it to \
+             devDependencies"
+        ),
+        "{said}"
+    );
+
+    // A file outside `src/` is read by no check, as before
+    put(r, "src/domain/pad.test.ts", "export const a = 1;\n");
+    put(r, "package.json", VITEST_PACKAGE);
+    put(
+        r,
+        "vite.config.ts",
+        "import { defineConfig } from 'vitest/config';\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
 }
 
 /// Every place of the Python layout, in the order of the grid below.
@@ -2832,9 +3210,16 @@ fn every_stack_with_layers_checks_everything() {
         .unwrap();
         let out = run(&["--root", &arg, "check"]);
         let said = stdout(&out);
-        // Nothing is skipped: the one line says that the layers, their direction and comments included, kept the rules
+        // Nothing is skipped: the one line says that the layers, their direction and comments included, kept the rules.
+        // Before it, a TypeScript project says how many files it read as tests, even when there are none
+        let tests = if stack == "typescript" {
+            "tests: 0 files read as tests (*.test.*, *.spec.*, __tests__/)\n"
+        } else {
+            ""
+        };
         assert_eq!(
-            said, "the layers and every record keep the rules\n",
+            said,
+            format!("{tests}the layers and every record keep the rules\n"),
             "{stack}"
         );
     }

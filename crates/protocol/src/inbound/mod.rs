@@ -140,6 +140,16 @@ pub struct Templates {
     pub not_judged: Vec<String>,
 }
 
+/// How many files `rotproof check` read as tests, in a stack that tells a test by its name. It is no finding: it is
+/// said on every run, so that a reader sees what the names matched, and notices when they matched nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestFiles {
+    /// How many source files are read as tests, outside `unchecked` and `moving`
+    pub count: usize,
+    /// What makes a file a test, as the layout writes it: `*.test.*`, `__tests__/`
+    pub patterns: Vec<String>,
+}
+
 /// What `rotproof check` found.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -160,6 +170,9 @@ pub struct Report {
     /// How the references between templates were read, said on every run apart from the findings and the warnings.
     /// `None` unless the project declares a UI whose views are templates
     pub templates: Option<Templates>,
+    /// How many files were read as tests, said on every run apart from the findings and the warnings. `None` unless
+    /// the stack tells a test by its name (TypeScript)
+    pub tests: Option<TestFiles>,
     /// Every warning, in the order it is printed, each kind under its own heading: a knowledge document whose
     /// `stale_after` has come, with what to do, and a comment that may make the type checker check less
     /// (`# pyright: basic`), as `path:line` and the line under it

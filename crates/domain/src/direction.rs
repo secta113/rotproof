@@ -11,6 +11,10 @@
 //!   that module; one built at run time (a variable, an f-string, a relative name) is not seen.
 //! - The entry file, which is no layer, is judged as a place of its own that may import what the table's `entry` lists.
 //!   Nothing may import it.
+//! - A test is no code of a layer, and its imports are not read: Python's `tests/` (a path that is no layer) and, in
+//!   TypeScript, the files the layout names as tests (`*.test.*`, `__tests__/`). Code that is not a test imports no
+//!   test, whatever layer it is in: an import that lands in one is forbidden ([`imports_test`]), and approved as
+//!   any other is.
 //!
 //! The layout's `language` says how the code is read. For `python`, a module is named by its dotted name
 //! (`python.rs`), and its parts joined with `/` are its path. For `typescript`, an import is resolved to a path
@@ -239,6 +243,21 @@ pub fn judged(
     to: &Place,
 ) -> Option<Forbidden> {
     judged_landing(file, line, import, what, from, to, &Way::default())
+}
+
+/// The import of `import` by `file`, on `line`, of a test, which code that is not a test never imports: a test is no
+/// layer's code, so what is imported out of it belongs to no layer. `what` says what was imported, as "imports x", and
+/// `test` where it is: "a test file (*.test.*, __tests__/)" or "in tests/, which holds tests". A test importing a test
+/// is not judged.
+pub fn imports_test(file: &str, line: usize, import: &str, what: &str, test: &str) -> Forbidden {
+    Forbidden {
+        file: file.to_string(),
+        import: import.to_string(),
+        detail: format!(
+            "{file}:{line}: {what}, {test}; code that is not a test imports no test: move what it needs out of the \
+             test into a layer"
+        ),
+    }
 }
 
 /// [`judged`] for an import that lands in a place or in a unit's code outside its layers. `way` says how the stack

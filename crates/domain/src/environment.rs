@@ -16,7 +16,8 @@
 //!   tell, so it fails as a read does. What is built at run time is not seen (`getattr(os, "environ")`, `from os import
 //!   *`), as the direction check does not see an import built at run time.
 //! - **Where:** the code of every layer but `infrastructure`, and the entry file; not `tests/` or another path that is
-//!   no layer. A layer's tests in TypeScript sit in its directory, and are its code.
+//!   no layer, and not a test beside the code, which a TypeScript layout tells by its name (`*.test.*`, `__tests__/`):
+//!   a test is no code of a layer.
 //!
 //! Python and TypeScript are read by the readers of their language, which find the forms above in the syntax tree
 //! (`Source::environment`); Rust by Rotproof's own scanner, here.
