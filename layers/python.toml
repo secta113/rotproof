@@ -13,7 +13,7 @@ doc_prefix = ""
 # What Rotproof reads the code as: its imports for the direction check, its comments for the marker check
 language = "python"
 # The UIs a project may declare besides "none" (the layers of table.toml that name one in `ui`)
-uis = ["atomic"]
+uis = ["atomic", "rendered"]
 # The entry file, which `python .` runs
 entry = "__main__.py"
 # What `rotproof create` writes into an entry file a unit declares that is not there: a file with no code, whose
@@ -26,6 +26,30 @@ entry_text = '''
 manifest = "pyproject.toml"
 # What a unit's own directory holds besides its layers and nests: its package's `__init__.py`, which imports no layer
 unit_files = ["__init__.py"]
+
+# The views of the UI `rendered` are template files, which the server renders (a route function in
+# `infrastructure.inbound` names one as a string, which is no import). A template is code like a `.py` file where the
+# structure is judged: one outside the levels of `ui` fails as code outside the layers, so a file that is no template
+# (a generated page, a report) is listed in `unchecked`. The references between templates are read as the template
+# languages below, at the major versions named, and a path in one is a path from the directory of `ui`. A reference
+# is judged by the level it lands in, as an import is, when a template is there; one that names no file of the project
+# (a template of a package) is not judged. A language is left out for a unit whose `pyproject.toml` asks for another
+# version of its package
+[templates]
+ui = "rendered"
+extensions = ["html", "htm", "jinja", "jinja2", "j2"]
+
+[[templates.language]]
+name = "Jinja2"
+package = "jinja2"
+versions = [3]
+tags = ["extends", "include", "import", "from"]
+
+[[templates.language]]
+name = "Django"
+package = "django"
+versions = [5, 6]
+tags = ["extends", "include"]
 
 [layer]
 path = "{name}"

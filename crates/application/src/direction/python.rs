@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::io;
 
 use super::moving::{Moving, python_files};
+use super::templates::templates;
 use super::{Direction, entry_files, layer_files, misread};
 use crate::tree::{exactly, read_code, resolved};
 use domain::code::module_parts;
@@ -83,6 +84,7 @@ pub(super) fn python<'a>(
         }
     }
     read_moving(tree, parsers, &imported, places, units, moving)?;
+    let templates = templates(tree, layout, places, units, &mut found, &mut forbidden)?;
     Ok(Direction {
         problems: found,
         forbidden,
@@ -90,6 +92,7 @@ pub(super) fn python<'a>(
         reads,
         links,
         moving: None,
+        templates,
     })
 }
 

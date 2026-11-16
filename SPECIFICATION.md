@@ -56,8 +56,9 @@ each command's output names the next step. A test follows that path from an empt
 
 Start a project with `rotproof init --stack <stack>` (`python`, `typescript`, `rust`, or `none` for a repository
 that keeps records only), and `--ui` for the stacks that offer a UI: `--ui atomic` for a project with screens, `--ui
-none` for one without (a command-line tool, a library, a server). Python and TypeScript need it named, as a project
-with screens and one without start from the same command; Rust offers `none` alone. It writes only the declaration,
+rendered` (Python only) for one whose views are templates the server renders, `--ui none` for one without screens (a
+command-line tool, a library, a server). Python and TypeScript need it named, as a project with screens and one
+without start from the same command; Rust offers `none` alone. It writes only the declaration,
 so you declare in `absent` the layers you do not want before anything is made. Then run `rotproof create`, which
 lists the layers it would make and writes nothing, and `rotproof create --yes` once `absent` lists every layer the
 project lacks. Run on a project that has a declaration, `rotproof init` upgrades the project's files instead (see
@@ -287,7 +288,7 @@ definitions are built into it, and the declaration is never shipped with it.
 ```toml
 stack = "python"         # python | typescript | rust | none
 areas = ["billing", "records"]  # the areas knowledge is grouped by, in this order (see The records)
-ui = "atomic"            # the layers of the screens: atomic | none (rust: none; none for a stack of none)
+ui = "atomic"            # the layers of the screens: atomic | rendered | none (rendered: python only; rust: none; none for a stack of none)
 absent = ["ui.templates"]  # layers or levels this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
 moving = ["legacy"]      # optional: paths of the project's own code that is not in a layer yet (see below)
@@ -344,8 +345,8 @@ What the layers are is written once, in `layers/table.toml`, on the onion archit
 The levels of a layer other than `ui` and `presentation` never import each other. `ui` is the view and
 `presentation` the state and behaviour of the screens apart from it, the Presentation Model (Fowler) held to the
 inward direction of the onion: a model calls the use cases through `protocol.inbound`, as an entry point does, and
-draws nothing. The two come with `ui = "atomic"`, and a project with `ui = "none"` has neither: `ui` is chosen as the
-stack is, not switched off in `absent`, since a screen needs both or neither. In TypeScript, `presentation` also holds
+draws nothing. The two come with `ui = "atomic"` (and with `ui = "rendered"`, below), and a project with `ui = "none"`
+has neither: `ui` is chosen as the stack is, not switched off in `absent`, since a screen needs both or neither. In TypeScript, `presentation` also holds
 no view: a `.tsx` or `.jsx` file there fails `rotproof check`, so the state and the hooks of a screen are `.ts` files
 and a component goes in `ui` or `composition` (a provider keeps its context and state hook in `presentation` and its
 thin component in `ui.pages`, or in `composition` for the whole program). The entry file is no layer, and may
@@ -355,7 +356,7 @@ Where they live is written once per stack:
 
 | Stack | A layer is | A level is | The entry file | Code Rotproof looks at |
 |---|---|---|---|---|
-| `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/` |
+| `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/`; with `ui = "rendered"`, template files too (below) |
 | `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
 | `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no UI yet: `ui = "none"`) | `src/main.rs` of the root package | every crate in `crates/`, and every `.rs` file in `src/` of the root package but the entry file |
 
@@ -379,6 +380,62 @@ case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 
 A project made of several parts that each hold the layers declares them as units, with `[[unit]]` tables (see
 "Units"); without them the whole project is one unit, which is what the rest of this file describes.
+
+### Views that are templates
+
+A Python project whose views are templates the server renders (Jinja, Django templates) declares `ui = "rendered"`.
+The value is named for the shape of its views, not for a framework, as `atomic` is: which templates are read, and
+how, is the Python layout's (`layers/python.toml`), and the table above is the same for it.
+
+- **A view is a template file in a level of `ui`**, which follows atomic design as for `ui = "atomic"` (a level refers
+  to the levels below it, and to its own). A file of the extensions `.html`, `.htm`, `.jinja`, `.jinja2` and `.j2` (in
+  any case) is code for the structure check, as a `.py` file is: one outside the levels of `ui`, or beside them in
+  `ui/`, fails as code outside the layers, so a file that is no template (a generated page, a report) is listed in
+  `unchecked`. A file of another extension (`.xml`, `.txt`) is not read, as a file that is not code is not. Templates
+  hold no comment the marker check reads: it reads `.py` files alone.
+- **A route function renders a template, and the table does not change.** The function, in `infrastructure.inbound`,
+  names the template with a string (`render_template("pages/home.html", ...)`), which is no import, so it imports
+  only `protocol.inbound`, as every entry point does, and `composition` registers it. A template draws the data the
+  route passes it, and which template a route names is not judged. `presentation` comes with `ui = "atomic"` as with
+  `ui = "rendered"`, and is declared absent in the declaration `rotproof init` writes for the second: a template holds
+  no state of its own, and a template cannot import it. The project takes it out of `absent` (and runs `rotproof
+  create --yes`) to keep the state of a screen in a model that a `.py` file of `ui.pages` uses.
+- **A reference between templates is judged as an import is.** The tags `{% extends %}`, `{% include %}`,
+  `{% import %}` and `{% from %}` name another template with a string, and the string is a path from the directory
+  `ui/` of the unit, which is the directory the project's template loader is set to (Flask's `template_folder`, the
+  `directory` of `Jinja2Templates`, Django's `DIRS`): `{% extends "templates/base.html" %}` names
+  `ui/templates/base.html`. The reference lands in the level that holds that file, and a level may refer to what it
+  may import: itself and the levels below it, so `atoms` refer to `atoms` alone, and no template refers to a level
+  above its own. The finding names the file and the line as an import's does (`ui/atoms/a.html:2: includes
+  pages/x.html, in ui.pages; ...`), and an approval keys it by the file and the name as written
+  (`rotproof approve ui/atoms/a.html pages/x.html --reason ...`). A reference whose name is not a literal (a variable,
+  a concatenation, a list, a condition), that climbs out of the directory (`..`) or starts with `/`, or that names no
+  file under `ui/` (a template of an installed package, as `admin/base.html`, or a template of a directory the
+  loader also looks in) is not seen: Rotproof does not know the loader, so a name no file answers to is no finding.
+  What is inside `{# #}`, `{% raw %}`, `{% verbatim %}` and `{% comment %}` is no tag. Not read: a template whose
+  delimiters were changed from `{% %}`, Jinja's line statements, a reference by a template's other name, the
+  `{% load %}` of Django and what a template imports in Python.
+- **The syntax is the languages' own, so `rotproof check` says which it assumed, on every run.** The layout names the
+  template languages and the major versions the references are read as (now Jinja2 3, which has all four tags, and
+  Django 5 and 6, which have `extends` and `include`), and `rotproof check` prints, on every run for a project with
+  `ui = "rendered"`, after the approvals and the comments tied to an issue and before the warnings,
+  `templates: references are read as the template languages Jinja2 3 and Django 5/6`, which fails nothing. A template
+  does not say which language it is written in, so the tags are the union of those of the languages read. **When a unit's `pyproject.toml` asks for another version, the references are not read
+  as that language**, and the check prints a line for the unit saying so and why: `templates: references are not
+  read as Jinja2 3: pyproject.toml asks for jinja2>=4, which is not Jinja2 3` (the `import` and `from` tags are then
+  no tag), and `templates: references are not judged: ...` when it asks for another version of every language. The
+  unit's `pyproject.toml` is the manifest of the unit (in its `root`, or at the root of the project): the requirements
+  of `project.dependencies`, `project.optional-dependencies` and `dependency-groups`, as PEP 508 writes them (a name,
+  extras, a range of versions, a marker). A package it does not name is read, since a framework brings Jinja2 or Django
+  in; a name with no upper bound (`jinja2`, `jinja2>=3`) is read, and so is one whose range holds a version that begins
+  with a major version the layout names, in any requirement of the manifest (`jinja2>=3` anywhere is enough). A range
+  that holds none (`jinja2>=4`, `jinja2<3`) leaves the language out. A requirement that cannot be read as a version
+  (`jinja2===3.1`, `django @ https://...`), and a manifest that is no TOML, leave the language out and say so. The
+  lock file and the settings of the loader are not read: no tool's own format is. Changing a requirement so that the
+  check stops judging is no fix, and the guide says so.
+- **Each unit is read as itself:** a project that declares units has a `ui` in each unit that holds one, its loader's
+  directory is that unit's `ui/`, and the manifest is that unit's. A reference is looked up under its own unit's `ui/`
+  alone, as the loader of one unit does not look in another's, so a template does not refer to another unit's.
 
 ## Units
 
@@ -780,7 +837,9 @@ entry can be told, is one.
   (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
   (a design value, one behaviour, a provider of a theme), is an atom, and what a screen holds and decides goes in
   `presentation.models`. A directory of a layer of the table before 0.4.0 (`handler`, `utils`) is named with where
-  its code goes now. In TypeScript, a `.tsx` or `.jsx` file in `presentation` fails, by its extension alone (case
+  its code goes now. In Python with `ui = "rendered"`, a template (`.html`, `.htm`, `.jinja`, `.jinja2`, `.j2`) is code
+  too, so one outside the levels of `ui` fails as code outside the layers (see "Views that are templates"). In
+  TypeScript, a `.tsx` or `.jsx` file in `presentation` fails, by its extension alone (case
   does not count): a view written with `createElement` in a `.ts` file passes, and so does a test outside `src/`,
   which Rotproof does not read; a test in `presentation` that needs a JSX `wrapper` writes it with `createElement`,
   or sits outside `src/`.
@@ -833,6 +892,12 @@ entry can be told, is one.
   unit is not read (its `paths` are not applied; only those at the project's root are), `imports` (`#name`) and a
   condition other than the three are not read, and an import that lands outside every unit's path (a package
   whose `exports` point to build output such as `./dist/client.js`) is not judged.
+- **The templates refer only to what the table allows** (Python, `ui = "rendered"`): every `{% extends %}`,
+  `{% include %}`, `{% import %}` and `{% from %}` of the tags the template languages read have, with a literal name,
+  in the templates of the levels of `ui`, judged by the level of the file it names under `ui/` as an import is. Which
+  languages and versions the tags are read as is printed on every run, and a unit whose `pyproject.toml` asks for
+  another version of a language is not read as it, or not judged at all, which is printed too (see "Views that are
+  templates", which also says what is not seen). A forbidden reference is approved as a forbidden import is.
 - **The layers import only what the table allows** (Rust): a crate is compiled only against the crates its
   `Cargo.toml` declares, so the declarations are read instead of `use`: every dependency in `[dependencies]` and
   `[build-dependencies]` (and `build_dependencies`), under `[target.<cfg>]` too, of the `Cargo.toml` files in the

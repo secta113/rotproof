@@ -20,7 +20,7 @@ use domain::skill::{PATHS as SKILL_PATHS, SKILL};
 use domain::suppressions::WEAKENS_HEADING;
 use domain::upgrade::guide_command;
 use domain::version::VERSION;
-use protocol::inbound::{Finding, LinkedTodo, Moving, MovingFile, Report, Warning};
+use protocol::inbound::{Finding, LinkedTodo, Moving, MovingFile, Report, Templates, Warning};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -85,6 +85,10 @@ fn code(
             })
             .collect(),
         more: order.more,
+    });
+    report.templates = direction.templates.map(|premise| Templates {
+        read_as: premise.read_as,
+        not_judged: premise.not_judged,
     });
     let listed = crate::readers::problems(tree, declared, &direction.reads);
     let approvals = crate::approvals::read(tree)?;

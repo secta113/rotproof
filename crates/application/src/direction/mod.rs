@@ -5,6 +5,7 @@
 mod moving;
 pub(crate) mod python;
 pub(crate) mod rust;
+mod templates;
 mod typescript;
 
 use std::io;
@@ -15,6 +16,7 @@ use domain::direction::{Edge, Forbidden, cycles, place_of};
 use domain::layers::{Language, Layout, Place, table};
 use domain::moving::Order;
 use domain::readers::Read;
+use domain::templates::Premise;
 use domain::units_doc::Link;
 use moving::Moving;
 use protocol::outbound::Parsers;
@@ -37,6 +39,8 @@ pub struct Direction {
     pub links: Vec<Link>,
     /// What to say of the code that is moving into the layers: `None` when the declaration lists no path of it
     pub moving: Option<Order>,
+    /// How the references between templates were read, for a layout whose views are templates: said on every run
+    pub templates: Option<Premise>,
 }
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An

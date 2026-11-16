@@ -23,7 +23,7 @@ pub const DECLARATION: &str = ".config/rotproof.toml";
 /// What to do when the declaration is missing, with every stack: a test keeps the list equal to [`known_stacks`]
 pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotproof init --stack <stack>` (python, \
                            typescript, rust, or none for records only) and `--ui atomic` or `--ui none` for python \
-                           and typescript";
+                           and typescript (`--ui rendered` too for python)";
 /// Which command brings a project's files into line, said the same way wherever a file or a field is missing: after an
 /// upgrade of Rotproof it is `rotproof init`, which also sets `files` and says what to do by hand, and `rotproof
 /// create` only otherwise
@@ -437,10 +437,21 @@ pub fn declaration_text(stack: &str, ui: &str) -> String {
         );
     }
     let offered = uis(stack).unwrap_or_default().join(" | ");
+    // A view a route renders takes the data the route passes it, so a project whose views are templates has no state
+    // of a screen to hold: its `presentation` is declared absent, and taken out of `absent` to have it
+    let rendered = layout(stack, ui).is_some_and(|layout| layout.templates.is_some());
+    let absent = if rendered {
+        "# Layers this project does not have, such as \"ui.templates\". Delete the directory too. `presentation` is\n\
+         # absent because a template holds no state of its own: take it out, and run `rotproof create --yes`, to keep\n\
+         # the state of the screens in models\n\
+         absent = [\"presentation\"]"
+    } else {
+        "# Layers this project does not have, such as \"ui.templates\". Delete the directory too\n\
+         absent = []"
+    };
     format!(
         "{head}\n# {stacks}\nstack = \"{stack}\"\n\n{areas}\n{UI_COMMENT}# {offered}\nui = \"{ui}\"\n\n\
-         # Layers this project does not have, such as \"ui.templates\". Delete the directory too\n\
-         absent = []\n\n\
+         {absent}\n\n\
          # Paths outside the layers that Rotproof does not look into, such as \"scripts\" (helper scripts, generated\n\
          # or vendored code). A path that holds a layer, or does not exist, fails\n\
          unchecked = []\n\n\
@@ -805,6 +816,35 @@ mod tests {
                 assert!(Declared::new(declaration).is_ok(), "{stack} {ui}");
             }
         }
+    }
+
+    #[test]
+    fn a_project_whose_views_are_templates_starts_without_presentation_and_may_have_it() {
+        let text = declaration_text("python", "rendered");
+        assert!(text.contains("\nabsent = [\"presentation\"]\n"), "{text}");
+        assert!(
+            text.contains("# atomic | rendered | none\nui = \"rendered\""),
+            "{text}"
+        );
+        let present = |text: &str| -> Vec<String> {
+            let declared = Declared::new(parse_declaration(text).unwrap()).unwrap();
+            declared
+                .places
+                .iter()
+                .filter(|place| !declared.is_absent(place))
+                .map(|place| place.name.clone())
+                .collect()
+        };
+        let names = present(&text);
+        assert!(names.contains(&"ui.pages".to_string()) && names.contains(&"ui.atoms".to_string()));
+        assert!(
+            !names.iter().any(|n| n.starts_with("presentation")),
+            "{names:?}"
+        );
+        // The same project with `presentation` taken out of `absent` has it, and one with the atomic UI starts with it
+        let kept = present(&text.replace("absent = [\"presentation\"]", "absent = []"));
+        assert!(kept.contains(&"presentation.models".to_string()));
+        assert!(declaration_text("python", "atomic").contains("\nabsent = []\n"));
     }
 
     #[test]
