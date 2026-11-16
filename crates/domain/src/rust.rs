@@ -11,6 +11,8 @@
 //!
 //! [`outline`] reads the definitions of a file from its tokens, for a knowledge document that follows one.
 
+use std::collections::BTreeMap;
+
 mod outline;
 
 pub use outline::outline;
@@ -278,46 +280,125 @@ fn path_tree(
     }
 }
 
+/// What the code names of a module: an item of it, or every item of it or of a module above it at once.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Item {
+    /// The item that follows the module in the path, wherever the path goes on after it: `Command` for
+    /// `std::process::Command::new` and for `std::process::Command`
+    Named(String),
+    /// A glob (`use std::process::*;`) of the module, or of a module above it (`use std::*;`), which brings in names
+    /// the scanner cannot tell. The path it is of.
+    Glob(Vec<String>),
+}
+
 /// Every item of the module at `module` (`["std", "env"]`) the code alone ([`code`]) names, with the offset where the
-/// path starts, in order: by its whole path (`std::env::var`), in a `use` (`use std::env::var`, `use std::env::{self,
-/// var}`), and through the module's last name once a `use` binds it (`use std::env;` or `use std::{env, fs}`, then
-/// `env::var`). A rename (`use std::env as e`) and a path from `::` are not followed, as [`paths`] drops them.
-pub fn items(code: &str, module: &[&str]) -> Vec<(usize, String)> {
-    let (Some(first), Some(last)) = (module.first(), module.last()) else {
+/// path starts, in order. A path names an item of the module when it goes through the module and on to a name:
+///
+/// - by its whole path, in an expression, a type or a `use` (`std::env::var`, `std::process::Command::new`, `use
+///   std::env::{self, var}`), from `::` too;
+/// - through a name a `use` binds to the module or to a module above it (`use std::env;` or `use std::{env, fs}`, then
+///   `env::var`);
+/// - through a rename of the module or of a module above it, and a rename of a rename (`use std::env as e;`, `use std
+///   as s;` then `s::env::var`, `use std::{self as s, env as e}`, `extern crate std as s;`).
+///
+/// A glob of the module or of a module above it (`use std::env::*;`, `use std::*;`) is an [`Item::Glob`], whatever it
+/// is used for. What is not followed: a name bound in one file and used through another (`pub use std::env;` in one
+/// module, `reexport::env::var` in the next), a path a macro builds from pieces, and a name that stands for another
+/// module where it is bound a second time: a file is one scope, so a name bound twice stands for both.
+pub fn items(code: &str, module: &[&str]) -> Vec<(usize, Item)> {
+    let Some(first) = module.first() else {
         return Vec::new();
     };
-    let item = |segments: &[String], prefix: &[&str]| match segments.split_last() {
-        Some((name, rest)) if rest.iter().map(String::as_str).eq(prefix.iter().copied()) => {
-            Some(name.clone())
-        }
-        _ => None,
-    };
+    let module: Vec<String> = module.iter().map(|s| s.to_string()).collect();
+    let names = names_for(code, &module);
+    let mut starts = vec![*first];
+    starts.extend(names.keys().map(String::as_str));
     let mut found = Vec::new();
-    let mut binds = false;
-    for (at, segments) in paths(code, &[first]) {
-        if segments
-            .iter()
-            .map(String::as_str)
-            .eq(module.iter().copied())
-        {
-            binds = true;
-        } else if let Some(name) = item(&segments, module) {
-            if name == "self" {
-                binds = true;
-            } else {
-                found.push((at, name));
+    for (at, segments) in paths(code, &starts) {
+        let mut roots = names.get(&segments[0]).cloned().unwrap_or_default();
+        if segments[0] == module[0] && !roots.contains(&module[..1].to_vec()) {
+            roots.push(module[..1].to_vec());
+        }
+        for root in roots {
+            let full: Vec<String> = root
+                .into_iter()
+                .chain(segments[1..].iter().cloned())
+                .collect();
+            if let Some(item) = reach(&full, &module) {
+                found.push((at, item));
             }
         }
     }
-    if binds {
-        found.extend(
-            paths(code, &[last])
-                .into_iter()
-                .filter_map(|(at, segments)| item(&segments, &[last]).map(|name| (at, name))),
-        );
-    }
     found.sort();
+    found.dedup();
     found
+}
+
+/// What the path `full`, written from the start of the crate's dependencies, names of `module`, if it goes through it.
+fn reach(full: &[String], module: &[String]) -> Option<Item> {
+    let n = module.len();
+    if full.len() > n && full[..n] == *module {
+        return match full[n].as_str() {
+            // `use std::env::self` binds the module and names no item of it
+            "self" => None,
+            "*" => Some(Item::Glob(module.to_vec())),
+            name => Some(Item::Named(name.to_string())),
+        };
+    }
+    match full.split_last() {
+        Some((last, parent)) if last == "*" && !parent.is_empty() && parent.len() < n => module
+            .starts_with(parent)
+            .then(|| Item::Glob(parent.to_vec())),
+        _ => None,
+    }
+}
+
+/// The names the code alone binds to the module, or to a module above it (a prefix of `module`, the whole of it
+/// included), with every path each stands for: by a `use` that names it (`use std::env;` binds `env`), by a rename
+/// (`use std::env as e;`), and by a rename of a name bound so (`use std as s;`, `use s::env as e;`).
+fn names_for(code: &str, module: &[String]) -> BTreeMap<String, Vec<Vec<String>>> {
+    let mut names: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
+    let is_above = |path: &[String]| path.len() <= module.len() && module.starts_with(path);
+    for (_, mut segments) in paths(code, &[module[0].as_str()]) {
+        if segments.len() > 1 && segments.last().map(String::as_str) == Some("self") {
+            segments.pop();
+        }
+        if is_above(&segments) {
+            let entry = names
+                .entry(segments[segments.len() - 1].clone())
+                .or_default();
+            if !entry.contains(&segments) {
+                entry.push(segments);
+            }
+        }
+    }
+    let renamed = renames(code);
+    // A chain of renames (`use s::env as e;`) is followed one link a round
+    for _ in 0..=renamed.len() {
+        let mut changed = false;
+        for (_, name, target) in &renamed {
+            let mut roots = names.get(&target[0]).cloned().unwrap_or_default();
+            if target[0] == module[0] {
+                roots.push(module[..1].to_vec());
+            }
+            for root in roots {
+                let full: Vec<String> = root
+                    .into_iter()
+                    .chain(target[1..].iter().cloned())
+                    .collect();
+                let entry = names.entry(name.clone()).or_default();
+                if is_above(&full) && !entry.contains(&full) {
+                    entry.push(full);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    names.retain(|_, paths| !paths.is_empty());
+    names
 }
 
 /// Every module the code alone ([`code`]) declares with a body (`mod tests { ... }`): its name, and the offsets of its
@@ -553,11 +634,7 @@ mod m { pub fn x() {} }
 fn c() { m::x(); std::fs::read(\"f\"); }
 ",
         );
-        let names: Vec<String> = items(&named, &["std", "env"])
-            .into_iter()
-            .map(|(_, name)| name)
-            .collect();
-        assert_eq!(names, ["var", "args", "vars"]);
+        assert_eq!(named_in(&named, &["std", "env"]), ["var", "args", "vars"]);
         // Without a `use` of the module, its last name is the file's own
         assert!(
             items(
@@ -566,6 +643,127 @@ fn c() { m::x(); std::fs::read(\"f\"); }
             )
             .is_empty()
         );
+    }
+
+    /// What a source names of `module`, as text: an item by its name, a glob as the path it is of and `::*`
+    fn named_in(source: &str, module: &[&str]) -> Vec<String> {
+        items(&code(source), module)
+            .into_iter()
+            .map(|(_, item)| match item {
+                Item::Named(name) => name,
+                Item::Glob(path) => format!("{}::*", path.join("::")),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_item_is_named_wherever_the_path_goes_on_after_it() {
+        let source = "\
+fn a() { std::process::Command::new(\"x\").arg(\"y\"); }
+use std::process;
+fn b(_: process::Child) { process::Command::new(\"x\"); process::exit(1); }
+fn c() { ::std::process::Stdio::piped(); }
+use std::process::{ExitCode, self as q};
+";
+        assert_eq!(
+            named_in(source, &["std", "process"]),
+            ["Command", "Child", "Command", "exit", "Stdio", "ExitCode"]
+        );
+        // The module's own name, bound and not followed by anything, names no item
+        assert!(
+            named_in(
+                "use std::process;\nuse std::process::self;\n",
+                &["std", "process"]
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_rename_of_the_module_or_of_a_module_above_it_is_followed() {
+        let source = "\
+use std::io as sio;
+fn a() { sio::stdin(); }
+use std as s;
+fn b() { s::io::stdout(); }
+use std::{self as t, fs};
+fn c() { t::io::stderr(); }
+use std::{io::{self as u}};
+fn d() { u::Stdin::new(); }
+extern crate std as v;
+fn e() { v::io::empty(); }
+";
+        assert_eq!(
+            named_in(source, &["std", "io"]),
+            ["stdin", "stdout", "stderr", "Stdin", "empty"]
+        );
+    }
+
+    #[test]
+    fn a_rename_of_a_rename_is_followed_in_any_order_of_the_file() {
+        let source = "\
+fn a() { e::stdin(); }
+use s::io as e;
+use std as s;
+use std::fs as f;
+fn b() { f::read(\"x\"); g::read(\"y\"); }
+";
+        assert_eq!(named_in(source, &["std", "io"]), ["stdin"]);
+        assert_eq!(named_in(source, &["std", "fs"]), ["read"]);
+    }
+
+    #[test]
+    fn a_module_of_three_names_is_followed_through_each_of_its_parents() {
+        let source = "\
+use std::os::unix as u;
+use std::os;
+fn a() { u::fs::symlink(); os::unix::process::exit(); std::os::unix::io::x(); }
+use std::os::windows as w;
+fn b() { w::fs::symlink(); }
+";
+        assert_eq!(
+            named_in(source, &["std", "os", "unix"]),
+            ["fs", "process", "io"]
+        );
+    }
+
+    #[test]
+    fn a_glob_of_the_module_or_of_a_module_above_it_is_named_as_a_glob() {
+        let source = "\
+use std::io::*;
+use std::{io::*, fs::*};
+use std as s;
+use s::io::*;
+use std::*;
+use std::process::*;
+use std::io as e;
+use e::*;
+";
+        assert_eq!(
+            named_in(source, &["std", "io"]),
+            [
+                "std::io::*",
+                "std::io::*",
+                "std::io::*",
+                "std::*",
+                "std::io::*"
+            ]
+        );
+    }
+
+    #[test]
+    fn what_stands_for_another_module_or_is_not_code_is_not_named() {
+        let source = "\
+use std::io::Read;
+use my::io;
+use other as o;
+// std::io::stdin();
+fn a() { let _ = \"std::io::stdin()\"; o::io::stdin(); crate::io::stdin(); a::std::io::stdin(); }
+use std::fs as f;
+use std::io::{Read as _};
+fn b() { f::read(\"x\"); }
+";
+        assert_eq!(named_in(source, &["std", "io"]), ["Read", "Read"]);
     }
 
     fn texts(source: &str) -> Vec<String> {

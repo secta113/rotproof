@@ -1100,10 +1100,14 @@ entry can be told, is one.
   `os.getenvb`, `os.putenv` and `os.unsetenv` in Python, `process.env` and `import.meta.env` in TypeScript, and
   `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var` and `remove_var` in Rust, each through an alias the file
   binds too (`import os as o`, `from os import getenv as g`, `import { env } from "node:process"`,
-  `const { env } = process`, `use std::env;` then `env::var`, `::std::env::var`). Not judged: the command line (`sys.argv`,
-  `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of
+  `const { env } = process`, `use std::env;` then `env::var`, `use std::env as e;` then `e::var`, `use std as s;` then
+  `s::env::var`, `::std::env::var`). In Rust a glob of `std::env`, or of `std` (`use std::env::*;`, `use std::*;`),
+  fails too: the names it brings in cannot be read, so name them (`use std::env::var;`). Not judged: the command line
+  (`sys.argv`, `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of
   `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
-  (`getattr(os, "environ")`, `from os import *`), and the code outside the layers (`tests/` in Python).
+  (`getattr(os, "environ")`, `from os import *`), in Rust a name bound in one file and used through another
+  (`pub use std::env;` in one module, `reexport::env::var` in the next) and a path a macro builds from pieces, and the
+  code outside the layers (`tests/` in Python).
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an

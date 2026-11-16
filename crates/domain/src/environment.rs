@@ -11,9 +11,10 @@
 //!   built, not what came from outside, and pass; a value the project passes in (`VITE_API_URL`) counts.
 //! - **How it is seen:** every form written in the code, through an alias the file binds too (`import os as o`,
 //!   `from os import getenv as g`, `import { env } from "node:process"`, `const { env } = process`,
-//!   `use std::env;` then `env::var`, or from `::std::env::var`). What is built at run time is not seen
-//!   (`getattr(os, "environ")`, `from os import *`, `use std as s;`), as the direction check does not see an import
-//!   built at run time.
+//!   `use std::env;` then `env::var`, `use std::env as e;` then `e::var`, `use std as s;` then `s::env::var`, or
+//!   from `::std::env::var`). A glob of `std::env` or of `std` (`use std::env::*;`) brings in names the scanner cannot
+//!   tell, so it fails as a read does. What is built at run time is not seen (`getattr(os, "environ")`, `from os import
+//!   *`), as the direction check does not see an import built at run time.
 //! - **Where:** the code of every layer but `infrastructure`, and the entry file; not `tests/` or another path that is
 //!   no layer. A layer's tests in TypeScript sit in its directory, and are its code.
 //!
@@ -21,7 +22,7 @@
 //! (`Source::environment`); Rust by Rotproof's own scanner, here.
 
 use crate::layers::{Language, Place};
-use crate::rust::{code, items};
+use crate::rust::{Item, code, items};
 use crate::text::line_of;
 
 /// The names of Python's `os` that read or write the environment.
@@ -34,6 +35,10 @@ pub const RUST: [&str; 6] = ["var", "var_os", "vars", "vars_os", "set_var", "rem
 
 /// The values of `import.meta.env` Vite sets itself, from how the code is built.
 pub const VITE_OWN: [&str; 5] = ["BASE_URL", "DEV", "MODE", "PROD", "SSR"];
+
+/// What a finding says of a glob of `std::env` or of `std`: the names it brings in cannot be read.
+const GLOB: &str =
+    " (a glob: the names it brings in cannot be read, so name them: `use std::env::var;`)";
 
 /// The file Cargo runs before it compiles a crate, from the crate's root.
 pub const BUILD_SCRIPT: &str = "build.rs";
@@ -58,7 +63,8 @@ pub fn guide(language: Language) -> String {
             "`process.env` and `import.meta.env` (except what Vite sets itself, such as `import.meta.env.DEV`)"
         }
         Language::Rust => {
-            "`std::env::var` and the other functions of `std::env` that read or set a variable"
+            "`std::env::var` and the other functions of `std::env` that read or set a variable (and on a glob of \
+             `std::env` or of `std`, whose names cannot be read: name what you use)"
         }
     };
     GUIDE_TEXT.replace("{reads}", reads)
@@ -76,12 +82,19 @@ pub fn finding(path: &str, source: &str, line: usize, what: &str) -> String {
     format!("{path}:{line}: {what}\n{text}")
 }
 
-/// Every read or write of the environment in a Rust source: the line, and the path it names (`std::env::var`).
+/// Every read or write of the environment in a Rust source: the line, and the path it names (`std::env::var`), or the
+/// glob of `std::env`, or of `std`, that brings in names the scanner cannot tell, which fails as a read does.
 pub fn in_rust(source: &str) -> Vec<(usize, String)> {
     items(&code(source), &["std", "env"])
         .into_iter()
-        .filter(|(_, name)| RUST.contains(&name.as_str()))
-        .map(|(at, name)| (line_of(source, at), format!("std::env::{name}")))
+        .filter_map(|(at, item)| {
+            let what = match item {
+                Item::Named(name) if RUST.contains(&name.as_str()) => format!("std::env::{name}"),
+                Item::Named(_) => return None,
+                Item::Glob(path) => format!("{}::*{GLOB}", path.join("::")),
+            };
+            Some((line_of(source, at), what))
+        })
         .collect()
 }
 
@@ -162,6 +175,82 @@ fn b() { env::var(); }
                 (3, "std::env::vars".into())
             ]
         );
+    }
+
+    #[test]
+    fn a_rename_of_std_env_or_of_a_module_above_it_is_followed() {
+        let source = "\
+use std::env as e;
+fn a() { let _ = e::var(\"A\"); }
+use std as s;
+fn b() { let _ = s::env::var_os(\"B\"); s::env::set_var(\"C\", \"1\"); }
+use std::{self as t, env as u};
+fn c() { t::env::vars(); u::remove_var(\"D\"); }
+use std::env::{self as w};
+fn d() { w::vars_os(); }
+use s::env as x;
+fn e() { x::var(\"E\"); }
+";
+        assert_eq!(
+            names(source),
+            [
+                (2, "std::env::var".to_string()),
+                (4, "std::env::var_os".into()),
+                (4, "std::env::set_var".into()),
+                (6, "std::env::vars".into()),
+                (6, "std::env::remove_var".into()),
+                (8, "std::env::vars_os".into()),
+                (10, "std::env::var".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_path_that_goes_on_after_the_function_is_still_a_read() {
+        let source = "\
+fn a() { let _ = std::env::var(\"A\").unwrap_or_default().len(); }
+fn b() { let _ = std::env::vars().count(); }
+";
+        assert_eq!(
+            names(source),
+            [
+                (1, "std::env::var".to_string()),
+                (2, "std::env::vars".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_glob_of_std_env_or_of_std_fails_as_one_whose_names_cannot_be_read() {
+        let found =
+            names("use std::env::*;\nfn a() { var(\"A\"); }\nuse std::*;\nuse std::{env::*};\n");
+        assert_eq!(
+            found.iter().map(|(line, _)| *line).collect::<Vec<_>>(),
+            [1, 3, 4]
+        );
+        assert!(found[0].1.starts_with("std::env::*"));
+        assert!(found[1].1.starts_with("std::*"));
+        assert!(found[0].1.contains("cannot be read") && found[0].1.contains("name them"));
+        // Through a rename, and the globs that bring in no `env`
+        assert_eq!(names("use std as s;\nuse s::env::*;\n").len(), 1);
+        assert_eq!(names("use std::env as e;\nuse e::*;\n").len(), 1);
+        assert!(names("use std::io::*;\nuse std::collections::*;\nuse super::*;\nuse std::prelude::v1::*;\n").is_empty());
+    }
+
+    #[test]
+    fn the_rest_of_std_env_and_what_is_renamed_to_it_passes() {
+        let source = "\
+use std::env as e;
+const V: &str = env!(\"CARGO_PKG_VERSION\");
+fn a() {
+    let _ = option_env!(\"X\");
+    let _ = e::args();
+    let _ = e::current_dir();
+    let _: Option<e::VarError> = None;
+    let _ = std::env::args().count();
+}
+";
+        assert!(names(source).is_empty());
     }
 
     #[test]

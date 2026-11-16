@@ -178,6 +178,43 @@ const all = import.meta.env;
     }
 
     #[test]
+    fn a_rust_rename_a_glob_and_a_longer_path_of_std_env_fail_in_a_layer_and_in_the_entry_file() {
+        let tree = crate::tree::fake::Fake::new(&[
+            ("crates/domain/Cargo.toml", "[package]\nname = \"domain\"\n"),
+            (
+                "crates/domain/src/lib.rs",
+                "use std::env as e;\npub fn a() { let _ = e::var(\"A\"); }\n\
+                 use std as s;\npub fn b() { let _ = s::env::vars().count(); }\n\
+                 use std::env::*;\npub fn c() { let _ = env!(\"X\"); let _ = std::env::args(); }\n",
+            ),
+            (
+                "src/main.rs",
+                "use std::env as e;\nfn main() { let _ = e::var_os(\"M\"); }\n",
+            ),
+        ]);
+        let declared = Declared::new(
+            domain::declaration::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
+                .unwrap(),
+        )
+        .unwrap();
+        let found = problems(&tree, &Readers, &declared).unwrap();
+        let heads: Vec<&str> = found
+            .iter()
+            .map(|f| f.lines().next().unwrap().split(" (").next().unwrap())
+            .collect();
+        assert_eq!(
+            heads,
+            [
+                "crates/domain/src/lib.rs:2: std::env::var",
+                "crates/domain/src/lib.rs:4: std::env::vars",
+                "crates/domain/src/lib.rs:5: std::env::*",
+                "src/main.rs:2: std::env::var_os",
+            ]
+        );
+        assert!(found[2].contains("cannot be read"));
+    }
+
+    #[test]
     fn a_rust_crates_build_script_is_not_judged() {
         let tree = crate::tree::fake::Fake::new(&[
             ("crates/domain/Cargo.toml", "[package]\nname = \"domain\"\n"),
