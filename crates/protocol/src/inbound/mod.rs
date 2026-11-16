@@ -130,6 +130,16 @@ pub struct Moving {
     pub more: usize,
 }
 
+/// How `rotproof check` read the references between templates, in a project whose views are templates. It is no
+/// finding: it is said on every run, so that a reader knows what the check assumed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Templates {
+    /// The template languages and the versions the references are read as: "Jinja2 3 and Django 5/6"
+    pub read_as: String,
+    /// One line for each unit whose references are not judged, or not read as a language, and why
+    pub not_judged: Vec<String>,
+}
+
 /// What `rotproof check` found.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -147,6 +157,9 @@ pub struct Report {
     /// The code that is not in a layer yet, printed on every run apart from the findings and the warnings. `None`
     /// unless the declaration lists a path in `moving`
     pub moving: Option<Moving>,
+    /// How the references between templates were read, said on every run apart from the findings and the warnings.
+    /// `None` unless the project declares a UI whose views are templates
+    pub templates: Option<Templates>,
     /// Every warning, in the order it is printed, each kind under its own heading: a knowledge document whose
     /// `stale_after` has come, with what to do, and a comment that may make the type checker check less
     /// (`# pyright: basic`), as `path:line` and the line under it

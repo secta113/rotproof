@@ -123,6 +123,7 @@ pub(super) fn typescript<'a>(
         reads,
         links,
         moving: None,
+        templates: None,
     })
 }
 

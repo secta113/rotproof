@@ -43,13 +43,14 @@ name = "ui"
 ui = ["atomic", "rendered"]
 imports = ["presentation.models", "presentation.display", "protocol.inbound"]
 role = """
-The view: what the user sees and touches, written with the UI framework (components, widgets). `composition`
-registers it.
+The view: what the user sees and touches, written with the UI framework (components, widgets) or as templates the
+server renders. `composition` registers the components; a route of `infrastructure.inbound` renders a template.
 
-It shows what `presentation` hands it and passes the user's actions back; what a screen holds and decides is in
-`presentation.models`. Does not import `application`, `domain` or `infrastructure`. Organized by atomic design:
-`pages` > `templates` > `organisms` > `molecules` > `atoms`; a level may import the levels below it, and only
-`pages` know the models. Split by level first, and by feature only inside a level.
+It shows what `presentation` or `protocol.inbound` hands it and passes the user's actions back; what a screen holds
+and decides is in `presentation.models` when the project has it. Does not import `application`, `domain` or
+`infrastructure`. Organized by atomic design: `pages` > `templates` > `organisms` > `molecules` > `atoms`; a level
+may import the levels below it, and only `pages` know the models. Split by level first, and by feature only inside a
+level.
 
 Every part of the UI sits in a level, and nothing sits beside them: what the whole UI shares goes in the lowest
 level that may know what it knows."""

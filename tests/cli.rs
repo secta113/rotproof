@@ -6902,3 +6902,97 @@ fn a_project_that_is_not_python_is_not_asked_for_a_lock_file_or_judged_by_its_en
         stdout(&out)
     );
 }
+
+#[test]
+fn a_project_whose_views_are_templates_is_checked_for_them() {
+    let root = declared(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"rendered\"\nabsent = [\"presentation\"]\n",
+    );
+    let arg = root_arg(root.path());
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        root.path().join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    assert!(root.path().join("ui/pages/__init__.py").is_file());
+    assert!(!root.path().join("presentation").exists());
+    // Said on every run, with nothing to judge yet
+    let said = "templates: references are read as the template languages Jinja2 3 and Django 5/6\n";
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(stdout(&out).starts_with(said), "{}", stdout(&out));
+
+    // A template in a level may refer to the levels below its own, and one that does not is a finding, as is a
+    // template outside the levels
+    let write = |path: &str, text: &str| fs::write(root.path().join(path), text).unwrap();
+    write(
+        "ui/pages/home.html",
+        "{% extends \"templates/base.html\" %}\n",
+    );
+    write(
+        "ui/templates/base.html",
+        "{% include \"organisms/nav.html\" %}\n",
+    );
+    write(
+        "ui/organisms/nav.html",
+        "{% include \"atoms/link.html\" %}\n{% include \"templates/base.html\" %}\n",
+    );
+    write("ui/atoms/link.html", "");
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "ui/organisms/nav.html:2: includes templates/base.html, in ui.templates; ui.organisms may import"
+        ),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stdout(&out).contains("home.html"), "{}", stdout(&out));
+    write("stray.html", "");
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        stdout(&out).contains("code outside the layers: stray.html"),
+        "{}",
+        stdout(&out)
+    );
+
+    // A manifest that asks for another version of every language: nothing is judged, and the check says why
+    write(
+        "pyproject.toml",
+        "[project]\nname = \"x\"\ndependencies = [\"jinja2>=4\", \"django>=7\"]\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        stdout(&out).contains(
+            "templates: references are not judged: pyproject.toml asks for jinja2>=4, which is not Jinja2 3; \
+             pyproject.toml asks for django>=7, which is not Django 5/6\n"
+        ),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stdout(&out).contains("nav.html"), "{}", stdout(&out));
+}
+
+#[test]
+fn a_project_with_atomic_ui_reads_no_template() {
+    let root = declared("stack = \"python\"\nareas = [\"a\"]\nui = \"atomic\"\n");
+    let arg = root_arg(root.path());
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    fs::write(
+        root.path().join("docs/log.md"),
+        "# Log\n\n## 2026-10-02\n\n* Something\n",
+    )
+    .unwrap();
+    fs::write(
+        root.path().join("ui/atoms/a.html"),
+        "{% include \"pages/x.html\" %}",
+    )
+    .unwrap();
+    fs::write(root.path().join("stray.html"), "").unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("templates:"), "{}", stdout(&out));
+}

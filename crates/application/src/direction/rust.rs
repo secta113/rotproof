@@ -91,6 +91,7 @@ pub(super) fn rust<'a>(
         reads,
         links,
         moving: None,
+        templates: None,
     })
 }
 

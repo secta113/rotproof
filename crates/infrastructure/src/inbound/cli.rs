@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use protocol::inbound::{
     Commands, Initialized, LinkedTodo, LogEntry, Made, Moving, MovingFile, Names, NewDocument,
-    Warning,
+    Templates, Warning,
 };
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
@@ -96,7 +96,12 @@ number or key of the issue that tracks the work, is not a finding: every one is 
 TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. With \
 paths in moving in the declaration (the project's code that is not in a layer yet, which no check reads), prints on \
 every run how many files are left and which to move next, those that import no other file still moving first, each \
-with the layers it could go in (where the direction check would pass it), and fails nothing for it. Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+with the layers it could go in (where the direction check would pass it), and fails nothing for it. With ui = \
+rendered in Python, judges the references between templates ({% extends %}, {% include %}, {% import %} and {% from %} \
+with a literal name, a path from the directory ui of the unit) by the level each file is in, as imports are, and prints \
+on every run the template languages and versions it reads them as (templates:); where a unit's pyproject.toml asks for \
+another version of the package of a language, the references are not read as it, or not judged at all, and it says so. \
+Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
 cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
@@ -196,8 +201,9 @@ enum Command {
     ///
     /// `rotproof approve <file> <import> --reason "<why>"` keeps an import the layer table forbids, as `rotproof check`
     /// names it: the file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each
-    /// name of `from m import n`; a TypeScript specifier; a crate's dependency). It shows the forbidden import, signs
-    /// with git's user.name, and adds the entry, with the reason, to .config/rotproof-approved.toml, which keeps a byte
+    /// name of `from m import n`; a TypeScript specifier; a crate's dependency; the name of a template as written in a
+    /// reference). It shows the forbidden import, signs with git's user.name, and adds the entry, with the reason, to
+    /// .config/rotproof-approved.toml, which keeps a byte
     /// order mark and its line endings (CRLF on every line when one line had it), as does --prune. It asks nothing and
     /// needs no terminal, but it takes no approval without a reason, and `rotproof check` prints every approval on
     /// every run. Run it only when the user asked for the exception, and say that you ran it.
@@ -610,6 +616,12 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
             println!("{line}");
         }
     }
+    // How the references between templates were read, on every run: what the check assumed is not for a reader to guess
+    if let Some(templates) = &report.templates {
+        for line in template_lines(templates) {
+            println!("{line}");
+        }
+    }
     // A warning: printed on every run, under the heading of its kind, and failing nothing
     for (heading, details) in warnings(&report.warnings) {
         println!(
@@ -663,6 +675,22 @@ fn linked_lines(linked: &[LinkedTodo]) -> Vec<String> {
             .iter()
             .zip(linked)
             .map(|(place, todo)| format!("  {place:<width$}  {}", todo.reference)),
+    );
+    lines
+}
+
+/// What `check` prints of how the references between templates were read: one line that says the languages and
+/// versions, then a line for each unit that is not read as every one of them, and why. Nothing fails for them.
+fn template_lines(templates: &Templates) -> Vec<String> {
+    let mut lines = vec![format!(
+        "templates: references are read as the template languages {}",
+        templates.read_as
+    )];
+    lines.extend(
+        templates
+            .not_judged
+            .iter()
+            .map(|line| format!("templates: {line}")),
     );
     lines
 }

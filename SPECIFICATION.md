@@ -400,6 +400,42 @@ how, is the Python layout's (`layers/python.toml`), and the table above is the s
   `ui = "rendered"`, and is declared absent in the declaration `rotproof init` writes for the second: a template holds
   no state of its own, and a template cannot import it. The project takes it out of `absent` (and runs `rotproof
   create --yes`) to keep the state of a screen in a model that a `.py` file of `ui.pages` uses.
+- **A reference between templates is judged as an import is.** The tags `{% extends %}`, `{% include %}`,
+  `{% import %}` and `{% from %}` name another template with a string, and the string is a path from the directory
+  `ui/` of the unit, which is the directory the project's template loader is set to (Flask's `template_folder`, the
+  `directory` of `Jinja2Templates`, Django's `DIRS`): `{% extends "templates/base.html" %}` names
+  `ui/templates/base.html`. The reference lands in the level that holds that file, and a level may refer to what it
+  may import: itself and the levels below it, so `atoms` refer to `atoms` alone, and no template refers to a level
+  above its own. The finding names the file and the line as an import's does (`ui/atoms/a.html:2: includes
+  pages/x.html, in ui.pages; ...`), and an approval keys it by the file and the name as written
+  (`rotproof approve ui/atoms/a.html pages/x.html --reason ...`). A reference whose name is not a literal (a variable,
+  a concatenation, a list, a condition), that climbs out of the directory (`..`) or starts with `/`, or that names no
+  file under `ui/` (a template of an installed package, as `admin/base.html`, or a template of a directory the
+  loader also looks in) is not seen: Rotproof does not know the loader, so a name no file answers to is no finding.
+  What is inside `{# #}`, `{% raw %}`, `{% verbatim %}` and `{% comment %}` is no tag. Not read: a template whose
+  delimiters were changed from `{% %}`, Jinja's line statements, a reference by a template's other name, the
+  `{% load %}` of Django and what a template imports in Python.
+- **The syntax is the languages' own, so `rotproof check` says which it assumed, on every run.** The layout names the
+  template languages and the major versions the references are read as (now Jinja2 3, which has all four tags, and
+  Django 5 and 6, which have `extends` and `include`), and `rotproof check` prints, on every run for a project with
+  `ui = "rendered"`, after the approvals and the comments tied to an issue and before the warnings,
+  `templates: references are read as the template languages Jinja2 3 and Django 5/6`, which fails nothing. A template
+  does not say which language it is written in, so the tags are the union of those of the languages read. **When a unit's `pyproject.toml` asks for another version, the references are not read
+  as that language**, and the check prints a line for the unit saying so and why: `templates: references are not
+  read as Jinja2 3: pyproject.toml asks for jinja2>=4, which is not Jinja2 3` (the `import` and `from` tags are then
+  no tag), and `templates: references are not judged: ...` when it asks for another version of every language. The
+  unit's `pyproject.toml` is the manifest of the unit (in its `root`, or at the root of the project): the requirements
+  of `project.dependencies`, `project.optional-dependencies` and `dependency-groups`, as PEP 508 writes them (a name,
+  extras, a range of versions, a marker). A package it does not name is read, since a framework brings Jinja2 or Django
+  in; a name with no upper bound (`jinja2`, `jinja2>=3`) is read, and so is one whose range holds a version that begins
+  with a major version the layout names, in any requirement of the manifest (`jinja2>=3` anywhere is enough). A range
+  that holds none (`jinja2>=4`, `jinja2<3`) leaves the language out. A requirement that cannot be read as a version
+  (`jinja2===3.1`, `django @ https://...`), and a manifest that is no TOML, leave the language out and say so. The
+  lock file and the settings of the loader are not read: no tool's own format is. Changing a requirement so that the
+  check stops judging is no fix, and the guide says so.
+- **Each unit is read as itself:** a project that declares units has a `ui` in each unit that holds one, its loader's
+  directory is that unit's `ui/`, and the manifest is that unit's. A reference is looked up under its own unit's `ui/`
+  alone, as the loader of one unit does not look in another's, so a template does not refer to another unit's.
 
 ## Units
 
@@ -856,6 +892,12 @@ entry can be told, is one.
   unit is not read (its `paths` are not applied; only those at the project's root are), `imports` (`#name`) and a
   condition other than the three are not read, and an import that lands outside every unit's path (a package
   whose `exports` point to build output such as `./dist/client.js`) is not judged.
+- **The templates refer only to what the table allows** (Python, `ui = "rendered"`): every `{% extends %}`,
+  `{% include %}`, `{% import %}` and `{% from %}` of the tags the template languages read have, with a literal name,
+  in the templates of the levels of `ui`, judged by the level of the file it names under `ui/` as an import is. Which
+  languages and versions the tags are read as is printed on every run, and a unit whose `pyproject.toml` asks for
+  another version of a language is not read as it, or not judged at all, which is printed too (see "Views that are
+  templates", which also says what is not seen). A forbidden reference is approved as a forbidden import is.
 - **The layers import only what the table allows** (Rust): a crate is compiled only against the crates its
   `Cargo.toml` declares, so the declarations are read instead of `use`: every dependency in `[dependencies]` and
   `[build-dependencies]` (and `build_dependencies`), under `[target.<cfg>]` too, of the `Cargo.toml` files in the

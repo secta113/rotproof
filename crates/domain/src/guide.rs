@@ -20,6 +20,8 @@ const GUIDE_TEXT: &str = include_str!("../../../project/rotproof/AGENTS.md.in");
 const LAYERS_TEXT: &str = include_str!("../../../project/rotproof/layers.md.in");
 const UNITS_TEXT: &str = include_str!("../../../project/rotproof/units.md.in");
 const UI_TEXT: &str = include_str!("../../../project/rotproof/ui.md.in");
+/// The screens of a project whose views are templates, in place of [`UI_TEXT`]
+const UI_RENDERED_TEXT: &str = include_str!("../../../project/rotproof/ui-rendered.md.in");
 /// How the direction is read: the imports of a source file, or the dependencies of a crate
 const DIRECTION_IMPORTS: &str = include_str!("../../../project/rotproof/direction-imports.md.in");
 const DIRECTION_CARGO: &str = include_str!("../../../project/rotproof/direction-cargo.md.in");
@@ -203,12 +205,20 @@ fn not_layers(layout: &Layout) -> String {
 /// The rules of the screens, when the layout has `ui`: atomic design, and where a view may not go.
 fn ui(layout: &Layout) -> String {
     let has = |name: &String| !layout.leaves_out(name);
-    let mut ui = if !layout.leaves_out("ui") {
-        UI_TEXT
+    let mut ui = if layout.leaves_out("ui") {
+        String::new()
+    } else if let Some(templates) = &layout.templates {
+        let extensions: Vec<String> = templates
+            .extensions
+            .iter()
+            .map(|e| format!("`.{e}`"))
+            .collect();
+        UI_RENDERED_TEXT
+            .replace("{extensions}", &extensions.join(", "))
+            .replace("{read_as}", &crate::templates::read_as(templates))
     } else {
-        ""
-    }
-    .to_string();
+        UI_TEXT.to_string()
+    };
     let no_view = layout.no_view.as_ref().filter(|n| n.layers.iter().any(has));
     if let Some(no_view) = no_view {
         let names: Vec<String> = no_view.layers.iter().filter(|n| has(n)).cloned().collect();

@@ -341,7 +341,12 @@ It keeps two structures:
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
   of dependencies stays what it was meant to be. A project made of several parts that each hold the layers declares
-  them as units (see "Units").
+  them as units (see "Units"). A Python project whose views are server-side templates (Jinja, Django templates)
+  declares `--ui rendered`: the templates sit in the levels of `ui`, a route in `infrastructure.inbound` renders them,
+  and the references between them (`{% extends %}`, `{% include %}`, `{% import %}`, `{% from %}`) are judged like
+  imports, with the template languages and versions it reads them as printed on every run, and not judged where the
+  project's `pyproject.toml` asks for another version (see
+  [Views that are templates](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#views-that-are-templates)).
 - **The records:** how things are now, and why, as far as the code cannot tell it, in knowledge documents that
   follow the code they describe, so that `rotproof check` fails once the code changes under them (and alarms, for what
   matters only when it is seen); and a log of what each task left behind. Open work is kept in issues, not here.
