@@ -56,8 +56,9 @@ each command's output names the next step. A test follows that path from an empt
 
 Start a project with `rotproof init --stack <stack>` (`python`, `typescript`, `rust`, or `none` for a repository
 that keeps records only), and `--ui` for the stacks that offer a UI: `--ui atomic` for a project with screens, `--ui
-none` for one without (a command-line tool, a library, a server). Python and TypeScript need it named, as a project
-with screens and one without start from the same command; Rust offers `none` alone. It writes only the declaration,
+rendered` (Python only) for one whose views are templates the server renders, `--ui none` for one without screens (a
+command-line tool, a library, a server). Python and TypeScript need it named, as a project with screens and one
+without start from the same command; Rust offers `none` alone. It writes only the declaration,
 so you declare in `absent` the layers you do not want before anything is made. Then run `rotproof create`, which
 lists the layers it would make and writes nothing, and `rotproof create --yes` once `absent` lists every layer the
 project lacks. Run on a project that has a declaration, `rotproof init` upgrades the project's files instead (see
@@ -287,7 +288,7 @@ definitions are built into it, and the declaration is never shipped with it.
 ```toml
 stack = "python"         # python | typescript | rust | none
 areas = ["billing", "records"]  # the areas knowledge is grouped by, in this order (see The records)
-ui = "atomic"            # the layers of the screens: atomic | none (rust: none; none for a stack of none)
+ui = "atomic"            # the layers of the screens: atomic | rendered | none (rendered: python only; rust: none; none for a stack of none)
 absent = ["ui.templates"]  # layers or levels this project does not have
 unchecked = ["scripts"]  # paths outside the layers that Rotproof does not look into
 moving = ["legacy"]      # optional: paths of the project's own code that is not in a layer yet (see below)
@@ -344,8 +345,8 @@ What the layers are is written once, in `layers/table.toml`, on the onion archit
 The levels of a layer other than `ui` and `presentation` never import each other. `ui` is the view and
 `presentation` the state and behaviour of the screens apart from it, the Presentation Model (Fowler) held to the
 inward direction of the onion: a model calls the use cases through `protocol.inbound`, as an entry point does, and
-draws nothing. The two come with `ui = "atomic"`, and a project with `ui = "none"` has neither: `ui` is chosen as the
-stack is, not switched off in `absent`, since a screen needs both or neither. In TypeScript, `presentation` also holds
+draws nothing. The two come with `ui = "atomic"` (and with `ui = "rendered"`, below), and a project with `ui = "none"`
+has neither: `ui` is chosen as the stack is, not switched off in `absent`, since a screen needs both or neither. In TypeScript, `presentation` also holds
 no view: a `.tsx` or `.jsx` file there fails `rotproof check`, so the state and the hooks of a screen are `.ts` files
 and a component goes in `ui` or `composition` (a provider keeps its context and state hook in `presentation` and its
 thin component in `ui.pages`, or in `composition` for the whole program). The entry file is no layer, and may
@@ -355,7 +356,7 @@ Where they live is written once per stack:
 
 | Stack | A layer is | A level is | The entry file | Code Rotproof looks at |
 |---|---|---|---|---|
-| `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/` |
+| `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/`; with `ui = "rendered"`, template files too (below) |
 | `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
 | `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no UI yet: `ui = "none"`) | `src/main.rs` of the root package | every crate in `crates/`, and every `.rs` file in `src/` of the root package but the entry file |
 
@@ -379,6 +380,26 @@ case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 
 A project made of several parts that each hold the layers declares them as units, with `[[unit]]` tables (see
 "Units"); without them the whole project is one unit, which is what the rest of this file describes.
+
+### Views that are templates
+
+A Python project whose views are templates the server renders (Jinja, Django templates) declares `ui = "rendered"`.
+The value is named for the shape of its views, not for a framework, as `atomic` is: which templates are read, and
+how, is the Python layout's (`layers/python.toml`), and the table above is the same for it.
+
+- **A view is a template file in a level of `ui`**, which follows atomic design as for `ui = "atomic"` (a level refers
+  to the levels below it, and to its own). A file of the extensions `.html`, `.htm`, `.jinja`, `.jinja2` and `.j2` (in
+  any case) is code for the structure check, as a `.py` file is: one outside the levels of `ui`, or beside them in
+  `ui/`, fails as code outside the layers, so a file that is no template (a generated page, a report) is listed in
+  `unchecked`. A file of another extension (`.xml`, `.txt`) is not read, as a file that is not code is not. Templates
+  hold no comment the marker check reads: it reads `.py` files alone.
+- **A route function renders a template, and the table does not change.** The function, in `infrastructure.inbound`,
+  names the template with a string (`render_template("pages/home.html", ...)`), which is no import, so it imports
+  only `protocol.inbound`, as every entry point does, and `composition` registers it. A template draws the data the
+  route passes it, and which template a route names is not judged. `presentation` comes with `ui = "atomic"` as with
+  `ui = "rendered"`, and is declared absent in the declaration `rotproof init` writes for the second: a template holds
+  no state of its own, and a template cannot import it. The project takes it out of `absent` (and runs `rotproof
+  create --yes`) to keep the state of a screen in a model that a `.py` file of `ui.pages` uses.
 
 ## Units
 
@@ -780,7 +801,9 @@ entry can be told, is one.
   (`ui/__init__.py`). What the whole UI shares goes in a level: a part that knows no project concept, visible or not
   (a design value, one behaviour, a provider of a theme), is an atom, and what a screen holds and decides goes in
   `presentation.models`. A directory of a layer of the table before 0.4.0 (`handler`, `utils`) is named with where
-  its code goes now. In TypeScript, a `.tsx` or `.jsx` file in `presentation` fails, by its extension alone (case
+  its code goes now. In Python with `ui = "rendered"`, a template (`.html`, `.htm`, `.jinja`, `.jinja2`, `.j2`) is code
+  too, so one outside the levels of `ui` fails as code outside the layers (see "Views that are templates"). In
+  TypeScript, a `.tsx` or `.jsx` file in `presentation` fails, by its extension alone (case
   does not count): a view written with `createElement` in a `.ts` file passes, and so does a test outside `src/`,
   which Rotproof does not read; a test in `presentation` that needs a JSX `wrapper` writes it with `createElement`,
   or sits outside `src/`.

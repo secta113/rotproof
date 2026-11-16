@@ -39,6 +39,7 @@ pub mod settings;
 pub mod skill;
 pub mod structure;
 pub mod suppressions;
+pub mod templates;
 pub mod text;
 pub mod tree;
 pub mod units;

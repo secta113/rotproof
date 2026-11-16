@@ -41,9 +41,9 @@ pub struct Level {
 #[serde(deny_unknown_fields)]
 pub struct Layer {
     pub name: String,
-    /// The UI it belongs to: there only in a project that declares this UI. `None` for a layer of every project
+    /// The UIs it belongs to: there only in a project that declares one of them. Empty for a layer of every project
     #[serde(default)]
-    pub ui: Option<String>,
+    pub ui: Vec<String>,
     /// Layers, or levels of other layers as `<layer>.<level>`
     pub imports: Vec<String>,
     pub role: String,
@@ -108,6 +108,34 @@ pub struct NoView {
     pub extensions: Vec<String>,
     /// Where the view goes instead, said in the finding
     pub goes: String,
+}
+
+/// A template language whose references between templates a layout reads: named by its package and the major versions
+/// it is read as, which the check says on every run.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateLanguage {
+    /// As the check names it: `Jinja2`
+    pub name: String,
+    /// The package a project asks for in its manifest, as PEP 503 writes a name: `jinja2`
+    pub package: String,
+    /// The major versions it is read as
+    pub versions: Vec<u64>,
+    /// The tags of the language that refer to another template: each is one of [`crate::templates::TAGS`]
+    pub tags: Vec<String>,
+}
+
+/// The views of a UI that are template files, which the server renders: what a layout reads of them.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Templates {
+    /// The UI whose views they are: the layout has this only for a project that declares it
+    pub ui: String,
+    /// The extensions of a template file, in any case
+    pub extensions: Vec<String>,
+    /// The template languages the references between templates are read as
+    #[serde(rename = "language")]
+    pub languages: Vec<TemplateLanguage>,
 }
 
 /// A directory besides a layout's `scope` where code is looked for, as code outside the layers when no layer holds it.
@@ -182,6 +210,11 @@ pub struct Layout {
     /// extension
     #[serde(default)]
     pub no_view: Option<NoView>,
+    /// The template files of the UI the layout is for, when its views are templates: code like the code of the layout
+    /// where the structure is judged, and read for the references between them. `None` for every other UI, which
+    /// [`layout`] sets
+    #[serde(default)]
+    pub templates: Option<Templates>,
     /// The language Rotproof reads the code as
     pub language: Language,
     /// Files the stack's toolchain needs at the root, written once with the project's files (`project.rs`)
@@ -284,10 +317,13 @@ pub fn layout(stack: &str, ui: &str) -> Option<Layout> {
         return None;
     }
     layout.ui = ui.to_string();
+    if layout.templates.as_ref().is_some_and(|t| t.ui != ui) {
+        layout.templates = None;
+    }
     layout.without = table()
         .layers
         .iter()
-        .filter(|l| l.ui.as_ref().is_some_and(|u| u != ui))
+        .filter(|l| !l.ui.is_empty() && !l.ui.iter().any(|u| u == ui))
         .map(|l| l.name.clone())
         .collect();
     Some(layout)
@@ -534,12 +570,26 @@ impl Layout {
         named_by(&self.code, file_name)
     }
 
-    /// Whether a file name is code in the directory `dir`, one of `also_code`'s, or in any other this layout reads.
+    /// Whether a file name is code in the directory `dir`, one of `also_code`'s, or in any other this layout reads. A
+    /// template of the UI the layout is for is code here, so that one outside the levels of `ui` fails as code outside
+    /// the layers; it is no code for the readers of the language ([`Layout::is_code`])
     pub fn is_code_in(&self, dir: &str, file_name: &str) -> bool {
         match self.also_code.iter().find(|also| also.scope == dir) {
             Some(also) => named_by(&also.code, file_name),
-            None => self.is_code(file_name),
+            None => self.is_code(file_name) || self.is_template(file_name),
         }
+    }
+
+    /// Whether a file name is a template, by its extension in any case: only in a layout for the UI whose views they
+    /// are.
+    pub fn is_template(&self, file_name: &str) -> bool {
+        self.templates.as_ref().is_some_and(|templates| {
+            let name = file_name.to_ascii_lowercase();
+            templates
+                .extensions
+                .iter()
+                .any(|e| name.ends_with(&format!(".{}", e.to_ascii_lowercase())))
+        })
     }
 
     /// The text of an entry file `rotproof create` makes, with no leading blank line.
@@ -746,7 +796,7 @@ mod tests {
         // A UI a layer names is one a layout offers, and the reverse: a UI with no layer would change nothing, and a
         // layer of a UI no stack offers would never be made
         let named: std::collections::BTreeSet<&String> =
-            table.layers.iter().filter_map(|l| l.ui.as_ref()).collect();
+            table.layers.iter().flat_map(|l| &l.ui).collect();
         let offered: std::collections::BTreeSet<String> = STACKS
             .iter()
             .flat_map(|(stack, _)| stack_layout(stack).unwrap().uis)
@@ -772,6 +822,15 @@ mod tests {
                     table.layers.iter().any(|l| &l.name == name),
                     "{stack}: no layer {name}"
                 );
+            }
+            // The templates of a layout are those of the UI it is for, which it offers; and only a Python layout, whose
+            // `ui` levels are directories, holds them
+            if let Some(templates) = &layout.templates {
+                assert_eq!(
+                    templates.ui, layout.ui,
+                    "{stack}: the templates of another UI"
+                );
+                assert_eq!(layout.language, Language::Python, "{stack}: templates");
             }
             // The Python reader names a module after its `.py` file, and the marker check reads every code file of a
             // Python layout without asking
@@ -1113,6 +1172,27 @@ mod tests {
         assert!(rust.is_code_in("src", "pricing.rs") && rust.is_code_in("src", "PRICING.RS"));
         assert!(!rust.is_code_in("src", "Cargo.toml") && !rust.is_code_in("src", "data.json"));
         assert!(rust.is_code_in("crates", "Cargo.toml") && !rust.is_code_in("crates", "a.rs"));
+    }
+
+    #[test]
+    fn a_template_is_code_in_the_layout_for_the_ui_whose_views_they_are_and_nowhere_else() {
+        let rendered = layout("python", "rendered").unwrap();
+        assert!(rendered.uis.contains(&"rendered".to_string()));
+        assert!(rendered.is_template("home.html") && rendered.is_template("Home.J2"));
+        assert!(!rendered.is_template("a.py") && !rendered.is_template("html"));
+        // Code for the structure, which lists what sits outside the layers, and none for the readers of Python
+        assert!(rendered.is_code_in("", "home.html") && rendered.is_code_in("ui", "a.py"));
+        assert!(!rendered.is_code("home.html") && !rendered.has_comments("home.html"));
+        // The layers of the screens are the atomic ones: a rendered project has `presentation` as well, which it may
+        // declare absent
+        assert!(!rendered.leaves_out("ui") && !rendered.leaves_out("presentation.models"));
+        for ui in ["atomic", NO_UI] {
+            let other = layout("python", ui).unwrap();
+            assert!(other.templates.is_none() && !other.is_template("home.html"));
+            assert!(!other.is_code_in("", "home.html"), "{ui}");
+        }
+        assert!(layout("typescript", "atomic").unwrap().templates.is_none());
+        assert!(layout("typescript", "rendered").is_none());
     }
 
     #[test]

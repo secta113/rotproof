@@ -439,7 +439,7 @@ pub fn ui_in_tree(tree: &dyn Tree, stack: &str) -> String {
             table
                 .layers
                 .iter()
-                .filter(|l| l.ui.as_ref() == Some(ui))
+                .filter(|l| l.ui.contains(ui))
                 .any(|l| tree.found(&base.layer_path(&l.name)) == Some(true))
         })
         .unwrap_or_else(|| NO_UI.to_string())
