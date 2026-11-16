@@ -54,9 +54,10 @@ impl Unit {
         }
     }
 
-    /// The places of this unit, as `layout` makes them with its layers in the unit's `path`.
+    /// The places of this unit, as `layout` makes them with its layers in the unit's `path`, each lacking what the unit
+    /// declares absent ([`Layout::places_lacking`]).
     pub fn places(&self, layout: &Layout, table: &Table) -> Vec<Place> {
-        layout.places_in(table, &self.path, &self.tag())
+        layout.places_lacking(table, &self.path, &self.tag(), &self.absent)
     }
 
     /// The name Python imports this unit by and the directory it is looked up in: the last name of its `path` and the

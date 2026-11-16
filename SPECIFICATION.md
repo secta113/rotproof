@@ -327,6 +327,11 @@ guide and the project's files, and `rotproof check` checks only the records and 
 layers. It is a line in the declaration, not a flag, so the structure check is never switched off where the
 declaration still declares layers.
 
+What is declared absent is imported by no layer of the project (of the unit, once units are declared), though the
+table allows it: the row of a layer is read without it, in the direction check, in the finding, which says that the
+place is absent, and in the documentation `rotproof create` writes into each layer. Between units the row holds as
+it is, since an app reads the layers of a shared unit that it lacks itself (see "What a unit may import").
+
 A level is declared absent by its dotted name (`absent = ["ui.templates"]`). A layer holds only its levels, so one
 whose every level is in `absent` is not there either, and is declared absent as a layer: `absent = ["infrastructure"]`,
 not both of its levels, which fails the declaration (it would otherwise make a directory with nothing in it, and
@@ -435,7 +440,8 @@ The records and "The document of the units"), and is read again when a unit chan
 
 ### What a unit may import
 
-A unit imports the layers of its own unit as the table says. Only direct imports are judged, as everywhere. Between
+A unit imports the layers of its own unit as the table says, without those it declares absent. Only direct imports
+are judged, as everywhere. Between
 units, the rules are these, applied to an import from one unit's layer into another unit's, from the top:
 
 1. An import that lands in the directory of another unit outside its layers fails: what is read from it afterwards

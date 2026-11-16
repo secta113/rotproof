@@ -45,7 +45,7 @@ Check the layers and the records, and exit non-zero when one breaks the rules
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
 layers, and in TypeScript no .tsx or .jsx file in presentation, which holds no view; in each unit, when the \
 declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
-what the layer table allows or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that only \
+what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that only \
 infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \

@@ -232,6 +232,10 @@ pub struct Place {
     /// The layers, and levels of other layers, it may import besides itself, as the table lists them, without those
     /// this stack does not have
     pub imports: Vec<String>,
+    /// Those of `imports` and `below` its own unit declares absent (a level inside a layer declared absent too): within
+    /// its unit it may not import them, and its documentation and messages do not offer them. Across units the row of
+    /// the table holds as it is, since a unit reads the layers of a shared unit that it lacks itself
+    pub lacks: Vec<String>,
     /// For a level of an ordered layer, the levels below it, which it may import too: `ui.molecules` and `ui.atoms`
     /// for `ui.organisms`. Empty otherwise
     pub below: Vec<String>,
@@ -245,6 +249,15 @@ impl Place {
     /// Whether this is a layer, and not a level of one.
     pub fn is_layer(&self) -> bool {
         self.parent.is_none()
+    }
+
+    /// The place as its own unit has it: without what it [`lacks`](Place::lacks) among its `imports` and `below`.
+    pub fn in_its_unit(&self) -> Place {
+        let mut place = self.clone();
+        let lacks = std::mem::take(&mut place.lacks);
+        place.imports.retain(|name| !lacks.contains(name));
+        place.below.retain(|name| !lacks.contains(name));
+        place
     }
 
     /// Whether `other` is this very place: the same name, in the same unit.
@@ -344,11 +357,37 @@ impl Layout {
     /// [`Layout::places`] moved from the layout's `scope` to `base` and tagged with `unit`. With `base` the scope
     /// itself, it is the very same places.
     pub fn places_in(&self, table: &Table, base: &str, unit: &UnitTag) -> Vec<Place> {
+        self.places_lacking(table, base, unit, &[])
+    }
+
+    /// [`Layout::places_in`] for a unit that declares `absent` the places it names: each place [`lacks`](Place::lacks)
+    /// those it may import or has below it that `absent` names, or sits in a layer `absent` names, and the
+    /// documentation in its files says what it may import without them.
+    pub fn places_lacking(
+        &self,
+        table: &Table,
+        base: &str,
+        unit: &UnitTag,
+        absent: &[String],
+    ) -> Vec<Place> {
         let mut out = Vec::new();
         // A place imports only the layers this stack has, and their levels: a Rust crate cannot import `ui`
         let has = |name: &str| !self.leaves_out(name);
         let imports = |imports: &[String]| -> Vec<String> {
             imports.iter().filter(|n| has(n)).cloned().collect()
+        };
+        let lacks = |place: &Place| -> Vec<String> {
+            let gone = |name: &&String| {
+                let layer = name.split('.').next().unwrap_or(name);
+                absent.iter().any(|a| a == *name || a == layer)
+            };
+            place
+                .imports
+                .iter()
+                .chain(&place.below)
+                .filter(gone)
+                .cloned()
+                .collect()
         };
         for layer in table.layers.iter().filter(|l| has(&l.name)) {
             let files = self
@@ -361,10 +400,12 @@ impl Layout {
                 parent: None,
                 role: layer.role.clone(),
                 imports: imports(&layer.imports),
+                lacks: Vec::new(),
                 below: Vec::new(),
                 files: Vec::new(),
                 unit: unit.clone(),
             };
+            place.lacks = lacks(&place);
             let package = package_of(unit, &layer.name);
             place.files = render(
                 files,
@@ -372,7 +413,7 @@ impl Layout {
                 &layer.name,
                 &package,
                 &self.doc_prefix,
-                &doc(&place),
+                &doc(&place.in_its_unit()),
             );
             out.push(place);
             if layer.levels.is_empty() {
@@ -403,17 +444,19 @@ impl Layout {
                     parent: Some(layer.name.clone()),
                     role: level.role.clone(),
                     imports: imports(&level.imports),
+                    lacks: Vec::new(),
                     below,
                     files: Vec::new(),
                     unit: unit.clone(),
                 };
+                place.lacks = lacks(&place);
                 place.files = render(
                     &shape.files,
                     &place.path,
                     &level.name,
                     &package,
                     &self.doc_prefix,
-                    &doc(&place),
+                    &doc(&place.in_its_unit()),
                 );
                 out.push(place);
             }
@@ -442,6 +485,7 @@ impl Layout {
                 .filter(|n| !self.leaves_out(n))
                 .cloned()
                 .collect(),
+            lacks: Vec::new(),
             below: Vec::new(),
             files: Vec::new(),
             unit: unit.clone(),
@@ -934,6 +978,43 @@ mod tests {
             "May import the levels below it, and `presentation.models`, `presentation.display` and \
                      `protocol.inbound`"
         ));
+    }
+
+    #[test]
+    fn what_a_place_may_import_in_its_documentation_leaves_out_what_its_unit_declares_absent() {
+        let table = table();
+        let python = layout("python", "atomic").unwrap();
+        let doc = |absent: &[&str], name: &str| {
+            let absent: Vec<String> = absent.iter().map(|a| a.to_string()).collect();
+            let places = python.places_lacking(&table, &python.scope, &UnitTag::default(), &absent);
+            let place = places.into_iter().find(|p| p.name == name).unwrap();
+            place.files[0].1.clone()
+        };
+        assert!(
+            doc(&[], "ui.organisms")
+                .contains("May import the levels below it, and `presentation.display`.")
+        );
+        for absent in ["presentation", "presentation.display"] {
+            let text = doc(&[absent], "ui.organisms");
+            assert!(
+                text.contains("\nMay import the levels below it.\n"),
+                "{text}"
+            );
+        }
+        let pages = doc(&["presentation"], "ui.pages");
+        assert!(
+            pages.contains("\nMay import the levels below it, and `protocol.inbound`.\n"),
+            "{pages}"
+        );
+        // The documentation of the places the unit lacks is not judged: they are not made
+        let atoms = doc(
+            &["ui.molecules", "ui.atoms", "ui.templates"],
+            "ui.organisms",
+        );
+        assert!(
+            atoms.contains("\nMay import `presentation.display`.\n"),
+            "{atoms}"
+        );
     }
 
     #[test]

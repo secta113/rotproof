@@ -298,11 +298,13 @@ pub fn edge<'a>(
 /// What the rules say of an import from `from` that lands in `to`, with the words of `way` for rule 1.
 pub fn verdict(from: &Place, to: Landing, way: &Way) -> Verdict {
     if from.unit.name == to.unit_name() {
-        // The same unit: the table decides, as in a project with one unit. Its code outside its layers is not judged
+        // The same unit: the table decides, as in a project with one unit, without the places the unit declares
+        // absent. Its code outside its layers is not judged
+        let own = from.in_its_unit();
         return match to {
-            Landing::Place(to) if !allowed(from, to) => Verdict::Forbidden {
+            Landing::Place(to) if !allowed(&own, to) => Verdict::Forbidden {
                 described: described(from, to),
-                reason: what_it_may_import(from),
+                reason: format!("{}{}", what_it_may_import(&own), declared_absent(from, to)),
             },
             _ => Verdict::Allowed,
         };
@@ -557,6 +559,16 @@ fn described(from: &Place, to: &Place) -> String {
     format!("in {}", to.name)
 }
 
+/// What a finding adds when the row of the table allows the import and only the unit's `absent` forbids it: that the
+/// unit lacks the place, which `absent` names itself or by its layer. Empty otherwise.
+fn declared_absent(from: &Place, to: &Place) -> String {
+    if allowed(from, to) && from.lacks.iter().any(|lacked| covers(lacked, to)) {
+        format!(" ({} is absent from the unit)", to.name)
+    } else {
+        String::new()
+    }
+}
+
 /// What a place may import, for the message.
 fn what_it_may_import(place: &Place) -> String {
     let importable = importable(place);
@@ -717,6 +729,65 @@ mod tests {
         assert_eq!(say("ui.atoms"), "ui.atoms imports no other layer");
         assert_eq!(
             say("ui.organisms"),
+            "ui.organisms may import the levels below it, and `presentation.display`"
+        );
+    }
+
+    #[test]
+    fn within_a_unit_a_place_the_unit_declares_absent_is_neither_imported_nor_named() {
+        let layout = layout("python", "atomic").unwrap();
+        let place = |absent: &[&str], name: &str| {
+            let absent: Vec<String> = absent.iter().map(|a| a.to_string()).collect();
+            Unit::implicit(&layout, &absent)
+                .places(&layout, &table())
+                .into_iter()
+                .find(|p| p.name == name)
+                .unwrap()
+        };
+        let reason =
+            |from: &Place, to: &Place| match verdict(from, Landing::Place(to), &Way::default()) {
+                Verdict::Forbidden { reason, .. } => reason,
+                Verdict::Allowed => panic!("{} may import {}", from.name, to.name),
+            };
+        for absent in [&["presentation"][..], &["presentation.display"]] {
+            let organisms = place(absent, "ui.organisms");
+            // The row of the table allows it; the unit's absent does not, and the finding says which name
+            let display = place(absent, "presentation.display");
+            assert!(allowed(&organisms, &display));
+            assert_eq!(
+                reason(&organisms, &display),
+                "ui.organisms may import the levels below it (presentation.display is absent from the unit)"
+            );
+            assert_eq!(
+                reason(&organisms, &place(absent, "application")),
+                "ui.organisms may import the levels below it"
+            );
+            assert_eq!(
+                reason(&place(absent, "ui.pages"), &place(absent, "application")),
+                if absent == ["presentation"] {
+                    "ui.pages may import the levels below it, and `protocol.inbound`"
+                } else {
+                    "ui.pages may import the levels below it, and `presentation.models` and `protocol.inbound`"
+                }
+            );
+        }
+        // A level below that the unit declares absent is not imported either
+        let pages = place(&["ui.templates"], "ui.pages");
+        assert_eq!(
+            reason(&pages, &place(&["ui.templates"], "ui.templates")),
+            "ui.pages may import the levels below it, and `presentation.models`, `presentation.display` and \
+             `protocol.inbound` (ui.templates is absent from the unit)"
+        );
+        let organisms_there = place(&["ui.templates"], "ui.organisms");
+        assert!(
+            verdict(&pages, Landing::Place(&organisms_there), &Way::default()) == Verdict::Allowed
+        );
+        // Nothing absent: the row of the table, and what it allows is allowed
+        let organisms = place(&[], "ui.organisms");
+        let display = place(&[], "presentation.display");
+        assert!(verdict(&organisms, Landing::Place(&display), &Way::default()) == Verdict::Allowed);
+        assert_eq!(
+            reason(&organisms, &place(&[], "application")),
             "ui.organisms may import the levels below it, and `presentation.display`"
         );
     }
@@ -1199,7 +1270,7 @@ mod tests {
                             format!(
                                 "f.py:1: imports x, {}; {}",
                                 described(from, to),
-                                what_it_may_import(from)
+                                what_it_may_import(&from.in_its_unit())
                             )
                         );
                     }
