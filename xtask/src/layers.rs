@@ -70,6 +70,10 @@ impl Tree for WithDeclaration {
         self.disk.files(dir)
     }
 
+    fn ignored(&self, path: &str) -> bool {
+        self.disk.ignored(path)
+    }
+
     fn landed(&self, dir: &str, rel: &str) -> Option<String> {
         self.disk.landed(dir, rel)
     }

@@ -25,6 +25,13 @@ If LLM agents write the code of a repository, these are the things nobody has to
   stops the missing ones. In Python the code of a layer uses runtime dependencies
   only, and a test both; the distribution an import is of (`dotenv` is `python-dotenv`) and a dependency used without an
   import are said in the declaration, and the verdict is the same on every machine.
+- **A Python project is locked, and has one virtual environment.** The dependencies are in `pyproject.toml` (a
+  `requirements.txt` does not count) and a lock file is committed (`uv.lock`, `poetry.lock`, `pdm.lock` or
+  `pylock.toml`), so that no import is satisfied by a package that happens to be installed on one machine. A virtual
+  environment on disk is the `.venv` beside a lock file, which the `.gitignore` excludes: the directories of the
+  project are searched for others, ignored ones included, and `venv/` fails. `rotproof create` writes the `pyproject.toml`
+  with Rotproof pinned in its `dev` group, and the CI workflow of the tool of the project's lock file (uv's, until
+  there is one).
 - **What the code cannot say stays true.** The reasons behind the code are kept in knowledge documents that name the
   code they describe, each pinned to it by a hash. When that code changes, `rotproof check` fails until someone reads
   the document against it and pins it again.
@@ -74,9 +81,10 @@ cargo build --release   # the binary is target/release/rotproof (rotproof.exe on
 ## Tutorial: five minutes
 
 A new Python project, a layer broken on purpose, and a knowledge document that follows code. It needs `rotproof` on the
-`PATH` (a `pip install` in an activated virtual environment puts it there) and a text editor. The project need not be a
-Git repository, and no Python is run. The output shown is what Rotproof printed when this was written, with the lines
-left out marked `...`.
+`PATH` (a `pip install` in a virtual environment puts it there), [uv](https://docs.astral.sh/uv/) for the one step that
+locks the dependencies (Poetry and PDM lock as well), and a text editor. The project need not be a Git repository, and
+none of its code is run. The output shown is what Rotproof printed when this was written, with the lines left out
+marked `...`.
 
 ### 1. Make the project
 
@@ -113,9 +121,23 @@ next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md
 
 Each layer is a directory whose `__init__.py` says its role. `docs/` holds the records, and the rest is what an agent
 reads (`AGENTS.md` and `CLAUDE.md`, which point at `.rotproof/AGENTS.md`, the rules written for the stack) and a CI
-workflow that runs `rotproof check`. A new project passes its first check with nothing to write:
+workflow that runs `rotproof check`. A Python project is locked: its dependencies are in `pyproject.toml`, which
+`create` wrote with Rotproof pinned in the `dev` group of its `[dependency-groups]`, and a lock file is committed, which
+only a tool can make. Until then `rotproof check` fails:
 
 ```sh
+rotproof check
+```
+
+```text
+a Python project lists its dependencies in pyproject.toml, commits a lock file, and keeps its virtual environment in .venv beside it:
+  pyproject.toml has no lock file in the root or above it: commit one (uv.lock, poetry.lock, pdm.lock or pylock.toml), made by the tool from pyproject.toml, so that every machine installs the same packages (a lock file a .gitignore excludes is not committed)
+```
+
+Lock it, and the first check passes with nothing else to write:
+
+```sh
+uv lock
 rotproof check
 ```
 
@@ -277,8 +299,8 @@ wrote docs/log.md: the entry is under ## 2026-11-16
 
 ### Where to go from here
 
-Commit the project. The CI workflow it made runs `rotproof check` on every push, and `requirements-dev.txt` pins
-Rotproof to an exact version. What `rotproof check` checks, field by field, the commands and the layers of each stack
+Commit the project. The CI workflow it made runs `rotproof check` on every push, and the `dev` group of
+`pyproject.toml`, which the lock file locks, pins Rotproof to an exact version. What `rotproof check` checks, field by field, the commands and the layers of each stack
 are in the [specification](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md), and "Compatibility" says what an upgrade of Rotproof can change.
 
 ## Compatibility

@@ -1,0 +1,10 @@
+[project]
+name = "{package}"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = []
+
+# Rotproof is pinned with ==, so an upgrade, which can bring new rules, is a commit of its own. After changing the
+# version here, lock and install it with the tool of the project, run `rotproof init`, then `rotproof check`.
+[dependency-groups]
+dev = ["rotproof=={version}"]

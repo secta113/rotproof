@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rotproof:
+    runs-on: ubuntu-latest
+    # Without a limit, a job that hangs runs for GitHub's default of six hours
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # PDM comes from PyPI at the version it has today; write pdm==<version> to freeze it
+      - run: python -m pip install pdm
+      # --check fails when pdm.lock is not what pyproject.toml says. --no-self: the project is no package to install
+      - run: pdm install --check --no-self
+      - run: pdm run rotproof check

@@ -30,6 +30,10 @@ pub trait Tree {
     /// order the file system lists them in, so what a check finds file by file is printed in the same order on every
     /// machine. A check relies on this and does not sort again.
     fn files(&self, dir: &str) -> io::Result<Vec<String>>;
+    /// Whether the project's own `.gitignore` files exclude the file or directory at `path`, hidden or not: whether
+    /// `files` would leave it out if it left out no hidden file. `false` for a path that is not there. The same
+    /// `.gitignore` files as `files` reads, so the answer is the same on every machine that has the path.
+    fn ignored(&self, path: &str) -> bool;
     /// Where the path `rel`, named from the directory `dir`, lands as the operating system resolves it: from the root,
     /// or `None` when it lands nowhere or outside the root. On Windows, another case, dots and spaces at the end and
     /// short names land too; links are followed everywhere.

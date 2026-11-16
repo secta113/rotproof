@@ -48,8 +48,10 @@ records are in `.rotproof/AGENTS.md`.
 
 Upgrade in a commit of its own, so that what the new rules bring is read apart from the rest.
 
-1. Change the version where the project pins it (its `README.md` says where), and install it. Run `rotproof --version`:
-   a binary left on the `PATH` from before would check the project by the old rules.
+1. Change the version where the project pins it (its `README.md` says where), and install it. A Python project pins it in
+   `dev` of `[dependency-groups]` in `pyproject.toml`, and locks again with its tool (`uv lock`, `poetry lock`,
+   `pdm lock`) before it installs: a lock file made before still names the old version. Run `rotproof --version`: a
+   binary left on the `PATH` from before would check the project by the old rules.
 2. Run `rotproof init`. Until it has run, `rotproof check` fails. It applies what the new version brings to the files
    `rotproof create` wrote once, rewrites the files Rotproof generates, sets `files` in `.config/rotproof.toml` to the new
    version and never moves or rewrites a record. Read its output line by line:

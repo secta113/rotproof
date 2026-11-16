@@ -19,6 +19,7 @@ pub mod index;
 pub mod init;
 pub mod layers;
 pub mod links;
+pub mod locked;
 pub mod log;
 pub mod markers;
 pub mod project;

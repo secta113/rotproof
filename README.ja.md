@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 021cad42. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 87f6f617. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -30,6 +30,12 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
   `[dependencies]` の使われていないものを見ます）。Python では、層のコードが使えるのは実行時の依存だけで、テストは
   両方を使えます。import 名と配布名の対応（`dotenv` は `python-dotenv`）と、import せずに使う依存は宣言に書き、
   判定はどの環境でも同じです。
+- **Python のプロジェクトはロックされ、仮想環境は 1 つです。** 依存は `pyproject.toml` に書き（`requirements.txt` は
+  数えません）、ロックファイル（`uv.lock`、`poetry.lock`、`pdm.lock`、`pylock.toml`）をコミットします。たまたまある
+  マシンに入っているパッケージで import が通ることがなくなります。ディスク上の仮想環境は、ロックファイルの隣の `.venv`
+  だけで、`.gitignore` が除外していなければなりません。プロジェクトのディレクトリを、ignore されたものも含めて探し、
+  `venv/` などは失敗します。`rotproof create` は、`dev` グループに Rotproof を固定した `pyproject.toml` と、プロジェクトの
+  ロックファイルの道具に合わせた CI のワークフロー（まだ無いときは uv の形）を書きます。
 - **コードからは読み取れないことが、正しいまま残ります。** コードの背後にある理由は knowledge の文書に書き、文書は
   自分が説明するコードを名指して、ハッシュで固定します。そのコードが変わると、誰かが文書をコードに照らして読み、
   固定し直すまで `rotproof check` が失敗します。
@@ -80,9 +86,10 @@ cargo build --release   # バイナリは target/release/rotproof（Windows で�
 ## チュートリアル: 5 分
 
 新しい Python のプロジェクトを作り、わざと層を破り、knowledge の文書にコードを追わせます。`PATH` に `rotproof` が
-あること（有効にした仮想環境で `pip install` すれば入ります）と、テキストエディタが要ります。プロジェクトは Git の
-リポジトリでなくてもかまいません。Python は実行しません。出力は、これを書いたときに Rotproof が実際に出したもので、
-省いた行は `...` にしてあります。
+あること（仮想環境で `pip install` すれば入ります）と、依存をロックする 1 つの手順のための
+[uv](https://docs.astral.sh/uv/)（Poetry や PDM でもロックできます）と、テキストエディタが要ります。プロジェクトは
+Git のリポジトリでなくてもかまいません。プロジェクトのコードは実行しません。出力は、これを書いたときに Rotproof が
+実際に出したもので、省いた行は `...` にしてあります。
 
 ### 1. プロジェクトを作る
 
@@ -119,9 +126,23 @@ next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md
 
 層はそれぞれディレクトリで、`__init__.py` にその役割が書いてあります。`docs/` には記録が入ります。残りは、エージェントが
 読むもの（`AGENTS.md` と `CLAUDE.md`。どちらも、スタックに合わせて書かれた規則 `.rotproof/AGENTS.md` を指します）と、
-`rotproof check` を実行する CI のワークフローです。新しいプロジェクトは、何も書かなくても最初の検査に通ります。
+`rotproof check` を実行する CI のワークフローです。Python のプロジェクトはロックされます。依存は `pyproject.toml` に書き
+（`create` は、`[dependency-groups]` の `dev` に Rotproof を固定して書きました）、ロックファイルをコミットします。
+ロックファイルは道具にしか作れないので、それまで `rotproof check` は失敗します。
 
 ```sh
+rotproof check
+```
+
+```text
+a Python project lists its dependencies in pyproject.toml, commits a lock file, and keeps its virtual environment in .venv beside it:
+  pyproject.toml has no lock file in the root or above it: commit one (uv.lock, poetry.lock, pdm.lock or pylock.toml), made by the tool from pyproject.toml, so that every machine installs the same packages (a lock file a .gitignore excludes is not committed)
+```
+
+ロックすれば、ほかに何も書かなくても最初の検査に通ります。
+
+```sh
+uv lock
 rotproof check
 ```
 
@@ -284,7 +305,7 @@ wrote docs/log.md: the entry is under ## 2026-11-16
 ### ここから先
 
 プロジェクトをコミットしてください。作られた CI のワークフローは push のたびに `rotproof check` を実行し、
-`requirements-dev.txt` は Rotproof を厳密な版に固定しています。`rotproof check` が検査することの詳細、コマンド、
+`pyproject.toml` の `dev` グループ（ロックファイルがロックします）は Rotproof を厳密な版に固定しています。`rotproof check` が検査することの詳細、コマンド、
 スタックごとの層は[仕様](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md)（英語）にあります。
 Rotproof のアップグレードで何が変わりうるかは「互換性」に書いてあります。
 

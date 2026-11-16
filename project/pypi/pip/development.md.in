@@ -1,0 +1,9 @@
+[Rotproof](https://github.com/secta113/rotproof) keeps the layers and the records in `docs/`. It is pinned in `dev` of
+`[dependency-groups]` in `pyproject.toml`, which `{lock}` (PEP 751) locks, and CI (`.github/workflows/ci.yml`)
+installs the lock with pip and runs `rotproof check`. The virtual environment is `.venv`, the one Rotproof accepts.
+
+```sh
+python -m venv .venv
+./.venv/Scripts/python -m pip install -r {lock}   # on Linux: ./.venv/bin/python
+./.venv/Scripts/rotproof check                    # on Linux: ./.venv/bin/rotproof
+```

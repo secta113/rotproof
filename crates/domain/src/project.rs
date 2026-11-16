@@ -1,14 +1,16 @@
 //! The project's files Rotproof writes once ([`project_files`]): `AGENTS.md`, `CLAUDE.md`, `README.md`, `.gitignore`,
 //! `.gitattributes`, a GitHub Actions workflow that installs the pinned Rotproof and runs `rotproof check` (with
-//! `requirements-dev.txt` where the stack installs it from PyPI; for `typescript` the pin goes in `package.json`, the
-//! project's own file, which Rotproof does not write), and the files the stack's layout lists for its toolchain (the
-//! workspace's `Cargo.toml` for `rust`). `rotproof create` writes each once, when it does not exist, and never again:
-//! from then on it is the project's. Rotproof's guide, which it rewrites, is `guide.rs`.
+//! a `pyproject.toml` that pins it in `dev` of `[dependency-groups]` where the stack installs it from PyPI, and a
+//! workflow for the tool of the lock file the project has (uv's when it has none); for `typescript` the pin goes in
+//! `package.json`, the project's own file, which Rotproof does not write), and the files the stack's layout lists for
+//! its toolchain (the workspace's `Cargo.toml` for `rust`). `rotproof create` writes each once, when it does not exist,
+//! and never again: from then on it is the project's. Rotproof's guide, which it rewrites, is `guide.rs`.
 //!
 //! The texts are in `project/`, built into the binary. Each is named after the file it becomes, without a leading dot
 //! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
 
 use crate::declaration::{DECLARATION, Declared};
+use crate::locked::{LOCK_NAMES, Locked, Tool};
 
 const AGENTS_TEXT: &str = include_str!("../../../project/AGENTS.md.in");
 const CLAUDE_TEXT: &str = include_str!("../../../project/CLAUDE.md.in");
@@ -30,7 +32,8 @@ const GITIGNORE: [(&str, &str); 4] = [
 /// Where a project installs Rotproof from, which decides how `rotproof create` pins it
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Channel {
-    /// PyPI, pinned in `requirements-dev.txt`, which a Python project installs anyway
+    /// PyPI, pinned in `dev` of the `[dependency-groups]` of `pyproject.toml`, which the project's lock file locks and
+    /// its tool installs
     Pypi,
     /// The archive of the GitHub Release, pinned by its version in the workflow, which checks it against the
     /// release's `SHA256SUMS`. The releases are immutable, so the version fixes the binary; the binary cannot know the
@@ -47,9 +50,30 @@ const CHANNEL: [(&str, Channel); 4] = [
     ("rust", Channel::Release),
     ("none", Channel::Release),
 ];
-const PYPI_REQUIREMENTS: &str = include_str!("../../../project/pypi/requirements-dev.txt.in");
-const PYPI_WORKFLOW: &str = include_str!("../../../project/pypi/ci.yml.in");
-const PYPI_DEVELOPMENT: &str = include_str!("../../../project/pypi/development.md.in");
+const PYPI_PYPROJECT: &str = include_str!("../../../project/pypi/pyproject.toml.in");
+/// Tool -> its workflow and the part of the README on development
+const PYPI: [(Tool, &str, &str); 4] = [
+    (
+        Tool::Uv,
+        include_str!("../../../project/pypi/uv/ci.yml.in"),
+        include_str!("../../../project/pypi/uv/development.md.in"),
+    ),
+    (
+        Tool::Poetry,
+        include_str!("../../../project/pypi/poetry/ci.yml.in"),
+        include_str!("../../../project/pypi/poetry/development.md.in"),
+    ),
+    (
+        Tool::Pdm,
+        include_str!("../../../project/pypi/pdm/ci.yml.in"),
+        include_str!("../../../project/pypi/pdm/development.md.in"),
+    ),
+    (
+        Tool::Pip,
+        include_str!("../../../project/pypi/pip/ci.yml.in"),
+        include_str!("../../../project/pypi/pip/development.md.in"),
+    ),
+];
 const RELEASE_WORKFLOW: &str = include_str!("../../../project/release/ci.yml.in");
 const RELEASE_DEVELOPMENT: &str = include_str!("../../../project/release/development.md.in");
 const NPM_WORKFLOW: &str = include_str!("../../../project/npm/ci.yml.in");
@@ -65,21 +89,29 @@ fn channel(stack: &str) -> Channel {
 
 /// The project's files `rotproof create` writes once, for the project named `name` (its directory's name): path from
 /// the root -> text, and what was not written for the stack, and why. `crates` are the directories of the crates the
-/// project has, which the workspace of a Rust project lists as its members.
+/// project has, which the workspace of a Rust project lists as its members. `python` is what the tree of a Python
+/// project holds that decides what is written for it.
 pub fn project_files<'a>(
     declared: &'a Declared,
     name: &str,
     crates: &[String],
+    python: &PythonTree,
 ) -> (Vec<(&'a str, String)>, Option<String>) {
     let stack = declared.declaration.stack.as_str();
     let fill = |text: &str| {
         text.replace("{name}", name)
             .replace("{stack}", stack)
             .replace("{version}", env!("CARGO_PKG_VERSION"))
+            .replace("{lock}", &python.locked.file)
     };
     let channel = channel(stack);
+    let (workflow, python_development) = PYPI
+        .iter()
+        .find(|(tool, _, _)| *tool == python.locked.tool)
+        .map(|(_, workflow, development)| (*workflow, *development))
+        .expect("every tool has a workflow: a test reads every tool");
     let development = match channel {
-        Channel::Pypi => PYPI_DEVELOPMENT,
+        Channel::Pypi => python_development,
         Channel::Release => RELEASE_DEVELOPMENT,
         Channel::Npm => NPM_DEVELOPMENT,
     };
@@ -118,8 +150,12 @@ pub fn project_files<'a>(
     }
     match channel {
         Channel::Pypi => {
-            files.push(("requirements-dev.txt", fill(PYPI_REQUIREMENTS)));
-            files.push((".github/workflows/ci.yml", PYPI_WORKFLOW.to_string()));
+            files.push((
+                "pyproject.toml",
+                fill(&PYPI_PYPROJECT.replace("{package}", &distribution(name))),
+            ));
+            files.push((".github/workflows/ci.yml", fill(workflow)));
+            return (files, python.not_written());
         }
         Channel::Release => files.push((".github/workflows/ci.yml", fill(RELEASE_WORKFLOW))),
         Channel::Npm => {
@@ -135,6 +171,74 @@ pub fn project_files<'a>(
         }
     }
     (files, None)
+}
+
+/// What the tree of a Python project holds that decides what `rotproof create` writes: which lock file it has, and
+/// whether its `pyproject.toml` is there already without Rotproof in it (the project's own, which Rotproof writes no
+/// pin into).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PythonTree {
+    /// The lock file at the root and its tool, uv's when the root has none
+    pub locked: Locked,
+    /// Whether the root has a lock file at all
+    pub has_lock: bool,
+    /// Whether `pyproject.toml` is at the root and never names `rotproof`
+    pub unpinned: bool,
+}
+
+impl Default for PythonTree {
+    /// A tree with neither a manifest nor a lock file
+    fn default() -> Self {
+        PythonTree {
+            locked: Locked::of_names(&[]),
+            has_lock: false,
+            unpinned: false,
+        }
+    }
+}
+
+impl PythonTree {
+    /// What `rotproof create` leaves to the project: the pin in a `pyproject.toml` that was there before it, and the
+    /// lock file, which only a tool can make.
+    fn not_written(&self) -> Option<String> {
+        let mut left = Vec::new();
+        if self.unpinned {
+            left.push(format!(
+                "the pin in pyproject.toml, which is the project's: until `dev` of its [dependency-groups] pins \
+                 Rotproof (rotproof=={}), the CI workflow fails",
+                env!("CARGO_PKG_VERSION")
+            ));
+        }
+        if !self.has_lock {
+            left.push(format!(
+                "the lock file ({LOCK_NAMES}), which a tool makes from pyproject.toml (`uv lock`): until one is \
+                 committed, `rotproof check` fails"
+            ));
+        }
+        (!left.is_empty()).then(|| left.join("; and "))
+    }
+}
+
+/// The project's name as the name of a distribution (PEP 508), which takes letters, digits, `-`, `_` and `.`, and
+/// starts and ends with a letter or a digit: every other character becomes `-`, and the ends are trimmed; `app` when
+/// nothing is left.
+fn distribution(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let name = name.trim_matches(|c: char| !c.is_ascii_alphanumeric());
+    if name.is_empty() {
+        "app".to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 /// The members of a workspace, as the array holds them: each crate's directory on a line of its own, and nothing for a
@@ -342,10 +446,11 @@ mod tests {
                 units: Vec::new(),
             })
             .unwrap();
-            let (files, not_written) = project_files(&declared, "x", &[]);
-            // Only the pin npm keeps in package.json, the project's own file, is left to the project
+            let (files, not_written) = project_files(&declared, "x", &[], &PythonTree::default());
+            // Only the pin npm keeps in package.json, the project's own file, and the lock file a Python project's
+            // tool makes are left to the project
             assert_eq!(
-                channel(stack) == Channel::Npm,
+                matches!(channel(stack), Channel::Npm | Channel::Pypi),
                 not_written.is_some(),
                 "{stack}"
             );
@@ -368,7 +473,7 @@ mod tests {
         ];
         let workspace = |declaration: &str| {
             let declared = Declared::new(parse_declaration(declaration).unwrap()).unwrap();
-            let (files, _) = project_files(&declared, "my-app", &crates);
+            let (files, _) = project_files(&declared, "my-app", &crates, &PythonTree::default());
             files
                 .into_iter()
                 .map(|(path, text)| (path.to_string(), text))
@@ -593,5 +698,109 @@ ui = \"none\"
                 .all(|line| line.starts_with("AGENTS.md has no row in its map for "))
         );
         assert!(found[LISTED].starts_with("and "), "{found:?}");
+    }
+
+    /// The files of a Python project made as `name` over a root that holds `names`, with a `pyproject.toml` that does
+    /// not pin Rotproof when `unpinned`.
+    fn python_files(
+        name: &str,
+        names: &[&str],
+        unpinned: bool,
+    ) -> (Vec<(String, String)>, Option<String>) {
+        let declared = Declared::new(
+            crate::declaration::parse_declaration(
+                "stack = \"python\"\nareas = []\nui = \"none\"\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let owned: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        let python = PythonTree {
+            locked: Locked::of_names(&owned),
+            has_lock: names.iter().any(|name| crate::locked::is_lock(name)),
+            unpinned,
+        };
+        let (files, not_written) = project_files(&declared, name, &[], &python);
+        (
+            files
+                .into_iter()
+                .map(|(path, text)| (path.to_string(), text))
+                .collect(),
+            not_written,
+        )
+    }
+
+    #[test]
+    fn a_python_project_pins_rotproof_in_its_manifest_and_its_workflow_installs_the_lock_of_its_tool()
+     {
+        let text = |files: &[(String, String)], path: &str| {
+            files
+                .iter()
+                .find(|(file, _)| file == path)
+                .map(|(_, text)| text.clone())
+        };
+        let version = env!("CARGO_PKG_VERSION");
+        let (files, _) = python_files("my app", &[], false);
+        // No requirements file: the pin is in the dev group of the manifest, which names the project as PEP 508 does
+        assert_eq!(text(&files, "requirements-dev.txt"), None);
+        let manifest = text(&files, "pyproject.toml").unwrap();
+        assert!(manifest.contains("name = \"my-app\""), "{manifest}");
+        assert!(
+            manifest.contains(&format!(
+                "[dependency-groups]\ndev = [\"rotproof=={version}\"]"
+            )),
+            "{manifest}"
+        );
+        let ignore = text(&files, ".gitignore").unwrap();
+        assert!(ignore.lines().any(|line| line == ".venv/"), "{ignore}");
+        // The workflow is written for the tool of the lock file that is there, uv's when none is
+        for (names, install) in [
+            (&[][..], "uv sync --locked"),
+            (&["uv.lock"][..], "uv sync --locked"),
+            (&["poetry.lock"][..], "poetry install"),
+            (&["pdm.lock"][..], "pdm install --check"),
+            (&["pylock.dev.toml"][..], "pip install -r pylock.dev.toml"),
+        ] {
+            let (files, _) = python_files("x", names, false);
+            let workflow = text(&files, ".github/workflows/ci.yml").unwrap();
+            assert!(workflow.contains(install), "{names:?}: {workflow}");
+            assert!(workflow.contains("rotproof check"), "{names:?}");
+            assert!(!workflow.contains("requirements-dev.txt"), "{names:?}");
+            assert!(!workflow.contains('{'), "{names:?}: {workflow}");
+            let readme = text(&files, "README.md").unwrap();
+            assert!(
+                !readme.contains("{lock}") && !readme.contains("{version}"),
+                "{readme}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_python_project_is_told_what_rotproof_leaves_to_it_only_while_it_is_left() {
+        let (_, none) = python_files("x", &[], false);
+        let none = none.unwrap();
+        assert!(
+            none.contains("the lock file (uv.lock, poetry.lock") && !none.contains("the pin"),
+            "{none}"
+        );
+        // A manifest of the project's own that does not pin Rotproof, with a lock file
+        let (_, pin) = python_files("x", &["uv.lock"], true);
+        let pin = pin.unwrap();
+        assert!(
+            pin.starts_with("the pin in pyproject.toml") && !pin.contains("lock file"),
+            "{pin}"
+        );
+        // Both, and neither
+        let (_, both) = python_files("x", &[], true);
+        assert!(both.unwrap().contains("; and the lock file"));
+        assert_eq!(python_files("x", &["pdm.lock"], false).1, None);
+    }
+
+    #[test]
+    fn the_name_of_a_distribution_is_made_of_what_a_name_may_hold() {
+        assert_eq!(distribution("my app"), "my-app");
+        assert_eq!(distribution("shop_2.0"), "shop_2.0");
+        assert_eq!(distribution("-x-"), "x");
+        assert_eq!(distribution("日本"), "app");
     }
 }

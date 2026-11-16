@@ -1,0 +1,8 @@
+[Rotproof](https://github.com/secta113/rotproof) keeps the layers and the records in `docs/`. It is pinned in `dev` of
+`[dependency-groups]` in `pyproject.toml`, which `uv.lock` locks, and CI (`.github/workflows/ci.yml`) installs the lock
+with `uv sync --locked` and runs `rotproof check`.
+
+```sh
+uv sync            # makes .venv, the one virtual environment of the project, from uv.lock
+uv run rotproof check
+```

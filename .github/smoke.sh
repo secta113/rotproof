@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Runs the Rotproof on PATH as a user runs it: ci.yml and release.yml call it after installing a wheel on each
-# platform, and release.yml in the oldest Linux the Linux wheel's tag claims too. A fresh project passes, the same
-# project fails with exit 1 (a crash exits otherwise) on a forbidden import and on a day in the log that has not come,
-# and passes again once both are taken out
+# platform, and release.yml in the oldest Linux the Linux wheel's tag claims too. A fresh project fails until it has a
+# lock file, which only a tool can make, then passes; the same project fails with exit 1 (a crash exits otherwise) on a
+# forbidden import and on a day in the log that has not come, and passes again once both are taken out
 set -euo pipefail
 
 rotproof --version
@@ -20,8 +20,12 @@ expect() {
   fi
 }
 
-# create leaves nothing for a person to write
-expect 0 "on the fresh project"
+# create leaves one thing for a person: the lock file of the pyproject.toml it wrote, which `uv lock` makes. The check
+# reads that one is committed, not what it holds, so an empty file stands for it here (the release being tested is not
+# on PyPI yet, so nothing could be locked)
+expect 1 "on the fresh project, which has no lock file"
+: > "$project/uv.lock"
+expect 0 "on the fresh project, locked"
 
 echo "import infrastructure" > "$project/domain/rules.py"
 expect 1 "on a forbidden import"
@@ -33,4 +37,4 @@ expect 1 "on a day in the log that has not come"
 printf '%s\n' "$log" > "$project/docs/log.md"
 
 expect 0 "once both were taken out"
-echo "the fresh project passed, a forbidden import and a day to come failed, and it passed again"
+echo "the fresh project failed without a lock file and passed with one, a forbidden import and a day to come failed, and it passed again"

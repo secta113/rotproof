@@ -19,6 +19,7 @@ pub mod guide;
 pub mod hook;
 pub mod layers;
 pub mod links;
+pub mod locked;
 pub mod log;
 pub mod markdown;
 pub mod markers;

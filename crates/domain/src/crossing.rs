@@ -53,6 +53,26 @@ pub const UI_SPLIT: &str = "ui imports neither application nor domain any more: 
                             domain values that organisms and templates show become plain values in \
                             presentation.display";
 
+/// The version from which a Python project is locked: its dependencies are in `pyproject.toml`, a lock file is
+/// committed, and Rotproof is pinned in the `dev` group of `[dependency-groups]` instead of `requirements-dev.txt`.
+/// Crossing it, `rotproof init` says what the project does, and edits none of its files: which tool locks the project
+/// is the project's to choose.
+pub const LOCKED: &str = "2.0.0-rc.2";
+
+/// What crossing [`LOCKED`] asks of a Python project, in the order to do it.
+pub const LOCKED_MOVES: &str = "a Python project lists its dependencies in pyproject.toml and commits a lock file \
+                                (uv.lock, poetry.lock, pdm.lock or pylock.toml), which `rotproof check` fails \
+                                without: list them in pyproject.toml, lock them with the tool of the project, and keep \
+                                the virtual environment in .venv, the one the tools make, which the .gitignore \
+                                excludes (delete venv/ and any other)";
+
+/// What crossing [`LOCKED`] asks of a project whose `requirements-dev.txt` pins Rotproof, and whose CI installs it.
+pub const LOCKED_REQUIREMENTS: &str = "Rotproof is pinned in dev of [dependency-groups] in pyproject.toml now, and \
+                                       requirements-dev.txt, like any requirements file, is no declaration: move \
+                                       the pin there, take the file out, and change the install step of \
+                                       .github/workflows/ci.yml to the lock (a new project's README says it for each \
+                                       tool, as `rotproof create` writes it)";
+
 /// Whether an upgrade from `files` to `running` crosses the version `at`.
 pub fn crosses(at: &str, files: &str, running: &str) -> bool {
     let at = version(at);
