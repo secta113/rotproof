@@ -44,7 +44,7 @@ use crate::units::Unit;
 pub struct Seen {
     /// Each path [`named`] gives: `Ok` when an entry has that exact name, otherwise what to say
     pub named: BTreeMap<String, Result<(), String>>,
-    /// The code files (by the layout's [`Layout::is_code`]) in each directory [`listed`] gives, from the root
+    /// The code files (by the layout's [`Layout::is_code_in`]) in each directory [`listed`] gives, from the root
     pub code: BTreeMap<String, Vec<String>>,
     /// Every manifest (by the layout's [`Layout::is_manifest`]) in the tree, from the root: read only when the project
     /// declares units

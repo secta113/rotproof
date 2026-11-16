@@ -301,11 +301,11 @@ fn write_project(
     Ok(())
 }
 
-/// there gets the crates of the layers and the entry packages this run made among its members, and loses a glob that
-/// would match a unit's directory, which has no `Cargo.toml` (`domain::members`). It is said, in `made.changed`. A
-/// workspace whose members already match every crate made, as the glob an older Rotproof wrote does in a project with
-/// no unit, is left as it is.
-/// is.
+/// In a Rust project, the workspace in the `Cargo.toml` at the root, when the project has one and this run did not
+/// write it, gets the crates of the layers and the entry packages this run made among its members, and loses a glob
+/// that would match a unit's directory, which has no `Cargo.toml` (`domain::members`). It is said, in `made.changed`.
+/// A workspace whose members already match every crate made, as the glob an older Rotproof wrote does in a project
+/// with no unit, is left as it is.
 fn write_members(
     tree: &dyn Tree,
     out: &dyn Writer,
