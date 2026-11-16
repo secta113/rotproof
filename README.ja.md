@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 610e0749. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 6af7bb04. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -173,7 +173,19 @@ def convert(amount: float, rate: float) -> float:
 areas = ["pricing"]
 ```
 
-`docs/knowledge/rates.md` を作ります。
+`rotproof new` で `docs/knowledge/rates.md` を始めます。書き間違えやすい frontmatter を書き、その下には何も書きません。
+
+```sh
+rotproof new rates
+```
+
+```text
+wrote docs/knowledge/rates.md (area: pricing)
+```
+
+続けて、本文を書くために尋ねることを表示します。なぜそうなっているか、何を考えてやめたか、本来どう動くべきか、コードの外で
+知っておかなければならないことは何か、です。`description` は空のままなので、書くまで `rotproof check` は失敗します。
+description と本文を書き、title を変えます。
 
 ```markdown
 ---
@@ -249,6 +261,19 @@ wrote docs/knowledge/rates.md
 ```
 
 `rotproof check` は通ります。コードを変えたコミットには、読み直した文書が一緒に入ります。
+
+タスクが終わったら、`rotproof log` がその記録を `docs/log.md` に足します。今日の日付を時計から読み、その日の見出しの
+いちばん上に書きます。見出しが無ければ作ります。
+
+```sh
+rotproof log --title "Round the converted price" --issue acme/shop#12 --problem None \n  --lesson "The rate is passed in, so a test of convert needs no feed"
+```
+
+```text
+wrote docs/log.md: the entry is under ## 2026-11-16
+```
+
+`--problem` と `--lesson` はどちらも必須で、書くことが無いときは `None` と書きます。どちらも繰り返すと一覧になります。
 
 ### ここから先
 
@@ -378,7 +403,9 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
   体裁（インデントは空白 2 つ）で書き直します。行末と byte order mark は保ちます。これらは人が書いたものを変えますが、
   どれもそのために実行するコマンドの中でのことです。Rotproof は記録を動かしたり書き換えたりしません。1.0 からは
   作業の記録を読まず、古いプロジェクトの記録は、あった場所にそのまま残ります。knowledge の文書をコードに照らして
-  読み直したら、`rotproof follows`（キーを名指す）が、その `follows` にハッシュを書きます。読み直すのは人かエージェントで、固定はそれを記録するだけです。`rotproof approve --prune` は、
+  読み直したら、`rotproof follows`（キーを名指す）が、その `follows` にハッシュを書きます。読み直すのは人かエージェントで、固定はそれを記録するだけです。`rotproof new` は、書き間違えやすい frontmatter と、
+  check が失敗する空の description だけを書いて文書を始め、本文は書きません。`rotproof log` は、今日の日付を時計から読み、
+  その日の見出しの下に記録を足します。`rotproof approve --prune` は、
   どの禁じられた import にも合わない承認を取り除きます。`rotproof check` はそういう承認があると失敗します。
   取り除くだけなので、前に落ちていたものが通ることはありません。Rotproof はコードを動かしません。層の表が変わるとき
   （0.4.0、1.0.0-rc.3）、`rotproof init` は各層のコードの行き先を言い、動かすのは人です。

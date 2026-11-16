@@ -5945,3 +5945,516 @@ fn an_npm_workspaces_monorepo_is_judged_through_the_names_of_its_packages() {
         "{said}"
     );
 }
+
+fn error_of(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// A records-only repository with a file of code to follow, whose index and rules are written.
+fn repo_with_code() -> tempfile::TempDir {
+    let root = declared("stack = \"none\"\nareas = [\"operations\"]\n");
+    let arg = root_arg(root.path());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    write_file(
+        root.path(),
+        "domain/model.py",
+        "def play():\n    return 1\n",
+    );
+    root
+}
+
+/// The text of the knowledge document `slug`.
+fn started_text(root: &Path, slug: &str) -> String {
+    fs::read_to_string(root.join(format!("docs/knowledge/{slug}.md"))).unwrap()
+}
+
+#[test]
+fn new_starts_a_document_that_fails_the_check_until_it_is_written() {
+    let root = repo_with_code();
+    let arg = root_arg(root.path());
+    let out = run(&["--root", &arg, "new", "rates-are-cached"]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let said = stdout(&out);
+    assert!(
+        said.starts_with("wrote docs/knowledge/rates-are-cached.md (area: operations)\n"),
+        "{said}"
+    );
+    // The questions to ask are the command's output: where an agent reads what to do next
+    for question in [
+        "Why is it so, and not another way?",
+        "What was considered and dropped, and why?",
+        "How should it behave, where the code says only how it does?",
+        "What outside the code does one need to know",
+    ] {
+        assert!(said.contains(question), "{question}\n{said}");
+    }
+    assert!(said.contains("next: write the description"), "{said}");
+    let text = started_text(root.path(), "rates-are-cached");
+    assert_eq!(
+        text,
+        "---\ntype: Knowledge\ntitle: Rates are cached\ndescription: \"\"\ntags: [operations]\nstatus: stable\n---\n"
+    );
+    // A document half done cannot pass: the description is empty
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("rates-are-cached.md: description: empty"),
+        "{}",
+        stdout(&out)
+    );
+    // Written, indexed, and it passes
+    fs::write(
+        root.path().join("docs/knowledge/rates-are-cached.md"),
+        text.replace(
+            "description: \"\"",
+            "description: Why the rates are cached.",
+        ) + "\n# Why\n\nThe provider limits calls.\n",
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // The slug never changes and nothing is written over: a second run is refused, and the document is as it was
+    let before = tree(root.path());
+    let out = run(&["--root", &arg, "new", "rates-are-cached"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        error_of(&out).contains("is there already"),
+        "{}",
+        error_of(&out)
+    );
+    assert_eq!(tree(root.path()), before);
+}
+
+#[test]
+fn new_pins_what_the_document_follows_as_follows_does() {
+    let root = repo_with_code();
+    let arg = root_arg(root.path());
+    let out = run(&[
+        "--root",
+        &arg,
+        "new",
+        "model",
+        "--follows",
+        "domain/model.py::play",
+        "--follows",
+        "domain/",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let said = stdout(&out);
+    assert!(said.contains("  follows domain/model.py::play: "), "{said}");
+    assert!(said.contains("  follows domain/: "), "{said}");
+    let text = started_text(root.path(), "model");
+    assert!(
+        text.contains("follows:\n  domain/model.py::play: \""),
+        "{text}"
+    );
+    // Pinned, and still not done: the description is what the check waits for
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("model.md: description: empty"),
+        "{}",
+        stdout(&out)
+    );
+    fs::write(
+        root.path().join("docs/knowledge/model.md"),
+        text.replace("description: \"\"", "description: How a song plays."),
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // The pin is the one `rotproof follows` writes: pinning again changes nothing
+    let out = run(&[
+        "--root",
+        &arg,
+        "follows",
+        "knowledge/model.md",
+        "domain/model.py::play",
+        "domain/",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    assert!(stdout(&out).contains("nothing written"), "{}", stdout(&out));
+    // And it is a pin: the code changes, the check says so
+    write_file(
+        root.path(),
+        "domain/model.py",
+        "def play():\n    return 2\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("knowledge/model.md follows domain/model.py::play, which changed"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn new_writes_an_alarm_whose_two_headings_and_description_are_left_to_write() {
+    let root = repo_with_code();
+    let arg = root_arg(root.path());
+    let out = run(&[
+        "--root",
+        &arg,
+        "new",
+        "pypi-403",
+        "--alarm",
+        "--match",
+        "403",
+        "--match",
+        "trusted publisher",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let said = stdout(&out);
+    assert!(said.contains("# When") && said.contains("# Do"), "{said}");
+    assert!(!said.contains("Why is it so"), "{said}");
+    let text = started_text(root.path(), "pypi-403");
+    assert!(
+        text.ends_with("match: [\"403\", \"trusted publisher\"]\n---\n\n# When\n\n# Do\n"),
+        "{text}"
+    );
+    // The description first, then each heading: the check names what is missing
+    fs::write(
+        root.path().join("docs/knowledge/pypi-403.md"),
+        text.replace("description: \"\"", "description: What to do on a 403."),
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("an alarm has both # When"),
+        "{}",
+        stdout(&out)
+    );
+    fs::write(
+        root.path().join("docs/knowledge/pypi-403.md"),
+        text.replace("description: \"\"", "description: What to do on a 403.")
+            .replace("# When\n", "# When\n\nThe release job prints 403.\n")
+            .replace("# Do\n", "# Do\n\nOpen an issue.\n"),
+    )
+    .unwrap();
+    assert!(run(&["--root", &arg, "index"]).status.success());
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let index = fs::read_to_string(root.path().join("docs/knowledge/index.md")).unwrap();
+    assert!(
+        index.contains("403") && index.contains("trusted publisher"),
+        "{index}"
+    );
+}
+
+#[test]
+fn new_refuses_what_it_cannot_write_correctly_and_writes_nothing() {
+    let root = declared("stack = \"none\"\nareas = [\"ops\", \"billing\"]\n");
+    let arg = root_arg(root.path());
+    // Before docs/ is made
+    let out = run(&["--root", &arg, "new", "a", "--area", "ops"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        error_of(&out).contains("docs/knowledge/ is not there"),
+        "{}",
+        error_of(&out)
+    );
+    assert!(!root.path().join("docs").exists());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    write_file(
+        root.path(),
+        "domain/model.py",
+        "def play():\n    return 1\n",
+    );
+    let before_new = tree(root.path());
+    for (args, says) in [
+        (vec!["new", "a"], "--area"),
+        (vec!["new", "a", "--area", "sales"], "\"sales\""),
+        (vec!["new", "Rates", "--area", "ops"], "not a slug"),
+        (vec!["new", "a.md", "--area", "ops"], "without .md"),
+        (vec!["new", "index", "--area", "ops"], "keeps for a file"),
+        (vec!["new", "rules", "--area", "ops"], "keeps for a file"),
+        (
+            vec!["new", "a", "--area", "ops", "--follows", "domain/gone.py"],
+            "domain/gone.py: not there",
+        ),
+        (
+            vec![
+                "new",
+                "a",
+                "--area",
+                "ops",
+                "--follows",
+                "domain/model.py::",
+            ],
+            "domain/model.py::",
+        ),
+        (
+            vec!["new", "a", "--area", "ops", "--alarm", "--match", "a\nb"],
+            "control character",
+        ),
+        (
+            vec![
+                "new", "a", "--area", "ops", "--alarm", "--match", "x", "--match", "x",
+            ],
+            "named twice",
+        ),
+        (
+            vec!["new", "a", "--area", "ops", "--match", "403"],
+            "--alarm",
+        ),
+    ] {
+        let mut all = vec!["--root", arg.as_str()];
+        all.extend(args.iter().copied());
+        let out = run(&all);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(
+            error_of(&out).contains(says),
+            "{args:?}: {}",
+            error_of(&out)
+        );
+        assert_eq!(tree(root.path()), before_new, "{args:?}");
+    }
+    // Two areas, one named: tagged with it
+    let out = run(&["--root", &arg, "new", "a", "--area", "billing"]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    assert!(started_text(root.path(), "a").contains("tags: [billing]\n"));
+}
+
+/// Today as the machine's clock gives it, which is what `rotproof log` reads: the day in the machine's own zone.
+fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+#[test]
+fn log_adds_an_entry_under_todays_heading_that_the_check_accepts() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    // A log as it is when the project starts, with the days of earlier work under it
+    fs::write(
+        root.path().join("docs/log.md"),
+        "# Log\n\n## 2026-10-04\n\n* **Earlier**\n  * **Problems**: None\n  * **Lessons**: L\n",
+    )
+    .unwrap();
+    let day = today();
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "Start the log",
+        "--issue",
+        "acme/app#4",
+        "--problem",
+        "None",
+        "--lesson",
+        "Write the entry with the command",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    assert!(
+        stdout(&out).contains(&format!("wrote docs/log.md: the entry is under ## {day}")),
+        "{}",
+        stdout(&out)
+    );
+    let log = fs::read_to_string(root.path().join("docs/log.md")).unwrap();
+    assert_eq!(
+        log,
+        format!(
+            "# Log\n\n## {day}\n\n* **Start the log**\n  * **Issue**: acme/app#4\n  * **Problems**: None\n  * \
+             **Lessons**: Write the entry with the command\n\n## 2026-10-04\n\n* **Earlier**\n  * **Problems**: None\n  \
+             * **Lessons**: L\n"
+        )
+    );
+    // A second entry of the day goes above the first, under the same heading, and lists are lists
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "A second task",
+        "--problem",
+        "The first thing\nthat went wrong",
+        "--problem",
+        "The second",
+        "--lesson",
+        "One lesson",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let log = fs::read_to_string(root.path().join("docs/log.md")).unwrap();
+    assert_eq!(log.matches(&format!("## {day}")).count(), 1, "{log}");
+    assert!(
+        log.contains(&format!(
+            "## {day}\n\n* **A second task**\n  * **Problems**:\n    * The first thing that went wrong\n    * The \
+             second\n  * **Lessons**: One lesson\n\n* **Start the log**\n"
+        )),
+        "{log}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn log_keeps_the_line_endings_and_the_byte_order_mark_of_the_log() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    fs::write(
+        root.path().join("docs/log.md"),
+        "\u{feff}# Log\r\n\r\n## 2026-10-04\r\n\r\n* **Earlier**\r\n",
+    )
+    .unwrap();
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "T",
+        "--problem",
+        "None",
+        "--lesson",
+        "L",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let raw = fs::read(root.path().join("docs/log.md")).unwrap();
+    let text = String::from_utf8(raw).unwrap();
+    assert!(text.starts_with('\u{feff}'), "{text:?}");
+    assert!(!text.replace("\r\n", "").contains('\n'), "{text:?}");
+    assert!(
+        text.contains(&format!("## {}\r\n\r\n* **T**\r\n", today())),
+        "{text:?}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn log_adds_to_the_heading_of_today_when_the_log_has_one() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    let day = today();
+    fs::write(
+        root.path().join("docs/log.md"),
+        format!("# Log\n\n## {day}\n\n* **Earlier today**\n"),
+    )
+    .unwrap();
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "T",
+        "--problem",
+        "None",
+        "--lesson",
+        "L",
+    ]);
+    assert!(out.status.success(), "{}", error_of(&out));
+    let log = fs::read_to_string(root.path().join("docs/log.md")).unwrap();
+    assert_eq!(
+        log,
+        format!(
+            "# Log\n\n## {day}\n\n* **T**\n  * **Problems**: None\n  * **Lessons**: L\n\n* **Earlier today**\n"
+        )
+    );
+}
+
+#[test]
+fn log_refuses_what_the_log_does_not_have_and_writes_nothing() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    // No log yet
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "T",
+        "--problem",
+        "None",
+        "--lesson",
+        "L",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        error_of(&out).contains("docs/log.md is not there"),
+        "{}",
+        error_of(&out)
+    );
+    assert!(!root.path().join("docs/log.md").exists());
+    assert!(run(&["--root", &arg, "create"]).status.success());
+    let before = tree(root.path());
+    for (args, says) in [
+        // A field forgotten is not a field with nothing in it: --problem None says the second
+        (vec!["log", "--title", "T", "--lesson", "L"], "--problem"),
+        (vec!["log", "--title", "T", "--problem", "None"], "--lesson"),
+        (vec!["log", "--problem", "None", "--lesson", "L"], "--title"),
+        (
+            vec!["log", "--title", " ", "--problem", "None", "--lesson", "L"],
+            "--title is empty",
+        ),
+        (
+            vec!["log", "--title", "T", "--problem", "", "--lesson", "L"],
+            "--problem is empty",
+        ),
+        (
+            vec![
+                "log",
+                "--title",
+                "T",
+                "--problem",
+                "None",
+                "--lesson",
+                "a <!-- b",
+            ],
+            "--lesson holds `<!--`",
+        ),
+        (
+            vec![
+                "log",
+                "--title",
+                "T",
+                "--issue",
+                "4",
+                "--problem",
+                "None",
+                "--lesson",
+                "L",
+            ],
+            "--issue",
+        ),
+    ] {
+        let mut all = vec!["--root", arg.as_str()];
+        all.extend(args.iter().copied());
+        let out = run(&all);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(
+            error_of(&out).contains(says),
+            "{args:?}: {}",
+            error_of(&out)
+        );
+        assert_eq!(tree(root.path()), before, "{args:?}");
+    }
+    // A log whose heading is hidden in a comment leaves no place that can be told
+    fs::write(
+        root.path().join("docs/log.md"),
+        format!("# Log\n\n<!--\n## {}\n-->\n", today()),
+    )
+    .unwrap();
+    let out = run(&[
+        "--root",
+        &arg,
+        "log",
+        "--title",
+        "T",
+        "--problem",
+        "None",
+        "--lesson",
+        "L",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        error_of(&out).contains("cannot be told"),
+        "{}",
+        error_of(&out)
+    );
+}

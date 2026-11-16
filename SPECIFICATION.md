@@ -38,6 +38,10 @@ rotproof --root <repository> index   # write the generated files that are out of
 rotproof --root <repository> approve <file> <import> --reason "<why>"  # keep a forbidden import (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
+rotproof --root <repository> new <slug> [--area <area>] [--follows <key>]... [--alarm [--match <string>]...]
+                                     # start a knowledge document: its frontmatter, the description left empty
+rotproof --root <repository> log --title <task> [--issue <owner/repo#n>] --problem <text>... --lesson <text>...
+                                     # add an entry to the log, under today's heading
 rotproof guide                       # print the guide `rotproof create` writes for the stack and the UI the declaration has
 rotproof guide --stack python        # print the rules Rotproof keeps for a stack, with or without a project
 rotproof guide --stack typescript --ui none  # the same for the layers of that UI (the values of init's --ui), with no project
@@ -678,10 +682,49 @@ stale_after: 2027-01-01
 - `stale_after`, optional: the day from which to look at it again, for what it says of outside the code. From that
   day `rotproof check` warns of it, and fails nothing.
 
+`rotproof new <slug>` starts a document: it writes `docs/knowledge/<slug>.md` with this frontmatter, the part that is
+easy to write wrongly, and no body. `type`, a `title` made from the slug (its words, the first one capitalised, for a
+person to change), `tags` with the area, and `status: stable` are written, and `description` is left empty, so
+`rotproof check` fails (`description: empty`) until a person writes it, and a document half done cannot be committed.
+`--area` names the area, one the declaration lists, and may be left out when it lists only one. `--follows <key>`,
+given any number of times, pins each key at its hash now exactly as `rotproof follows` would (a file, a definition, a
+table or a directory, as the same keys are written), all of the keys or none. `--alarm` writes what an alarm needs,
+`# When` and `# Do`, empty so that the check fails the same way until each is written, and `--match <string>`, given
+any number of times with `--alarm`, the strings of `match` (trimmed, each on one line and named once; with none, the
+field is left out). Nothing else is written into the body: a heading left empty would be a record gone stale from its
+first day, so the questions to ask are printed instead (why it is so, what was considered and dropped, how it should
+behave, what one must know that lies outside the code), and the answers are the person's or the task's, not what the
+code says. The slug is lower-case words and digits joined by single hyphens, never `index`, `log` or `rules`, and it
+never changes once the file exists. A document that is there already is never written over, whatever the case of its
+name or the dots and spaces at its end (as Windows reads names). The index is not written, as the document is not
+read until its description is: run `rotproof index` then. It exits 2, writing nothing, when the slug, the area, a key or
+a string of `match` is not as above, a key names what is not there, a document of that name is there already, or
+`docs/knowledge/` is not.
+
 The log holds one entry per task, under the day's `## YYYY-MM-DD` heading, newest first: the task, its issue, what went
 wrong and what was learned, which is found nowhere else, and searchable in the repository when something breaks. What
 changed is in the commits, what was measured and decided along the way in the task's issue, and what still holds in
 `knowledge/`.
+
+`rotproof log` adds the entry, so that nobody writes a day from memory or reads the whole log to place one. It reads
+today from the clock of the machine (the day there, in its own zone: the check compares the days of the log with the
+latest day anywhere, so a day written in any zone passes), writes the entry at the top under the `## YYYY-MM-DD`
+heading of that day, and makes the heading when there is none, above the first heading of an older day, so the days
+stay newest first. The entry has the form of the guide, `* **<task>**` with `**Issue**`, `**Problems**` and
+`**Lessons**` as nested items, the issue left out when there is none:
+
+```sh
+rotproof log --title <task> [--issue <owner/repo#n>] --problem <text>... --lesson <text>...
+```
+
+`--title` is the task. `--issue` is `owner/repo#n`. `--problem` and `--lesson` are each needed at least once, so that
+a field forgotten is told from one with nothing in it: `--problem None` says that nothing went wrong. A field given
+more than once is a list under its label, and given once it stays on the label's line. A line break in a value
+becomes a space, so a value never opens a line of its own, and a value that is empty or opens an HTML comment (which
+would hide the rest of the log) is refused. The log keeps its line endings and its byte order mark, and the rest of
+its text is as it was. It exits 2, writing nothing, when a value is not as above, `docs/log.md` is not there, or the
+entry would break a rule the log kept: a heading of a day inside a comment or a code block, where no place for the
+entry can be told, is one.
 
 ## What `rotproof check` checks
 

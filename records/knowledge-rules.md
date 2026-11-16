@@ -23,8 +23,9 @@ to it and says what the code cannot: why it has this shape, and what changing it
 
 # One document
 
-One document is one file, `docs/knowledge/<slug>.md`. The slug never changes once the file exists, because commit
-messages and other documents refer to it. The frontmatter holds no YAML comment, which is read as nothing: quote a
+One document is one file, `docs/knowledge/<slug>.md`. `rotproof new <slug>` starts it with the frontmatter below and an
+empty `description`, which `rotproof check` fails on until it is written. The slug never changes once the file exists,
+because commit messages and other documents refer to it. The frontmatter holds no YAML comment, which is read as nothing: quote a
 value with a `#` after a space in it (`title: 'PR #1 is merged'`).
 
 | Field | Content |
