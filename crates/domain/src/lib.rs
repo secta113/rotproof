@@ -28,6 +28,7 @@ pub mod modules;
 pub mod moving;
 pub mod paths;
 pub mod project;
+pub mod python_builtins;
 pub mod python_stdlib;
 pub mod readers;
 pub mod records;

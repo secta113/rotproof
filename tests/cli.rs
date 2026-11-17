@@ -2031,6 +2031,147 @@ fn put(root: &Path, path: &str, text: &str) {
     fs::write(full, text).unwrap();
 }
 
+#[test]
+fn a_python_name_is_read_as_python_scopes_read_it_by_the_environment_check() {
+    let root = clean_repo();
+    let r = root.path();
+    // The forms that read the environment or the home directory, through every way the file may name them, in a layer
+    put(
+        r,
+        "domain/forbidden.py",
+        "import os\nimport os.path as p\nfrom os import getenv as g\nfrom pathlib import Path\n\n\n\
+         def read():\n    return (\n        os.environ['A'],\n        g('B'),\n        p.expanduser('~'),\n        \
+         Path.home(),\n    )\n",
+    );
+    put(r, "application/star.py", "from os import *\n");
+    // What is no read: a parameter called `os`, a local that is, and the names of the same modules that read nothing
+    put(
+        r,
+        "domain/allowed.py",
+        "import os\nfrom pathlib import Path\n\n\ndef a(os):\n    return os.environ\n\n\ndef b():\n    os = 1\n    \
+         return os.getenv('A')\n\n\ndef c():\n    return os.path.join('a', 'b'), Path.cwd(), Path('a').exists()\n",
+    );
+    // `infrastructure` alone may read it
+    put(
+        r,
+        "infrastructure/outbound/settings.py",
+        "import os\nfrom os import *\nfrom pathlib import Path\n\nHOME = Path.home()\nA = os.environ['A']\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    let star = "(a star import: the names it brings in cannot be read, so name them: `from os import path`)";
+    assert!(
+        said.ends_with(&format!(
+            "  application/star.py:1: os.* {star}\n    from os import *\n\
+             \x20 domain/forbidden.py:3: os.getenv\n    from os import getenv as g\n\
+             \x20 domain/forbidden.py:9: os.environ\n    os.environ['A'],\n\
+             \x20 domain/forbidden.py:10: os.getenv\n    g('B'),\n\
+             \x20 domain/forbidden.py:11: os.path.expanduser\n    p.expanduser('~'),\n\
+             \x20 domain/forbidden.py:12: pathlib.Path.home\n    Path.home(),\n"
+        )),
+        "{said}"
+    );
+    assert!(
+        !said.contains("allowed.py") && !said.contains("settings.py"),
+        "{said}"
+    );
+    // Without the forbidden files, the allowed ones and `infrastructure` pass
+    fs::remove_file(r.join("domain/forbidden.py")).unwrap();
+    fs::remove_file(r.join("application/star.py")).unwrap();
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn each_python_form_that_reads_the_environment_fails_alone_and_a_shadowed_name_does_not() {
+    let root = clean_repo();
+    let r = root.path();
+    // (what the file holds, what the check names)
+    let forbidden = [
+        // What the check found before names of scopes were read
+        (
+            "import os\nx = os.environ['A']\n",
+            "domain/x.py:2: os.environ",
+        ),
+        (
+            "import os as o\nx = o.getenv('A')\n",
+            "domain/x.py:2: os.getenv",
+        ),
+        (
+            "import os.path\nos.putenv('A', '1')\n",
+            "domain/x.py:2: os.putenv",
+        ),
+        ("from os import environ\n", "domain/x.py:1: os.environ"),
+        (
+            "from os import getenv as g\ng('A')\n",
+            "domain/x.py:1: os.getenv",
+        ),
+        // The names that came with scopes
+        (
+            "import os\nos.path.expandvars('$A')\n",
+            "domain/x.py:2: os.path.expandvars",
+        ),
+        (
+            "import os\nos.path.expanduser('~')\n",
+            "domain/x.py:2: os.path.expanduser",
+        ),
+        (
+            "from os import path\npath.expanduser('~')\n",
+            "domain/x.py:2: os.path.expanduser",
+        ),
+        (
+            "import posixpath\nposixpath.expanduser('~')\n",
+            "domain/x.py:2: posixpath.expanduser",
+        ),
+        (
+            "import ntpath\nntpath.expandvars('x')\n",
+            "domain/x.py:2: ntpath.expandvars",
+        ),
+        (
+            "import genericpath\ngenericpath.expanduser('~')\n",
+            "domain/x.py:2: genericpath.expanduser",
+        ),
+        (
+            "from pathlib import Path\nPath.home()\n",
+            "domain/x.py:2: pathlib.Path.home",
+        ),
+        (
+            "from pathlib import PosixPath\nPosixPath.home()\n",
+            "domain/x.py:2: pathlib.PosixPath.home",
+        ),
+        (
+            "import pathlib\npathlib.WindowsPath.home()\n",
+            "domain/x.py:2: pathlib.WindowsPath.home",
+        ),
+        ("from os import *\n", "domain/x.py:1: os.*"),
+        ("from os.path import *\n", "domain/x.py:1: os.path.*"),
+        ("from pathlib import *\n", "domain/x.py:1: pathlib.*"),
+    ];
+    for (source, named) in forbidden {
+        put(r, "domain/x.py", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{source}\n{said}");
+        assert!(said.contains(&format!("\n  {named}")), "{source}\n{said}");
+    }
+    // A name that is not the module, or of a module that reads nothing from the environment
+    let allowed = [
+        "import os\ndef f(os):\n    return os.environ\n",
+        "def f():\n    os = {}\n    return os.getenv('A')\n",
+        "import os\nclass C:\n    os = {}\n    x = os.environ\n",
+        "import os\nx = [os.environ for os in range(3)]\n",
+        "from os import path\nx = path.join('a', 'b')\n",
+        "from pathlib import Path\nx = Path.cwd()\n",
+        "import os\nx = os.getcwd()\n",
+    ];
+    for source in allowed {
+        put(r, "domain/x.py", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        assert!(out.status.success(), "{source}\n{}", stdout(&out));
+    }
+}
+
 /// The `package.json` of a TypeScript project that lists `vitest` for development and `react` to run.
 const VITEST_PACKAGE: &str = "{\n  \"name\": \"shop\",\n  \"dependencies\": { \"react\": \"^18\" },\n  \
                               \"devDependencies\": { \"vitest\": \"^2\", \"@types/node\": \"^22\" }\n}\n";

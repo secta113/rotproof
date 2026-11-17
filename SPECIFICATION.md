@@ -1168,18 +1168,30 @@ entry can be told, is one.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,
-  `os.getenvb`, `os.putenv` and `os.unsetenv` in Python, `process.env` and `import.meta.env` in TypeScript, and
-  `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var` and `remove_var` in Rust, each through an alias the file
-  binds too (`import os as o`, `from os import getenv as g`, `import { env } from "node:process"`,
-  `const { env } = process`, `use std::env;` then `env::var`, `use std::env as e;` then `e::var`, `use std as s;` then
-  `s::env::var`, `::std::env::var`). In Rust a glob of `std::env`, or of `std` (`use std::env::*;`, `use std::*;`),
-  fails too: the names it brings in cannot be read, so name them (`use std::env::var;`). Not judged: the command line
-  (`sys.argv`, `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of
-  `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
-  (`getattr(os, "environ")`, `from os import *`), in Rust a name bound in one file and used through another
-  (`pub use std::env;` in one module, `reexport::env::var` in the next) and a path a macro builds from pieces, and the
-  code outside the layers (`tests/` in Python) and the tests (in TypeScript, the files named `*.test.*` or
-  `*.spec.*`, or in `__tests__/`: see "Tests").
+  `os.getenvb`, `os.putenv` and `os.unsetenv` in Python, and on the two functions that expand a variable or the home
+  directory, `os.path.expandvars` and `os.path.expanduser` (also as `posixpath`, `ntpath` and `genericpath` name
+  them), and on `pathlib.Path.home` (also `PosixPath.home` and `WindowsPath.home`); `process.env` and
+  `import.meta.env` in TypeScript; and `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var`, `remove_var`,
+  `home_dir` and `temp_dir` in Rust. Each is found through an alias the file binds too (`import os as o`,
+  `from os import getenv as g`, `import os.path as p` then `p.expanduser`, `from pathlib import Path` then
+  `Path.home()`, `import { env } from "node:process"`, `const { env } = process`, `use std::env;` then `env::var`,
+  `use std::env as e;` then `e::var`, `use std as s;` then `s::env::var`, `::std::env::var`), and in Python at the
+  import (`from os import getenv`) and at each line that then uses the name. A star import of a module whose names
+  count fails too, as the names it brings in cannot be read, so name them: in Python `from os import *`,
+  `from os.path import *` (also `posixpath`, `ntpath`, `genericpath`) and `from pathlib import *`, in Rust a glob of
+  `std::env` or of `std` (`use std::env::*;`, `use std::*;`, then `use std::env::var;`). Python's names are read as
+  Python's scopes read them (module, function and lambda, class body, comprehension; a name is the one of the scope it
+  is bound in at all, by assignment, parameter, `def`, `class`, `import`, `for`, `with`, `except ... as`, `match`,
+  `:=`, `del`, `global` and `nonlocal`): a parameter or a variable that is called `os` is not the module, and
+  `os.getenv` through it passes, as an `import os` in one function does not bind `os` in another; an import under
+  `if TYPE_CHECKING:` is an import as any. Not judged: the command line (`sys.argv`, `std::env::args`), `env!`,
+  `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of `import.meta.env` Vite sets itself
+  (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time (`getattr(os, "environ")`), in Python a name
+  bound through an assignment (`o = os`, then `o.environ`), a method of an object (`Path("~").expanduser()`, which
+  needs the type of what it is called on), a name a star import of another module brings in and a name in a string
+  annotation, in Rust a name bound in one file and used through another (`pub use std::env;` in one module,
+  `reexport::env::var` in the next) and a path a macro builds from pieces, and the code outside the layers (`tests/` in
+  Python) and the tests (in TypeScript, the files named `*.test.*` or `*.spec.*`, or in `__tests__/`: see "Tests").
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an

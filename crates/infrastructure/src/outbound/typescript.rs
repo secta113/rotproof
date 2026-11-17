@@ -80,6 +80,8 @@ pub fn read(source: &str, path: &str) -> Source<Import> {
         imports: imports.found,
         comments,
         environment: environment(source, &parsed.program),
+        uses: Vec::new(),
+        unread: Vec::new(),
         error: first_error(source, &parsed),
     }
 }

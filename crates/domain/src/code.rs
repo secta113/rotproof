@@ -39,7 +39,16 @@ pub struct Source<I> {
     pub comments: Vec<(usize, String)>,
     /// Every read or write of the environment variables the reader sees (`environment.rs`): the line (from 1), and
     /// what it names (`os.environ`, `process.env`)
+    ///
+    /// Python's reader gives none: it gives [`Source::uses`], which `domain::environment::in_python` judges
     pub environment: Vec<(usize, String)>,
+    /// Every use of a name that resolves to something outside the file's own code, in the order of the lines. Python's
+    /// reader gives them (see [`Use`]); TypeScript's gives none
+    pub uses: Vec<Use>,
+    /// What the reader met and could not read: the line (from 1), and the function a file calls to import a module
+    /// whose name it does not write as a string (`importlib.import_module(name)`, a relative `".x"`), which is built
+    /// at run time. Python's reader only
+    pub unread: Vec<(usize, String)>,
     /// The first syntax error, if any: its line and what the parser says. The parser recovers, but what follows may be
     /// misread
     pub error: Option<(usize, String)>,
@@ -51,9 +60,62 @@ impl<I> Default for Source<I> {
             imports: Vec::new(),
             comments: Vec::new(),
             environment: Vec::new(),
+            uses: Vec::new(),
+            unread: Vec::new(),
             error: None,
         }
     }
+}
+
+/// One use of a name in a Python file that resolves to something outside the file's own code, as the lexical scopes of
+/// Python resolve it (module, function and lambda, class body, comprehension; a name is the one of the scope it is
+/// bound in at all, wherever in the scope it is bound).
+///
+/// A name is outside the file's own code when an `import` binds it (`import a.b as c`, then `c.x` is `a.b.x`; `from a
+/// import b as c`, then `c` is `a.b`; `import os`, then `os.path.exists` is `os.path.exists`), or when no scope binds
+/// it and it is a builtin (`open` is `builtins.open`). A name the file defines, a parameter, a name assigned and one
+/// no scope binds that is no builtin are not uses. An attribute chain is followed as far as it is a chain of names: the
+/// use is the whole of it (`os.environ.get`), and what comes after a call or a subscript is not part of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Use {
+    /// The line (from 1) the use starts on
+    pub line: usize,
+    /// The dotted name it resolves to, whole: `os.path.exists`, `datetime.datetime.now`, `builtins.open`. The module
+    /// `from m import *` brings the names of, for [`How::Star`]
+    pub name: String,
+    /// How the name is used
+    pub how: How,
+    /// Whether the use sits in a type position: an annotation, a bound or default of a type parameter, or the value
+    /// of a `type` statement, and in it a name, an attribute or a subscript (`Path`, `os.PathLike`, `list[Path]`). A
+    /// call in it, with its callee and its arguments, is not: it runs when the annotation is evaluated, so
+    /// `Annotated[datetime, Field(default_factory=datetime.now)]` has `datetime` in a type position and `Field` and
+    /// `datetime.now` out of it. A rule on what the code does at run time does not judge a use in a type position
+    pub in_type: bool,
+}
+
+/// How a name is used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum How {
+    /// The name is taken at an import, `from m import n` (`m.n`, resolved against the package for a relative `m`),
+    /// whether the file uses it or not. `import m` is no use: it is in [`Source::imports`]
+    Imported,
+    /// `from m import *`: the names it brings in cannot be read. The use is of the module `m`; the names the file then
+    /// uses without binding them are not uses
+    Star,
+    /// The name is called: `os.getenv("X")`, `datetime.now()`, `open(path)`
+    Called {
+        /// How many positional arguments, a `*args` not counted
+        positional: usize,
+        /// The names of the keyword arguments, in the order written (`**kwargs` is not one)
+        keywords: Vec<String>,
+        /// Whether the call has a `*args` or a `**kwargs`, which hides how many arguments there are
+        unpacked: bool,
+    },
+    /// The name is used as a value, and called by no one here: `default_factory=datetime.now`, `f = time.time`,
+    /// `os.environ["A"]`, `getattr(os, "environ")` (the `os`), `o = os`, `@functools.cache`. When the name is a module
+    /// (`os`), the module object itself is used: the reader does not know which names are modules, a rule asks its
+    /// own table of them
+    Value,
 }
 
 /// What one import of a TypeScript or JavaScript file names: the module, and the names it takes from it.

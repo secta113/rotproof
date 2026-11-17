@@ -1,30 +1,28 @@
-//! Reading Python with Ruff's parser: what a file imports, as the modules it names, its comments, and the functions
-//! and classes it defines.
+//! Reading Python with Ruff's parser: what a file imports, as the modules it names, its comments, the names it uses,
+//! and the functions and classes it defines.
 //!
 //! - **What a file imports:** every module an `import` or `from ... import` names, inside functions, classes and
 //!   `if TYPE_CHECKING:` too. `from m import n` names `m.n`, which is the module `n` when there is one and `m`
 //!   otherwise; both sit in the place of `m` unless `m.n` is a place itself (`from ui import atoms`). A relative import
 //!   is resolved against the file's package, and one that climbs above the top package is left out: Python fails on it.
-//!   A call of `importlib.import_module` or `__import__` (`builtins.__import__`, or a name bound to either by `from
-//!   importlib import import_module`) with a string literal as its module is an import of that module, as `import` of
-//!   it is. A name that is not a literal (a variable, an f-string, a concatenation), and a relative one (`".x"`), is
-//!   built at run time and is not seen.
+//!   A call that resolves to `importlib.import_module` or to the builtin `__import__` (`builtins.__import__`, or a name
+//!   bound to either by `from importlib import import_module`) with a string literal as its module is an import of
+//!   that module, as `import` of it is. A name that is not a literal (a variable, an f-string, a concatenation), and a
+//!   relative one (`".x"`), is built at run time and is not seen: the reader says so in `Source::unread`.
 //! - **Its comments,** `#` to the end of the line. A docstring is a string, so it is not a comment.
-//! - **Its reads of the environment** (`domain::environment`): a name of `os` that touches it, imported or reached
-//!   through a name bound to `os`.
+//! - **Its uses** (`uses.rs`, `domain::code::Use`): every name that resolves to something outside the file's own code,
+//!   as Python's scopes resolve it, which the environment check, and the checks after it, judge.
 //! - **Its outline** ([`outline`]), every function and class with its names and its range, for a knowledge document
 //!   that follows one and for a link that names one.
 
-use std::collections::BTreeSet;
+mod uses;
 
 use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
 use ruff_python_ast::token::TokenKind;
-use ruff_python_ast::visitor::{Visitor, walk_expr};
-use ruff_python_ast::{Expr, PySourceType, Stmt};
+use ruff_python_ast::{PySourceType, Stmt};
 
 use domain::code::{Source, module_parts};
 use domain::definitions::Definition;
-use domain::environment::PYTHON as PYTHON_ENVIRONMENT;
 use domain::text::line_of;
 
 /// Read one file, whose path from the root names the package its relative imports start from.
@@ -38,7 +36,8 @@ pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
     };
     imports.visit_body(&parsed.syntax().body);
     let mut found = imports.found;
-    found.extend(dynamic(source, &parsed.syntax().body));
+    let read = uses::read(source, &parsed.syntax().body, &package);
+    found.extend(read.dynamic);
     // In the order of the lines, as the statements are read, with the calls among them
     found.sort_by_key(|(line, _)| *line);
     let comments = parsed
@@ -60,204 +59,28 @@ pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
     Source {
         imports: found,
         comments,
-        environment: environment(source, &parsed.syntax().body),
+        uses: read.uses,
+        unread: read.unread,
         error,
+        ..Source::default()
     }
 }
 
-/// Every read or write of the environment in a file (`domain::environment`): a name of `os` in
-/// [`domain::environment::PYTHON`], as `from os import environ` imports it, or as an attribute of a name the file
-/// binds to `os` (`import os`, `import os as o`, `import os.path`). The line, and the name as `os.<name>`.
-fn environment(source: &str, body: &[Stmt]) -> Vec<(usize, String)> {
-    /// The names a file binds to the module `os`, and the names of `os` it imports
-    struct Bindings<'s> {
-        source: &'s str,
-        os: BTreeSet<String>,
-        found: Vec<(usize, String)>,
-    }
-    impl<'a> StatementVisitor<'a> for Bindings<'_> {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            match stmt {
-                Stmt::Import(import) => {
-                    for alias in &import.names {
-                        let name = alias.name.as_str();
-                        match &alias.asname {
-                            // `import os.path as p` binds `p` to `os.path`, not to `os`
-                            Some(local) if name == "os" => {
-                                self.os.insert(local.to_string());
-                            }
-                            None if name == "os" || name.starts_with("os.") => {
-                                self.os.insert("os".into());
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                Stmt::ImportFrom(import)
-                    if import.level == 0 && import.module.as_ref().is_some_and(|m| m == "os") =>
-                {
-                    for alias in &import.names {
-                        if PYTHON_ENVIRONMENT.contains(&alias.name.as_str()) {
-                            self.found.push((
-                                line_of(self.source, alias.range.start().to_usize()),
-                                format!("os.{}", alias.name),
-                            ));
-                        }
-                    }
-                }
-                _ => {}
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-    /// The attributes of those names that read or write the environment
-    struct Reads<'b, 's> {
-        source: &'s str,
-        os: &'b BTreeSet<String>,
-        found: &'b mut Vec<(usize, String)>,
-    }
-    impl<'a> Visitor<'a> for Reads<'_, '_> {
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            if let Expr::Attribute(attribute) = expr
-                && let Expr::Name(name) = attribute.value.as_ref()
-                && self.os.contains(name.id.as_str())
-                && PYTHON_ENVIRONMENT.contains(&attribute.attr.as_str())
-            {
-                self.found.push((
-                    line_of(self.source, attribute.range.start().to_usize()),
-                    format!("os.{}", attribute.attr),
-                ));
-            }
-            walk_expr(self, expr);
-        }
-    }
-    let mut bindings = Bindings {
-        source,
-        os: BTreeSet::new(),
-        found: Vec::new(),
+/// The package a relative import of `level` dots starts from, followed by the module it names: `None` when it climbs
+/// above the top package, which Python fails on.
+fn base_of(package: &[String], level: u32, module: Option<&str>) -> Option<Vec<String>> {
+    let level = level as usize;
+    let mut base: Vec<String> = if level == 0 {
+        Vec::new()
+    } else if level - 1 < package.len() {
+        package[..package.len() - (level - 1)].to_vec()
+    } else {
+        return None;
     };
-    bindings.visit_body(body);
-    let mut found = bindings.found;
-    if !bindings.os.is_empty() {
-        let mut reads = Reads {
-            source,
-            os: &bindings.os,
-            found: &mut found,
-        };
-        for stmt in body {
-            reads.visit_stmt(stmt);
-        }
+    if let Some(module) = module {
+        base.extend(module.split('.').map(String::from));
     }
-    found.sort();
-    found
-}
-
-/// The modules a file imports by calling `importlib.import_module` or `__import__` with a string literal, each with the
-/// line of the call. `import_module` is `importlib`'s, reached as an attribute of a name the file binds to `importlib`
-/// (`import importlib`, `import importlib as il`, `import importlib.util`) or as a name imported from it; `__import__`
-/// is a builtin, reached by its name, as an attribute of a name bound to `builtins`, or imported from it. The module is
-/// the first argument, or `name=`, when it is one literal string (an implicit concatenation is one); a relative name
-/// (`".x"`), which needs the `package` to resolve, and anything but a literal is built at run time and left out.
-fn dynamic(source: &str, body: &[Stmt]) -> Vec<(usize, Vec<String>)> {
-    /// The names a file binds to `importlib` and `builtins`, and to the two functions
-    #[derive(Default)]
-    struct Bindings {
-        importlib: BTreeSet<String>,
-        builtins: BTreeSet<String>,
-        functions: BTreeSet<String>,
-    }
-    impl<'a> StatementVisitor<'a> for Bindings {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            match stmt {
-                Stmt::Import(import) => {
-                    for alias in &import.names {
-                        let name = alias.name.as_str();
-                        let top = name.split('.').next().unwrap_or(name);
-                        // `import a.b as c` binds `c` to `a.b`, and `import a.b` binds `a`
-                        let (bound, module) = match &alias.asname {
-                            Some(local) if name == "importlib" || name == "builtins" => {
-                                (local.to_string(), name)
-                            }
-                            Some(_) => continue,
-                            None => (top.to_string(), top),
-                        };
-                        match module {
-                            "importlib" => self.importlib.insert(bound),
-                            "builtins" => self.builtins.insert(bound),
-                            _ => continue,
-                        };
-                    }
-                }
-                Stmt::ImportFrom(import) if import.level == 0 => {
-                    let wanted = match import.module.as_ref().map(|m| m.as_str()) {
-                        Some("importlib") => "import_module",
-                        Some("builtins") => "__import__",
-                        _ => "",
-                    };
-                    for alias in &import.names {
-                        if alias.name.as_str() == wanted {
-                            let local = alias.asname.as_ref().unwrap_or(&alias.name);
-                            self.functions.insert(local.to_string());
-                        }
-                    }
-                }
-                _ => {}
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-    /// The calls of those, wherever an expression can be
-    struct Calls<'b, 's> {
-        source: &'s str,
-        bindings: &'b Bindings,
-        found: Vec<(usize, Vec<String>)>,
-    }
-    impl<'a> Visitor<'a> for Calls<'_, '_> {
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            if let Expr::Call(call) = expr {
-                let imports = match call.func.as_ref() {
-                    Expr::Name(name) => {
-                        name.id.as_str() == "__import__"
-                            || self.bindings.functions.contains(name.id.as_str())
-                    }
-                    Expr::Attribute(attribute) => match attribute.value.as_ref() {
-                        Expr::Name(name) => {
-                            let (name, attr) = (name.id.as_str(), attribute.attr.as_str());
-                            (attr == "import_module" && self.bindings.importlib.contains(name))
-                                || (attr == "__import__" && self.bindings.builtins.contains(name))
-                        }
-                        _ => false,
-                    },
-                    _ => false,
-                };
-                if imports
-                    && let Some(Expr::StringLiteral(module)) =
-                        call.arguments.find_argument_value("name", 0)
-                {
-                    let module = module.value.to_str();
-                    let parts: Vec<String> = module.split('.').map(String::from).collect();
-                    if parts.iter().all(|part| !part.is_empty()) {
-                        self.found.push((
-                            line_of(self.source, call.arguments.range.start().to_usize()),
-                            parts,
-                        ));
-                    }
-                }
-            }
-            walk_expr(self, expr);
-        }
-    }
-    let mut bindings = Bindings::default();
-    bindings.visit_body(body);
-    let mut calls = Calls {
-        source,
-        bindings: &bindings,
-        found: Vec::new(),
-    };
-    for stmt in body {
-        calls.visit_stmt(stmt);
-    }
-    calls.found
+    Some(base)
 }
 
 struct Imports<'s> {
@@ -283,19 +106,12 @@ impl<'a> StatementVisitor<'a> for Imports<'_> {
                 }
             }
             Stmt::ImportFrom(import) => {
-                let level = import.level as usize;
-                let mut base: Vec<String> = if level == 0 {
-                    Vec::new()
-                } else if level - 1 < self.package.len() {
-                    self.package[..self.package.len() - (level - 1)].to_vec()
-                } else {
+                let Some(base) = base_of(self.package, import.level, import.module.as_deref())
+                else {
                     // Above the top package: Python fails on it, so it imports nothing
                     walk_stmt(self, stmt);
                     return;
                 };
-                if let Some(module) = &import.module {
-                    base.extend(module.split('.').map(String::from));
-                }
                 for alias in &import.names {
                     let mut module = base.clone();
                     if alias.name.as_str() != "*" {

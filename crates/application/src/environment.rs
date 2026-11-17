@@ -5,7 +5,7 @@ use std::io;
 
 use crate::tree::{code_files, is_file, read_code};
 use domain::declaration::Declared;
-use domain::environment::{BUILD_SCRIPT, finding, in_rust, is_judged};
+use domain::environment::{BUILD_SCRIPT, finding, in_python, in_rust, is_judged};
 use domain::layers::{Language, table};
 use domain::paths::join;
 use protocol::outbound::Parsers;
@@ -52,7 +52,7 @@ pub fn problems(
             continue;
         };
         let reads = match layout.language {
-            Language::Python => parsers.python(&source, &path).environment,
+            Language::Python => in_python(&parsers.python(&source, &path).uses),
             Language::TypeScript => parsers.typescript(&source, &path).environment,
             Language::Rust => in_rust(&source),
         };
@@ -71,7 +71,7 @@ mod tests {
     use infrastructure::outbound::readers::Readers;
 
     fn python(source: &str) -> Vec<(usize, String)> {
-        Readers.python(source, "domain/a.py").environment
+        in_python(&Readers.python(source, "domain/a.py").uses)
     }
 
     fn typescript(source: &str) -> Vec<(usize, String)> {
@@ -107,7 +107,6 @@ def f():
     fn python_forms_built_at_run_time_or_of_another_module_pass() {
         let source = "\
 import os.path as p
-from os import *
 import sys
 x = getattr(os, 'environ')
 y = sys.argv
@@ -115,8 +114,170 @@ z = p.environ
 class C:
     environ = 1
 w = C.environ
+v = os.path.join('a', 'b')
+u = os.getcwd()
 ";
         assert!(python(source).is_empty());
+    }
+
+    #[test]
+    fn a_python_read_through_a_name_taken_from_os_is_found_at_the_import_and_at_each_use() {
+        let source = "\
+from os import getenv as g, environ
+def f():
+    return g('A') or environ['B']
+";
+        assert_eq!(
+            python(source),
+            [
+                (1, "os.environ".to_string()),
+                (1, "os.getenv".into()),
+                (3, "os.environ".into()),
+                (3, "os.getenv".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_python_name_that_is_not_the_module_called_os_passes() {
+        let source = "\
+import os
+def a(os):
+    return os.environ
+def b():
+    os = make()
+    return os.getenv('A')
+def c(env=None):
+    import os
+    return os.getenv('A')
+class D:
+    os = make()
+    x = os.environ
+d = [os.environ for os in range(3)]
+";
+        // Only the `import os` of `c` is the module
+        assert_eq!(python(source), [(9, "os.getenv".to_string())]);
+        // The module `os` itself, bound by an import, is found in a method too, which the class body does not shadow
+        assert_eq!(
+            python(
+                "import os\nclass D:\n    os = 1\n    def m(self):\n        return os.environ\n"
+            ),
+            [(5, "os.environ".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_python_star_import_of_a_module_whose_names_count_fails() {
+        let found = python(
+            "from os import *\nfrom os.path import *\nfrom pathlib import *\nfrom typing import *\n",
+        );
+        assert_eq!(
+            found.iter().map(|(line, _)| *line).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert!(found[0].1.starts_with("os.*"));
+        assert!(found[0].1.contains("cannot be read") && found[0].1.contains("name them"));
+    }
+
+    #[test]
+    fn python_names_that_expand_the_environment_or_give_the_home_directory_are_reads() {
+        let source = "\
+import os
+import os.path as p
+import posixpath
+import ntpath
+import pathlib
+from os.path import expandvars as ev
+from pathlib import Path, PosixPath as P, WindowsPath
+a = os.path.expandvars('$A')
+b = os.path.expanduser('~')
+c = p.expanduser('~')
+d = posixpath.expandvars('$A')
+e = ntpath.expanduser('~')
+f = pathlib.Path.home()
+g = Path.home()
+h = P.home()
+i = WindowsPath.home
+j = ev('$A')
+";
+        assert_eq!(
+            python(source),
+            [
+                (6, "os.path.expandvars".to_string()),
+                (8, "os.path.expandvars".into()),
+                (9, "os.path.expanduser".into()),
+                (10, "os.path.expanduser".into()),
+                (11, "posixpath.expandvars".into()),
+                (12, "ntpath.expanduser".into()),
+                (13, "pathlib.Path.home".into()),
+                (14, "pathlib.Path.home".into()),
+                (15, "pathlib.PosixPath.home".into()),
+                (16, "pathlib.WindowsPath.home".into()),
+                (17, "os.path.expandvars".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn python_names_of_the_same_modules_that_read_nothing_from_the_environment_pass() {
+        let source = "\
+import os
+import pathlib
+from pathlib import Path
+a = os.path.join('a', 'b')
+b = os.path.exists('a')
+c = os.path.abspath('a')
+d = Path.cwd()
+e = Path('a').exists()
+f = pathlib.PurePath('a')
+g = os.getcwd()
+h = os.listdir('.')
+";
+        assert!(python(source).is_empty());
+    }
+
+    #[test]
+    fn a_python_project_is_judged_through_its_uses_in_every_layer_and_the_entry_file() {
+        let tree = crate::tree::fake::Fake::new(&[
+            (
+                "domain/a.py",
+                "from pathlib import Path\n\n\ndef home():\n    return Path.home()\n",
+            ),
+            (
+                "infrastructure/b.py",
+                "import os\n\nVALUE = os.environ['A']\n",
+            ),
+            ("application/c.py", "def f(os):\n    return os.environ\n"),
+            ("application/d.py", "from os import *\n"),
+        ]);
+        let declared = Declared::new(
+            domain::declaration::parse_declaration(
+                "stack = \"python\"\nareas = []\nui = \"none\"\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let found: Vec<String> = problems(&tree, &Readers, &declared)
+            .unwrap()
+            .iter()
+            .map(|finding| {
+                finding
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .split(" (")
+                    .next()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "application/d.py:1: os.*",
+                "domain/a.py:5: pathlib.Path.home"
+            ]
+        );
     }
 
     #[test]
