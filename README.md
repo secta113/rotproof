@@ -569,3 +569,10 @@ Licensed under either of [MIT](https://github.com/secta113/rotproof/blob/main/LI
 includes are under their own licenses, listed with their texts in
 [THIRD-PARTY-LICENSES.txt](https://github.com/secta113/rotproof/blob/main/THIRD-PARTY-LICENSES.txt). The links are full
 URLs so that they work on PyPI and npm, where this README is the project's page.
+
+## Acknowledgements
+
+Rotproof grew out of *The Pragmatic Programmer, 20th Anniversary Edition* by David Thomas and Andrew Hunt: "Software
+Entropy" (don't live with broken windows), "Orthogonality" and "DRY—The Evils of Duplication". A repository rots one
+neglected window at a time; Rotproof is a way to see each window as it breaks, the same way every time, while LLMs and
+people change the code.

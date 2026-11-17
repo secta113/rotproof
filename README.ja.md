@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at d7cb07e4. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 61231519. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -480,3 +480,11 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
   [Apache-2.0](https://github.com/secta113/rotproof/blob/main/LICENSE-APACHE) のどちらかを選べます。バイナリに含まれる
   crate はそれぞれのライセンスに従い、その文面は
   [THIRD-PARTY-LICENSES.txt](https://github.com/secta113/rotproof/blob/main/THIRD-PARTY-LICENSES.txt) にあります。
+
+## 謝辞
+
+Rotproof は、David Thomas と Andrew Hunt の『達人プログラマー 第二版 熟達に向けたあなたの旅』（原書
+*The Pragmatic Programmer, 20th Anniversary Edition*）から生まれました。もとになったのは「ソフトウェアのエントロピー」
+（割れた窓を放置しない）、「直交性」、「DRY原則 - 二重化の過ち」です。リポジトリは、放置された窓ひとつずつから
+腐っていきます。Rotproof は、LLM と人がコードを変えていくあいだ、窓が割れるたびに、毎回同じやり方でそれを見つける
+ための道具です。
