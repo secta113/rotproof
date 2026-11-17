@@ -31,6 +31,17 @@ pub const RETIRED: [(&str, &str); 2] = [
 pub const PORTS_MOVED: &str = "the ports (the interfaces to the outside) move from domain to protocol.outbound, and \
                                the use cases the entry points call get interfaces in protocol.inbound, with plain data";
 
+/// The first version that reads no record of work. Crossing it, a project that has a `docs/work/` is told what that
+/// directory is now, and nothing in it moves: whether its open items become issues or stay as history is the project's.
+pub const WORK_STOPPED: &str = "1.0.0-rc.1";
+
+/// What crossing [`WORK_STOPPED`] means for a project whose `docs/work/` is there.
+pub const WORK_LEFT: &str = "Rotproof kept open work in docs/work/ before 1.0 and reads none of it now: it checks \
+                             nothing there and writes no index.md, closed.md or rules.md, so those stay as they \
+                             were, and docs/index.md no longer links to it. Open work is kept in issues: its open \
+                             items need a home you choose (the project's issues, or kept as frozen history where \
+                             they are). Nothing there is moved or deleted";
+
 /// The version whose table splits the UI into the view (`ui`) and the Presentation Model (`presentation`), and whose
 /// declaration says which UI a project has (`ui`). Crossing it, `rotproof init` says what moves, and moves nothing:
 /// which part of a page is the state of the screen and which is its view, no machine can tell.
@@ -79,6 +90,28 @@ pub fn crosses(at: &str, files: &str, running: &str) -> bool {
     version(files) < at && at <= version(running)
 }
 
+/// What a project does after it has moved the code of the layers that are gone, said with the directories `paths` of
+/// those it still had: the files no check reads (documents, scripts, configuration, comments) keep naming them, and
+/// nothing fails when they do.
+pub fn old_paths(paths: &[String]) -> String {
+    let named = match paths {
+        [] => String::new(),
+        [only] => format!("{only}/"),
+        [rest @ .., last] => format!(
+            "{} and {last}/",
+            rest.iter()
+                .map(|path| format!("{path}/"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    format!(
+        "once the code has moved, search the files Rotproof does not read (documents, scripts, configuration, \
+         comments) for the paths of the layers that are gone ({named}): no check reads them, and they keep naming \
+         directories that are not there"
+    )
+}
+
 /// Where the layout would hold each retired layer, with where its code goes now.
 pub fn retired(layout: &Layout) -> Vec<(&'static str, String, &'static str)> {
     RETIRED
@@ -102,6 +135,16 @@ mod tests {
         // A pre-release is ordered as SemVer orders it
         assert!(crosses(PRESENTATION, "1.0.0-rc.2", "1.0.0-rc.3"));
         assert!(!crosses(PRESENTATION, "1.0.0-rc.3", "1.0.0"));
+    }
+
+    #[test]
+    fn the_old_paths_are_named_as_the_directories_that_were_found() {
+        let said =
+            |paths: &[&str]| old_paths(&paths.iter().map(|p| p.to_string()).collect::<Vec<_>>());
+        assert!(said(&["crates/handler"]).contains("(crates/handler/)"));
+        assert!(said(&["handler", "utils"]).contains("(handler/ and utils/)"));
+        assert!(said(&["a", "b", "c"]).contains("(a/, b/ and c/)"));
+        assert!(said(&["handler"]).contains("search the files Rotproof does not read"));
     }
 
     #[test]

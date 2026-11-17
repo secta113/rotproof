@@ -127,8 +127,10 @@ name = "models"
 imports = ["protocol.inbound"]
 role = """
 One model per screen, or per part of a screen that holds state: the values being typed, what is shown as invalid,
-whether a request is under way, the error to show, where to go next. Each calls the input ports of
-`protocol.inbound` it is given, and turns what they return into the values of `display`."""
+whether a request is under way, the error to show, where to go next. A screen that serves several flows (a sign-in
+that returns to the screen that opened it, a picker) does not decide where to go next: whatever opens it passes the
+destination in. Each calls the input ports of `protocol.inbound` it is given, and turns what they return into the
+values of `display`."""
 
 [[layer.level]]
 name = "display"
