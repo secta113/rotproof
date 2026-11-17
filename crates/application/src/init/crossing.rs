@@ -6,7 +6,7 @@
 use crate::create::ui_in_tree;
 use domain::crossing::{
     LOCKED, LOCKED_MOVES, LOCKED_REQUIREMENTS, ONION, PORTS_MOVED, PRESENTATION,
-    PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, retired,
+    PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, old_paths, retired,
 };
 use domain::declaration::Fields;
 use domain::layers::{NO_UI, layout};
@@ -48,9 +48,12 @@ fn onion_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
     let Some(layout) = stack.and_then(|stack| layout(stack, NO_UI)) else {
         return Vec::new();
     };
-    let mut moves: Vec<String> = retired(&layout)
+    let found: Vec<_> = retired(&layout)
         .into_iter()
         .filter(|(_, path, _)| tree.found(path) == Some(true))
+        .collect();
+    let mut moves: Vec<String> = found
+        .iter()
         .map(|(name, path, goes)| {
             format!(
                 "{path}/ holds the layer {name} of the table before {ONION}, which is gone: {goes}"
@@ -58,6 +61,11 @@ fn onion_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
         })
         .collect();
     moves.push(format!("in the layers that stay, {PORTS_MOVED}"));
+    // The code moved by hand leaves its old paths in the files no check reads
+    if !found.is_empty() {
+        let paths: Vec<String> = found.into_iter().map(|(_, path, _)| path).collect();
+        moves.push(old_paths(&paths));
+    }
     moves
 }
 
@@ -122,13 +130,24 @@ mod tests {
         else {
             panic!("upgraded");
         };
-        assert_eq!(upgraded.moves.len(), 3, "{:#?}", upgraded.moves);
+        assert_eq!(upgraded.moves.len(), 4, "{:#?}", upgraded.moves);
         assert!(
             upgraded.moves[0]
                 .starts_with("handler/ holds the layer handler of the table before 0.4.0")
         );
         assert!(upgraded.moves[1].starts_with("utils/ holds the layer utils"));
         assert!(upgraded.moves[2].contains("protocol.outbound"));
+        // The last line names the directories it found, and says to search the files no check reads for them
+        assert_eq!(
+            upgraded.moves[3],
+            old_paths(&["handler".to_string(), "utils".to_string()])
+        );
+        assert!(
+            upgraded.moves[3].contains("(handler/ and utils/)")
+                && upgraded.moves[3].contains("documents, scripts, configuration, comments"),
+            "{}",
+            upgraded.moves[3]
+        );
         // It keeps nothing behind, and moves nothing
         assert!(upgraded.files_set && upgraded.by_hand.is_empty());
         assert_eq!(tree.text("handler/__init__.py").as_deref(), Some(""));
@@ -150,6 +169,35 @@ mod tests {
             panic!("upgraded");
         };
         assert!(none.moves.is_empty());
+    }
+
+    #[test]
+    fn crossing_the_onion_table_names_only_the_retired_directories_it_found() {
+        let moves = |planted: &[&str]| {
+            let tree = Fake::default();
+            tree.write(
+                DECLARATION,
+                "stack = \"rust\"\nareas = []\nui = \"none\"\nfiles = \"0.3.0\"\n",
+            )
+            .unwrap();
+            for path in planted {
+                tree.write(path, "").unwrap();
+            }
+            let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", "0.4.0")
+            else {
+                panic!("upgraded");
+            };
+            upgraded.moves
+        };
+        // One directory: it alone is named, with its path from the root
+        let one = moves(&["crates/utils/src/lib.rs"]);
+        assert_eq!(one.len(), 3, "{one:#?}");
+        assert!(one[2].contains("(crates/utils/)"), "{}", one[2]);
+        assert!(!one[2].contains("handler"), "{}", one[2]);
+        // None: the layers that stay move, and there is no old path to search for
+        let none = moves(&[]);
+        assert_eq!(none.len(), 1, "{none:#?}");
+        assert!(none[0].contains("protocol.outbound"));
     }
 
     #[test]

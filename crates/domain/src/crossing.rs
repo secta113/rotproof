@@ -79,6 +79,28 @@ pub fn crosses(at: &str, files: &str, running: &str) -> bool {
     version(files) < at && at <= version(running)
 }
 
+/// What a project does after it has moved the code of the layers that are gone, said with the directories `paths` of
+/// those it still had: the files no check reads (documents, scripts, configuration, comments) keep naming them, and
+/// nothing fails when they do.
+pub fn old_paths(paths: &[String]) -> String {
+    let named = match paths {
+        [] => String::new(),
+        [only] => format!("{only}/"),
+        [rest @ .., last] => format!(
+            "{} and {last}/",
+            rest.iter()
+                .map(|path| format!("{path}/"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    format!(
+        "once the code has moved, search the files Rotproof does not read (documents, scripts, configuration, \
+         comments) for the paths of the layers that are gone ({named}): no check reads them, and they keep naming \
+         directories that are not there"
+    )
+}
+
 /// Where the layout would hold each retired layer, with where its code goes now.
 pub fn retired(layout: &Layout) -> Vec<(&'static str, String, &'static str)> {
     RETIRED
@@ -102,6 +124,16 @@ mod tests {
         // A pre-release is ordered as SemVer orders it
         assert!(crosses(PRESENTATION, "1.0.0-rc.2", "1.0.0-rc.3"));
         assert!(!crosses(PRESENTATION, "1.0.0-rc.3", "1.0.0"));
+    }
+
+    #[test]
+    fn the_old_paths_are_named_as_the_directories_that_were_found() {
+        let said =
+            |paths: &[&str]| old_paths(&paths.iter().map(|p| p.to_string()).collect::<Vec<_>>());
+        assert!(said(&["crates/handler"]).contains("(crates/handler/)"));
+        assert!(said(&["handler", "utils"]).contains("(handler/ and utils/)"));
+        assert!(said(&["a", "b", "c"]).contains("(a/, b/ and c/)"));
+        assert!(said(&["handler"]).contains("search the files Rotproof does not read"));
     }
 
     #[test]

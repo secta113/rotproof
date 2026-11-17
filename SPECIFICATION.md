@@ -148,8 +148,10 @@ that has a declaration:
   `docs/knowledge/`, the log and the project's files where they are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
   names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
-  ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
-  `rotproof check` names what is not moved yet. Crossing 1.0.0-rc.3, which splits the UI into the view (`ui`) and the
+  ports move from `domain` to `protocol.outbound`, as "move by hand" lines, and, when a directory of a layer that is
+  gone is there, one line more that names the directories it found and says to search the files Rotproof does not read
+  (documents, scripts, configuration, comments) for those paths once the code has moved, since no check reads them;
+  it moves no code, and keeps nothing behind: `rotproof check` names what is not moved yet. Crossing 1.0.0-rc.3, which splits the UI into the view (`ui`) and the
   state of the screens (`presentation`) and declares the UI, the refresh adds `ui` to the declaration: `"atomic"` when
   `ui/` is there, `"none"` otherwise. With `"atomic"`, it says, as the same lines, that `presentation` is to be made
   (`rotproof create --yes`), and that the state of a page and its calls of the use cases move to
