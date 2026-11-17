@@ -16,6 +16,8 @@
 //!   `unlink`), because the type of what it is called on cannot be read: the net. A name the project itself defines,
 //!   with the same number of parameters, is left out of it ([`excluded`]).
 
+use std::collections::BTreeSet;
+
 use crate::code::{Defined, First, How, Method, Use};
 use crate::environment::{owns_python, owns_python_star};
 
@@ -222,8 +224,8 @@ pub const NET_ALWAYS: [&str; 23] = [
 /// The names of a path that are judged when called with no argument: with one, they are the name of another thing.
 pub const NET_NO_ARGUMENT: [&str; 6] = ["exists", "is_file", "is_dir", "stat", "owner", "resolve"];
 
-/// `open` is judged when it is called with a string literal for its mode, or with one of these keywords, as a path's
-/// `open` is.
+/// `open` is judged when it is called with no argument at all (a path's `open()` reads a file in practice), with a
+/// string literal for its mode, or with one of these keywords, as a path's `open` is.
 pub const NET_OPEN_KEYWORDS: [&str; 4] = ["mode", "encoding", "newline", "buffering"];
 
 /// The module family of a name, and the module as written.
@@ -400,6 +402,40 @@ pub fn judge(used: &Use) -> Option<Found> {
     })
 }
 
+/// The classes of `pathlib` (as `pathlib.Path`) that the file imports and then uses in a type position alone, or not at
+/// all: the line that imports one is not judged, as nothing the file does runs it. Any other use of the class decides
+/// the other way: constructing it, `Path.cwd()`, `Path.home()`, `isinstance(x, Path)`, a reference (`f = Path`), a
+/// use of it in a call in an annotation. `uses` give each name as what it resolves to, so a use of `P` in `from pathlib
+/// import Path as P` is a use of `pathlib.Path`; two bindings of one class are told apart by neither, which changes
+/// nothing, since the file fails at the use that runs.
+pub fn type_only_imports(uses: &[Use]) -> BTreeSet<&str> {
+    let mut free: BTreeSet<&str> = uses
+        .iter()
+        .filter(|used| used.how == How::Imported)
+        .map(|used| used.name.as_str())
+        .filter(|name| is_pathlib_class(name))
+        .collect();
+    for used in uses {
+        if used.in_type || matches!(used.how, How::Imported | How::Star) {
+            continue;
+        }
+        free.retain(|class| {
+            used.name != *class
+                && !used
+                    .name
+                    .strip_prefix(class)
+                    .is_some_and(|rest| rest.starts_with('.'))
+        });
+    }
+    free
+}
+
+/// Whether `name` is `pathlib.Path`, `pathlib.PosixPath` or `pathlib.WindowsPath`.
+fn is_pathlib_class(name: &str) -> bool {
+    name.strip_prefix("pathlib.")
+        .is_some_and(|class| PATHLIB_CLASSES.contains(&class))
+}
+
 /// The import of the module `module` (its dotted parts): `secrets` is randomness whole, so it is found where it is
 /// imported, as a module of the table is.
 pub fn judge_import(line: usize, parts: &[String]) -> Option<Found> {
@@ -442,7 +478,8 @@ pub fn net(method: &Method, excluded: &Excluded) -> Option<Found> {
     let judged = NET_ALWAYS.contains(&name)
         || (NET_NO_ARGUMENT.contains(&name) && given == 0 && !method.unpacked)
         || (name == "open"
-            && (method.first == First::Text
+            && ((given == 0 && !method.unpacked)
+                || method.first == First::Text
                 || method
                     .keywords
                     .iter()
@@ -468,7 +505,8 @@ pub fn excluded(defined: &[Defined]) -> Excluded {
                 let (name, parameters) = (method.name.as_str(), method.parameters);
                 NET_ALWAYS.contains(&name)
                     || (NET_NO_ARGUMENT.contains(&name) && parameters == 0)
-                    || (name == "open" && parameters >= 1)
+                    // `open` is judged with no argument and, in the forms above, with one or more
+                    || name == "open"
             })
             .map(|method| (method.name.clone(), method.parameters))
             .collect(),
@@ -548,8 +586,13 @@ pub fn listing() -> String {
     ));
     text.push_str("  - **The command-line arguments** (`argv`): `sys.argv` and `sys.orig_argv`.\n");
     text.push_str(&format!(
-        "  - **`pathlib.Path`, `pathlib.PosixPath` and `pathlib.WindowsPath`** are I/O by name: an import or a use of one \
-         fails ({}, one entry for each class). `PurePath`, `PurePosixPath` and `PureWindowsPath` are the pure way.\n",
+        "  - **`pathlib.Path`, `pathlib.PosixPath` and `pathlib.WindowsPath`** are I/O by name ({}, one entry for each \
+         class): a use of one fails (constructing it, `Path.cwd()`, `isinstance(x, Path)`, a reference as in `f = Path`), \
+         and so does its import line, unless every use of the name in the file is in a type position or there is none. A \
+         path as a value is `PurePath` (`PurePosixPath`, `PureWindowsPath`): `isinstance(x, PurePath)` narrows a `Path` \
+         too. `Path` written in a type position alone (`def load(path: str | Path)`, `-> list[Path]`) is not judged, and \
+         neither is its import then, also under `if TYPE_CHECKING:` and as `from pathlib import Path as P`, whose uses of \
+         `P` count.\n",
         join(&PATHLIB_CLASSES.map(|name| format!("pathlib.{name}")).iter().map(String::as_str).collect::<Vec<_>>())
     ));
     text.push_str(&format!(
@@ -562,8 +605,8 @@ pub fn listing() -> String {
     ));
     text.push_str(&format!(
         "  - **A method of a path, on any receiver** (the type of what a method is called on cannot be read, so its name is \
-         judged): {} always, {} when called with no argument, and `open` when called with a string literal or a keyword of \
-         {}. A name is left out of this net when the project defines a method (a `def` in a class) of the same name and the \
+         judged): {} always, {} when called with no argument, and `open` when called with no argument at all (`x.open()`; \
+         `x.open(name)` is not judged), with a string literal, or with a keyword of {}. A name is left out of this net when the project defines a method (a `def` in a class) of the same name and the \
          same number of parameters, not counting `self`, anywhere in it; `rotproof check` prints each name left out on every \
          run.\n",
         join(&NET_ALWAYS),
@@ -1005,16 +1048,90 @@ mod tests {
     }
 
     #[test]
-    fn open_is_judged_with_a_literal_mode_or_a_keyword_of_a_files() {
+    fn open_is_judged_with_no_argument_a_literal_mode_or_a_keyword_of_a_files() {
         let none = Excluded::default();
+        assert!(net(&method("open", 0, &[], First::Other), &none).is_some());
         assert!(net(&method("open", 1, &[], First::Text), &none).is_some());
         assert!(net(&method("open", 0, &["encoding"], First::Other), &none).is_some());
         assert!(net(&method("open", 0, &["newline"], First::Other), &none).is_some());
         assert!(net(&method("open", 0, &["buffering"], First::Other), &none).is_some());
         assert!(net(&method("open", 0, &["mode"], First::Other), &none).is_some());
-        assert!(net(&method("open", 0, &[], First::Other), &none).is_none());
         assert!(net(&method("open", 1, &[], First::Other), &none).is_none());
         assert!(net(&method("open", 1, &["url"], First::Other), &none).is_none());
+        // Nothing unpacked: `x.open(*args)` hides how many arguments there are
+        let mut unpacked = method("open", 0, &[], First::Other);
+        unpacked.unpacked = true;
+        assert!(net(&unpacked, &none).is_none());
+    }
+
+    #[test]
+    fn a_method_open_of_the_project_leaves_out_the_call_of_its_shape() {
+        let excluded = excluded(&[
+            Defined {
+                name: "open".into(),
+                parameters: 0,
+            },
+            Defined {
+                name: "open".into(),
+                parameters: 2,
+            },
+        ]);
+        assert!(net(&method("open", 0, &[], First::Other), &excluded).is_none());
+        assert!(net(&method("open", 2, &[], First::Text), &excluded).is_none());
+        // Another number of arguments is not the project's
+        assert!(net(&method("open", 1, &[], First::Text), &excluded).is_some());
+        assert!(net(&method("open", 0, &["encoding"], First::Other), &excluded).is_some());
+    }
+
+    /// The uses of a file that imports `class` and then uses `after`, as the reader gives them
+    fn imported_then(class: &str, after: Vec<Use>) -> Vec<Use> {
+        let mut uses = vec![used(class, How::Imported)];
+        uses.extend(after);
+        uses
+    }
+
+    fn typed(name: &str) -> Use {
+        let mut typed = used(name, How::Value);
+        typed.in_type = true;
+        typed
+    }
+
+    #[test]
+    fn a_class_of_pathlib_used_in_a_type_position_alone_or_not_at_all_has_a_free_import() {
+        for class in ["pathlib.Path", "pathlib.PosixPath", "pathlib.WindowsPath"] {
+            // No other use, and uses in a type position only
+            for after in [vec![], vec![typed(class)], vec![typed(class), typed(class)]] {
+                let uses = imported_then(class, after);
+                assert!(type_only_imports(&uses).contains(class), "{class}");
+            }
+            // Any use that runs keeps the import judged: constructing, `Path.cwd()`, `Path.home()` (the environment
+            // check's), and the class as a value, which is `isinstance(x, Path)` and `f = Path`
+            for run in [
+                called(class, 1, First::Text),
+                called(&format!("{class}.cwd"), 0, First::Other),
+                called(&format!("{class}.home"), 0, First::Other),
+                used(class, How::Value),
+            ] {
+                let uses = imported_then(class, vec![typed(class), run.clone()]);
+                assert!(!type_only_imports(&uses).contains(class), "{class} {run:?}");
+            }
+        }
+        // Another class, a module of the table and a pure path are not freed
+        let uses = imported_then("pathlib.PurePath", vec![]);
+        assert!(type_only_imports(&uses).is_empty());
+        let uses = imported_then(
+            "argparse.ArgumentParser",
+            vec![typed("argparse.ArgumentParser")],
+        );
+        assert!(type_only_imports(&uses).is_empty());
+        // A use of one class does not decide the import of another
+        let uses = vec![
+            used("pathlib.Path", How::Imported),
+            used("pathlib.PosixPath", How::Imported),
+            called("pathlib.PosixPath", 1, First::Text),
+        ];
+        let free = type_only_imports(&uses);
+        assert!(free.contains("pathlib.Path") && !free.contains("pathlib.PosixPath"));
     }
 
     #[test]

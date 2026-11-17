@@ -835,6 +835,80 @@ e = PurePosixPath('x').name
     }
 
     #[test]
+    fn a_path_in_a_type_position_alone_is_free_with_its_import_and_a_use_that_runs_is_not() {
+        // The import and the annotation, with an alias and under `TYPE_CHECKING`, and an import nothing uses
+        for source in [
+            "from pathlib import Path\n\n\ndef load_config(path: str | Path = 'config.yaml') -> list[Path]:\n    return []\n",
+            "from pathlib import Path as P\n\n\ndef load(path: P) -> P:\n    return path\n",
+            "import pathlib\n\n\ndef load(path: pathlib.Path) -> pathlib.PosixPath:\n    return path\n",
+            "from pathlib import Path\n",
+            "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from pathlib import Path\n\n\ndef f(p: Path) -> None:\n    return None\n",
+            "from pathlib import Path, PurePath\n\n\ndef f(p: Path, q: PurePath) -> bool:\n    return isinstance(q, PurePath)\n",
+        ] {
+            assert_eq!(says(source), nothing(), "{source}");
+        }
+        // Any other use of the name fails at the import and at the use
+        let both = |line: &str| {
+            says(&format!(
+                "from pathlib import Path\n\n\ndef f(p: Path, x):\n    {line}\n"
+            ))
+        };
+        assert_eq!(
+            both("return Path('x')"),
+            ["1 pathlib.Path", "5 pathlib.Path"]
+        );
+        assert_eq!(
+            both("return isinstance(x, Path)"),
+            ["1 pathlib.Path", "5 pathlib.Path"]
+        );
+        assert_eq!(both("return Path"), ["1 pathlib.Path", "5 pathlib.Path"]);
+        assert_eq!(
+            both("return Path.cwd()"),
+            ["1 pathlib.Path", "5 (cwd) pathlib.Path"]
+        );
+        // `Path.home` is the environment check's: the import fails for the use that runs, and the call is not reported
+        assert_eq!(both("return Path.home()"), ["1 pathlib.Path"]);
+        // An alias: the uses of the alias count
+        assert_eq!(
+            says("from pathlib import Path as P\nx = P('a')\n"),
+            ["1 pathlib.Path", "2 pathlib.Path"]
+        );
+        // A module of the table is not freed by a type position
+        assert_eq!(
+            says("import argparse\n\n\ndef f(a: argparse.Namespace) -> None:\n    pass\n"),
+            ["1 argparse"]
+        );
+        assert_eq!(
+            says(
+                "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from shutil import copyfile\n\n\ndef f(a: 'copyfile') -> None:\n    pass\n"
+            ),
+            ["3 (copyfile) shutil"]
+        );
+    }
+
+    #[test]
+    fn open_with_no_argument_is_judged_unless_the_project_defines_one() {
+        let source =
+            "def f(x, name):\n    a = x.open()\n    b = x.open(name)\n    c = x.open(*name)\n";
+        assert_eq!(says(source), ["2 open"]);
+        let tree = Fake::new(&[
+            ("domain/a.py", source),
+            (
+                "tests/test_store.py",
+                "class Store:\n    def open(self): ...\n",
+            ),
+        ]);
+        let found = problems(&tree, &Readers, &declared("python", "none")).unwrap();
+        assert!(found.forbidden.is_empty(), "{:?}", found.forbidden);
+        assert_eq!(
+            found.excluded.line().as_deref(),
+            Some(
+                "I/O net: left out, as the project defines a method of the same name and number of parameters: open(0)"
+            )
+        );
+    }
+
+    #[test]
     fn a_name_in_a_type_position_is_not_judged_and_a_call_in_an_annotation_is() {
         let source = "\
 import os
@@ -1039,6 +1113,8 @@ def f(p, repo):
                 "domain/a.py:2 read_text",
                 "domain/a.py:3 exists",
                 "domain/a.py:6 open",
+                // `open()` with no argument is judged too
+                "domain/a.py:7 open",
                 "domain/a.py:9 mkdir",
             ]
         );
@@ -1063,6 +1139,7 @@ def f(p, repo):
                     "domain/a.py:2 read_text",
                     "domain/a.py:5 mkdir",
                     "domain/a.py:6 open",
+                    "domain/a.py:7 open",
                     "domain/a.py:8 stat",
                     "domain/a.py:9 mkdir",
                 ],

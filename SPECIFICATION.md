@@ -584,7 +584,8 @@ in the section after Python's.
 **Not seen:** in every stack, a name bound in one
 file and used through another (in Rust, `pub use std::fs;` in a module and `reexport::fs::read` in the next: the `use`
 itself is found), a path a macro builds from pieces, a module of the project that is named as one of the table (a bare
-`import code` is the standard library's), and a type-only import, which counts as any. What Python, TypeScript and Rust
+`import code` is the standard library's), and a type-only import, which counts as any (but for the classes of
+`pathlib.Path`, whose import is free when the file uses the name in a type position alone). What Python, TypeScript and Rust
 do not see is in their sections that follow.
 
 #### Python: what is judged by the name
@@ -636,14 +637,26 @@ the environment check is not approved.
   `input` is its own), `io.open`, `io.FileIO`, `io.open_code`, `codecs.open`, and the streams of `sys`. Archives
   (`zipfile`, `tarfile`, `gzip.open`) are not I/O here.
 - **The command-line arguments** (`argv`): `sys.argv` and `sys.orig_argv`; the outer layers and the entry file read them.
-- **`pathlib.Path`, `pathlib.PosixPath` and `pathlib.WindowsPath` are I/O by name:** an import or a use of one fails (one
-  entry for each); `PurePath`, `PurePosixPath` and `PureWindowsPath` are the pure way.
+- **`pathlib.Path`, `pathlib.PosixPath` and `pathlib.WindowsPath` are I/O by name:** a use of one fails (one entry for
+  each): constructing it, `Path.cwd()`, `Path.home()` (the environment check's, so it is not reported for the call, but
+  it counts as a use that runs), `isinstance(x, Path)`, a reference (`f = Path`), and any use outside a type position.
+  Its import line fails with them, **but not when every other use of the imported name in the file is in a type
+  position, or there is none:** `from pathlib import Path` with `def load_config(path: str | Path = "config.yaml")` is
+  free, also under `if TYPE_CHECKING:` and through an alias (`from pathlib import Path as P`: the uses of `P` count; the
+  uses are read as the name they resolve to, so two bindings of one class are not told apart, which changes no verdict
+  since the file fails at the use that runs). A module of the table (`import argparse`) or a star import is not freed:
+  only these three by-name entries are. The pure way is `PurePath`, `PurePosixPath` and `PureWindowsPath` (a path as a
+  value), and `isinstance(x, PurePath)` narrows a `Path` too; the finding says so. A type checker may ask for `Path`
+  where a `PurePath` is returned (a `Path` method called on it, a port that takes `Path`): writing `Path` in a type
+  position alone is the way, and it is not judged. A switch per file that is stricter was rejected, since a `Path`
+  value reaches files that never name `Path` through attributes and return values.
 - **A method is judged by its name on any receiver, the net,** because the type of what it is called on cannot be read:
   `read_text`, `write_text`, `read_bytes`, `write_bytes`, `iterdir`, `rglob`, `mkdir`, `unlink`, `rmdir`, `symlink_to`,
   `hardlink_to`, `readlink`, `lstat`, `touch`, `chmod`, `lchmod`, `samefile`, `is_symlink`, `is_mount`, `is_junction`,
   `copy_into`, `move_into` and `absolute` always; `exists`, `is_file`, `is_dir`, `stat`, `owner` and `resolve`
-  only called with no argument; `open` only called with a string literal first (the mode) or a keyword `mode`,
-  `encoding`, `newline` or `buffering`. `group` (`Path.group()`) is left out of the net on purpose, because
+  only called with no argument; `open` only called with no argument at all (`x.open()`: no positional argument, no
+  keyword and nothing unpacked, which is a file read in practice), with a string literal first (the mode) or a keyword
+  `mode`, `encoding`, `newline` or `buffering` (`x.open(name)` is not judged). `group` (`Path.group()`) is left out of the net on purpose, because
   `re.Match.group()` shares the name, is pure and is common in domain code. A call whose callee is a name of a module
   that is judged already
   (`os.mkdir(p)`, `shutil.rmtree(p)`) is judged as that name and not again by the net. **A name is left out of the net

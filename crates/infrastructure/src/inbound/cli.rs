@@ -84,7 +84,7 @@ import.meta.env in TypeScript, std::env::var in Rust; not in another layer or th
 subprocess and socket in Python, fs and child_process in Node, std::fs and std::process and the print macros in Rust; \
 not in infrastructure, composition, ui, the entry file or a test; in Python also the names of what is I/O in part: os, \
 os.path, sys, time and logging by an allowlist of what is pure, the clock, randomness, the terminal and the arguments, \
-pathlib.Path, and a method of a path judged by its name, which a method of the project of the same name and number of \
+pathlib.Path (free in a type position alone), and a method of a path judged by its name, which a method of the project of the same name and number of \
 parameters leaves out, said on every run; approved as an import is, by its file and the entry), that in Python and \
 TypeScript they import only the packages allowed for the layer or level (allowed under [dependencies] of the \
 declaration, the person's decision, to which a unit adds in its own table; the layout allows react in \

@@ -2617,14 +2617,40 @@ fn each_python_name_that_does_io_in_part_fails_alone_and_what_is_pure_passes() {
             "reads the command-line arguments (sys.argv), which does I/O (entry `argv`)",
         ),
         (
-            "from pathlib import Path\n",
+            "from pathlib import Path\nx = Path('a')\n",
+            2,
+            "uses `pathlib.Path`, which does I/O: a path as a value is `PurePath`",
+        ),
+        // The import line fails with the use that runs
+        (
+            "from pathlib import Path\nx = Path('a')\n",
             1,
+            "uses `pathlib.Path`, which does I/O",
+        ),
+        (
+            "from pathlib import Path\n\n\ndef f(x):\n    return isinstance(x, Path)\n",
+            5,
+            "uses `pathlib.Path`, which does I/O",
+        ),
+        (
+            "from pathlib import Path as P\nx = P.cwd()\n",
+            2,
+            "uses `pathlib.Path` (cwd), which does I/O",
+        ),
+        (
+            "from pathlib import Path\nf = Path\n",
+            2,
             "uses `pathlib.Path`, which does I/O",
         ),
         (
             "import pathlib\nx = pathlib.PosixPath('a')\n",
             2,
             "uses `pathlib.PosixPath`, which does I/O",
+        ),
+        (
+            "def f(p):\n    return p.open()\n",
+            2,
+            "calls `.open(...)`, a method of a path that does I/O",
         ),
         (
             "def f(p):\n    return p.read_text()\n",
@@ -2690,7 +2716,15 @@ fn each_python_name_that_does_io_in_part_fails_alone_and_what_is_pure_passes() {
         "from pathlib import PurePath\nx = PurePath('a').name\n",
         "def f(input, print):\n    return input(print)\n",
         "import sys\nx: sys.stdout = None\n",
-        "def f(p):\n    return p.exists(1), p.open(), p.get(), p.read(), re.match(a, b).group()\n",
+        "def f(p, name):\n    return p.exists(1), p.open(name), p.open(*name), p.get(), p.read(), re.match(a, b).group()\n",
+        // `Path` written in a type position alone: the import is free too, with an alias and under `TYPE_CHECKING`
+        "from pathlib import Path\n\n\ndef load_config(path: str | Path = 'config.yaml') -> list[Path]:\n    return []\n",
+        "from pathlib import Path as P\n\n\ndef load(path: P) -> P:\n    return path\n",
+        "from pathlib import Path\n",
+        "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from pathlib import Path\n\n\n\
+         def load(path: 'Path') -> None:\n    return None\n",
+        "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from pathlib import PosixPath\n\n\n\
+         def load(path: PosixPath) -> PosixPath:\n    return path\n",
         "import os\ndef f(os):\n    return check(os)\n",
         "from datetime import datetime\nx = datetime.fromtimestamp(0)\n",
         "import zipfile, tarfile, gzip\n",
@@ -2855,6 +2889,38 @@ fn a_method_the_project_defines_is_left_out_of_the_net_and_the_line_is_printed_o
     let (code, said) = checked(r);
     assert_eq!(code, Some(0), "{said}");
     assert!(said.contains("I/O net: left out"), "{said}");
+}
+
+#[test]
+fn open_with_no_argument_is_judged_everywhere_unless_the_project_defines_one() {
+    let root = clean_repo();
+    let r = root.path();
+    put(
+        r,
+        "domain/a.py",
+        "def f(x, name):\n    return x.open(), x.open(name)\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The call with no argument alone is judged, in the one line
+    assert!(said.contains("domain/a.py:2: "), "{said}");
+    assert_eq!(said.matches("calls `.open(...)`").count(), 1, "{said}");
+    // A method `open(self)` of the project leaves it out, and says so; `open('r')` is still judged
+    put(
+        r,
+        "tests/test_store.py",
+        "class Store:\n    def open(self): ...\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("same name and number of parameters: open(0)"),
+        "{said}"
+    );
+    put(r, "domain/a.py", "def f(x):\n    return x.open('r')\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("calls `.open(...)`"), "{said}");
 }
 
 #[test]

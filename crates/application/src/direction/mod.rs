@@ -678,7 +678,15 @@ import os
         );
         let found = candidates(&[
             // A class, a star import of a module with names that are I/O, and what cannot be read
-            ("legacy/path.py", "from pathlib import Path\n"),
+            (
+                "legacy/path.py",
+                "from pathlib import Path\nhere = Path('a')\n",
+            ),
+            // The import of a class in a type position alone is free, and the file is offered every layer
+            (
+                "legacy/typed.py",
+                "from pathlib import Path\n\n\ndef f(p: Path) -> None:\n    pass\n",
+            ),
             ("legacy/star.py", "from datetime import *\n"),
             ("legacy/dyn.py", "eval('1')\n"),
             // What is pure: the names of an allowlist, and a module that only holds values
@@ -694,6 +702,7 @@ import os
                 free("legacy/path.py"),
                 ("legacy/pure.py".to_string(), None),
                 free("legacy/star.py"),
+                ("legacy/typed.py".to_string(), None),
             ]
         );
     }

@@ -177,7 +177,8 @@ fn python_entry(dotted: &str) -> Option<(&'static str, Option<String>)> {
 /// line: `from m import n` is `m.n`) and from the names it uses: `import asyncio` then `asyncio.open_connection(...)`
 /// is a use of the entry `asyncio.open_connection`, and `import urllib` then `urllib.request.urlopen(...)` one of
 /// `urllib.request`. A use in a type position is never judged, by the table or by the name: an annotation runs
-/// nothing, and the import it names fails at its own line.
+/// nothing, and the import it names fails at its own line, but for the import of a class of `pathlib` (`Path`) that the
+/// file uses in a type position alone, which is not judged either.
 ///
 /// What is I/O in part is judged by the name after the table ([`python`]): the allowlists, the groups, `pathlib.Path`,
 /// a module used as a value and a star import of one, and the calls of an attribute (`methods`) whose name is a path's,
@@ -194,6 +195,8 @@ pub fn in_python(
             python_found(*line, &parts.join(".")).or_else(|| python::judge_import(*line, parts))
         })
         .collect();
+    // A class of `pathlib` that the file uses in a type position alone is free to import: nothing runs it
+    let type_only = python::type_only_imports(uses);
     for used in uses {
         // An annotation runs nothing, and the import it names is found at its own line
         if used.in_type {
@@ -202,6 +205,9 @@ pub fn in_python(
         // The module `from m import *` brings the names of is its import, which is already one when it is in the table
         if used.how == How::Star {
             found.extend(python::judge_star(used));
+            continue;
+        }
+        if used.how == How::Imported && type_only.contains(used.name.as_str()) {
             continue;
         }
         match python_found(used.line, &used.name) {
@@ -536,6 +542,10 @@ pub fn findings(
                 format!(" ({})", names.iter().copied().collect::<Vec<_>>().join(", "))
             };
             let what = match cause {
+                Cause::Used if entry.starts_with("pathlib.") => format!(
+                    "uses `{entry}`{used}, which does I/O: a path as a value is `PurePath` (`isinstance(x, PurePath)` \
+                     narrows a `Path` too), and `Path` written in a type position alone is not judged"
+                ),
                 Cause::Used => format!("uses `{entry}`{used}, which does I/O"),
                 Cause::Glob(of) => format!(
                     "a glob of `{of}`, which brings in names that do I/O: the names it brings in cannot be read, so name \
