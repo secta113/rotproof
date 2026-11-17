@@ -93,7 +93,7 @@ presentation.models in TypeScript; a name no manifest lists or no file of its pl
 file and the package), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
-updates them), that .rotproof/AGENTS.md and the two copies of the skill rotproof (.claude/skills/rotproof/SKILL.md and .agents/skills/rotproof/SKILL.md) are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
+updates them), that .rotproof/AGENTS.md and .rotproof/running.md are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
 would write it (there with a shared unit, not there without), that every knowledge document in docs/knowledge/ keeps its \
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
 follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \
@@ -178,9 +178,8 @@ enum Command {
     /// A Python project's lock file is the one thing it does not write: a tool makes it, and `rotproof check` fails
     /// until one is committed.
     /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
-    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), the skill rotproof (how to
-    /// upgrade Rotproof and when to run each command; the same text in .claude/skills/rotproof/SKILL.md and
-    /// .agents/skills/rotproof/SKILL.md), .rotproof/readers.md (who reads
+    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), .rotproof/running.md (how to
+    /// upgrade Rotproof and when to run each command), .rotproof/readers.md (who reads
     /// each shared unit, when a unit is shared), and docs/index.md and the
     /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
     /// Never overwrites another file, and never moves or deletes one, except that in a rust project it adds the
@@ -203,7 +202,7 @@ enum Command {
     ///
     /// Prints the guide of the stack and the UI the project declares, or of the stack named with --stack, which needs
     /// no project: the layers of the stack with where each lives and what it may import, the rules of the records and
-    /// where the skill for running Rotproof is. The same text `rotproof create` writes to .rotproof/AGENTS.md. With
+    /// where the page on running Rotproof is. The same text `rotproof create` writes to .rotproof/AGENTS.md. With
     /// --stack, --ui picks the UI, as for `rotproof init` (with python, atomic, rendered or none; with typescript,
     /// atomic or none; the layers of the fullest UI the stack offers without it). Exits 2 for an unknown stack or UI,
     /// or when no stack is named and the declaration cannot be read.

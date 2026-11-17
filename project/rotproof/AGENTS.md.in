@@ -9,8 +9,8 @@ project's own map, its differences and its own rules are in `AGENTS.md`.
 
 ## Running Rotproof
 
-- **Use the skill `rotproof` (`.agents/skills/rotproof/SKILL.md`) when you upgrade Rotproof or run one of its
-  commands.** It says when to run which command; a tool that does not load skills reads it as a file.
+- **Read `.rotproof/running.md` when you upgrade Rotproof or run one of its commands.** It says when to run which
+  command and how to read what each prints.
 {layers}
 ## The records
 

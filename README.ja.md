@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 05f5a1ea. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 0bb1191c. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -51,8 +51,8 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
   通りません。環境変数を読めるのは `infrastructure` だけです。
 - **バイナリしか持たないエージェントも、迷いません。** `rotproof --help` が始める順番を示します。規則はプロジェクトの
   スタックに合わせて `.rotproof/AGENTS.md` に書かれ、`rotproof create` が書く `AGENTS.md` と `CLAUDE.md` が
-  エージェントをそこへ案内します。Rotproof の上げ方と、コマンドをいつ走らせるかは、スキル `rotproof` にあり、
-  `rotproof create` が `.claude/skills/` と `.agents/skills/` に書きます。
+  エージェントをそこへ案内します。Rotproof の上げ方と、コマンドをいつ走らせるかは `.rotproof/running.md` にあり、
+  ガイドがそれを名指します。
 - **規則は、固定した版のものです。** プロジェクトは Rotproof の版を 1 つ、厳密に固定します。規則が変わるのは、
   プロジェクト自身のコミットの中だけです（「互換性」を参照）。
 

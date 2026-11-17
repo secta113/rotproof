@@ -17,8 +17,8 @@ use domain::markers::KNOWLEDGE_HEADING;
 use domain::moving::Candidates;
 use domain::outside::Outside;
 use domain::project::MAP_HEADING;
+use domain::running::{PATH as RUNNING_PATH, RUNNING};
 use domain::schema::Time;
-use domain::skill::{PATHS as SKILL_PATHS, SKILL};
 use domain::suppressions::WEAKENS_HEADING;
 use domain::upgrade::guide_command;
 use domain::version::VERSION;
@@ -177,7 +177,7 @@ fn code(
 }
 
 /// Every broken rule of the files Rotproof writes into the project of `declared`: they are up to this version
-/// (`files` in the declaration), and the guide and the skill are the ones this version writes.
+/// (`files` in the declaration), and the guide and the page on running Rotproof are the ones this version writes.
 fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
     let mut found: Vec<Finding> = under(
         "the project's files are up to this version of Rotproof",
@@ -188,46 +188,37 @@ fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
         ),
     )
     .collect();
+    let files = declared.declaration.files.as_deref();
     let guide = domain::guide::guide(&declared.declaration.stack, declared.layout.as_ref());
-    let written = exactly(tree, GUIDE)
-        .ok()
-        .and_then(|(path, _)| read_text(tree, &path).ok());
-    if written.as_ref() != Some(&guide) {
-        let state = if written.is_some() {
-            "out of date"
-        } else {
-            "missing"
-        };
-        found.extend(under(
-            "Rotproof's guide is up to date",
-            [format!(
-                "{state}, {}: {GUIDE}",
-                guide_command(declared.declaration.files.as_deref(), VERSION)
-            )],
-        ));
-    }
-    // Each copy on a line of its own, so that one missing is not read as both
     found.extend(under(
-        "Rotproof's skill is up to date",
-        SKILL_PATHS.iter().filter_map(|path| {
-            let written = exactly(tree, path)
-                .ok()
-                .and_then(|(found, _)| read_text(tree, &found).ok());
-            if written.as_deref() == Some(SKILL) {
-                return None;
-            }
-            let state = if written.is_some() {
-                "out of date"
-            } else {
-                "missing"
-            };
-            Some(format!(
-                "{state}, {}: {path}",
-                guide_command(declared.declaration.files.as_deref(), VERSION)
-            ))
-        }),
+        "Rotproof's guide is up to date",
+        generated(tree, GUIDE, &guide, files),
+    ));
+    found.extend(under(
+        "Rotproof's page on running it is up to date",
+        generated(tree, RUNNING_PATH, RUNNING, files),
     ));
     found
+}
+
+/// What is wrong with the file Rotproof generates at `path`, whose text is to be `text`, with the command that writes
+/// it again: nothing when it is that text.
+fn generated(tree: &dyn Tree, path: &str, text: &str, files: Option<&str>) -> Option<String> {
+    let written = exactly(tree, path)
+        .ok()
+        .and_then(|(found, _)| read_text(tree, &found).ok());
+    if written.as_deref() == Some(text) {
+        return None;
+    }
+    let state = if written.is_some() {
+        "out of date"
+    } else {
+        "missing"
+    };
+    Some(format!(
+        "{state}, {}: {path}",
+        guide_command(files, VERSION)
+    ))
 }
 
 #[cfg(test)]

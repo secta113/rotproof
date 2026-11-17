@@ -1,7 +1,7 @@
 //! Rotproof's guide, `.rotproof/AGENTS.md`, which every `rotproof create` rewrites and `rotproof check` compares, as it
 //! does the generated files in `docs/`. It says the rules Rotproof keeps in the project's stack: the layers (their
 //! table is written from `layers/table.toml`, so the two cannot disagree) and the records, which every session needs,
-//! and where the skill is that says how to run Rotproof (`skill.rs`). It names the version that wrote it, so an
+//! and where the page is that says how to run Rotproof (`running.rs`). It names the version that wrote it, so an
 //! upgrade fails `rotproof check` until `rotproof init` has run.
 //!
 //! The texts are in `project/rotproof/`, built into the binary. A rule that says something of its own in the section on
@@ -263,7 +263,7 @@ fn ui(layout: &Layout) -> String {
 mod tests {
     use super::*;
     use crate::layers::{NO_UI, STACKS, uis};
-    use crate::skill;
+    use crate::running;
 
     #[test]
     fn every_stack_has_a_guide_with_every_placeholder_filled() {
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn every_guide_sends_to_the_skill_in_one_place_that_is_written() {
+    fn every_guide_sends_to_the_page_on_running_rotproof_that_is_written() {
         let mut guides: Vec<String> = known_stacks()
             .iter()
             .filter(|stack| **stack != RECORDS_ONLY)
@@ -478,9 +478,10 @@ mod tests {
         guides.push(guide(RECORDS_ONLY, None));
         for text in guides {
             let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-            let says = format!("the skill `{}` (`{}`)", skill::NAME, skill::PATHS[1]);
+            let says = format!("Read `{}`", running::PATH);
             assert!(text.contains(&says), "{says}");
-            // How to upgrade, and when to run which command, are the skill's
+            assert!(!text.contains("skill"));
+            // How to upgrade, and when to run which command, are the page's
             assert!(!text.contains("Upgrade Rotproof in a commit"));
             assert!(!text.contains("rotproof follows knowledge/<slug>.md"));
         }
