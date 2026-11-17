@@ -2,8 +2,10 @@
 //!
 //! - Every layer of the stack's layout is present or declared absent, and no layer declared absent is present.
 //!   `absent` names no layer the declared UI leaves out.
-//! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`), the entry file and
-//!   the paths the project lists in `unchecked` or `moving`. Where code is looked for is the layout's `scope`, and its
+//! - No code sits outside the layers, except in the stack's paths that are not layers (`tests/`), a test the layout
+//!   tells by its name (a TypeScript `*.test.*`, which `application` leaves out of what it reads as code: it is no
+//!   layer's, wherever it sits), the entry file and the paths the project lists in `unchecked` or `moving`. Where code
+//!   is looked for is the layout's `scope`, and its
 //!   `also_code` (the root package's `src/` in Rust). A path in `unchecked` or `moving` exists and holds no layer, so a
 //!   layer cannot be switched off by listing it.
 //! - A project that declares units is read unit by unit, and every finding about a layer, a view or code outside the
@@ -23,7 +25,7 @@
 //!   (`atoms → ui/helpers.py → domain`) would pass every direct check of the direction.
 //! - A layer the layout says holds no view (`presentation` in TypeScript) holds no file with the extension of a view
 //!   (`.tsx`, `.jsx`), whatever its level: the extension is all that tells one, as the check reads imports, not what
-//!   a file draws.
+//!   a file draws. A test (`useForm.test.tsx`) is no view, nor any code of a layer.
 //!
 //! The floor: at least one layer is present. A project with every layer declared absent would check nothing. A
 //! repository that keeps records only declares `stack = "none"`, and the check says that it skipped the layers.

@@ -30,16 +30,29 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::paths::{join, normalize, parent};
 
 /// What one file of code holds: what it imports, as `I`, its comments and its first syntax error.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Source<I> {
     /// Everything the file imports, each with the line (from 1) it is imported on
     pub imports: Vec<(usize, I)>,
     /// Every comment: its byte offset in the source, and its text with its delimiters. A reader reads comments past a
     /// syntax error too
     pub comments: Vec<(usize, String)>,
-    /// Every read or write of the environment variables the reader sees (`environment.rs`): the line (from 1), and
-    /// what it names (`os.environ`, `process.env`)
-    pub environment: Vec<(usize, String)>,
+    /// Every use of a name that resolves to something outside the file's own code, in the order of the lines: what
+    /// the checks of a language judge (`domain::environment::in_python` and `in_typescript`). See [`Use`]
+    pub uses: Vec<Use>,
+    /// What the reader met and could not read: the line (from 1), and what it is. In Python, the function a file calls
+    /// to import a module whose name it does not write as a string (`importlib.import_module(name)`, a relative
+    /// `".x"`), which is built at run time, and `eval` and `exec` (`builtins.eval`), whether called or taken as a
+    /// value; in TypeScript, `import` and `require` of what is no literal string (`import()`, `require`), `eval` and
+    /// `Function`
+    pub unread: Vec<(usize, String)>,
+    /// Every call of an attribute, whatever it is the attribute of (`a.b()`, `f().g()`, `self.x.y()`), in the order of
+    /// the lines: what a rule judges by the method's name alone, when the type of the receiver cannot be known.
+    /// Python's reader gives them; TypeScript's does not
+    pub methods: Vec<Method>,
+    /// Every method a class defines, with how many parameters it takes: what a rule that judges a method by its name
+    /// leaves out when the project has one of its own. Python's reader gives them; TypeScript's does not
+    pub defined: Vec<Defined>,
     /// The first syntax error, if any: its line and what the parser says. The parser recovers, but what follows may be
     /// misread
     pub error: Option<(usize, String)>,
@@ -50,10 +63,224 @@ impl<I> Default for Source<I> {
         Source {
             imports: Vec::new(),
             comments: Vec::new(),
-            environment: Vec::new(),
+            uses: Vec::new(),
+            unread: Vec::new(),
+            methods: Vec::new(),
+            defined: Vec::new(),
             error: None,
         }
     }
+}
+
+/// What the first positional argument of a call is, when it is a literal a rule asks about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum First {
+    /// Anything else, and a call that has none
+    #[default]
+    Other,
+    /// The literal `None` (Python): `time.gmtime(None)` reads the clock as `time.gmtime()` does
+    Null,
+    /// A string literal (Python's `p.open("w")`), with any quotes; an f-string is not one
+    Text,
+}
+
+/// One call of an attribute in Python, whatever it is the attribute of: `p.read_text()`, `Path("a").exists()`,
+/// `self.repo.mkdir(name)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Method {
+    /// The line (from 1) of the attribute's name
+    pub line: usize,
+    /// The attribute called, without what it is the attribute of
+    pub name: String,
+    /// What the chain of names the call starts at resolves to, when its first name is an import or a builtin: the whole
+    /// callee, as a [`Use`] names it (`os.path.exists` for `os.path.exists(p)`); empty when it starts at anything else
+    /// (a variable, a parameter, a call, a subscript)
+    pub resolved: Vec<String>,
+    /// How many positional arguments, a `*args` not counted
+    pub positional: usize,
+    /// The names of the keyword arguments, in the order written
+    pub keywords: Vec<String>,
+    /// Whether the call has a `*args` or a `**kwargs`, which hides how many arguments there are
+    pub unpacked: bool,
+    /// What the first positional argument is
+    pub first: First,
+}
+
+/// One method a class defines (a `def` directly in a class body), with how many parameters it takes, not counting
+/// `self` (nor the `cls` of a `@classmethod`); a `@staticmethod` has no such parameter and counts them all. A `*args`
+/// and a `**kwargs` count one each.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Defined {
+    pub name: String,
+    pub parameters: usize,
+}
+
+/// One use of a name in a Python or TypeScript file that resolves to something outside the file's own code, as the
+/// scopes of the language resolve it (in Python: module, function and lambda, class body, comprehension, where a name
+/// is the one of the scope it is bound in at all, wherever in the scope it is bound; in TypeScript: the block, the
+/// function, the module, with what `var` hoists and the names `declare` makes).
+///
+/// A name is outside the file's own code when an `import` binds it (in Python `import a.b as c`, then `c.x` is
+/// `a.b.x`; `from a import b as c`, then `c` is `a.b`; `import os`, then `os.path.exists` is `os.path.exists`; in
+/// TypeScript `import * as fs from "fs"`, then `fs.readFile` is `"fs".readFile`), or when no scope binds it and it is a
+/// builtin in Python (`open` is `builtins.open`) or a global in TypeScript (`fetch`). A name the file defines, a
+/// parameter, a name assigned and, in Python, one no scope binds that is no builtin are not uses. A chain of names is
+/// followed as far as it is static: the use is the whole of it (`os.environ.get`, `process.env.X`), and what comes
+/// after a call or a subscript that is no literal is not part of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Use {
+    /// The line (from 1) the use starts on
+    pub line: usize,
+    /// The name it resolves to, whole.
+    ///
+    /// **In Python** it is dotted: `os.path.exists`, `datetime.datetime.now`, `builtins.open`. The module `from m
+    /// import *` brings the names of, for [`How::Star`].
+    ///
+    /// **In TypeScript** a global is as written, dotted, with what the global object (`window`, `globalThis`, `self`,
+    /// `global`) holds taken as a global: `fetch`, `Date.now`, `localStorage.getItem`, `process.env.X`, and
+    /// `import.meta.env.X` for `import.meta`. A name taken from a module starts with the specifier as written, in
+    /// double quotes (it has dots and slashes in it, and `#` at times; a `"` or a `\` in it is escaped with a `\`),
+    /// then the export it takes and the properties that follow, after dots: `"node:fs".readFile`,
+    /// `"fs".promises.readFile` for `import * as fs` then `fs.promises.readFile`, `"react".default.useState` for
+    /// `import React from "react"` then `React.useState`, and `"fs"` for the namespace itself. A name a declarator
+    /// binds from `require("fs")` or `await import("fs")` with a literal is taken as an import's (`const fs =
+    /// require("fs")` is the namespace, `const { readFile } = require("fs")` takes `readFile`). A property that is no
+    /// identifier is written `["a-b"]`, after no dot. [`typescript_name`] writes one and [`split_typescript_name`]
+    /// reads one back
+    pub name: String,
+    /// How the name is used
+    pub how: How,
+    /// Whether the use sits in a type position: an annotation, a bound or default of a type parameter, or the value
+    /// of a `type` statement, and in it a name, an attribute or a subscript (`Path`, `os.PathLike`, `list[Path]`). A
+    /// call in it, with its callee and its arguments, is not: it runs when the annotation is evaluated, so
+    /// `Annotated[datetime, Field(default_factory=datetime.now)]` has `datetime` in a type position and `Field` and
+    /// `datetime.now` out of it. A rule on what the code does at run time does not judge a use in a type position.
+    ///
+    /// TypeScript's reader leaves a type position out (a type reference is no value reference, and `import type` takes
+    /// nothing a program runs), so it is `false` there
+    pub in_type: bool,
+}
+
+/// How a name is used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum How {
+    /// The name is taken at an import, `from m import n` (`m.n`, resolved against the package for a relative `m`),
+    /// whether the file uses it or not. `import m` is no use: it is in [`Source::imports`]. In TypeScript, a named or
+    /// a default import (`import { readFile } from "node:fs"` is `"node:fs".readFile`, `import React from "react"` is
+    /// `"react".default`), at the line of the specifier; `import * as fs` takes no name, and `import type` is no use
+    Imported,
+    /// `from m import *`: the names it brings in cannot be read. The use is of the module `m`; the names the file then
+    /// uses without binding them are not uses
+    Star,
+    /// The name is called: `os.getenv("X")`, `datetime.now()`, `open(path)`
+    Called {
+        /// How many positional arguments, a `*args` not counted
+        positional: usize,
+        /// The names of the keyword arguments, in the order written (`**kwargs` is not one)
+        keywords: Vec<String>,
+        /// Whether the call has a `*args` or a `**kwargs`, which hides how many arguments there are
+        unpacked: bool,
+        /// What the first positional argument is: Python's reader tells `None` and a string literal, TypeScript's
+        /// leaves it [`First::Other`]
+        first: First,
+    },
+    /// The name is used as a value, and called by no one here: `default_factory=datetime.now`, `f = time.time`,
+    /// `os.environ["A"]`, `getattr(os, "environ")` (the `os`), `o = os`, `@functools.cache`; in TypeScript
+    /// `useState(Date.now)`, `const f = fetch`, `process.env.X`, `document.title`. When the name is a module (`os`),
+    /// the module object itself is used: the reader does not know which names are modules, a rule asks its own table
+    /// of them
+    Value,
+    /// TypeScript's `new`: `new Date()` is `Date` constructed with none, `new Date(x)` with one. Python's reader gives
+    /// none: a class is called there
+    Constructed {
+        /// How many arguments, a spread not counted
+        positional: usize,
+        /// Whether one is a spread (`new Date(...args)`), which hides how many there are
+        unpacked: bool,
+    },
+    /// The name is the operand of `typeof` (TypeScript): `typeof window`, `typeof process.env`. Nothing of it runs but
+    /// the test of what it is, which does not fail for a name nothing binds, so a rule on what the code reads may skip
+    /// it. Python's reader gives none
+    TypeOf,
+}
+
+/// The name of a TypeScript [`Use`] taken from `module` (as written, `None` for a global) with the `parts` that follow
+/// it: `"node:fs".readFile`, `localStorage.getItem`, `import.meta.env`, `["a-b"]` for a part that is no identifier.
+pub fn typescript_name(module: Option<&str>, parts: &[String]) -> String {
+    let escape = |text: &str| text.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut name = String::new();
+    if let Some(module) = module {
+        name.push('"');
+        name.push_str(&escape(module));
+        name.push('"');
+    }
+    for part in parts {
+        let mut chars = part.chars();
+        let identifier = chars
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
+            && chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$');
+        if identifier {
+            if !name.is_empty() {
+                name.push('.');
+            }
+            name.push_str(part);
+        } else {
+            name.push_str("[\"");
+            name.push_str(&escape(part));
+            name.push_str("\"]");
+        }
+    }
+    name
+}
+
+/// The module a name of TypeScript's [`Use`] is taken from, unquoted (`None` for a global), and its names, each
+/// without the dot or the brackets: `"node:fs".readFile` is `Some("node:fs")` and `["readFile"]`, `fetch` is `None` and
+/// `["fetch"]`, `"react".default.useState` is `Some("react")` and `["default", "useState"]`, and `"fs"` alone has none
+/// (the module itself).
+pub fn split_typescript_name(name: &str) -> (Option<String>, Vec<String>) {
+    let mut chars = name.chars().peekable();
+    let module = (chars.peek() == Some(&'"')).then(|| quoted(&mut chars));
+    let mut parts = Vec::new();
+    while let Some(&next) = chars.peek() {
+        match next {
+            '.' => {
+                chars.next();
+            }
+            '[' => {
+                chars.next();
+                parts.push(quoted(&mut chars));
+                // The closing bracket
+                chars.next();
+            }
+            _ => {
+                let mut part = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c == '.' || c == '[' {
+                        break;
+                    }
+                    part.push(c);
+                    chars.next();
+                }
+                parts.push(part);
+            }
+        }
+    }
+    (module, parts)
+}
+
+/// What a string in double quotes holds, the quotes taken: a `\` stands for the character after it.
+fn quoted(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+    let mut text = String::new();
+    chars.next();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => break,
+            '\\' => text.extend(chars.next()),
+            _ => text.push(c),
+        }
+    }
+    text
 }
 
 /// What one import of a TypeScript or JavaScript file names: the module, and the names it takes from it.
@@ -507,6 +734,34 @@ mod tests {
         assert_eq!(parts("ui/pages/home.py"), "ui.pages.home");
         assert_eq!(parts("ui/pages/__init__.py"), "ui.pages");
         assert_eq!(parts("domain/Model.PY"), "domain.Model");
+    }
+
+    #[test]
+    fn the_name_of_a_typescript_use_is_written_and_read_back() {
+        let parts = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        for (module, names, written) in [
+            (None, &["fetch"][..], "fetch"),
+            (None, &["process", "env", "X"], "process.env.X"),
+            (None, &["import", "meta", "env"], "import.meta.env"),
+            (Some("node:fs"), &["readFile"], "\"node:fs\".readFile"),
+            (
+                Some("react"),
+                &["default", "useState"],
+                "\"react\".default.useState",
+            ),
+            (Some("fs"), &[], "\"fs\""),
+            (Some("#internal/x.js"), &["a"], "\"#internal/x.js\".a"),
+            (None, &["window", "a-b", "c"], "window[\"a-b\"].c"),
+            (Some("a\"b\\c"), &["d.e"], "\"a\\\"b\\\\c\"[\"d.e\"]"),
+        ] {
+            let names = parts(names);
+            assert_eq!(typescript_name(module, &names), written);
+            assert_eq!(
+                split_typescript_name(written),
+                (module.map(String::from), names),
+                "{written}"
+            );
+        }
     }
 
     #[test]

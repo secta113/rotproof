@@ -109,8 +109,9 @@ pub struct LinkedTodo {
 pub struct MovingFile {
     /// From the root, with `/`
     pub path: String,
-    /// The layers and levels in which the direction check would pass it, innermost first, as a finding names a place;
-    /// none when empty. `None`: every one there is, as nothing it imports and nothing that imports it says against any
+    /// The layers and levels in which the direction check would pass it and, in Python and TypeScript, the check of
+    /// the I/O of the inner layers would too, innermost first, as a finding names a place; none when empty. `None`:
+    /// every one there is, as nothing it imports, does, or is imported by says against any
     pub candidates: Option<Vec<String>>,
 }
 
@@ -140,6 +141,16 @@ pub struct Templates {
     pub not_judged: Vec<String>,
 }
 
+/// How many files `rotproof check` read as tests, in a stack that tells a test by its name. It is no finding: it is
+/// said on every run, so that a reader sees what the names matched, and notices when they matched nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestFiles {
+    /// How many source files are read as tests, outside `unchecked` and `moving`
+    pub count: usize,
+    /// What makes a file a test, as the layout writes it: `*.test.*`, `__tests__/`
+    pub patterns: Vec<String>,
+}
+
 /// What `rotproof check` found.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -157,9 +168,21 @@ pub struct Report {
     /// The code that is not in a layer yet, printed on every run apart from the findings and the warnings. `None`
     /// unless the declaration lists a path in `moving`
     pub moving: Option<Moving>,
+    /// Every import from the code of an inner layer (domain, protocol, application, presentation) into a path of
+    /// `unchecked` or `moving`, which no check judges, one line each as `file:line imports <import>, in a path of
+    /// <field>`, in the order of the file and the line: said on every run apart from the findings and the warnings,
+    /// failing nothing. Empty when there are none
+    pub outside: Vec<String>,
     /// How the references between templates were read, said on every run apart from the findings and the warnings.
     /// `None` unless the project declares a UI whose views are templates
     pub templates: Option<Templates>,
+    /// How many files were read as tests, said on every run apart from the findings and the warnings. `None` unless
+    /// the stack tells a test by its name (TypeScript)
+    pub tests: Option<TestFiles>,
+    /// The methods the net of method names leaves out because the project defines one of the same name and number of
+    /// parameters, as one line said on every run apart from the findings and the warnings, failing nothing. `None` when
+    /// the project defines none that the net judges
+    pub io_net: Option<String>,
     /// Every warning, in the order it is printed, each kind under its own heading: a knowledge document whose
     /// `stale_after` has come, with what to do, and a comment that may make the type checker check less
     /// (`# pyright: basic`), as `path:line` and the line under it

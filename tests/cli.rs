@@ -1968,9 +1968,10 @@ fn presentation_holds_no_view_in_typescript() {
     for planted in [
         "src/presentation/models/Form.tsx",
         "src/presentation/display/row.jsx",
-        // A test with a wrapper in JSX is a view all the same, and so is any case
-        "src/presentation/models/useForm.test.tsx",
+        // Any case
         "src/presentation/models/Form.TSX",
+        // A test whose name does not tell it is a test is a view all the same
+        "src/presentation/models/useForm.tests.tsx",
     ] {
         let root = repo_with_ui("typescript", "");
         plant_file(root.path(), planted);
@@ -2000,6 +2001,10 @@ fn presentation_holds_no_view_in_typescript() {
         "src/ui/pages/Home.tsx",
         "src/ui/atoms/Button.jsx",
         "src/composition/Providers.tsx",
+        // A test of a hook that needs a wrapper written in JSX is a test, as the file of Python's `tests/` is
+        "src/presentation/models/useForm.test.tsx",
+        "src/presentation/models/useForm.spec.jsx",
+        "src/presentation/models/__tests__/wrapper.tsx",
     ] {
         plant_file(root.path(), path);
     }
@@ -2017,6 +2022,2711 @@ fn presentation_holds_no_view_in_typescript() {
     plant_file(root.path(), "src/presentation/Form.tsx");
     let said = stdout(&run(&["--root", &root_arg(root.path()), "check"]));
     assert!(!said.contains("a view in"), "{said}");
+}
+
+/// Writes `text` at `path` of `root`, making its directories.
+fn put(root: &Path, path: &str, text: &str) {
+    let full = root.join(path);
+    fs::create_dir_all(full.parent().unwrap()).unwrap();
+    fs::write(full, text).unwrap();
+}
+
+#[test]
+fn a_python_name_is_read_as_python_scopes_read_it_by_the_environment_check() {
+    let root = clean_repo();
+    let r = root.path();
+    // The forms that read the environment or the home directory, through every way the file may name them, in a layer
+    put(
+        r,
+        "domain/forbidden.py",
+        "import os\nimport os.path as p\nfrom os import getenv as g\nfrom pathlib import Path\n\n\n\
+         def read():\n    return (\n        os.environ['A'],\n        g('B'),\n        p.expanduser('~'),\n        \
+         Path.home(),\n    )\n",
+    );
+    put(r, "application/star.py", "from os import *\n");
+    // What is no read: a parameter called `os`, a local that is, and the names of the same modules that read nothing
+    put(
+        r,
+        "domain/allowed.py",
+        "import os\nfrom pathlib import PurePath\n\n\ndef a(os):\n    return os.environ\n\n\ndef b():\n    os = 1\n    \
+         return os.getenv('A')\n\n\ndef c():\n    return os.path.join('a', 'b'), PurePath('a').name\n",
+    );
+    // `infrastructure` alone may read it
+    put(
+        r,
+        "infrastructure/outbound/settings.py",
+        "import os\nfrom os import *\nfrom pathlib import Path\n\nHOME = Path.home()\nA = os.environ['A']\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    let star = "(a star import: the names it brings in cannot be read, so name them: `from os import path`)";
+    assert!(
+        said.ends_with(&format!(
+            "  application/star.py:1: os.* {star}\n    from os import *\n\
+             \x20 domain/forbidden.py:3: os.getenv\n    from os import getenv as g\n\
+             \x20 domain/forbidden.py:9: os.environ\n    os.environ['A'],\n\
+             \x20 domain/forbidden.py:10: os.getenv\n    g('B'),\n\
+             \x20 domain/forbidden.py:11: os.path.expanduser\n    p.expanduser('~'),\n\
+             \x20 domain/forbidden.py:12: pathlib.Path.home\n    Path.home(),\n"
+        )),
+        "{said}"
+    );
+    assert!(
+        !said.contains("allowed.py") && !said.contains("settings.py"),
+        "{said}"
+    );
+    // Without the forbidden files, the allowed ones and `infrastructure` pass
+    fs::remove_file(r.join("domain/forbidden.py")).unwrap();
+    fs::remove_file(r.join("application/star.py")).unwrap();
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+}
+
+#[test]
+fn each_python_form_that_reads_the_environment_fails_alone_and_a_shadowed_name_does_not() {
+    let root = clean_repo();
+    let r = root.path();
+    // (what the file holds, what the check names)
+    let forbidden = [
+        // What the check found before names of scopes were read
+        (
+            "import os\nx = os.environ['A']\n",
+            "domain/x.py:2: os.environ",
+        ),
+        (
+            "import os as o\nx = o.getenv('A')\n",
+            "domain/x.py:2: os.getenv",
+        ),
+        (
+            "import os.path\nos.putenv('A', '1')\n",
+            "domain/x.py:2: os.putenv",
+        ),
+        ("from os import environ\n", "domain/x.py:1: os.environ"),
+        (
+            "from os import getenv as g\ng('A')\n",
+            "domain/x.py:1: os.getenv",
+        ),
+        // The names that came with scopes
+        (
+            "import os\nos.path.expandvars('$A')\n",
+            "domain/x.py:2: os.path.expandvars",
+        ),
+        (
+            "import os\nos.path.expanduser('~')\n",
+            "domain/x.py:2: os.path.expanduser",
+        ),
+        (
+            "from os import path\npath.expanduser('~')\n",
+            "domain/x.py:2: os.path.expanduser",
+        ),
+        (
+            "import posixpath\nposixpath.expanduser('~')\n",
+            "domain/x.py:2: posixpath.expanduser",
+        ),
+        (
+            "import ntpath\nntpath.expandvars('x')\n",
+            "domain/x.py:2: ntpath.expandvars",
+        ),
+        (
+            "import genericpath\ngenericpath.expanduser('~')\n",
+            "domain/x.py:2: genericpath.expanduser",
+        ),
+        (
+            "from pathlib import Path\nPath.home()\n",
+            "domain/x.py:2: pathlib.Path.home",
+        ),
+        (
+            "from pathlib import PosixPath\nPosixPath.home()\n",
+            "domain/x.py:2: pathlib.PosixPath.home",
+        ),
+        (
+            "import pathlib\npathlib.WindowsPath.home()\n",
+            "domain/x.py:2: pathlib.WindowsPath.home",
+        ),
+        ("from os import *\n", "domain/x.py:1: os.*"),
+        ("from os.path import *\n", "domain/x.py:1: os.path.*"),
+        ("from pathlib import *\n", "domain/x.py:1: pathlib.*"),
+    ];
+    for (source, named) in forbidden {
+        put(r, "domain/x.py", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{source}\n{said}");
+        assert!(said.contains(&format!("\n  {named}")), "{source}\n{said}");
+    }
+    // A name that is not the module, or of a module that reads nothing from the environment
+    let allowed = [
+        "import os\ndef f(os):\n    return os.environ\n",
+        "def f():\n    os = {}\n    return os.getenv('A')\n",
+        "import os\nclass C:\n    os = {}\n    x = os.environ\n",
+        "import os\nx = [os.environ for os in range(3)]\n",
+        "from os import path\nx = path.join('a', 'b')\n",
+        "from pathlib import PurePath\nx = PurePath('a')\n",
+        "import os\nx = os.fspath('a')\n",
+    ];
+    for source in allowed {
+        put(r, "domain/x.py", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        assert!(out.status.success(), "{source}\n{}", stdout(&out));
+    }
+}
+
+#[test]
+fn each_typescript_form_that_reads_the_environment_fails_alone_and_a_shadowed_name_does_not() {
+    let root = typescript_with_vitest();
+    let r = root.path();
+    // (what the file holds, what the check names)
+    let forbidden = [
+        (
+            "export const x = process.env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "export const x = process['env'].A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "export const x = globalThis.process.env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "export const x = window.process.env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "export const x = (self as any).process.env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "const { env } = process;\nexport const x = env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "const { env: e } = globalThis.process;\nexport const x = e.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "import { env } from 'node:process';\nexport const x = env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "import proc from 'process';\nexport const x = proc.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "import * as proc from 'node:process';\nexport const x = proc.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "export const x = import.meta.env.VITE_A;\n",
+            "src/domain/x.ts:1: import.meta.env",
+        ),
+        (
+            "export const x = import.meta.env;\n",
+            "src/domain/x.ts:1: import.meta.env",
+        ),
+        (
+            "const { MODE, VITE_A } = import.meta.env;\nexport const x = VITE_A;\n",
+            "src/domain/x.ts:1: import.meta.env",
+        ),
+        // A name that a function binds does not hide the use outside it
+        (
+            "export const a = (process: any) => process.env;\nexport const x = process.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        // What `require` and `import()` with a literal bind is the module, as an import's
+        (
+            "const process = require('process');\nexport const x = process.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "const p = require('node:process');\nexport const x = p.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "const { env } = require('node:process');\nexport const x = env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "const p = await import('process');\nexport const x = p.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "const { env } = await import('node:process');\nexport const x = env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+    ];
+    for (source, named) in forbidden {
+        put(r, "src/domain/x.ts", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{source}\n{said}");
+        assert!(said.contains(&format!("\n  {named}")), "{source}\n{said}");
+    }
+    // A name the file binds is not the global, and what reads nothing from the environment passes
+    let allowed = [
+        "const p = require('path');\nexport const x = p.join('a', 'b');\n",
+        "const p = require('path');\nexport const x = p.env.A;\n",
+        "export function f(process: any) { return process.env.A; }\n",
+        "export function f() { const process = { env: {} as any }; return process.env.A; }\n",
+        "export const f = (process: { env: string }) => process.env;\n",
+        "export function f() { try { return 1; } catch (process: any) { return process.env; } }\n",
+        "export const x = [1].map((process) => process.toString());\n",
+        "export type E = typeof process.env;\n",
+        "export const x = typeof process.argv;\n",
+        "export const x = import.meta.env.DEV && import.meta.env.MODE;\n",
+        "const { DEV, PROD } = import.meta.env;\nexport const x = DEV || PROD;\n",
+        "const config = { env: 'dev' };\nexport const x = config.env;\n",
+    ];
+    for source in allowed {
+        put(r, "src/domain/x.ts", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        assert!(out.status.success(), "{source}\n{}", stdout(&out));
+    }
+    // What reads nothing from the environment but imports `process` is no read, and is I/O of the inner layers by its
+    // import (a `require` that a parameter hides is an import to the reader of imports, as to the direction check)
+    for source in [
+        "export function f(require: any) { const process = require('process'); return process.env.A; }\n",
+        "import { argv } from 'node:process';\nexport const x = argv;\n",
+    ] {
+        put(r, "src/domain/x.ts", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{source}\n{said}");
+        assert!(
+            said.contains("uses `process`") && !said.contains("only infrastructure reads"),
+            "{source}\n{said}"
+        );
+    }
+}
+
+/// `rotproof check` in `root`: its exit code and what it printed.
+fn checked(root: &Path) -> (Option<i32>, String) {
+    let out = run(&["--root", &root_arg(root), "check"]);
+    (out.status.code(), stdout(&out))
+}
+
+/// The lines of `file` that the findings in `said` name, in ascending order: the line a finding starts with, and the
+/// ones it lists after "on lines" (a finding is one for each entry in a file, with every line of it)
+fn named_lines(said: &str, file: &str) -> Vec<usize> {
+    let mut lines = Vec::new();
+    for line in said.lines() {
+        let Some(rest) = line.strip_prefix(&format!("  {file}:")) else {
+            continue;
+        };
+        let (first, rest) = rest.split_once(": ").unwrap_or((rest, ""));
+        lines.extend(first.parse::<usize>());
+        if let Some((_, listed)) = rest.rsplit_once(", on lines ") {
+            lines.extend(listed.split(", ").filter_map(|n| n.parse::<usize>().ok()));
+        }
+    }
+    lines.sort_unstable();
+    lines.dedup();
+    lines
+}
+
+const IO_HEADING: &str =
+    "the inner layers do no I/O (domain, protocol, application and presentation import nothing";
+const IO_FIX: &str = "move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use case is given";
+
+/// Plant each source at `path`, check, and expect the check to fail under the heading of the I/O of the inner layers
+/// with `line` and what it uses of `entry`; then expect each of `free` to pass.
+fn plant_io(r: &Path, path: &str, forbidden: &[(&str, usize, &str)], free: &[&str], reset: &str) {
+    for (source, line, uses) in forbidden {
+        put(r, path, source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        // What a finding says of what it found: a use, or a scheme or a glob in its own words
+        let what = if uses.starts_with("imports ") || uses.starts_with("a glob") {
+            uses.to_string()
+        } else {
+            format!("uses {uses}, which does I/O")
+        };
+        // A finding is one for each entry in a file: it starts with the first line of the entry and lists the others
+        assert!(
+            said.lines()
+                .any(|one| one.starts_with(&format!("  {path}:"))
+                    && one.contains(&format!("{IO_FIX}: {what}"))
+                    && named_lines(one, path).contains(line)),
+            "{source}\n{said}"
+        );
+    }
+    for source in free {
+        put(r, path, source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(0), "{source}\n{said}");
+    }
+    put(r, path, reset);
+}
+
+#[test]
+fn the_inner_layers_do_no_io_in_python_and_each_form_planted_fails() {
+    let root = clean_repo();
+    let r = root.path();
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    plant_io(
+        r,
+        "domain/x.py",
+        &[
+            ("import shutil\n", 1, "`shutil`"),
+            ("import urllib.request\n", 1, "`urllib.request`"),
+            ("import urllib.request as r\n", 1, "`urllib.request`"),
+            ("from urllib import request\n", 1, "`urllib.request`"),
+            (
+                "from urllib.request import urlopen\n",
+                1,
+                "`urllib.request` (urlopen)",
+            ),
+            (
+                "import urllib\nurllib.request.urlopen('x')\n",
+                2,
+                "`urllib.request` (urlopen)",
+            ),
+            ("import _socket\n", 1, "`_socket`"),
+            ("from subprocess import *\n", 1, "`subprocess`"),
+            (
+                "import importlib\nimportlib.import_module('sqlite3')\n",
+                2,
+                "`sqlite3`",
+            ),
+            (
+                "from asyncio import create_subprocess_exec as c\n",
+                1,
+                "`asyncio.create_subprocess_exec`",
+            ),
+            (
+                "import asyncio\n\n\nasync def f():\n    return await asyncio.open_connection('h', 1)\n",
+                5,
+                "`asyncio.open_connection`",
+            ),
+            ("import argparse\nimport shutil\n", 1, "`argparse`"),
+            ("from logging import handlers\n", 1, "`logging.handlers`"),
+            (
+                "import tempfile\n\nx = tempfile.mkdtemp()\n",
+                3,
+                "`tempfile` (mkdtemp)",
+            ),
+        ],
+        &[
+            "import os\nimport os.path\nimport pathlib\nimport json\nimport io\nimport logging\nimport asyncio\n",
+            "from urllib import parse\nimport urllib.error\nimport zipfile\nimport tarfile\nimport gzip\n",
+            "import sys\nimport time\nimport datetime\nimport csv\nimport mmap\nimport ctypes\nimport bz2, lzma\n",
+            "import http\nfrom http import HTTPStatus\nimport multiprocessing\nimport importlib\n",
+        ],
+        "",
+    );
+    // The files and layers that are not judged: the I/O layer, what wires and draws, the entry file, and the tests
+    let io = "import shutil\nshutil.rmtree('x')\n";
+    for path in [
+        "infrastructure/outbound/x.py",
+        "infrastructure/inbound/x.py",
+        "composition/x.py",
+        "__main__.py",
+        "tests/test_x.py",
+    ] {
+        put(r, path, io);
+    }
+    let (code, said) = checked(r);
+    // Only the marker and structure rules may say anything of them, never the I/O of the inner layers
+    assert!(!said.contains(IO_HEADING), "{said}");
+    assert!(!said.contains("does I/O"), "{said}");
+    assert!(code == Some(0) || code == Some(1));
+    // The heading and the way out are the guide's too: the whole table, and what is no fix
+    let guide = stdout(&run(&["guide", "--stack", "python"]));
+    for name in [
+        "`shutil`",
+        "`urllib.request`",
+        "`_socket`",
+        "`asyncio.open_connection`",
+        "`argparse`",
+    ] {
+        assert!(guide.contains(name), "{name}");
+    }
+    assert!(guide.contains("The inner layers do no I/O."));
+    assert!(
+        guide.contains("moving the code to a path in `unchecked` or `moving` is not a fix"),
+        "{guide}"
+    );
+}
+
+#[test]
+fn an_approved_use_of_io_prints_the_names_the_file_uses_now_and_a_stale_one_fails() {
+    let root = clean_repo();
+    let r = root.path();
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let source = |names: &str| format!("import shutil\n\n\ndef f(a, b):\n{names}");
+    put(
+        r,
+        "domain/model.py",
+        &source("    shutil.copyfile(a, b)\n    shutil.rmtree(b)\n    shutil.rmtree(a)\n"),
+    );
+    // One approval for the file and the entry covers every use of it, whatever the names
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // ... and the check says it as one finding, with every line, and the source text of the first
+    assert!(
+        said.contains(
+            "  domain/model.py:1: move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use \
+             case is given: uses `shutil` (copyfile, rmtree), which does I/O, on lines 1, 5, 6, 7\n    import shutil\n"
+        ) && said.matches("domain/model.py:").count() == 1,
+        "{said}"
+    );
+    let out = approve_with_git(
+        r,
+        named,
+        &[
+            "domain/model.py",
+            "shutil",
+            "--reason",
+            "the report is written here until the port is made",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains(
+            "approved in .config/rotproof-approved.toml (1):\n  shutil in domain/model.py: the report is written here \
+             until the port is made (Someone Else, "
+        ),
+        "{said}"
+    );
+    assert!(said.contains("; now used: copyfile, rmtree\n"), "{said}");
+    // The names change, so the reason is read again
+    put(r, "domain/model.py", &source("    shutil.move(a, b)\n"));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("; now used: move\n") && !said.contains("copyfile"),
+        "{said}"
+    );
+    // Another entry of the file is not covered
+    put(
+        r,
+        "domain/model.py",
+        &format!("import tempfile\n{}", source("    shutil.move(a, b)\n")),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("domain/model.py:1: ") && said.contains("uses `tempfile`"),
+        "{said}"
+    );
+    assert!(!said.contains("uses `shutil`"), "{said}");
+    // Only what the check finds is approved
+    let out = approve_with_git(r, named, &["domain/model.py", "socket", "--reason", "no"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no forbidden import of socket"));
+    // An approval that matches nothing fails, and `--prune` takes it away
+    put(r, "domain/model.py", "import os\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("approved, but no such forbidden import: shutil in domain/model.py"),
+        "{said}"
+    );
+    let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+}
+
+#[test]
+fn each_python_name_that_does_io_in_part_fails_alone_and_what_is_pure_passes() {
+    let root = clean_repo();
+    let r = root.path();
+    // (what the file holds, the line, what the finding says it found)
+    let forbidden = [
+        (
+            "import os\nx = os.getcwd()\n",
+            2,
+            "uses `os.getcwd`, which does I/O",
+        ),
+        (
+            "import os\nx = os.path.exists('a')\n",
+            2,
+            "uses `os.path.exists`, which does I/O",
+        ),
+        (
+            "import sys\nx = sys.platform\n",
+            2,
+            "uses `sys.platform`, which does I/O",
+        ),
+        (
+            "import logging\nlogging.basicConfig()\n",
+            2,
+            "uses `logging.basicConfig`, which does I/O",
+        ),
+        (
+            "import time\nx = time.mktime(t)\n",
+            2,
+            "uses `time.mktime`, which does I/O",
+        ),
+        (
+            "import time\nx = time.time()\n",
+            2,
+            "reads the clock (time.time), which does I/O (entry `clock`)",
+        ),
+        (
+            "from datetime import datetime\nx = datetime.now()\n",
+            2,
+            "reads the clock (datetime.datetime.now), which does I/O (entry `clock`)",
+        ),
+        (
+            "from dataclasses import field\nfrom datetime import datetime\nx = field(default_factory=datetime.now)\n",
+            3,
+            "reads the clock (datetime.datetime.now)",
+        ),
+        (
+            "import time\nx = time.gmtime()\n",
+            2,
+            "reads the clock (time.gmtime)",
+        ),
+        (
+            "import uuid\nfrom typing import Annotated\nfrom pydantic import Field\n\n\nclass M:\n    \
+             id: Annotated[str, Field(default_factory=uuid.uuid4)]\n",
+            7,
+            "draws on randomness (uuid.uuid4), which does I/O (entry `random`)",
+        ),
+        (
+            "import random\nx = random.Random()\n",
+            2,
+            "draws on randomness (random.Random)",
+        ),
+        (
+            "import random\nx = random.choice([1, 2])\n",
+            2,
+            "draws on randomness (random.choice)",
+        ),
+        ("import secrets\n", 1, "draws on randomness (secrets)"),
+        (
+            "import os\nx = os.urandom(8)\n",
+            2,
+            "draws on randomness (os.urandom)",
+        ),
+        (
+            "x = input()\n",
+            1,
+            "uses the terminal or opens a file (input), which does I/O (entry `terminal`)",
+        ),
+        (
+            "print('x')\n",
+            1,
+            "uses the terminal or opens a file (print)",
+        ),
+        (
+            "with open('f') as f:\n    pass\n",
+            1,
+            "uses the terminal or opens a file (open)",
+        ),
+        (
+            "import sys\nsys.stdout.write('x')\n",
+            2,
+            "uses the terminal or opens a file (sys.stdout)",
+        ),
+        (
+            "import io\nx = io.open('f')\n",
+            2,
+            "uses the terminal or opens a file (io.open)",
+        ),
+        (
+            "import sys\nx = sys.argv\n",
+            2,
+            "reads the command-line arguments (sys.argv), which does I/O (entry `argv`)",
+        ),
+        (
+            "from pathlib import Path\nx = Path('a')\n",
+            2,
+            "uses `pathlib.Path`, which does I/O: a path as a value is `PurePath`",
+        ),
+        // The import line fails with the use that runs
+        (
+            "from pathlib import Path\nx = Path('a')\n",
+            1,
+            "uses `pathlib.Path`, which does I/O",
+        ),
+        (
+            "from pathlib import Path\n\n\ndef f(x):\n    return isinstance(x, Path)\n",
+            5,
+            "uses `pathlib.Path`, which does I/O",
+        ),
+        (
+            "from pathlib import Path as P\nx = P.cwd()\n",
+            2,
+            "uses `pathlib.Path` (cwd), which does I/O",
+        ),
+        (
+            "from pathlib import Path\nf = Path\n",
+            2,
+            "uses `pathlib.Path`, which does I/O",
+        ),
+        (
+            "import pathlib\nx = pathlib.PosixPath('a')\n",
+            2,
+            "uses `pathlib.PosixPath`, which does I/O",
+        ),
+        (
+            "def f(p):\n    return p.open()\n",
+            2,
+            "calls `.open(...)`, a method of a path that does I/O",
+        ),
+        (
+            "def f(p):\n    return p.read_text()\n",
+            2,
+            "calls `.read_text(...)`, a method of a path that does I/O",
+        ),
+        (
+            "def f(p):\n    return p.exists()\n",
+            2,
+            "calls `.exists(...)`",
+        ),
+        (
+            "def f(p):\n    return p.open('w')\n",
+            2,
+            "calls `.open(...)`",
+        ),
+        ("import os\nsh = os\n", 2, "uses the module `os` as a value"),
+        (
+            "import os\nx = getattr(os, 'system')\n",
+            2,
+            "uses the module `os` as a value",
+        ),
+        (
+            "import sys\nx = vars(sys)\n",
+            2,
+            "uses the module `sys` as a value",
+        ),
+        (
+            "from time import *\n",
+            1,
+            "a star import of `time`, which brings in names that do I/O",
+        ),
+        ("from datetime import *\n", 1, "a star import of `datetime`"),
+        (
+            "x = eval('1')\n",
+            1,
+            "uses `eval`: what it runs or imports cannot be read",
+        ),
+        ("exec('x = 1')\n", 1, "uses `exec`"),
+        (
+            "import importlib\nimportlib.import_module(name)\n",
+            2,
+            "uses `importlib.import_module`",
+        ),
+    ];
+    for (source, line, what) in forbidden {
+        put(r, "domain/x.py", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        // The finding is one for the entry of the file: it names the first line and lists the others
+        assert!(
+            named_lines(&said, "domain/x.py").contains(&line) && said.contains(what),
+            "{source}\n{said}"
+        );
+    }
+    // What is pure, a name the file binds, a use in a type position, and what is judged by its arguments
+    let free = [
+        "import os\nimport sys\nimport time\nimport logging\nx = (os.fspath('a'), os.path.join('a', 'b'), \
+         sys.version_info, time.strptime('1', '%S'), logging.getLogger('x'), logging.INFO)\ntime.sleep(1)\n",
+        "import time\nx = time.gmtime(0)\ny = time.strftime('%Y', x)\n",
+        "import random\nx = random.Random(1)\n",
+        "import uuid\nx = uuid.uuid5(uuid.NAMESPACE_DNS, 'a')\n",
+        "from pathlib import PurePath\nx = PurePath('a').name\n",
+        "def f(input, print):\n    return input(print)\n",
+        "import sys\nx: sys.stdout = None\n",
+        "def f(p, name):\n    return p.exists(1), p.open(name), p.open(*name), p.get(), p.read(), re.match(a, b).group()\n",
+        // `Path` written in a type position alone: the import is free too, with an alias and under `TYPE_CHECKING`
+        "from pathlib import Path\n\n\ndef load_config(path: str | Path = 'config.yaml') -> list[Path]:\n    return []\n",
+        "from pathlib import Path as P\n\n\ndef load(path: P) -> P:\n    return path\n",
+        "from pathlib import Path\n",
+        "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from pathlib import Path\n\n\n\
+         def load(path: 'Path') -> None:\n    return None\n",
+        "from typing import TYPE_CHECKING\n\nif TYPE_CHECKING:\n    from pathlib import PosixPath\n\n\n\
+         def load(path: PosixPath) -> PosixPath:\n    return path\n",
+        "import os\ndef f(os):\n    return check(os)\n",
+        "from datetime import datetime\nx = datetime.fromtimestamp(0)\n",
+        "import zipfile, tarfile, gzip\n",
+    ];
+    for source in free {
+        put(r, "domain/x.py", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(0), "{source}\n{said}");
+    }
+    // The layers that do the I/O, wire and draw, and the entry file and the tests do all of it
+    fs::remove_file(r.join("domain/x.py")).unwrap();
+    let all = "import os, sys, time, random\nprint(os.getcwd(), sys.argv, time.time(), random.random())\n\
+               def f(p):\n    return p.read_text()\n";
+    for path in [
+        "infrastructure/outbound/x.py",
+        "infrastructure/inbound/x.py",
+        "composition/x.py",
+        "__main__.py",
+        "tests/test_x.py",
+    ] {
+        put(r, path, all);
+    }
+    let (code, said) = checked(r);
+    assert!(!said.contains("does I/O"), "{said}");
+    assert!(code == Some(0) || code == Some(1));
+}
+
+#[test]
+fn an_act_of_a_group_and_a_name_of_a_module_judged_by_its_names_are_approved_by_their_own_entries()
+{
+    let root = clean_repo();
+    let r = root.path();
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let approve = |entry: &str| {
+        let out = approve_with_git(
+            r,
+            named,
+            &["domain/model.py", entry, "--reason", "the port comes later"],
+        );
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{entry}: {}{}",
+            stdout(&out),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let source = |body: &str| {
+        format!("import os\nimport time\nfrom datetime import datetime\n\n\ndef f(p):\n{body}")
+    };
+    put(
+        r,
+        "domain/model.py",
+        &source(
+            "    a = datetime.now()\n    b = time.time()\n    c = os.getcwd()\n    return p.read_text()\n",
+        ),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The act of a group is one entry, whichever names the file reaches it by
+    approve("clock");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("uses `os.getcwd`") && said.contains("calls `.read_text(...)`"),
+        "{said}"
+    );
+    assert!(
+        !said.contains("reads the clock"),
+        "one approval covers both names\n{said}"
+    );
+    assert!(
+        said.contains("clock in domain/model.py: the port comes later (Someone Else, ")
+            && said.contains("; now used: datetime.datetime.now, time.time\n"),
+        "{said}"
+    );
+    // A name of a module judged by its names, and a method of the net, are entries of their own
+    approve("os.getcwd");
+    approve("read_text");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("approved in .config/rotproof-approved.toml (3):"),
+        "{said}"
+    );
+    assert!(
+        said.contains("  os.getcwd in domain/model.py: the port comes later")
+            && said.contains("  read_text in domain/model.py: the port comes later"),
+        "{said}"
+    );
+    // The names change, so the reason is read again; and what is no longer used is a stale entry
+    put(
+        r,
+        "domain/model.py",
+        &source("    a = time.monotonic\n    return p.read_text()\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("; now used: time.monotonic\n"), "{said}");
+    assert!(
+        said.contains("approved, but no such forbidden import: os.getcwd in domain/model.py"),
+        "{said}"
+    );
+    // Only an entry the check names is approved: `time` is a module, the entry is `clock`
+    let out = approve_with_git(r, named, &["domain/model.py", "time", "--reason", "no"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no forbidden import of time"));
+    let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // The name of a group that no file uses is stale as any other entry
+    put(r, "domain/model.py", "import os\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("approved, but no such forbidden import: clock in domain/model.py"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_method_the_project_defines_is_left_out_of_the_net_and_the_line_is_printed_on_every_run() {
+    let root = clean_repo();
+    let r = root.path();
+    put(
+        r,
+        "domain/a.py",
+        "def f(p, store):\n    return p.exists(), p.read_text(), store.mkdir('x'), p.mkdir()\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("I/O net:"), "{said}");
+    for method in ["exists", "read_text", "mkdir"] {
+        assert!(said.contains(&format!("calls `.{method}(...)`")), "{said}");
+    }
+    // The project defines a method of the same name and number of parameters, in any file of it
+    put(
+        r,
+        "tests/test_store.py",
+        "class Store:\n    def exists(self): ...\n    def mkdir(self, name): ...\n    def read_text(self, a, b): ...\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "I/O net: left out, as the project defines a method of the same name and number of parameters: \
+             exists(0), mkdir(1), read_text(2)\n"
+        ),
+        "{said}"
+    );
+    // `exists()` and `mkdir('x')` are left out; `read_text()` has another number of parameters, and so has `mkdir()`
+    assert!(
+        !said.contains("calls `.exists(...)`")
+            && said.contains("calls `.read_text(...)`")
+            && said.contains("domain/a.py:2: "),
+        "{said}"
+    );
+    assert_eq!(said.matches("calls `.mkdir(...)`").count(), 1, "{said}");
+    // It is printed when nothing fails too
+    put(r, "domain/a.py", "def f(p):\n    return p.get()\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(said.contains("I/O net: left out"), "{said}");
+}
+
+#[test]
+fn a_file_is_one_finding_for_each_entry_whatever_the_number_of_lines_it_does_it_on() {
+    let root = clean_repo();
+    let r = root.path();
+    // Thirteen prints and two clocks: two findings, each with all its lines, the first line's text and the names
+    let mut source = String::from("import time\n");
+    for at in 0..13 {
+        source.push_str(&format!("print({at})\n"));
+        if at == 3 || at == 8 {
+            source.push_str("t = time.time()\n");
+        }
+    }
+    put(r, "domain/a.py", &source);
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(said.matches("  domain/a.py:").count(), 2, "{said}");
+    assert!(
+        said.contains("  domain/a.py:2: return what is to be shown")
+            && said.contains(
+                "uses the terminal or opens a file (print), which does I/O (entry `terminal`), on lines 2, 3, 4, 5, 7, 8, \
+                 9, 10, 11, 13, 14, 15, 16\n    print(0)\n"
+            ),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "reads the clock (time.time), which does I/O (entry `clock`), on lines 6, 12\n    t = time.time()\n"
+        ),
+        "{said}"
+    );
+    // The key of the approval is the file and the entry, as before: one approval of `terminal` covers the 13 prints
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let out = approve_with_git(
+        r,
+        named,
+        &[
+            "domain/a.py",
+            "terminal",
+            "--reason",
+            "the report is printed here",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(said.matches("  domain/a.py:").count(), 1, "{said}");
+    assert!(
+        said.contains("reads the clock")
+            && said.contains("terminal in domain/a.py: the report is printed here"),
+        "{said}"
+    );
+    assert!(said.contains("; now used: print\n"), "{said}");
+}
+
+#[test]
+fn open_with_no_argument_is_judged_everywhere_unless_the_project_defines_one() {
+    let root = clean_repo();
+    let r = root.path();
+    put(
+        r,
+        "domain/a.py",
+        "def f(x, name):\n    return x.open(), x.open(name)\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The call with no argument alone is judged, in the one line
+    assert!(said.contains("domain/a.py:2: "), "{said}");
+    assert_eq!(said.matches("calls `.open(...)`").count(), 1, "{said}");
+    // A method `open(self)` of the project leaves it out, and says so; `open('r')` is still judged
+    put(
+        r,
+        "tests/test_store.py",
+        "class Store:\n    def open(self): ...\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("same name and number of parameters: open(0)"),
+        "{said}"
+    );
+    put(r, "domain/a.py", "def f(x):\n    return x.open('r')\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("calls `.open(...)`"), "{said}");
+}
+
+#[test]
+fn the_guide_of_a_python_project_lists_the_allowlists_in_full_and_the_way_out() {
+    let guide = stdout(&run(&["guide", "--stack", "python"]));
+    for name in [
+        // os, os.path, sys, time, logging: what is pure
+        "`fspath`",
+        "`extsep`",
+        "`splitroot`",
+        "`commonprefix`",
+        "`version_info`",
+        "`getsizeof`",
+        "`strptime`",
+        "`sleep`",
+        "`getLogger`",
+        "`LoggerAdapter`",
+        // the groups, `Path` and the net
+        "`datetime.datetime.now`",
+        "`default_factory=datetime.now`",
+        "`secrets`",
+        "`uuid4`",
+        "`pathlib.PosixPath`",
+        "`PurePath`",
+        "`read_text`",
+        "`is_junction`",
+        "`resolve`",
+        "`encoding`",
+        "`clock`",
+        "`terminal`",
+        "`argv`",
+        "`Clock = Callable[[], datetime]`",
+        "`eval`",
+    ] {
+        assert!(guide.contains(name), "{name}");
+    }
+    assert!(
+        guide.contains("`os.getcwd` or `sys.platform` for a name of a module judged by its names"),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("Approving the import,\n  renaming or respelling it"),
+        "{guide}"
+    );
+    // The other stacks do not claim what is not checked for them yet, or what is another stack's
+    for stack in ["typescript", "rust"] {
+        let guide = stdout(&run(&["guide", "--stack", stack]));
+        assert!(
+            !guide.contains("`Clock = Callable[[], datetime]`"),
+            "{stack}"
+        );
+        assert!(!guide.contains("`fspath`"), "{stack}");
+        assert!(!guide.contains("`os.getcwd` or `sys.platform`"), "{stack}");
+    }
+    let guide = stdout(&run(&["guide", "--stack", "rust"]));
+    assert!(!guide.contains("`() => Date`"));
+    assert!(!guide.contains("`Math.random`"));
+}
+
+#[test]
+fn the_inner_layers_do_no_io_in_typescript_and_the_table_comes_before_the_manifest() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    plant_io(
+        r,
+        "src/domain/x.ts",
+        &[
+            ("import fs from 'fs';\n", 1, "`fs`"),
+            (
+                "import { readFile } from 'node:fs/promises';\n",
+                1,
+                "`fs` (readFile)",
+            ),
+            (
+                "import * as cp from \"child_process\";\ncp.exec('x');\n",
+                1,
+                "`child_process` (exec)",
+            ),
+            ("const net = require('node:net');\n", 1, "`net`"),
+            ("export * from 'node:tty';\n", 1, "`tty`"),
+            ("import sqlite from 'node:sqlite';\n", 1, "`sqlite`"),
+            ("import type { Stats } from 'fs';\n", 1, "`fs` (Stats)"),
+            ("export const a = import('node:http');\n", 1, "`http`"),
+            (
+                "import { Database } from 'bun:sqlite';\n",
+                1,
+                "imports `bun:sqlite`: a scheme other than node: names what cannot be judged",
+            ),
+            (
+                "import x from 'npm:left-pad';\n",
+                1,
+                "imports `npm:left-pad`: a scheme other than node:",
+            ),
+            (
+                "import x from 'https://esm.sh/x';\n",
+                1,
+                "imports `https://esm.sh/x`: a scheme other than node:",
+            ),
+            (
+                "import dns from 'node:dns/promises';\nimport rl from 'readline';\n",
+                1,
+                "`dns`",
+            ),
+        ],
+        &[
+            "import os from 'node:os';\nimport { join } from 'path';\nimport crypto from 'crypto';\n",
+            "import { Readable } from 'node:stream';\nimport { URL } from 'node:url';\nimport util from 'util';\n",
+            "import { EventEmitter } from 'events';\nimport { Buffer } from 'buffer';\nimport zlib from 'node:zlib';\n",
+            "import { Worker } from 'worker_threads';\nimport { setTimeout } from 'timers';\nimport t from 'node:test';\n",
+            "import { performance } from 'perf_hooks';\nimport { join } from './other';\nexport const x = join;\n",
+        ],
+        "",
+    );
+    // A bare name is Node's even when the manifest lists a package of that name
+    put(
+        r,
+        "package.json",
+        "{\n  \"name\": \"shop\",\n  \"dependencies\": { \"fs\": \"^1\" }\n}\n",
+    );
+    put(
+        r,
+        "src/domain/x.ts",
+        "import fs from 'fs';\nexport const x = fs;\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(&format!(
+            "  src/domain/x.ts:1: {IO_FIX}: uses `fs`, which does I/O, on lines 1, 2\n"
+        )),
+        "{said}"
+    );
+    put(r, "package.json", "{\n  \"name\": \"shop\"\n}\n");
+    // The files and layers that are not judged
+    let io = "import fs from 'node:fs';\nexport const x = fs;\n";
+    for path in [
+        "src/infrastructure/outbound/x.ts",
+        "src/composition/x.ts",
+        "src/main.tsx",
+        "src/domain/x.test.ts",
+        "src/domain/x.spec.tsx",
+        "src/domain/__tests__/x.ts",
+        "src/ui/atoms/x.ts",
+    ] {
+        put(r, path, io);
+    }
+    put(r, "src/domain/x.ts", "");
+    let (_, said) = checked(r);
+    assert!(!said.contains(IO_HEADING), "{said}");
+    let guide = stdout(&run(&["guide", "--stack", "typescript"]));
+    for name in [
+        "`fs`",
+        "`child_process`",
+        "`sqlite`",
+        "`_tls_wrap`",
+        "`bun:`",
+    ] {
+        assert!(guide.contains(name), "{name}");
+    }
+}
+
+#[test]
+fn a_screens_model_is_told_to_get_what_it_needs_from_its_page() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    put(
+        r,
+        "src/presentation/models/x.ts",
+        "import fs from 'node:fs';\nexport const x = fs;\n",
+    );
+    put(
+        r,
+        "src/application/y.ts",
+        "import fs from 'node:fs';\nexport const y = fs;\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "  src/presentation/models/x.ts:1: a screen's model does no I/O: it gets what it needs from its page, \
+             through a hook in `ui.atoms`, or through a use case of protocol.inbound it is given: uses `fs`, which does \
+             I/O, on lines 1, 2\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!(
+            "  src/application/y.ts:1: {IO_FIX}: uses `fs`, which does I/O, on lines 1, 2\n"
+        )),
+        "{said}"
+    );
+}
+
+#[test]
+fn each_typescript_global_that_does_io_fails_alone_and_what_is_pure_passes() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // (what the file holds, the line, what the finding says it found)
+    let forbidden = [
+        (
+            "export const x = fetch('a');\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        (
+            "export const x = window.fetch('a');\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        (
+            "export const x = globalThis.fetch('a');\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        (
+            "export const x = (self as any).fetch('a');\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        // A reference counts as a call
+        (
+            "export const f = fetch;\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        (
+            "export const x = document.title;\n",
+            1,
+            "uses `document` (document.title), which does I/O",
+        ),
+        (
+            "export const x = window.localStorage.getItem('a');\n",
+            1,
+            "uses `localStorage` (localStorage.getItem), which does I/O",
+        ),
+        (
+            "export const x = sessionStorage.length;\n",
+            1,
+            "uses `sessionStorage` (sessionStorage.length), which does I/O",
+        ),
+        (
+            "export const x = matchMedia('(min-width: 1px)').matches;\n",
+            1,
+            "uses `matchMedia`, which does I/O",
+        ),
+        (
+            "export const x = navigator.userAgent;\n",
+            1,
+            "uses `navigator` (navigator.userAgent), which does I/O",
+        ),
+        (
+            "export const x = new WebSocket('ws://a');\n",
+            1,
+            "uses `WebSocket`, which does I/O",
+        ),
+        (
+            "export const x = new XMLHttpRequest();\n",
+            1,
+            "uses `XMLHttpRequest`, which does I/O",
+        ),
+        (
+            "export const x = requestAnimationFrame(() => 1);\n",
+            1,
+            "uses `requestAnimationFrame`, which does I/O",
+        ),
+        (
+            "export const x = new IntersectionObserver(() => 1);\n",
+            1,
+            "uses `IntersectionObserver`, which does I/O",
+        ),
+        (
+            "export const x = crypto.subtle.digest('SHA-256', new Uint8Array(1));\n",
+            1,
+            "uses `crypto` (crypto.subtle), which does I/O",
+        ),
+        (
+            "export const x = Buffer.from('a');\n",
+            1,
+            "uses `Buffer` (Buffer.from), which does I/O",
+        ),
+        // `process`, but for `process.env`
+        (
+            "export const x = process.cwd();\n",
+            1,
+            "uses `process.cwd`, which does I/O",
+        ),
+        (
+            "export const x = process.platform;\n",
+            1,
+            "uses `process.platform`, which does I/O",
+        ),
+        (
+            "const { cwd } = process;\nexport const x = cwd();\n",
+            1,
+            "uses `process.cwd`, which does I/O",
+        ),
+        (
+            "export const x = process;\n",
+            1,
+            "uses the module `process` as a value",
+        ),
+        // The clock
+        (
+            "export const x = Date.now();\n",
+            1,
+            "reads the clock (Date.now), which does I/O (entry `clock`)",
+        ),
+        (
+            "export const x = new Date();\n",
+            1,
+            "reads the clock (new Date()), which does I/O (entry `clock`)",
+        ),
+        (
+            "export const x = Date();\n",
+            1,
+            "reads the clock (Date()), which does I/O (entry `clock`)",
+        ),
+        (
+            "export const f = (...a: number[]) => new Date(...(a as []));\n",
+            1,
+            "reads the clock (new Date())",
+        ),
+        (
+            "export const x = performance.now();\n",
+            1,
+            "reads the clock (performance.now)",
+        ),
+        (
+            "export const x = process.hrtime.bigint();\n",
+            1,
+            "reads the clock (process.hrtime)",
+        ),
+        (
+            "export const x = Temporal.Now.instant();\n",
+            1,
+            "reads the clock (Temporal.Now.instant)",
+        ),
+        // A reference counts as a call
+        (
+            "import { useState } from 'react';\nexport const x = useState(Date.now);\n",
+            2,
+            "reads the clock (Date.now)",
+        ),
+        (
+            "export const f = Date.now;\n",
+            1,
+            "reads the clock (Date.now)",
+        ),
+        // Randomness
+        (
+            "export const x = Math.random();\n",
+            1,
+            "draws on randomness (Math.random), which does I/O (entry `random`)",
+        ),
+        (
+            "export const x = crypto.randomUUID();\n",
+            1,
+            "draws on randomness (crypto.randomUUID)",
+        ),
+        (
+            "export const x = globalThis.crypto.getRandomValues(new Uint8Array(1));\n",
+            1,
+            "draws on randomness (crypto.getRandomValues)",
+        ),
+        (
+            "export const f = Math.random;\n",
+            1,
+            "draws on randomness (Math.random)",
+        ),
+        // The terminal and the arguments
+        (
+            "console.log('a');\n",
+            1,
+            "uses the terminal or opens a file (console.log), which does I/O (entry `terminal`)",
+        ),
+        (
+            "export const f = console.error;\n",
+            1,
+            "uses the terminal or opens a file (console.error)",
+        ),
+        (
+            "process.stdout.write('a');\n",
+            1,
+            "uses the terminal or opens a file (process.stdout)",
+        ),
+        (
+            "export const x = process.argv.slice(2);\n",
+            1,
+            "reads the command-line arguments (process.argv), which does I/O (entry `argv`)",
+        ),
+        // What cannot be read
+        (
+            "export const x = eval('1');\n",
+            1,
+            "uses `eval`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const x = window.eval('1');\n",
+            1,
+            "uses `eval`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = new Function('return 1');\n",
+            1,
+            "uses `Function`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = Function('return 1');\n",
+            1,
+            "uses `Function`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = eval;\n",
+            1,
+            "uses `eval`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = (name: string) => import(name);\n",
+            1,
+            "uses `import()`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = (name: string) => require(name);\n",
+            1,
+            "uses `require`: what it runs or imports cannot be read",
+        ),
+    ];
+    for (source, line, what) in forbidden {
+        put(r, "src/domain/x.ts", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        assert!(
+            said.contains(&format!("  src/domain/x.ts:{line}: ")) && said.contains(what),
+            "{source}\n{said}"
+        );
+    }
+    // What is pure, a name the file binds, a name in a type position and the operand of `typeof`
+    let free = [
+        "export const x = [new Map(), new Set(), JSON.stringify({}), Math.max(1, 2), Number('1'), Object.keys({}), \
+         Symbol('a'), new Error('x'), new TypeError('x'), parseInt('1'), Intl.NumberFormat, structuredClone(1)];\n",
+        "export const x = [new URL('http://a'), new URLSearchParams(), new Headers(), new TextEncoder(), \
+         new AbortController(), new Uint8Array(1), setTimeout, clearTimeout, queueMicrotask, atob, btoa];\n",
+        // A moment that is given is pure
+        "export const x = [new Date(0), new Date(2020, 1), new Date('2020-01-01'), Date.parse('x'), Date.UTC(1), Date];\n",
+        "export const x = globalThis;\n",
+        "export type W = typeof window;\nexport let c: Date | undefined;\nexport const w: Window | undefined = undefined;\n",
+        "export const x = typeof window !== 'undefined' && typeof document !== 'undefined' && typeof process === 'object';\n",
+        "export const x = typeof process.argv + typeof Date.now + typeof fetch;\n",
+        "export function f(fetch: (u: string) => void) { return fetch('a'); }\n",
+        "export const g = (Date: { now(): number }) => Date.now();\n",
+        "export function h(localStorage: Storage) { return localStorage.getItem('a'); }\n",
+        "export function k() { const console = { log: (s: string) => s }; return console.log('a'); }\n",
+        "export function m(process: { cwd(): string }) { return process.cwd(); }\n",
+        "import { fetch } from './net';\nexport const x = fetch('a');\n",
+        "import { readFile } from './files';\nexport const x = readFile;\n",
+        "export const x = import.meta.url;\n",
+    ];
+    for source in free {
+        put(r, "src/domain/x.ts", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(0), "{source}\n{said}");
+    }
+    // `process.env` is the environment check's alone, and is not reported twice
+    put(r, "src/domain/x.ts", "export const x = process.env.A;\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("src/domain/x.ts:1: process.env") && !said.contains(IO_HEADING),
+        "{said}"
+    );
+    // The layers that do the I/O, wire and draw, the entry file and the tests do all of it
+    put(r, "src/domain/x.ts", "");
+    let all = "export const x = [fetch('a'), Date.now(), Math.random(), localStorage.length, process.cwd()];\n\
+               console.log(process.argv, eval('1'));\n";
+    for path in [
+        "src/infrastructure/outbound/x.ts",
+        "src/infrastructure/inbound/x.ts",
+        "src/composition/x.ts",
+        "src/ui/atoms/x.ts",
+        "src/main.tsx",
+        "src/domain/x.test.ts",
+        "src/domain/x.spec.tsx",
+        "src/domain/__tests__/x.ts",
+    ] {
+        put(r, path, all);
+    }
+    let (_, said) = checked(r);
+    assert!(
+        !said.contains(IO_HEADING) && !said.contains("does I/O"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_global_that_does_io_says_what_to_do_in_the_layer_it_is_in() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    put(
+        r,
+        "src/presentation/models/x.ts",
+        "export const x = window.matchMedia('(min-width: 1px)').matches;\nexport const y = Date.now();\n",
+    );
+    put(
+        r,
+        "src/application/y.ts",
+        "export const y = Date.now();\nexport const z = localStorage.length;\nexport const a = process.argv;\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // A screen's model gets it from its page, through a hook in `ui.atoms`, or through a use case
+    assert!(
+        said.contains(
+            "  src/presentation/models/x.ts:1: a screen's model does no I/O: it gets what it needs from its page, \
+             through a hook in `ui.atoms`, or through a use case of protocol.inbound it is given: uses `matchMedia`, \
+             which does I/O\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "  src/presentation/models/x.ts:2: a screen's model does no I/O: it gets the time now from its page, \
+             through a hook in `ui.atoms`, or through a use case of protocol.inbound it is given: reads the clock \
+             (Date.now), which does I/O (entry `clock`)\n"
+        ),
+        "{said}"
+    );
+    // The other layers pass the value in, or take it from a port that may be a callable alias
+    assert!(
+        said.contains(
+            "  src/application/y.ts:1: pass the time now in as an argument, or take it from a port in protocol.outbound \
+             that the use case is given (a port may be a callable alias, `() => Date`): reads the clock (Date.now), \
+             which does I/O (entry `clock`)\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!(
+            "  src/application/y.ts:2: {IO_FIX}: uses `localStorage` (localStorage.length), which does I/O\n"
+        )),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "  src/application/y.ts:3: read the arguments in infrastructure and pass the value in as an argument: \
+             reads the command-line arguments (process.argv), which does I/O (entry `argv`)\n"
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn an_approved_typescript_global_is_an_entry_by_its_name_and_a_group_is_one_entry() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let approve = |entry: &str| {
+        let out = approve_with_git(
+            r,
+            named,
+            &[
+                "src/domain/model.ts",
+                entry,
+                "--reason",
+                "the port comes later",
+            ],
+        );
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{entry}: {}{}",
+            stdout(&out),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let source = |body: &str| format!("export function f() {{\n{body}}}\n");
+    put(
+        r,
+        "src/domain/model.ts",
+        &source(
+            "  const a = Date.now();\n  const b = performance.now();\n  const c = localStorage.getItem('k');\n  \
+             const d = process.cwd();\n  const e = fetch('u');\n  return [a, b, c, d, e];\n",
+        ),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The act of a group is one entry, whichever names the file reaches it by
+    approve("clock");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("reads the clock"), "{said}");
+    assert!(
+        said.contains("clock in src/domain/model.ts: the port comes later (Someone Else, ")
+            && said.contains("; now used: Date.now, performance.now\n"),
+        "{said}"
+    );
+    // A global is an entry of its own, and so is a member of `process`
+    approve("localStorage");
+    approve("process.cwd");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("uses `fetch`")
+            && !said.contains("uses `localStorage`")
+            && !said.contains("uses `process.cwd`"),
+        "{said}"
+    );
+    approve("fetch");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("approved in .config/rotproof-approved.toml (4):")
+            && said.contains("  fetch in src/domain/model.ts: the port comes later")
+            && said.contains("  localStorage in src/domain/model.ts: the port comes later")
+            && said.contains("; now used: localStorage.getItem\n"),
+        "{said}"
+    );
+    // The names change, so the reason is read again; and what is no longer used is a stale entry
+    put(
+        r,
+        "src/domain/model.ts",
+        &source("  const a = Date.now();\n  const c = localStorage.length;\n  return [a, c];\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("; now used: localStorage.length\n")
+            && !said.contains("; now used: localStorage.getItem"),
+        "{said}"
+    );
+    for stale in ["process.cwd", "fetch"] {
+        assert!(
+            said.contains(&format!(
+                "approved, but no such forbidden import: {stale} in src/domain/model.ts"
+            )),
+            "{stale}\n{said}"
+        );
+    }
+    // A group not approved is not covered by another's approval
+    put(
+        r,
+        "src/domain/model.ts",
+        &source("  const a = Math.random();\n  const c = localStorage.length;\n  return [a, c];\n"),
+    );
+    let (_, said) = checked(r);
+    assert!(said.contains("draws on randomness (Math.random)"), "{said}");
+    // Only what the check finds is approved
+    let out = approve_with_git(
+        r,
+        named,
+        &["src/domain/model.ts", "navigator", "--reason", "no"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no forbidden import of navigator"));
+    // The environment check is not approved
+    put(
+        r,
+        "src/domain/model.ts",
+        "export const x = process.env.A;\n",
+    );
+    let out = approve_with_git(
+        r,
+        named,
+        &["src/domain/model.ts", "process.env", "--reason", "no"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn the_guide_of_a_typescript_project_lists_the_allowlist_in_full_and_the_way_out() {
+    let guide = stdout(&run(&["guide", "--stack", "typescript"]));
+    for name in [
+        // the allowlist of globals
+        "`Object`",
+        "`FinalizationRegistry`",
+        "`AggregateError`",
+        "`Intl`",
+        "`Float64Array`",
+        "`encodeURIComponent`",
+        "`structuredClone`",
+        "`setInterval`",
+        "`URLSearchParams`",
+        "`TextDecoder`",
+        "`DOMException`",
+        "`FormData`",
+        // what is not on it, and the groups
+        "`localStorage`",
+        "`matchMedia`",
+        "`Date.now`",
+        "`new Date()`",
+        "`performance`",
+        "`Temporal.Now.*`",
+        "`Math.random`",
+        "`randomUUID`",
+        "`getRandomValues`",
+        "`console`",
+        "`process.argv`",
+        "`process.cwd`",
+        "`() => Date`",
+        "`eval`",
+        "`Function`",
+        "`clock`",
+        "`random`",
+        "`terminal`",
+        "`argv`",
+    ] {
+        assert!(guide.contains(name), "{name}\n{guide}");
+    }
+    assert!(
+        guide.contains("`fetch`, `localStorage` or `process.cwd` for a global judged by its name"),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("through a hook in `ui.atoms`, or through a use case it is given"),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("Approving the import,\n  renaming or respelling it"),
+        "{guide}"
+    );
+}
+
+#[test]
+fn the_inner_crates_do_no_io_in_rust_and_a_test_is_free() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    let lib = std::fs::read_to_string(r.join("crates/domain/src/lib.rs")).unwrap();
+    plant_io(
+        r,
+        "crates/domain/src/lib.rs",
+        &[
+            (
+                "pub fn a() { let _ = std::fs::read(\"x\"); }\n",
+                1,
+                "`std::fs` (read)",
+            ),
+            (
+                "use std::process::Command;\n",
+                1,
+                "`std::process` (Command)",
+            ),
+            (
+                "use std::os::unix::fs::PermissionsExt;\n",
+                1,
+                "`std::os::fs` (PermissionsExt)",
+            ),
+            (
+                "pub fn a() { println!(\"x\"); }\n",
+                1,
+                "`std::io` (println!)",
+            ),
+            ("pub fn a() { std::dbg!(1); }\n", 1, "`std::io` (dbg!)"),
+            ("use std::io::stdin;\n", 1, "`std::io` (stdin)"),
+            ("use std::net::TcpStream;\n", 1, "`std::net` (TcpStream)"),
+            (
+                "use std::env::current_dir;\n",
+                1,
+                "`std::env` (current_dir)",
+            ),
+            (
+                "use std::fs as f;\npub fn a() { f::write(\"a\", \"b\").ok(); }\n",
+                2,
+                "`std::fs` (write)",
+            ),
+            (
+                "use std as s;\npub fn a() { s::process::exit(0); s::io::stdout(); }\n",
+                2,
+                "`std::io` (stdout)",
+            ),
+        ],
+        &[
+            "use std::io::Write;\nuse std::path::PathBuf;\nuse std::process::{ExitCode, exit};\n",
+            "use std::env::{consts, split_paths};\nuse std::net::{IpAddr, SocketAddr};\npub fn a() { let _ = format!(\"x\"); }\n",
+            "#[cfg(test)]\nmod tests {\n    use std::fs;\n    #[test]\n    fn t() { fs::read(\"x\").ok(); println!(\"x\"); }\n}\n",
+            "#[cfg(test)]\nuse std::process::Command;\n",
+            "#![cfg(test)]\nuse std::fs;\n",
+        ],
+        &lib,
+    );
+    // A glob names nothing: a glob of the module, and one above it, fail
+    for (source, said_of) in [
+        ("use std::fs::*;\n", "a glob of `std::fs`"),
+        ("use std::*;\n", "a glob of `std`"),
+    ] {
+        put(r, "crates/domain/src/lib.rs", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(
+            said.contains(said_of) && said.contains("cannot be read"),
+            "{source}\n{said}"
+        );
+    }
+    put(r, "crates/domain/src/lib.rs", &lib);
+    // What is outside the crate's `src/`, in a test module's file, in the I/O crate and in the entry file is not judged
+    put(
+        r,
+        "crates/domain/tests/it.rs",
+        "use std::fs;\n#[test]\nfn t() { std::fs::read(\"x\").ok(); }\n",
+    );
+    put(
+        r,
+        "crates/domain/benches/b.rs",
+        "use std::process::Command;\n",
+    );
+    put(
+        r,
+        "crates/domain/build.rs",
+        "fn main() { std::fs::write(\"a\", \"b\").ok(); }\n",
+    );
+    put(
+        r,
+        "crates/infrastructure/src/outbound/mod.rs",
+        "pub fn f() { std::fs::read(\"x\").ok(); }\n",
+    );
+    put(r, "src/main.rs", "fn main() { println!(\"x\"); }\n");
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}#[cfg(test)]\nmod checks;\n"),
+    );
+    put(
+        r,
+        "crates/domain/src/checks.rs",
+        "use std::fs;\nuse std::process::Command;\n",
+    );
+    let (_, said) = checked(r);
+    assert!(!said.contains(IO_HEADING), "{said}");
+    // The same file is code once it is no module under `#[cfg(test)]`
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}mod checks;\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("  crates/domain/src/checks.rs:1: "), "{said}");
+    let guide = stdout(&run(&["guide", "--stack", "rust"]));
+    for name in [
+        "`std::fs`",
+        "`Command`",
+        "`println!`",
+        "`std::os::fs`",
+        "`current_exe`",
+    ] {
+        assert!(guide.contains(name), "{name}");
+    }
+}
+
+#[test]
+fn the_environment_check_reads_a_rust_test_as_the_check_of_the_io_does() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let lib = std::fs::read_to_string(r.join("crates/domain/src/lib.rs")).unwrap();
+    let reads = "std::env::temp_dir()";
+    let read = |what: &str| format!("pub fn t() {{ let _ = ({what}, std::env::var(\"A\")); }}\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // The same read in a file of the layer's `src/` that is no test fails, and says where
+    put(r, "crates/domain/src/other.rs", &read(reads));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("crates/domain/src/other.rs:1: std::env::temp_dir")
+            && said.contains("crates/domain/src/other.rs:1: std::env::var"),
+        "{said}"
+    );
+    std::fs::remove_file(r.join("crates/domain/src/other.rs")).unwrap();
+    // Each form that is a test passes: the items under `#[cfg(test)]` (a module with a body, a function, a use), the
+    // file of a `#[cfg(test)] mod x;` as `x.rs` and as `x/mod.rs`, with the files under it, a file that starts
+    // with `#![cfg(test)]`, and a crate's `tests/`
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!(
+            "{lib}#[cfg(test)]\nmod tests {{\n    fn t() {{ let _ = {reads}; }}\n}}\n#[cfg(test)]\nfn u() {{ let _ = std::env::var(\"B\"); }}\n#[cfg(test)]\nuse std::env::var;\n"
+        ),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}#[cfg(test)]\nmod checks;\n#[cfg(test)]\nmod more;\n"),
+    );
+    put(r, "crates/domain/src/checks.rs", &read(reads));
+    put(r, "crates/domain/src/more/mod.rs", &read(reads));
+    put(r, "crates/domain/src/more/deeper.rs", &read(reads));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}#[cfg(test)]\nmod checks;\n"),
+    );
+    std::fs::remove_dir_all(r.join("crates/domain/src/more")).unwrap();
+    put(
+        r,
+        "crates/domain/src/checks.rs",
+        &format!("#![cfg(test)]\n{}", read(reads)),
+    );
+    put(r, "crates/domain/tests/it.rs", &read(reads));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // What is no test of the same crate fails still, whatever sits beside it: the module not declared under
+    // `#[cfg(test)]`, and the same read in the code outside the item
+    put(r, "crates/domain/src/checks.rs", &read(reads));
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}mod checks;\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("crates/domain/src/checks.rs:1: std::env::temp_dir"),
+        "{said}"
+    );
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}#[cfg(test)]\nmod t {{}}\npub fn u() {{ let _ = {reads}; }}\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("std::env::temp_dir"), "{said}");
+}
+
+/// Plant each source in the domain crate of a Rust project: the check fails under the heading of the I/O of the inner
+/// layers, on `line`, and says `said`. The crate is put back as it was.
+fn plant_rust(r: &Path, planted: &[(&str, usize, &str)], reset: &str) {
+    let path = "crates/domain/src/lib.rs";
+    for (source, line, said_of) in planted {
+        put(r, path, source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        assert!(
+            said.contains(&format!("  {path}:{line}: ")) && said.contains(said_of),
+            "{source}\n{said_of}\n{said}"
+        );
+    }
+    put(r, path, reset);
+}
+
+#[test]
+fn each_rust_name_that_does_io_in_part_fails_alone_and_what_is_pure_passes() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let lib = std::fs::read_to_string(r.join("crates/domain/src/lib.rs")).unwrap();
+    let path_fn = |call: &str| format!("pub fn a(p: &std::path::Path) {{ let _ = p.{call}; }}\n");
+    let net = "a method of a path that does I/O";
+    let mut planted: Vec<(String, usize, String)> = Vec::new();
+    // The names of `std::env` that are I/O, each an entry of its own under `std::env`
+    for (source, name) in [
+        (
+            "pub fn a() { let _ = std::env::current_dir(); }\n",
+            "current_dir",
+        ),
+        (
+            "use std::env;\npub fn a() { env::set_current_dir(\"x\").ok(); }\n",
+            "set_current_dir",
+        ),
+        (
+            "use std::env as e;\npub fn a() { let _ = e::current_exe(); }\n",
+            "current_exe",
+        ),
+        ("pub fn a(x: std::env::Args) {}\n", "Args"),
+    ] {
+        let line = source.lines().count();
+        planted.push((
+            source.to_string(),
+            line,
+            format!("uses `std::env` ({name}), which does I/O"),
+        ));
+    }
+    // The command-line arguments are `argv`
+    for (source, name) in [
+        (
+            "pub fn a() { let _ = std::env::args(); }\n",
+            "std::env::args",
+        ),
+        (
+            "use std::env::args_os;
+",
+            "std::env::args_os",
+        ),
+    ] {
+        planted.push((
+            source.to_string(),
+            1,
+            format!(
+                "read the arguments in infrastructure and pass the value in as an argument: reads the command-line \
+                 arguments ({name}), which does I/O (entry `argv`)"
+            ),
+        ));
+    }
+    // The clocks: as a call, as a reference, through a rename and through `use`, and the epoch read as the time now
+    for (source, name) in [
+        (
+            "pub fn a() { let _ = std::time::SystemTime::now(); }\n",
+            "std::time::SystemTime::now",
+        ),
+        (
+            "use std::time::Instant;\npub fn a() { let _ = Instant::now(); }\n",
+            "std::time::Instant::now",
+        ),
+        (
+            "use std::time::Instant;\npub fn a() { let f = Instant::now; let _ = f; }\n",
+            "std::time::Instant::now",
+        ),
+        (
+            "use std::time::SystemTime as T;\npub fn a() { let _ = T::now(); }\n",
+            "std::time::SystemTime::now",
+        ),
+        (
+            "use std as s;\npub fn a() { let _ = s::time::Instant::now(); }\n",
+            "std::time::Instant::now",
+        ),
+        (
+            "pub fn a() { let _ = std::time::UNIX_EPOCH.elapsed(); }\n",
+            "std::time::UNIX_EPOCH.elapsed",
+        ),
+        (
+            "use std::time::SystemTime;\npub fn a() { let _ = SystemTime::UNIX_EPOCH.elapsed(); }\n",
+            "std::time::UNIX_EPOCH.elapsed",
+        ),
+        (
+            "use std::time::UNIX_EPOCH as E;\npub fn a() { let _ = E.elapsed(); }\n",
+            "std::time::UNIX_EPOCH.elapsed",
+        ),
+    ] {
+        planted.push((
+            source.to_string(),
+            source.lines().count(),
+            format!(
+                "pass the time now in as an argument, or take it from a port in protocol.outbound that the use case is \
+                 given (a port may be a callable alias, `Box<dyn Fn() -> SystemTime>`, a generic `F: Fn() -> \
+                 SystemTime`): reads the clock ({name}), which does I/O (entry `clock`)"
+            ),
+        ));
+    }
+    // The net of the names of a path's methods, on any receiver
+    for call in [
+        "canonicalize()",
+        "read_dir()",
+        "read_link()",
+        "try_exists()",
+        "symlink_metadata()",
+        "is_symlink()",
+        "exists()",
+        "is_file()",
+        "is_dir()",
+        "metadata()",
+    ] {
+        let name = call.trim_end_matches("()");
+        planted.push((path_fn(call), 1, format!("calls `.{name}(...)`, {net}")));
+    }
+    planted.push((
+        "pub fn a(store: &Store) { let _ = store.canonicalize(1, 2); }\n".to_string(),
+        1,
+        format!("calls `.canonicalize(...)`, {net}"),
+    ));
+    // A method named by the standard library's path, a reference included, and `std::path::absolute`
+    for (source, said_of) in [
+        (
+            "use std::path::Path;\npub fn a() -> bool { Path::exists(Path::new(\"x\")) }\n",
+            "uses `exists` (Path::exists), which does I/O",
+        ),
+        (
+            "pub fn a(v: Vec<&std::path::Path>) { let _ = v.into_iter().filter(|p| p.is_dir()).count(); let _ = std::path::Path::is_file; }\n",
+            "uses `is_file` (Path::is_file), which does I/O",
+        ),
+        (
+            "pub fn a() { let _ = std::path::absolute(\"x\"); }\n",
+            "uses `std::path` (absolute), which does I/O",
+        ),
+        (
+            "use std::path::absolute;\n",
+            "uses `std::path` (absolute), which does I/O",
+        ),
+    ] {
+        planted.push((
+            source.to_string(),
+            source.lines().count(),
+            said_of.to_string(),
+        ));
+    }
+    // What cannot be read: an `extern` block, and a glob of `std::env` or `std::time`
+    for (source, said_of) in [
+        (
+            "extern \"C\" {\n    fn abs(x: i32) -> i32;\n}\n",
+            "declares an `extern` block",
+        ),
+        (
+            "unsafe extern \"C\" {\n    pub safe fn sqrt(x: f64) -> f64;\n}\n",
+            "declares an `extern` block",
+        ),
+        ("use std::env::*;\n", "a glob of `std::env`"),
+        ("use std::time::*;\n", "a glob of `std::time`"),
+    ] {
+        planted.push((source.to_string(), 1, said_of.to_string()));
+    }
+    let planted: Vec<(&str, usize, &str)> = planted
+        .iter()
+        .map(|(source, line, said)| (source.as_str(), *line, said.as_str()))
+        .collect();
+    // `line` of a source is the line of its last statement, which is where each form above is written; the extern
+    // blocks and the globs start on the first
+    plant_rust(r, &planted, &lib);
+
+    // What is pure passes
+    let free = [
+        "use std::env::{consts, split_paths, join_paths, VarError, JoinPathsError, SplitPaths};\npub fn a() -> &'static str { std::env::consts::OS }\n",
+        "pub fn a(p: &std::path::Path, store: &Store) { let _ = (p.exists(1), p.is_file(2, 3), p.metadata(|a, b| a), p.get(), p.exist()); let _ = store; }\n",
+        "pub fn a(p: &std::path::Path) -> std::path::PathBuf { p.join(\"x\").to_path_buf() }\n",
+        "use std::time::{Duration, SystemTime};\npub fn a(t: SystemTime) -> Duration { Duration::from_secs(1) + t.duration_since(SystemTime::UNIX_EPOCH).unwrap() }\n",
+        "pub struct Instant;\nimpl Instant { pub fn now() -> u8 { 1 } }\npub fn a() -> u8 { Instant::now() }\n",
+        "extern crate alloc;\npub extern \"C\" fn callback() {}\npub type F = extern \"C\" fn(u8);\n",
+        "pub fn a() -> Vec<u8> { vec![] }\n#[cfg(test)]\nmod tests {\n    use std::time::Instant;\n    #[test]\n    fn t() { let _ = (Instant::now(), std::env::current_dir(), std::path::Path::new(\"x\").exists()); }\n    extern \"C\" { fn x(); }\n}\n",
+    ];
+    for source in free {
+        put(r, "crates/domain/src/lib.rs", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(0), "{source}\n{said}");
+    }
+    // The functions of the environment are the environment check's alone, and are not reported twice
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        "pub fn a() { let _ = std::env::var(\"A\"); let _ = std::env::temp_dir(); }\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("std::env::var") && !said.contains(IO_HEADING),
+        "{said}"
+    );
+    // The outer layers, the entry file and the tests do all of it
+    put(r, "crates/domain/src/lib.rs", &lib);
+    let all = "pub fn a(p: &std::path::Path) { let _ = (std::time::Instant::now(), std::env::args(), std::env::current_dir(), p.canonicalize(), p.exists()); }\nextern \"C\" { fn abs(x: i32) -> i32; }\n";
+    for path in [
+        "crates/infrastructure/src/outbound/mod.rs",
+        "crates/domain/tests/it.rs",
+        "crates/domain/benches/b.rs",
+        "crates/domain/build.rs",
+        "src/main.rs",
+    ] {
+        put(r, path, all);
+    }
+    let (_, said) = checked(r);
+    assert!(!said.contains(IO_HEADING), "{said}");
+}
+
+#[test]
+fn a_rust_method_the_project_defines_is_left_out_of_the_net_and_the_line_is_printed_on_every_run() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let file = "crates/domain/src/lib.rs";
+    let lib = "pub fn f(p: &std::path::Path, store: &Store) {\n    let a = p.exists();\n    let b = p.read_dir();\n    let c = store.exists();\n    let d = store.read_dir(p);\n    let e = store.is_file();\n    let _ = (a, b, c, d, e);\n}\n";
+    put(r, file, lib);
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("I/O net:"), "{said}");
+    let flagged = |said: &str| named_lines(said, file);
+    assert_eq!(flagged(&said), [2, 3, 4, 5, 6], "{said}");
+    // The project defines a method of the same name and number of parameters, in any file of it: a trait of another
+    // layer, an impl in a test
+    put(
+        r,
+        "crates/infrastructure/src/outbound/mod.rs",
+        "pub trait Store { fn exists(&self) -> bool; fn read_dir(&self, p: &std::path::Path); }\n",
+    );
+    put(
+        r,
+        "crates/domain/tests/fake.rs",
+        "struct Fake;\nimpl Fake { fn is_file(&self, a: u8, b: u8) {} fn metadata(&self) {} }\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "I/O net: left out, as the project defines a method of the same name and number of parameters: \
+             exists(0), metadata(0), read_dir(1)\n"
+        ),
+        "{said}"
+    );
+    // `exists()` and `read_dir(p)` are left out on any receiver; `read_dir()` takes none, and `is_file()` is called
+    // with none where the project's takes two
+    assert_eq!(flagged(&said), [3, 6], "{said}");
+    // The same names with another number of parameters leave nothing out of those calls
+    put(
+        r,
+        "crates/infrastructure/src/outbound/mod.rs",
+        "pub trait Store { fn exists(&self, a: u8) -> bool; fn read_dir(&self); }\n",
+    );
+    let (_, said) = checked(r);
+    assert_eq!(flagged(&said), [2, 4, 5, 6], "{said}");
+    // It is printed when nothing fails too
+    put(r, file, "pub fn f(a: u8) -> u8 { a }\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(said.contains("I/O net: left out"), "{said}");
+}
+
+#[test]
+fn an_approved_rust_name_is_an_entry_by_its_name_and_a_group_is_one_entry() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let file = "crates/domain/src/lib.rs";
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let approve = |entry: &str| {
+        let out = approve_with_git(r, named, &[file, entry, "--reason", "the port comes later"]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{entry}: {}{}",
+            stdout(&out),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    put(
+        r,
+        file,
+        "use std::time::{Instant, SystemTime};\npub fn f(p: &std::path::Path) {\n    let a = Instant::now();\n    let b = SystemTime::now();\n    let c = std::env::current_dir();\n    let d = std::env::args();\n    let e = p.canonicalize();\n    let g = std::path::absolute(\"x\");\n    let _ = (a, b, c, d, e, g);\n}\nextern \"C\" { fn abs(x: i32) -> i32; }\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The act of a group is one entry, whichever names the file reaches it by
+    approve("clock");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("reads the clock"), "{said}");
+    assert!(
+        said.contains("clock in crates/domain/src/lib.rs: the port comes later (Someone Else, ")
+            && said.contains("; now used: std::time::Instant::now, std::time::SystemTime::now\n"),
+        "{said}"
+    );
+    // A name of `std::env` is an entry of its own, a method of the net its own, and `std::path` its own
+    approve("std::env");
+    approve("canonicalize");
+    // A name of `std::env` approved does not cover the arguments, which are a group of their own
+    let (_, said) = checked(r);
+    assert!(said.contains("reads the command-line arguments"), "{said}");
+    approve("argv");
+    approve("std::path");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("declares an `extern` block")
+            && !said.contains("uses `std::env`")
+            && !said.contains("calls `.canonicalize(...)`")
+            && !said.contains("(entry `argv`)")
+            && !said.contains("uses `std::path`"),
+        "{said}"
+    );
+    assert!(
+        said.contains("; now used: current_dir\n") && said.contains("; now used: std::env::args\n"),
+        "{said}"
+    );
+    approve("extern");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("approved in .config/rotproof-approved.toml (6):"),
+        "{said}"
+    );
+    // The names change, so the reason is read again; and what is no longer used is a stale entry
+    put(
+        r,
+        file,
+        "use std::time::Instant;\npub fn f() {\n    let a = Instant::now();\n    let c = std::env::set_current_dir(\"x\");\n    let _ = (a, c);\n}\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("; now used: set_current_dir\n")
+            && !said.contains("; now used: current_dir\n"),
+        "{said}"
+    );
+    for stale in ["canonicalize", "argv", "std::path", "extern"] {
+        assert!(
+            said.contains(&format!(
+                "approved, but no such forbidden import: {stale} in {file}"
+            )),
+            "{stale}\n{said}"
+        );
+    }
+    // Only what the check finds is approved
+    let out = approve_with_git(r, named, &[file, "std::net", "--reason", "no"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no forbidden import of std::net"));
+    // The environment check is not approved
+    put(r, file, "pub fn f() { let _ = std::env::var(\"A\"); }\n");
+    let out = approve_with_git(r, named, &[file, "std::env::var", "--reason", "no"]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn the_guide_of_a_rust_project_lists_the_allowlist_in_full_and_the_way_out() {
+    let guide = stdout(&run(&["guide", "--stack", "rust"]));
+    for name in [
+        // std::env: what is pure, and what is not
+        "`consts`",
+        "`split_paths`",
+        "`join_paths`",
+        "`VarError`",
+        "`JoinPathsError`",
+        "`SplitPaths`",
+        "`current_dir`",
+        "`args_os`",
+        // the clocks, the net and what cannot be read
+        "`std::time::SystemTime::now`",
+        "`std::time::Instant::now`",
+        "`UNIX_EPOCH.elapsed()`",
+        "`canonicalize`",
+        "`read_dir`",
+        "`read_link`",
+        "`try_exists`",
+        "`symlink_metadata`",
+        "`is_symlink`",
+        "`exists`",
+        "`is_file`",
+        "`is_dir`",
+        "`metadata`",
+        "`std::path::absolute`",
+        "`extern`",
+        "`Path::exists`",
+        "`Box<dyn Fn() -> SystemTime>`",
+        "`F: Fn() -> SystemTime`",
+        "`clock`",
+        "`argv`",
+    ] {
+        assert!(guide.contains(name), "{name}\n{guide}");
+    }
+    assert!(
+        guide.contains("`std::env` (`current_dir`) for a name of it that is I/O"),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("Approving the import,\n  renaming or respelling it"),
+        "{guide}"
+    );
+    // The other stacks do not claim what is Rust's
+    for stack in ["python", "typescript"] {
+        let guide = stdout(&run(&["guide", "--stack", stack]));
+        assert!(!guide.contains("`Box<dyn Fn() -> SystemTime>`"), "{stack}");
+        assert!(!guide.contains("`UNIX_EPOCH.elapsed()`"), "{stack}");
+    }
+}
+
+/// The `package.json` of a TypeScript project that lists `vitest` for development and `react` to run.
+const VITEST_PACKAGE: &str = "{\n  \"name\": \"shop\",\n  \"dependencies\": { \"react\": \"^18\" },\n  \
+                              \"devDependencies\": { \"vitest\": \"^2\", \"@types/node\": \"^22\" }\n}\n";
+
+/// A TypeScript project that keeps every rule and lists `vitest` for development, with `react` imported by its UI.
+fn typescript_with_vitest() -> tempfile::TempDir {
+    let root = repo_with_ui("typescript", "");
+    put(root.path(), "package.json", VITEST_PACKAGE);
+    put(
+        root.path(),
+        "src/ui/atoms/Button.tsx",
+        "import React from 'react';\nexport const Button = () => <p />;\n",
+    );
+    let out = run(&["--root", &root_arg(root.path()), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    root
+}
+
+#[test]
+fn a_typescript_test_is_told_by_its_name_and_every_rule_reads_it_as_one_and_says_how_many() {
+    let root = typescript_with_vitest();
+    let r = root.path();
+    // Each file does what no code of a layer may, and sits where a test may: in a layer, in a directory of tests, and
+    // in no layer at all. A file under `__tests__/` is a test whatever it is called, and a JSON file is read by none
+    put(
+        r,
+        "src/domain/song.test.ts",
+        "import { test } from 'vitest';\nimport { play } from '../application/play';\n\
+         import { helper } from './__tests__/helper';\nexport const a = process.env.A;\n",
+    );
+    put(
+        r,
+        "src/domain/__tests__/helper.ts",
+        "import { db } from '../../infrastructure/db';\nexport const helper = import.meta.env.VITE_X;\n",
+    );
+    put(r, "src/domain/__tests__/fixture.json", "{}\n");
+    put(
+        r,
+        "src/helpers.spec.ts",
+        "import { test } from 'vitest';\nimport { Home } from './ui/pages/Home';\n",
+    );
+    put(
+        r,
+        "src/presentation/models/useForm.test.tsx",
+        "export const Wrapper = () => <p />;\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(
+        said,
+        "tests: 4 files read as tests (*.test.*, *.spec.*, __tests__/)\n\
+         the layers and every record keep the rules\n"
+    );
+    // One file is one: said in the singular
+    fs::remove_file(r.join("src/domain/song.test.ts")).unwrap();
+    fs::remove_file(r.join("src/domain/__tests__/helper.ts")).unwrap();
+    fs::remove_file(r.join("src/helpers.spec.ts")).unwrap();
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    assert!(
+        said.starts_with("tests: 1 file read as a test (*.test.*, *.spec.*, __tests__/)\n"),
+        "{said}"
+    );
+
+    // A test is code for the checks of comments, as the files of Python's `tests/` are
+    put(
+        r,
+        "src/domain/song.test.ts",
+        "// TODO: more\n// @ts-ignore\nexport const a = 1;\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains("  src/domain/song.test.ts:1\n    // TODO: more\n"),
+        "{said}"
+    );
+    assert!(
+        said.contains("  src/domain/song.test.ts:2\n    // @ts-ignore\n"),
+        "{said}"
+    );
+    assert!(said.starts_with("tests: 2 files read as tests"), "{said}");
+
+    // The same names in a path the project keeps out of the checks are not read, so not counted
+    put(r, "src/legacy/old.test.ts", "export const a = 1;\n");
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    assert!(said.starts_with("tests: 3 files read as tests"), "{said}");
+    declare(
+        r,
+        "stack = \"typescript\"\nareas = [\"a\"]\nui = \"atomic\"\nunchecked = [\"src/legacy\"]\n",
+    );
+    let said = stdout(&run(&["--root", &root_arg(r), "check"]));
+    assert!(said.starts_with("tests: 2 files read as tests"), "{said}");
+
+    // Python and Rust tell no test by its name, and say nothing of tests
+    for stack in ["python", "rust"] {
+        let root = repo_with_ui(stack, "");
+        let said = stdout(&run(&["--root", &root_arg(root.path()), "check"]));
+        assert!(!said.contains("tests:"), "{stack}: {said}");
+    }
+}
+
+#[test]
+fn code_that_is_not_a_test_imports_no_test_in_typescript_and_in_python() {
+    let finding = |file: &str, line: usize, import: &str, target: &str| {
+        format!(
+            "{file}:{line}: imports {import} ({target}), a test (*.test.*, *.spec.*, __tests__/); code that is not a \
+             test imports no test: move what it needs out of the test into a layer"
+        )
+    };
+    // The import of a layer's code by a file named as a test is none of this, and a test importing a test passes
+    let root = typescript_with_vitest();
+    let r = root.path();
+    put(
+        r,
+        "src/domain/__tests__/helper.ts",
+        "export const helper = 1;\n",
+    );
+    put(r, "src/domain/song.test.ts", "export const song = 1;\n");
+    put(
+        r,
+        "src/application/play.test.ts",
+        "import { helper } from '../domain/__tests__/helper';\nimport { song } from '../domain/song.test';\n\
+         import { play } from './play';\n",
+    );
+    put(r, "src/application/play.ts", "export const play = 1;\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // Each form of an import of a test by code that is not one, planted and removed
+    for (path, text, line, import, target) in [
+        (
+            "src/application/play.ts",
+            "import { helper } from '../domain/__tests__/helper';\n",
+            1,
+            "../domain/__tests__/helper",
+            "src/domain/__tests__/helper",
+        ),
+        (
+            "src/application/play.ts",
+            "export const play = 1;\nimport { song } from '../domain/song.test';\n",
+            2,
+            "../domain/song.test",
+            "src/domain/song.test",
+        ),
+        (
+            "src/domain/song.ts",
+            "import { song } from './song.test.ts';\n",
+            1,
+            "./song.test.ts",
+            "src/domain/song.test.ts",
+        ),
+        (
+            "src/main.tsx",
+            "import { play } from './application/play.test';\n",
+            1,
+            "./application/play.test",
+            "src/application/play.test",
+        ),
+        // A package's entry that is a test, through an alias of `paths`
+        (
+            "src/ui/atoms/Button.tsx",
+            "import React from 'react';\nconst helper = import('@/domain/__tests__/helper');\n",
+            2,
+            "@/domain/__tests__/helper",
+            "src/domain/__tests__/helper",
+        ),
+    ] {
+        let original = fs::read_to_string(r.join(path)).ok();
+        put(
+            r,
+            "tsconfig.json",
+            "{ \"compilerOptions\": { \"paths\": { \"@/*\": [\"./src/*\"] } } }\n",
+        );
+        let kept = original.clone().unwrap_or_default();
+        put(r, path, &format!("{kept}{text}"));
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{path}: {said}");
+        let wanted = finding(path, line + kept.lines().count(), import, target);
+        assert!(
+            said.contains(&wanted),
+            "{path}: wanted\n{wanted}\nin\n{said}"
+        );
+        assert_eq!(said.matches(": imports ").count(), 1, "{path}: {said}");
+        // Put back, it passes
+        match original {
+            Some(original) => put(r, path, &original),
+            None => fs::remove_file(r.join(path)).unwrap(),
+        }
+        let out = run(&["--root", &root_arg(r), "check"]);
+        assert!(out.status.success(), "{path} put back: {}", stdout(&out));
+    }
+
+    // An approval keeps one, as it keeps any forbidden import
+    put(
+        r,
+        "src/application/play.ts",
+        "import { helper } from '../domain/__tests__/helper';\n",
+    );
+    let out = approve_with_git(
+        r,
+        Some("[user]\n\tname = Someone\n"),
+        &[
+            "src/application/play.ts",
+            "../domain/__tests__/helper",
+            "--reason",
+            "the helper is moved next week",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(stdout(&out).contains("approved in"), "{}", stdout(&out));
+
+    // Python: a layer, the entry file and a unit's package file import no module of `tests/`, and a test imports both
+    let root = repo_with_ui("python", "");
+    let r = root.path();
+    put(r, "tests/helper.py", "x = 1\n");
+    put(
+        r,
+        "tests/test_model.py",
+        "from tests import helper\nimport tests.helper\nfrom domain import model\n",
+    );
+    put(r, "domain/model.py", "x = 1\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let in_tests = |file: &str, line: usize, import: &str| {
+        format!(
+            "{file}:{line}: imports {import}, in tests/, which holds tests; code that is not a test imports no \
+             test: move what it needs out of the test into a layer"
+        )
+    };
+    for (path, text, import) in [
+        (
+            "domain/model.py",
+            "from tests import helper\n",
+            "tests.helper",
+        ),
+        ("domain/model.py", "import tests.helper\n", "tests.helper"),
+        (
+            "domain/model.py",
+            "from tests.helper import x\n",
+            "tests.helper.x",
+        ),
+        ("infrastructure/inbound/web.py", "import tests\n", "tests"),
+        ("__main__.py", "import tests.helper\n", "tests.helper"),
+    ] {
+        put(r, path, text);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{path}: {said}");
+        let wanted = in_tests(path, 1, import);
+        assert!(
+            said.contains(&wanted),
+            "{path}: wanted\n{wanted}\nin\n{said}"
+        );
+        assert_eq!(said.matches(": imports ").count(), 1, "{path}: {said}");
+        fs::remove_file(r.join(path)).unwrap();
+        put(r, "domain/model.py", "x = 1\n");
+    }
+    // A project with no `tests/` has no test to import: `tests` is a package of someone else's
+    fs::remove_dir_all(r.join("tests")).unwrap();
+    put(r, "domain/model.py", "import tests\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(
+        !stdout(&out).contains("which holds tests"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn only_a_test_imports_a_development_dependency_of_a_typescript_project() {
+    let root = typescript_with_vitest();
+    let r = root.path();
+    put(
+        r,
+        "src/domain/song.test.ts",
+        "import { test } from 'vitest';\n",
+    );
+    put(
+        r,
+        "src/domain/__tests__/helper.ts",
+        "import { vi } from 'vitest';\n",
+    );
+    put(
+        r,
+        "src/infrastructure/outbound/song.ts",
+        "import type { Buffer } from '@types/node';\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+
+    // The code of a layer (one that may import a package: the allowlist of the inner layers is another rule), the
+    // entry file and a file outside the layers that is no test
+    for (path, expected) in [
+        (
+            "src/infrastructure/outbound/song.ts",
+            "src/infrastructure/outbound/song.ts:1",
+        ),
+        ("src/main.tsx", "src/main.tsx:1"),
+    ] {
+        let original = fs::read_to_string(r.join(path)).unwrap_or_default();
+        put(r, path, "import { vi } from 'vitest';\n");
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{path}: {said}");
+        let wanted = format!(
+            "{expected}: imports vitest, which package.json:4 lists for development only: the code of a layer uses \
+             runtime dependencies only, so move vitest to dependencies, or import it in a test alone (a file named \
+             *.test.* or *.spec.*, or in __tests__/)"
+        );
+        assert!(
+            said.contains(&wanted),
+            "{path}: wanted\n{wanted}\nin\n{said}"
+        );
+        // Moved to `dependencies`, as the finding says, it passes
+        put(
+            r,
+            "package.json",
+            &VITEST_PACKAGE
+                .replace(
+                    "\"react\": \"^18\" }",
+                    "\"react\": \"^18\", \"vitest\": \"^2\" }",
+                )
+                .replace("\"vitest\": \"^2\", \"@types", "\"@types"),
+        );
+        let out = run(&["--root", &root_arg(r), "check"]);
+        assert!(out.status.success(), "{path} moved: {}", stdout(&out));
+        put(r, "package.json", VITEST_PACKAGE);
+        if original.is_empty() {
+            fs::remove_file(r.join(path)).unwrap();
+        } else {
+            put(r, path, &original);
+        }
+    }
+
+    // A runtime dependency that only tests import is moved to `devDependencies`, as in Python
+    put(
+        r,
+        "package.json",
+        &VITEST_PACKAGE.replace(
+            "\"react\": \"^18\" }",
+            "\"react\": \"^18\", \"left-pad\": \"1\" }",
+        ),
+    );
+    put(r, "src/domain/pad.test.ts", "import pad from 'left-pad';\n");
+    let out = run(&["--root", &root_arg(r), "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "package.json:3: lists the dependency left-pad in dependencies, and only tests import it: move it to \
+             devDependencies"
+        ),
+        "{said}"
+    );
+
+    // A file outside `src/` is read by no check, as before
+    put(r, "src/domain/pad.test.ts", "export const a = 1;\n");
+    put(r, "package.json", VITEST_PACKAGE);
+    put(
+        r,
+        "vite.config.ts",
+        "import { defineConfig } from 'vitest/config';\n",
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
 }
 
 /// Every place of the Python layout, in the order of the grid below.
@@ -2529,7 +5239,7 @@ fn every_form_of_typescript_import_is_judged() {
     );
     write(
         "src/domain/song.ts",
-        "import React from 'react';\nimport type { Play } from '../application/play';\nexport * from '@/infrastructure/db';\n\
+        "import path from 'node:path';\nimport type { Play } from '../application/play';\nexport * from '@/infrastructure/db';\n\
          export const load = () => import('../composition/main');\nconst x = require(`../vendor/x`);\n\
          const where = import.meta.resolve('../composition/worker');\n",
     );
@@ -2537,6 +5247,11 @@ fn every_form_of_typescript_import_is_judged() {
         "src/ui/molecules/Row.tsx",
         "import { Button } from '../atoms/Button';\nimport { List } from '../organisms/List';\nimport '../index.css';\n\
          import logo from '../../domain/logo.svg?url';\nexport const Row = () => <p>{/* ../pages */}</p>;\n",
+    );
+    // A package is no layer: it is the dependencies check's, and the allowlist's where the layer may not import it
+    write(
+        "src/infrastructure/outbound/view.ts",
+        "import React from 'react';\n",
     );
     // Not a source file, ignored by git, or hidden: not read
     write("src/domain/notes.md", "import '../composition'\n");
@@ -2735,7 +5450,7 @@ fn every_form_of_import_is_judged() {
     };
     write(
         "domain/model.py",
-        "import os\nimport requests\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    \
+        "import os\nimport json\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    \
          from application import play\ndef f():\n    import infrastructure.db\n",
     );
     write(
@@ -2745,7 +5460,7 @@ fn every_form_of_import_is_judged() {
     // The entry file, outside the layers, is read too
     write(
         "__main__.py",
-        "import composition\nfrom application import play\n",
+        "import composition\nfrom application import play\nimport requests\n",
     );
     // Not a layer, ignored by git, or hidden: not read
     write("tests/test_x.py", "import composition\n");
@@ -2779,6 +5494,13 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
     )
     .unwrap();
     fs::write(r.join("domain/model.py"), "import infrastructure.db\n").unwrap();
+    // It is a package all the same, which the domain may import once it is allowed there
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        format!("{declaration}\n[dependencies]\nallowed = {{ domain = [\"infrastructure\"] }}\n"),
+    )
+    .unwrap();
     let out = run(&["--root", &root_arg(r), "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
@@ -2832,9 +5554,16 @@ fn every_stack_with_layers_checks_everything() {
         .unwrap();
         let out = run(&["--root", &arg, "check"]);
         let said = stdout(&out);
-        // Nothing is skipped: the one line says that the layers, their direction and comments included, kept the rules
+        // Nothing is skipped: the one line says that the layers, their direction and comments included, kept the rules.
+        // Before it, a TypeScript project says how many files it read as tests, even when there are none
+        let tests = if stack == "typescript" {
+            "tests: 0 files read as tests (*.test.*, *.spec.*, __tests__/)\n"
+        } else {
+            ""
+        };
         assert_eq!(
-            said, "the layers and every record keep the rules\n",
+            said,
+            format!("{tests}the layers and every record keep the rules\n"),
             "{stack}"
         );
     }
@@ -3020,6 +5749,154 @@ fn check_counts_the_rust_code_that_is_moving_and_names_none_to_move_first() {
             "moving: 2 files are not in a layer yet, and none is checked. Rotproof does not read what a Rust file \
              imports, so it names none to move first\n"
         ),
+        "{said}"
+    );
+}
+
+#[test]
+fn check_leaves_out_of_the_layers_a_moving_file_could_go_in_those_the_io_check_would_fail_it_in() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let moving = |rest: &str| {
+        declare(
+            r,
+            &format!(
+                "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"legacy\"]\nfiles = \"{}\"\n{rest}",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+    };
+    let said = || {
+        stdout(&run(&["--root", &arg, "check"]))
+            .lines()
+            .filter(|line| line.starts_with("  legacy"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    write_file(r, "legacy/model.py", "import pydantic\n");
+    write_file(r, "legacy/store.py", "import shutil\n");
+    write_file(r, "legacy/pure.py", "import json\n");
+    moving("");
+    // The code that is moving is counted, and the check passes all the same
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // A file that imports a table entry, and one that imports a package no list allows, may not go in the four layers
+    // the check judges, and a file that does neither may go anywhere
+    let free = "infrastructure.outbound, infrastructure.inbound, composition";
+    assert_eq!(
+        said(),
+        format!(
+            "  legacy/model.py: {free}\n  legacy/pure.py: any layer\n  legacy/store.py: {free}"
+        )
+    );
+    // Allowed for `domain`, the package is no reason to leave it out of that layer
+    moving("[dependencies]\nallowed = { domain = [\"pydantic\"] }\n");
+    assert_eq!(
+        said(),
+        format!(
+            "  legacy/model.py: domain, {free}\n  legacy/pure.py: any layer\n  legacy/store.py: {free}"
+        )
+    );
+    // What reads it from a layer that may not import I/O leaves it no place at all, and the line says why
+    write_file(r, "domain/uses.py", "from legacy import store\n");
+    assert!(
+        said().contains(
+            "  legacy/store.py: no layer passes the direction check and the check of the I/O of the inner layers, \
+             for what it imports, what it does and what imports it"
+        ),
+        "{}",
+        said()
+    );
+}
+
+#[test]
+fn check_lists_what_the_inner_layers_import_of_code_outside_the_layers_and_fails_nothing() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let declare_paths = |paths: &str| {
+        declare(
+            r,
+            &format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\n{paths}"),
+        )
+    };
+    let listed = || {
+        let out = run(&["--root", &arg, "check"]);
+        assert!(out.status.success(), "{}", stdout(&out));
+        stdout(&out)
+            .lines()
+            .skip_while(|line| !line.starts_with("inner layers read code outside the layers"))
+            .take_while(|line| line.starts_with("inner layers") || line.starts_with("  "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    write_file(r, "legacy/io_helper.py", "import shutil\n");
+    write_file(r, "scripts/tool.py", "");
+    write_file(
+        r,
+        "domain/x.py",
+        "import os\nfrom legacy import io_helper\nimport scripts.tool\n",
+    );
+    write_file(
+        r,
+        "infrastructure/outbound/y.py",
+        "import legacy.io_helper\n",
+    );
+    // Nothing is listed while no path is: the code outside the layers fails as code outside the layers does
+    declare_paths("");
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        !stdout(&out).contains("inner layers read code"),
+        "{}",
+        stdout(&out)
+    );
+    // Listed, the helper is not judged, and the import of it is named, apart from what fails
+    declare_paths("unchecked = [\"scripts\"]\nmoving = [\"legacy\"]\n");
+    assert_eq!(
+        listed(),
+        "inner layers read code outside the layers (not judged) (2):\n  \
+         domain/x.py:2 imports legacy.io_helper, in a path of moving\n  \
+         domain/x.py:3 imports scripts.tool, in a path of unchecked"
+    );
+    // Nothing is listed once no inner layer imports it
+    write_file(r, "domain/x.py", "import os\n");
+    assert_eq!(listed(), "");
+}
+
+#[test]
+fn check_lists_what_a_rust_inner_layer_depends_on_in_a_path_of_unchecked_or_moving() {
+    let root = declared("stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    write_file(
+        r,
+        "crates/legacy/Cargo.toml",
+        "[package]\nname = \"legacy\"\n",
+    );
+    write_file(r, "crates/legacy/src/lib.rs", "");
+    let manifest = fs::read_to_string(r.join("crates/domain/Cargo.toml")).unwrap();
+    fs::write(
+        r.join("crates/domain/Cargo.toml"),
+        format!("{manifest}\n[dependencies]\nlegacy = {{ path = \"../legacy\" }}\n"),
+    )
+    .unwrap();
+    declare(
+        r,
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"crates/legacy\"]\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains(
+            "inner layers read code outside the layers (not judged) (1):\n  \
+             crates/domain/Cargo.toml:"
+        ) && said.contains(" imports legacy, in a path of moving\n"),
         "{said}"
     );
 }
@@ -6589,7 +9466,7 @@ fn a_python_manifest_is_compared_with_what_the_code_imports_either_way() {
     );
     write_file(
         r,
-        "application/pay.py",
+        "infrastructure/outbound/pay.py",
         "import os\nimport requests\nfrom dotenv import load_dotenv\n",
     );
     // `dotenv` is taken for the distribution named like it, and `python-dotenv` is imported by nothing
@@ -6602,7 +9479,7 @@ fn a_python_manifest_is_compared_with_what_the_code_imports_either_way() {
     );
     assert!(
         said.contains(
-            "application/pay.py:3: imports dotenv.load_dotenv, which needs the package dotenv, and pyproject.toml \
+            "infrastructure/outbound/pay.py:3: imports dotenv.load_dotenv, which needs the package dotenv, and pyproject.toml \
              does not list it: add it to dependencies in [project]"
         ),
         "{said}"
@@ -6654,15 +9531,15 @@ fn a_typescript_manifest_is_compared_with_what_the_code_imports_either_way() {
     );
     write_file(
         r,
-        "src/application/pay.ts",
-        "import React from \"react\";\nimport z from \"zod\";\nimport { readFile } from \"node:fs\";\n",
+        "src/infrastructure/outbound/pay.ts",
+        "import React from \"react\";\nimport z from \"zod\";\nimport { join } from \"node:path\";\n",
     );
     let out = run(&["--root", &arg, "check"]);
     let said = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{said}");
     assert!(
         said.contains(
-            "src/application/pay.ts:2: imports zod, which needs the package zod, and package.json does not list it: \
+            "src/infrastructure/outbound/pay.ts:2: imports zod, which needs the package zod, and package.json does not list it: \
              add it to dependencies"
         ),
         "{said}"
@@ -6995,4 +9872,490 @@ fn a_project_with_atomic_ui_reads_no_template() {
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(!stdout(&out).contains("templates:"), "{}", stdout(&out));
+}
+
+/// What a finding of a package an inner layer may not import starts with: the way out, up to the place.
+const PACKAGE_FIX: &str = "move the code that needs the package to infrastructure, behind a port the use case is \
+                           given, or, when the package does no I/O, ask the person whether to allow it for";
+
+#[test]
+fn a_package_is_imported_in_an_inner_layer_only_where_it_is_allowed_and_each_form_planted_fails() {
+    let root = repo_with_ui("python", "");
+    let r = root.path();
+    put(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\", \"pydantic\"]\n",
+    );
+    // What is not an inner layer is free: the layer that does the I/O, what wires and draws, the entry file and a test
+    for path in [
+        "infrastructure/outbound/o.py",
+        "infrastructure/inbound/i.py",
+        "composition/c.py",
+        "ui/pages/p.py",
+        "__main__.py",
+        "tests/test_o.py",
+    ] {
+        put(r, path, "import requests\nimport pydantic\nimport os\n");
+    }
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // Every inner layer and level fails on a package that no list allows it
+    for path in [
+        "domain/x.py",
+        "protocol/inbound/x.py",
+        "protocol/outbound/x.py",
+        "application/x.py",
+        "presentation/models/x.py",
+        "presentation/display/x.py",
+    ] {
+        put(r, path, "import os\nimport requests\n");
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{path}\n{said}");
+        assert!(said.contains(IO_HEADING), "{path}\n{said}");
+        let place = path.rsplit_once('/').unwrap().0.replace('/', ".");
+        assert!(
+            said.contains(&format!("  {path}:2: {PACKAGE_FIX} {place} (allowed under [dependencies] in .config/rotproof.toml; an agent never adds it to pass the check): imports requests, of the package requests, which {place} may not import\n    import requests")),
+            "{path}\n{said}"
+        );
+        fs::remove_file(r.join(path)).unwrap();
+    }
+
+    // A list allows it, by layer or by level, and the declaration is the person's: it is written, never made
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    assert!(!declaration.contains("allowed"), "{declaration}");
+    let declare = |text: &str| {
+        put(
+            r,
+            ".config/rotproof.toml",
+            &format!("{declaration}\n{text}\n"),
+        )
+    };
+    put(r, "domain/x.py", "import requests\n");
+    put(r, "presentation/models/x.py", "import pydantic\n");
+    put(r, "presentation/display/x.py", "import os\n");
+    declare("[dependencies]\nallowed = { domain = [\"Requests\"], presentation = [\"pydantic\"] }");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // A level's key adds to that level alone
+    put(r, "presentation/display/x.py", "import pydantic\n");
+    declare(
+        "[dependencies]\nallowed = { domain = [\"requests\"], \"presentation.models\" = [\"pydantic\"] }",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("presentation/display/x.py:1: ")
+            && !said.contains("presentation/models/x.py:1: "),
+        "{said}"
+    );
+    put(r, "presentation/display/x.py", "import os\n");
+    // The table form of the same list, with its keys in quotes
+    declare(
+        "[dependencies.allowed]\ndomain = [\"requests\"]\n\"presentation.models\" = [\"pydantic\"]",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+
+    // Each form of a list that cannot be kept fails, said with what to do, and the declaration put back passes
+    for (table, said_so) in [
+        (
+            "allowed = { domain = [\"requests\"], domane = [\"x\"] }",
+            "allowed under [dependencies] has the key \"domane\", which is no layer or level of the table: write one of presentation, presentation.models",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], infrastructure = [\"x\"] }",
+            "has the key \"infrastructure\", a layer that is free to import any package",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], composition = [\"x\"] }",
+            "has the key \"composition\", a layer that is free to import any package",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], ui = [\"x\"] }",
+            "has the key \"ui\", a layer that is free to import any package",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], presentation.models = [\"pydantic\"] }",
+            "has the table presentation.models: TOML reads presentation.models = [...] written without quotes as the key models inside the table presentation, not as the key presentation.models. Write the key in quotes: \"presentation.models\" = [...]",
+        ),
+        (
+            "allowed = { domain = \"requests\" }",
+            "has domain = \"requests\", which is no list of names",
+        ),
+        (
+            "allowed = { domain = [\"requests\", \"Requests\"] }",
+            "lists requests twice for domain (as \"requests\" and \"Requests\"): allow it once",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], \"presentation.models\" = [\"pydantic\"], presentation = [\"pydantic\"] }",
+            "pydantic is allowed twice for the same code, by allowed under [dependencies] (presentation) and by allowed under [dependencies] (presentation.models)",
+        ),
+        (
+            "allowed = { domain = [\"requests\", \"pydantic\"], \"presentation.models\" = [\"pydantic\"] }",
+            "lists pydantic for domain, which no file of domain imports: take it out, so that the list does not keep what is gone",
+        ),
+        (
+            "allowed = { domain = [\"requests\", \"ghost\"], \"presentation.models\" = [\"pydantic\"] }",
+            "lists ghost for domain, which no manifest of the project lists as a dependency: take it out",
+        ),
+    ] {
+        declare(&format!("[dependencies]\n{table}"));
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{table}\n{said}");
+        assert!(said.contains(said_so), "{table}\n{said}");
+    }
+    // A layer the project lacks: left out by the UI, or declared absent
+    let root = clean_repo();
+    let r = root.path();
+    put(r, "domain/x.py", "import os\n");
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    put(
+        r,
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nallowed = {{ presentation = [\"pydantic\"] }}\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("has the key \"presentation\", and no unit of the project has it (declared absent, or left out by the ui): take it out"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_unit_adds_its_own_packages_to_the_projects_and_a_key_for_a_layer_it_lacks_fails() {
+    let unit = |name: &str, extra: &str| {
+        format!("\n[[unit]]\nname = \"{name}\"\npath = \"{name}\"\n{extra}")
+    };
+    let declaration = format!(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[dependencies]\nallowed = {{ domain = [\"requests\"] }}\n{}{}",
+        env!("CARGO_PKG_VERSION"),
+        unit("a", "allowed = { domain = [\"pydantic\"] }\n"),
+        unit("b", ""),
+    );
+    let root = declared(&declaration);
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(
+        out.status.success(),
+        "{}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    put(r, "docs/log.md", "# Log\n\n## 2026-10-02\n\n* Something\n");
+    for dir in ["a", "b"] {
+        put(
+            r,
+            &format!("{dir}/pyproject.toml"),
+            "[project]\nname = \"x\"\ndependencies = [\"requests\", \"pydantic\"]\n",
+        );
+    }
+    put(r, "a/domain/x.py", "import requests\nimport pydantic\n");
+    put(r, "b/domain/x.py", "import requests\nimport pydantic\n");
+    let (code, said) = checked(r);
+    // The project's list is for both units, a unit's own for its code alone
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("  b/domain/x.py:2: ") && !said.contains("a/domain/x.py:"),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "imports pydantic, of the package pydantic, which domain of unit b may not import"
+        ),
+        "{said}"
+    );
+    // The unit that lacks a layer has no list for it, and says so, with the unit named
+    let lacking = declaration.replace(
+        "name = \"b\"\npath = \"b\"\n",
+        "name = \"b\"\npath = \"b\"\nabsent = [\"application\"]\nallowed = { application = [\"requests\"] }\n",
+    );
+    put(r, ".config/rotproof.toml", &up_to_date(&lacking));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "allowed of unit \"b\" has the key \"application\", and the unit \"b\" lacks it"
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_rust_project_has_no_list_and_its_crate_lists_what_its_layer_may_use() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    put(
+        r,
+        "crates/domain/Cargo.toml",
+        "[package]\nname = \"domain\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nserde = \"1\"\n",
+    );
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        "//! Doc\n\nuse serde::Serialize;\n",
+    );
+    // A dependency of an inner layer's crate is that crate's own list, and passes
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // An `allowed` there fails, with why, in the project's table and in a unit's
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    for table in [
+        "[dependencies]\nallowed = { domain = [\"serde\"] }\n",
+        "[[unit]]\nname = \"core\"\npath = \"crates\"\nallowed = { domain = [\"serde\"] }\n",
+    ] {
+        put(
+            r,
+            ".config/rotproof.toml",
+            &format!("{declaration}\n{table}"),
+        );
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{table}\n{said}");
+        assert!(
+            said.contains("is set, and a Rust project has no such list: a crate's own Cargo.toml [dependencies] is the list of packages its layer may import")
+                && said.contains("is a decision of the person: take allowed out"),
+            "{table}\n{said}"
+        );
+    }
+    // A repository of records has no code to list
+    let root = repo();
+    let declaration = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
+    put(
+        root.path(),
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nallowed = {{ domain = [\"x\"] }}\n"),
+    );
+    let (code, said) = checked(root.path());
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("stack = \"none\" has no code, so it has no dependencies to judge: take out [dependencies]"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_typescript_layout_allows_react_in_the_models_and_nothing_else_and_the_list_is_the_persons() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    put(
+        r,
+        "package.json",
+        "{\n  \"name\": \"shop\",\n  \"dependencies\": { \"react\": \"^18\", \"react-dom\": \"^18\", \"zustand\": \"^5\" }\n}\n",
+    );
+    put(
+        r,
+        "src/main.tsx",
+        "import { createRoot } from 'react-dom/client';\nimport create from 'zustand';\n",
+    );
+    put(
+        r,
+        "src/presentation/models/m.ts",
+        "import { useState } from 'react';\nimport { useRef } from 'react/jsx-runtime';\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // `react` is for the models alone, and `react-dom` for no inner layer: the layout lists the one, no more
+    for (path, source, package, place) in [
+        (
+            "src/domain/x.ts",
+            "import { useState } from 'react';\n",
+            "react",
+            "domain",
+        ),
+        (
+            "src/presentation/display/x.ts",
+            "import { useState } from 'react';\n",
+            "react",
+            "presentation.display",
+        ),
+        (
+            "src/presentation/models/x.ts",
+            "import { createRoot } from 'react-dom/client';\n",
+            "react-dom",
+            "presentation.models",
+        ),
+        (
+            "src/application/x.ts",
+            "import create from 'zustand';\n",
+            "zustand",
+            "application",
+        ),
+    ] {
+        put(r, path, source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{path}\n{said}");
+        assert!(
+            said.contains(&format!("  {path}:1: {PACKAGE_FIX} {place} (allowed under [dependencies] in .config/rotproof.toml; an agent never adds it to pass the check): imports")),
+            "{path}\n{said}"
+        );
+        assert!(
+            said.contains(&format!(
+                "of the package {package}, which {place} may not import"
+            )),
+            "{path}\n{said}"
+        );
+        fs::remove_file(r.join(path)).unwrap();
+    }
+    // A test is free, and a list written by the person allows the rest: the name as `package.json` writes it
+    put(r, "src/domain/x.test.ts", "import create from 'zustand';\n");
+    put(r, "src/application/x.ts", "import create from 'zustand';\n");
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    put(
+        r,
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nallowed = {{ application = [\"zustand\"] }}\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // What the layout allows is not written again, and a name npm writes in another case is another name
+    for (table, said_so) in [
+        (
+            "allowed = { application = [\"zustand\"], \"presentation.models\" = [\"react\"] }",
+            "lists react for presentation.models, which the typescript layout allows for presentation.models already: take it out",
+        ),
+        (
+            "allowed = { application = [\"Zustand\"] }",
+            "lists Zustand for application, which no manifest of the project lists as a dependency",
+        ),
+    ] {
+        put(
+            r,
+            ".config/rotproof.toml",
+            &format!("{declaration}\n[dependencies]\n{table}\n"),
+        );
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{table}\n{said}");
+        assert!(said.contains(said_so), "{table}\n{said}");
+    }
+}
+
+#[test]
+fn an_approved_package_prints_the_imports_the_file_makes_of_it_and_a_stale_approval_fails() {
+    let root = repo_with_ui("python", "");
+    let r = root.path();
+    put(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\"]\n",
+    );
+    put(
+        r,
+        "domain/x.py",
+        "from requests import get, post\nimport requests\n\n\ndef f():\n    return requests.get\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The package is one finding of the file, with both lines the file imports it on
+    assert!(
+        said.contains(
+            "which domain may not import, on lines 1, 2\n    from requests import get, post\n"
+        ) && said.matches("domain/x.py:").count() == 1,
+        "{said}"
+    );
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let out = approve_with_git(
+        r,
+        named,
+        &[
+            "domain/x.py",
+            "requests",
+            "--reason",
+            "the report is fetched here until the port is made",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // One approval for the file and the package covers every import of it
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains(
+            "approved in .config/rotproof-approved.toml (1):\n  requests in domain/x.py: the report is fetched here until the port is made (Someone Else, "
+        ) && said.contains("; now used: requests, requests.get, requests.post\n"),
+        "{said}"
+    );
+    // Another package of the file is not covered
+    put(r, "domain/x.py", "import requests\nimport pydantic\n");
+    put(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\", \"pydantic\"]\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("domain/x.py:2: ")
+            && said.contains("of the package pydantic")
+            && !said.contains("domain/x.py:1: "),
+        "{said}"
+    );
+    // The import goes, and the approval that matches nothing fails
+    put(r, "domain/x.py", "import os\n");
+    put(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = []\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("approved, but no such forbidden import: requests in domain/x.py"),
+        "{said}"
+    );
+}
+
+#[test]
+fn the_guide_says_what_is_allowed_in_an_inner_layer_and_that_the_list_is_the_persons() {
+    for stack in ["python", "typescript"] {
+        // The guide is wrapped: its words are read as one line
+        let guide = stdout(&run(&["guide", "--stack", stack]))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        for said in [
+            "**The inner layers import only the packages they are allowed.**",
+            "`allowed = { domain = [\"pydantic\"], protocol = [\"pydantic\"], \"presentation.models\" = [\"zustand\"] }`",
+            "**Write a dotted key in quotes:**",
+            "**Allowing a package is a decision of the person.** Never add, change or take out a name of `allowed` to pass the check, as with `todo_link` and `approved_max`",
+            "`rotproof init` and `rotproof create` never write it",
+        ] {
+            assert!(guide.contains(said), "{stack}: {said}");
+        }
+        assert_eq!(
+            guide.contains("The layout allows `react` in `presentation.models`"),
+            stack == "typescript"
+        );
+    }
+    let guide = stdout(&run(&["guide", "--stack", "rust"]))
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        guide.contains("**A crate's own `Cargo.toml` is the list of the packages its layer may use, and adding one is a decision of the person.**"),
+        "{guide}"
+    );
+    // Neither command writes it into a declaration
+    for stack in ["python", "typescript", "rust"] {
+        let ui = if stack == "rust" { "none" } else { "atomic" };
+        let root = tempfile::tempdir().unwrap();
+        let out = run(&[
+            "--root",
+            &root_arg(root.path()),
+            "init",
+            "--stack",
+            stack,
+            "--ui",
+            ui,
+        ]);
+        assert!(out.status.success(), "{}", stdout(&out));
+        let text = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
+        assert!(!text.contains("allowed"), "{stack}: {text}");
+    }
 }

@@ -5,8 +5,9 @@
 //!   a heading of its own, which asks where it belongs.
 //! - The words count in upper case, as whole words, and only in comments: a task board's status named after one, or
 //!   a phone format written with the letter X, is not a marker. Docstrings are strings, so they are not read.
-//! - Every code file of the layout is read, `tests/` and the other paths that are not layers included, except the
-//!   paths the project lists in `unchecked` (generated code is written by a tool the project does not edit).
+//! - Every code file of the layout is read, `tests/` and the other paths that are not layers included (and the tests
+//!   a TypeScript layout tells by their names), except the paths the project lists in `unchecked` (generated code is
+//!   written by a tool the project does not edit).
 //!
 //! The layout's `language` says how the code is read: a Python file's `#` comments with Ruff's parser (`python.rs`), a
 //! TypeScript or JavaScript file's `//` and `/* */` comments with oxc (`typescript.rs`), where JSX text is not a

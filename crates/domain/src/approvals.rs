@@ -17,7 +17,7 @@ use serde::Deserialize;
 use toml_edit::{ArrayOfTables, DocumentMut, InlineTable, Item, Table, value};
 
 use crate::declaration::DECLARATION;
-use crate::direction::Forbidden;
+use crate::direction::{Forbidden, Rule};
 
 /// The approvals file, from the root.
 pub const APPROVALS: &str = ".config/rotproof-approved.toml";
@@ -160,6 +160,43 @@ pub fn shown(entry: &Kept) -> String {
     )
 }
 
+/// How each approval in `sorted` is printed on every run, one line for each entry in the order the entries first
+/// approve something. An entry that approves an entry of the table of I/O the inner layers do none of also says the
+/// names the file uses under it now, from every finding it approves, so that a reason that no longer fits is seen:
+/// `shutil in domain/a.py: <reason> (<by>, <at>); now used: copyfile, rmtree`.
+pub fn shown_all(sorted: &Sorted) -> Vec<String> {
+    let mut lines: Vec<(&Kept, BTreeSet<&str>)> = Vec::new();
+    for (found, entry) in &sorted.approved {
+        let at = match lines
+            .iter()
+            .position(|(seen, _)| std::ptr::eq(*seen, *entry))
+        {
+            Some(at) => at,
+            None => {
+                lines.push((entry, BTreeSet::new()));
+                lines.len() - 1
+            }
+        };
+        if let Rule::InnerIo { names } = &found.rule {
+            lines[at].1.extend(names.iter().map(String::as_str));
+        }
+    }
+    lines
+        .into_iter()
+        .map(|(entry, names)| {
+            let line = shown(entry);
+            if names.is_empty() {
+                line
+            } else {
+                format!(
+                    "{line}; now used: {}",
+                    names.into_iter().collect::<Vec<_>>().join(", ")
+                )
+            }
+        })
+        .collect()
+}
+
 /// The finding for an entry that matches no forbidden import.
 pub fn stale(entry: &Kept) -> String {
     format!(
@@ -281,6 +318,7 @@ mod tests {
             file: file.into(),
             import: import.into(),
             detail: format!("{file}:{line}: imports {import}"),
+            rule: Rule::Direction,
         }
     }
 
@@ -328,6 +366,49 @@ mod tests {
             ]
         );
         assert_eq!(sorted.stale, [&entries[1]]);
+    }
+
+    fn io(file: &str, line: usize, import: &str, names: &[&str]) -> Forbidden {
+        Forbidden {
+            rule: Rule::InnerIo {
+                names: names.iter().map(|name| name.to_string()).collect(),
+            },
+            ..forbidden(file, line, import)
+        }
+    }
+
+    #[test]
+    fn an_entry_of_the_io_table_is_approved_as_an_import_is_and_prints_the_names_the_file_uses_now()
+    {
+        let found = [
+            io("domain/a.py", 1, "shutil", &["rmtree"]),
+            io("domain/a.py", 7, "shutil", &["copyfile", "rmtree"]),
+            io("domain/a.py", 2, "socket", &[]),
+            forbidden("domain/a.py", 3, "infrastructure.db"),
+            io("domain/b.py", 1, "shutil", &["copy"]),
+        ];
+        let entries = [
+            kept("domain/a.py", "shutil"),
+            kept("domain/a.py", "infrastructure.db"),
+            kept("domain/b.py", "socket"),
+        ];
+        let sorted = sort(&found, &entries);
+        // The entry for `socket` in `b.py` approves nothing, and `socket` in `a.py` and `shutil` in `b.py` are not
+        // approved
+        assert_eq!(sorted.forbidden.len(), 2);
+        assert_eq!(sorted.stale, [&entries[2]]);
+        let said = shown_all(&sorted);
+        assert_eq!(said.len(), 2, "{said:?}");
+        assert!(said[0].starts_with(
+            "shutil in domain/a.py: the framework loads it (someone, 2026-10-06T09:00:00+09:00)"
+        ));
+        assert!(
+            said[0].ends_with("; now used: copyfile, rmtree"),
+            "{}",
+            said[0]
+        );
+        // An entry of the layer table says nothing of names, and neither does one that uses none by name
+        assert_eq!(said[1], shown(&entries[1]));
     }
 
     #[test]

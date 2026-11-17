@@ -15,8 +15,10 @@ use domain::declaration::Declared;
 use domain::direction::{Edge, Forbidden, cycles, place_of};
 use domain::layers::{Language, Layout, Place, table};
 use domain::moving::Order;
+use domain::outside::Outside;
 use domain::readers::Read;
 use domain::templates::Premise;
+use domain::units::Unit;
 use domain::units_doc::Link;
 use moving::Moving;
 use protocol::outbound::Parsers;
@@ -41,6 +43,9 @@ pub struct Direction {
     pub moving: Option<Order>,
     /// How the references between templates were read, for a layout whose views are templates: said on every run
     pub templates: Option<Premise>,
+    /// Every import from the code of an inner layer into a path of `unchecked` or `moving`, which no check judges: said
+    /// on every run, in the order of the file and the line, and failing nothing
+    pub outside: Vec<Outside>,
 }
 
 /// Every import in the layers of `declared` that the table does not allow, and every file that could not be read. An
@@ -61,33 +66,46 @@ pub fn problems(
         Language::Python => python::python(
             tree,
             parsers,
+            declared,
             layout,
             &places,
             &entries,
-            &declared.units,
             &mut moving,
         ),
         Language::TypeScript => typescript::typescript(
             tree,
             parsers,
+            declared,
             layout,
             &places,
             &entries,
-            &declared.units,
             &mut moving,
         ),
-        Language::Rust => rust::rust(tree, parsers, layout, &places, &entries, &declared.units),
+        Language::Rust => rust::rust(tree, parsers, declared, layout, &places, &entries),
     }?;
+    // What each file that is moving does that the check of the I/O of the inner layers fails, which narrows the layers
+    // it could go in. Rust files are counted and not read
+    if layout.language != Language::Rust {
+        moving.does(crate::inner_io::of_files(
+            tree,
+            parsers,
+            declared,
+            &moving.files(),
+        )?);
+    }
     // The imports of the files of a Rust project are its crates' dependencies, which are no files'
     direction.moving = moving.order(
         layout.language != Language::Rust,
         &places,
         &entries,
         &declared.units,
+        &declared.allowed,
     );
     // A cycle of shared units is no import of a file but the shape of them all, so it is a problem, which no approval
     // covers, and not a forbidden import
     direction.problems.extend(cycles(&direction.edges));
+    direction.outside.sort();
+    direction.outside.dedup();
     Ok(direction)
 }
 
@@ -129,6 +147,21 @@ pub(crate) fn entry_files<'a>(tree: &dyn Tree, entries: &'a [Place]) -> Vec<(Str
         .filter(|entry| is_file(tree, &entry.path))
         .map(|entry| (entry.path.clone(), entry))
         .collect()
+}
+
+/// The directories of the project that hold tests and are no layer (`tests/` in Python, at the root of the project and
+/// in the directory and the root of each unit), those that are there. An import that lands in one is an import of a
+/// test.
+pub(crate) fn test_dirs(tree: &dyn Tree, layout: &Layout, units: &[Unit]) -> Vec<String> {
+    let mut dirs = layout.not_layers_in(&layout.scope);
+    for unit in units {
+        dirs.extend(layout.not_layers_in(&unit.path));
+        dirs.extend(layout.not_layers_in(&unit.root));
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs.retain(|dir| exactly(tree, dir).is_ok_and(|(_, is_dir)| is_dir));
+    dirs
 }
 
 /// The finding for a file a reader gave up on at `line`: what it read before is judged, and the rest may be misread.
@@ -462,10 +495,20 @@ import os
     /// The layers each file named by the order of a Python project that lists `legacy` could go in, by path. `None`
     /// for every layer there is, and the names, innermost first, otherwise.
     fn candidates(files: &[(&str, &str)]) -> Vec<(String, Option<Vec<String>>)> {
+        candidates_declaring("", files)
+    }
+
+    /// [`candidates`] for a project whose declaration has `rest` after its first lines, the tables of it.
+    fn candidates_declaring(
+        rest: &str,
+        files: &[(&str, &str)],
+    ) -> Vec<(String, Option<Vec<String>>)> {
         let mut all = LAYERS.to_vec();
         all.extend_from_slice(files);
         let (order, _) = moving(
-            "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\"]\n",
+            &format!(
+                "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\"]\n{rest}"
+            ),
             &all,
         );
         order
@@ -493,7 +536,7 @@ import os
     #[test]
     fn the_layers_a_file_could_go_in_are_those_that_pass_for_what_it_imports_of_the_layers() {
         let found = candidates(&[
-            ("legacy/leaf.py", "import os\nimport requests\n"),
+            ("legacy/leaf.py", "import os\nimport json\n"),
             (
                 "legacy/price.py",
                 "from domain import money\nfrom legacy import leaf\n",
@@ -598,6 +641,358 @@ import os
                     ])
                 ),
                 ("billing/legacy/use.py".to_string(), names(&[])),
+            ]
+        );
+    }
+
+    /// The places that judge no I/O, which are all a file that does some can go in.
+    const FREE: &[&str] = &[
+        "infrastructure.outbound",
+        "infrastructure.inbound",
+        "composition",
+    ];
+
+    #[test]
+    fn a_python_file_that_does_io_the_check_of_the_inner_layers_fails_is_offered_no_layer_it_judges()
+     {
+        let free = |path: &str| only(path, FREE);
+        // The first five groups are named, so the kinds of I/O are tried in two runs
+        let found = candidates(&[
+            // An import of the table
+            ("legacy/table.py", "import shutil\n"),
+            // A name judged by the allowlists, a group and the terminal
+            ("legacy/name.py", "import os\nhere = os.getcwd()\n"),
+            ("legacy/clock.py", "import time\nnow = time.time()\n"),
+            ("legacy/args.py", "import sys\nargs = sys.argv\n"),
+            ("legacy/term.py", "print('x')\n"),
+        ]);
+        assert_eq!(
+            found,
+            [
+                free("legacy/args.py"),
+                free("legacy/clock.py"),
+                free("legacy/name.py"),
+                free("legacy/table.py"),
+                free("legacy/term.py"),
+            ]
+        );
+        let found = candidates(&[
+            // A class, a star import of a module with names that are I/O, and what cannot be read
+            (
+                "legacy/path.py",
+                "from pathlib import Path\nhere = Path('a')\n",
+            ),
+            // The import of a class in a type position alone is free, and the file is offered every layer
+            (
+                "legacy/typed.py",
+                "from pathlib import Path\n\n\ndef f(p: Path) -> None:\n    pass\n",
+            ),
+            ("legacy/star.py", "from datetime import *\n"),
+            ("legacy/dyn.py", "eval('1')\n"),
+            // What is pure: the names of an allowlist, and a module that only holds values
+            (
+                "legacy/pure.py",
+                "import os\nimport json\nx = os.fspath('a')\n",
+            ),
+        ]);
+        assert_eq!(
+            found,
+            [
+                free("legacy/dyn.py"),
+                free("legacy/path.py"),
+                ("legacy/pure.py".to_string(), None),
+                free("legacy/star.py"),
+                ("legacy/typed.py".to_string(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_python_method_the_project_defines_is_left_out_of_the_net_for_a_file_that_is_moving_too() {
+        let call = ("legacy/call.py", "def f(p):\n    return p.read_text()\n");
+        // The net judges a method of a path by its name: the file may not go in an inner layer
+        assert_eq!(candidates(&[call]), [only("legacy/call.py", FREE)]);
+        // The project defines one of that name and number of parameters, wherever it is: it is its own, and no path's
+        let defined = (
+            "tests/helper.py",
+            "class T:\n    def read_text(self):\n        pass\n",
+        );
+        assert_eq!(
+            candidates(&[call, defined]),
+            [("legacy/call.py".to_string(), None)]
+        );
+    }
+
+    #[test]
+    fn a_python_file_is_offered_the_layers_that_allow_every_package_it_imports() {
+        let files = [
+            ("legacy/model.py", "import pydantic\n"),
+            ("legacy/web.py", "import pydantic\nimport requests\n"),
+            // The standard library is no package
+            ("legacy/plain.py", "import json\nimport typing\n"),
+        ];
+        // No list: the packages are allowed nowhere, and a file that imports none is not narrowed
+        let found = candidates(&files);
+        assert_eq!(
+            found,
+            [
+                only("legacy/model.py", FREE),
+                ("legacy/plain.py".to_string(), None),
+                only("legacy/web.py", FREE),
+            ]
+        );
+        // `pydantic` allowed for `domain` and for the levels of `protocol`: where `requests` is not, `web.py` is not
+        let found = candidates_declaring(
+            "[dependencies]\nallowed = { domain = [\"pydantic\"], protocol = [\"pydantic\"] }\n",
+            &files,
+        );
+        let names = |places: &[&str]| places.iter().map(|place| place.to_string()).collect();
+        assert_eq!(
+            found[0],
+            (
+                "legacy/model.py".to_string(),
+                Some(names(&[
+                    "domain",
+                    "protocol.outbound",
+                    "protocol.inbound",
+                    "infrastructure.outbound",
+                    "infrastructure.inbound",
+                    "composition",
+                ]))
+            )
+        );
+        assert_eq!(found[2], only("legacy/web.py", FREE));
+    }
+
+    #[test]
+    fn what_a_unit_allows_applies_to_the_files_that_are_moving_in_its_directory_only() {
+        let (order, problems) = moving(
+            "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"billing/legacy\", \"shipping/legacy\"]\n\
+             [[unit]]\nname = \"billing\"\npath = \"billing\"\nallowed = { domain = [\"pydantic\"] }\n\
+             [[unit]]\nname = \"shipping\"\npath = \"shipping\"\n",
+            &[
+                ("billing/domain/__init__.py", ""),
+                ("shipping/domain/__init__.py", ""),
+                ("billing/legacy/model.py", "import pydantic\n"),
+                ("shipping/legacy/model.py", "import pydantic\n"),
+            ],
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let found: Vec<_> = order
+            .unwrap()
+            .next
+            .into_iter()
+            .flatten()
+            .map(|file| (file.path, file.candidates))
+            .collect();
+        let has = |path: &str, place: &str| match &found.iter().find(|(p, _)| p == path).unwrap().1
+        {
+            domain::moving::Candidates::Only(places) => places.contains(&place.to_string()),
+            domain::moving::Candidates::Any => true,
+        };
+        assert!(has("billing/legacy/model.py", "domain of unit billing"));
+        assert!(!has("shipping/legacy/model.py", "domain of unit shipping"));
+    }
+
+    /// The layers a TypeScript project that lists `src/legacy` and has `rest` in its declaration, with the layers each
+    /// an empty module, could put each file of `files` in, by path.
+    fn typescript_candidates(
+        rest: &str,
+        files: &[(&str, &str)],
+    ) -> Vec<(String, domain::moving::Candidates)> {
+        let layers = [
+            ("src/composition/index.ts", ""),
+            ("src/infrastructure/index.ts", ""),
+            ("src/infrastructure/inbound/index.ts", ""),
+            ("src/infrastructure/outbound/index.ts", ""),
+            ("src/application/index.ts", ""),
+            ("src/protocol/index.ts", ""),
+            ("src/protocol/inbound/index.ts", ""),
+            ("src/protocol/outbound/index.ts", ""),
+            ("src/domain/index.ts", ""),
+        ];
+        let (order, problems) = moving(
+            &format!(
+                "stack = \"typescript\"\nareas = []\nui = \"none\"\nmoving = [\"src/legacy\"]\n{rest}"
+            ),
+            &[&layers[..], files].concat(),
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        order
+            .unwrap()
+            .next
+            .into_iter()
+            .flatten()
+            .map(|file| (file.path, file.candidates))
+            .collect()
+    }
+
+    #[test]
+    fn a_typescript_file_that_does_io_is_offered_no_layer_the_check_judges() {
+        let free = || {
+            domain::moving::Candidates::Only(FREE.iter().map(|place| place.to_string()).collect())
+        };
+        let found = typescript_candidates(
+            "",
+            &[
+                (
+                    "src/legacy/fs.ts",
+                    "import { readFile } from \"node:fs\";\n",
+                ),
+                ("src/legacy/clock.ts", "export const now = Date.now();\n"),
+                (
+                    "src/legacy/global.ts",
+                    "export const get = () => fetch(\"x\");\n",
+                ),
+                ("src/legacy/dyn.ts", "export const r = eval(\"1\");\n"),
+                ("src/legacy/pure.ts", "export const n = Math.max(1, 2);\n"),
+            ],
+        );
+        assert_eq!(
+            found,
+            [
+                ("src/legacy/clock.ts".to_string(), free()),
+                ("src/legacy/dyn.ts".to_string(), free()),
+                ("src/legacy/fs.ts".to_string(), free()),
+                ("src/legacy/global.ts".to_string(), free()),
+                (
+                    "src/legacy/pure.ts".to_string(),
+                    domain::moving::Candidates::Any
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_typescript_file_is_offered_the_layers_that_allow_every_package_it_imports() {
+        let found = typescript_candidates(
+            "[dependencies]\nallowed = { domain = [\"zod\"] }\n",
+            &[
+                ("src/legacy/schema.ts", "import { z } from \"zod\";\n"),
+                ("src/legacy/other.ts", "import _ from \"lodash\";\n"),
+            ],
+        );
+        let names = |places: &[&str]| {
+            domain::moving::Candidates::Only(places.iter().map(|place| place.to_string()).collect())
+        };
+        assert_eq!(
+            found,
+            [
+                (
+                    "src/legacy/other.ts".to_string(),
+                    names(&[
+                        "infrastructure.outbound",
+                        "infrastructure.inbound",
+                        "composition"
+                    ])
+                ),
+                (
+                    "src/legacy/schema.ts".to_string(),
+                    names(&[
+                        "domain",
+                        "infrastructure.outbound",
+                        "infrastructure.inbound",
+                        "composition"
+                    ])
+                ),
+            ]
+        );
+    }
+
+    /// What the inner layers read of the code outside the layers, as it is said, in the project `declaration` declares
+    /// with `files`.
+    fn outside_in(declaration: &str, files: &[(&str, &str)]) -> Vec<String> {
+        let declared = Declared::new(parse_declaration(declaration).unwrap()).unwrap();
+        let found = problems(&Fake::new(files), &Readers, &declared).unwrap();
+        assert!(found.forbidden.is_empty(), "{:?}", found.forbidden);
+        found.outside.iter().map(Outside::said).collect()
+    }
+
+    /// [`outside_in`] for a Python project with the layers, which lists `scripts` as unchecked and `legacy` as moving
+    /// unless `declaration` is given.
+    fn outside_of(declaration: Option<&str>, files: &[(&str, &str)]) -> Vec<String> {
+        let all = [LAYERS, files].concat();
+        outside_in(declaration.unwrap_or(PYTHON_OUTSIDE), &all)
+    }
+
+    const PYTHON_OUTSIDE: &str = "stack = \"python\"\nareas = []\nui = \"none\"\nunchecked = [\"scripts\"]\nmoving = [\"legacy\"]\n";
+
+    #[test]
+    fn what_an_inner_layer_imports_of_a_path_in_unchecked_or_moving_is_listed_and_fails_nothing() {
+        let found = outside_of(
+            None,
+            &[
+                (
+                    "domain/a.py",
+                    "import os\nfrom legacy import io_helper\nimport scripts.tool\nimport legacy.sub.x\n",
+                ),
+                ("legacy/io_helper.py", "import shutil\n"),
+                ("legacy/sub/x.py", ""),
+                ("scripts/tool.py", ""),
+                // The layers that do I/O, and wire, may read it
+                ("infrastructure/outbound/b.py", "import legacy.io_helper\n"),
+                ("composition/c.py", "import scripts.tool\n"),
+                // Another path is no path listed
+                ("other/d.py", ""),
+                ("application/e.py", "import other.d\nimport legacy\n"),
+            ],
+        );
+        assert_eq!(
+            found,
+            [
+                "application/e.py:2 imports legacy, in a path of moving",
+                "domain/a.py:2 imports legacy.io_helper, in a path of moving",
+                "domain/a.py:3 imports scripts.tool, in a path of unchecked",
+                "domain/a.py:4 imports legacy.sub.x, in a path of moving",
+            ]
+        );
+    }
+
+    #[test]
+    fn nothing_is_listed_when_no_inner_layer_reads_a_listed_path_or_no_path_is_listed() {
+        assert_eq!(
+            outside_of(
+                None,
+                &[
+                    ("domain/a.py", "import os\nimport json\n"),
+                    ("legacy/io_helper.py", "import shutil\n"),
+                ]
+            ),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            outside_of(
+                Some("stack = \"python\"\nareas = []\nui = \"none\"\n"),
+                &[("domain/a.py", "from legacy import io_helper\n")]
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_typescript_inner_layer_importing_a_path_in_unchecked_or_moving_is_listed() {
+        let found = outside_in(
+            "stack = \"typescript\"\nareas = []\nui = \"none\"\nunchecked = [\"src/scripts\"]\nmoving = [\"src/legacy\"]\n",
+            &[
+                ("src/domain/index.ts", ""),
+                (
+                    "src/domain/a.ts",
+                    "import { f } from \"../legacy/helper\";\nimport g from \"../scripts/tool.js\";\nimport h from \"./index\";\n",
+                ),
+                ("src/legacy/helper.ts", ""),
+                ("src/scripts/tool.ts", ""),
+                ("src/infrastructure/outbound/index.ts", ""),
+                (
+                    "src/infrastructure/outbound/b.ts",
+                    "import { f } from \"../../legacy/helper\";\n",
+                ),
+            ],
+        );
+        assert_eq!(
+            found,
+            [
+                "src/domain/a.ts:1 imports ../legacy/helper, in a path of moving",
+                "src/domain/a.ts:2 imports ../scripts/tool.js, in a path of unchecked",
             ]
         );
     }

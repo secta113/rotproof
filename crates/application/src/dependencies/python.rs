@@ -22,17 +22,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 use super::venv::Venv;
-use super::{Read, listing, without_import};
+use super::{Ask, Read, listing, without_import};
 use crate::direction::python::{package_files, path_of};
 use crate::direction::{entry_files, layer_files};
-use crate::tree::{code_files, read_code, resolved};
+use crate::tree::{Resolver, code_files, read_code};
 use domain::code::module_parts;
 use domain::declaration::{DECLARATION, Declared};
 use domain::dependencies::python::{distribution_of, normalize};
 use domain::dependencies::{Kind, Listing, Problem, Use, judge};
 use domain::direction::{Landing, landing_of};
 use domain::layers::{Language, Layout, Place, table};
-use domain::paths::{join, parent};
+use domain::paths::{join, parent, within};
 use domain::python_stdlib::is_standard_library;
 use domain::units::Unit;
 use protocol::outbound::{Parsers, Tree};
@@ -61,6 +61,8 @@ struct Imports<'a> {
     bases: Vec<String>,
     /// What the directories asked about hold, each read once
     directories: RefCell<BTreeMap<String, Vec<(String, bool)>>>,
+    /// Where a path lands, each asked once: the same module is imported by many files
+    resolver: Resolver<'a>,
 }
 
 impl Imports<'_> {
@@ -70,7 +72,7 @@ impl Imports<'_> {
             return Needs::Nothing;
         };
         let (target, _) = path_of(module, &self.imported);
-        let at = resolved(self.tree, &target);
+        let at = self.resolver.of(&target);
         if let Some(landing) = landing_of(&at, self.places, self.units) {
             let to = match landing {
                 Landing::Place(place) => &place.unit.name,
@@ -135,10 +137,11 @@ pub(super) fn python(
     declared: &Declared,
     layout: &Layout,
     places: &[&Place],
-    entries: &[Place],
+    ask: Ask,
     found: &mut Vec<String>,
 ) -> io::Result<Read> {
     let units = &declared.units;
+    let entries = declared.entries(&table());
     let manifest_of = |unit: &Unit| {
         let dir = if unit.declared {
             unit.root.as_str()
@@ -185,11 +188,47 @@ pub(super) fn python(
             .collect(),
         bases,
         directories: RefCell::new(BTreeMap::new()),
+        resolver: Resolver::new(tree),
     };
+    // The files that are moving, for the packages they import alone: no manifest is compared with them, as none is with
+    // the code outside the layers
+    if let Ask::Moving(moving) = ask {
+        let mut moved: Vec<Use> = Vec::new();
+        for path in moving {
+            let Some(unit) = units
+                .iter()
+                .filter(|unit| within(path, &unit.path))
+                .max_by_key(|unit| unit.path.len())
+                .or(units.first())
+            else {
+                continue;
+            };
+            let Some(source) = read_code(tree, path, "imports", &mut Vec::new())? else {
+                continue;
+            };
+            for (line, module) in parsers.python(&source, path).imports {
+                if let Needs::Package(package, _) = imports.needs(path, unit, &module) {
+                    moved.push(Use {
+                        file: path.clone(),
+                        line,
+                        shown: module.join("."),
+                        package,
+                        test: false,
+                        unit: None,
+                    });
+                }
+            }
+        }
+        // The code of the layers is no part of what was asked for
+        return Ok(Read {
+            moving: moved,
+            ..Read::default()
+        });
+    }
     let mut files: Vec<File> = Vec::new();
     let package_files = package_files(tree, layout, &table(), units)?;
     let mut code = layer_files(tree, layout, places, |path| module_parts(path).join("/"))?;
-    code.extend(entry_files(tree, entries));
+    code.extend(entry_files(tree, &entries));
     code.extend(
         package_files
             .iter()
@@ -217,6 +256,8 @@ pub(super) fn python(
         }
     }
     let mut uses: BTreeMap<String, Vec<Use>> = BTreeMap::new();
+    // Every import of a package, whether or not the unit has a manifest to compare it with
+    let mut packages: Vec<Use> = Vec::new();
     // The first part of the import of each package that is taken to be of the distribution named like it
     let mut guesses: BTreeMap<(String, String), String> = BTreeMap::new();
     for file in &files {
@@ -224,9 +265,6 @@ pub(super) fn python(
             continue;
         };
         let manifest = manifest_of(unit);
-        if !listings.contains_key(&manifest) {
-            continue;
-        }
         let Some(source) = read_code(tree, &file.path, "imports", &mut Vec::new())? else {
             continue;
         };
@@ -241,18 +279,25 @@ pub(super) fn python(
                     .entry((manifest.clone(), package.clone()))
                     .or_insert(guess);
             }
-            uses.entry(manifest.clone()).or_default().push(Use {
+            let used = Use {
                 file: file.path.clone(),
                 line,
                 shown: module.join("."),
                 package,
                 test: file.test,
                 unit: named,
-            });
+            };
+            if used.unit.is_none() {
+                packages.push(used.clone());
+            }
+            uses.entry(manifest.clone()).or_default().push(used);
         }
     }
     let without = without_import(declared, Language::Python);
-    let mut read = Read::default();
+    let mut read = Read {
+        packages,
+        ..Read::default()
+    };
     let mut venvs = Venvs::new(tree);
     for (manifest, listing) in &listings {
         read.any = true;
@@ -263,6 +308,8 @@ pub(super) fn python(
                 .filter(|dep| dep.kind == Kind::Runtime)
                 .map(|dep| dep.name.clone()),
         );
+        read.listed
+            .extend(listing.deps.iter().map(|dep| dep.name.clone()));
         let used = uses.get(manifest).map_or(&[][..], Vec::as_slice);
         for problem in judge(Language::Python, listing, used, &without) {
             let hint = match &problem {

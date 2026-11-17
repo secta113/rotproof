@@ -10,7 +10,7 @@ writes changes this file in the same commit.
 Rotproof makes the layer directories, checks that they are where the project declares them, and checks their
 direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
 the levels inside a crate, from the paths its code names. From the same reading of the code it checks that only
-`infrastructure` reads the environment variables, that no comment switches the type checker off, and that the manifest
+`infrastructure` reads the environment variables, that the inner layers do no I/O and import only the packages they are allowed, that no comment switches the type checker off, and that the manifest
 of each package lists the dependencies its code imports, no more and no fewer (see "What `rotproof check` checks"). A project made of several parts that each hold the layers declares them as units, and all
 of this holds in each unit, with the imports between units judged too (see "Units").
 
@@ -249,7 +249,13 @@ rotproof approve domain/model.py infrastructure.db --reason "the ORM's session f
 
 The file and the import are named as `rotproof check` names them: the file from the root, and the import as the check
 writes it (a Python dotted name, a TypeScript specifier, a crate's dependency). In Python, each name of
-`from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them.
+`from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them. The
+I/O of the inner layers (see "The inner layers do no I/O") is approved the same way, and the import is the entry of
+Rotproof's table that the finding names (`rotproof approve domain/report.py shutil --reason "..."`), which covers every
+use of that entry in the file, whatever names it uses under it; a name judged by an allowlist (`os.getcwd`), a group
+(`clock`) and a method of the net (`read_text`) are entries of their own. A package no list allows in an inner layer
+is approved by the package as the finding names it (a Python distribution as PEP 503 writes it: lowercase, each run of
+`-`, `_` and `.` one `-`): `rotproof approve domain/report.py requests --reason "..."`.
 `rotproof approve` shows the forbidden import, signs with git's `user.name`, and adds the entry (the file keeps a byte
 order mark and its line endings, CRLF on every line when one line had it, and so it does when `--prune` removes
 entries). It asks nothing, so an agent's shell can run it, but it takes no approval without `--reason` (an empty one
@@ -305,23 +311,26 @@ approved_max = 3         # optional, a count: the most approvals the project hol
 [dependencies]           # optional: what the manifests and the tree cannot say (see "What `rotproof check` checks")
 imports = { dotenv = "python-dotenv" }  # Python only: the distribution an import is of
 without_import = ["openpyxl"]           # dependencies the code uses without importing them
+allowed = { domain = ["pydantic"], "presentation.models" = ["zustand"] }  # Python and TypeScript: the packages an inner layer may import
 ```
 
-`todo_link` and `approved_max` are the two keys of the declaration that `rotproof init` and `rotproof create` never
-write: a project that wants one adds it by hand, and everything else is as without it. Without `todo_link` the marker
+`todo_link`, `approved_max` and `allowed` (under `[dependencies]`, below) are the keys of the declaration that
+`rotproof init` and `rotproof create` never write: a project that wants one adds it by hand, and everything else is as
+without it. Without `todo_link` the marker
 check below fails on every `TODO`; without `approved_max` the number of approvals has no limit. `todo_link` is
 `"number"` for `TODO(#123): what is left`, or `"key"` for `TODO(ABC-123): what is left`; any other value fails, naming
 the two, and so does the key with `stack = "none"`, which has no code to read. The declaration is read strictly, with
 a field Rotproof does not know failing it, so a Rotproof older than the one that brought `todo_link` cannot read a
 declaration that holds it: a project pins an exact version of Rotproof, and moves it before it adds the key. Whether a
-project declares either is a person's decision, which an agent never makes to pass the check, and the guide says so.
+project declares any of them is a person's decision, which an agent never makes to pass the check, and the guide says so.
 
 `moving` lists the paths of the project's own code that is not in a layer yet, in a project that adopts Rotproof in the
 middle of a refactoring. It is no `unchecked`: `unchecked` is for code that is never moved (generated or vendored
 files), and `moving` for code that is to go into the layers. It is written as `unchecked` is, from the root with `/`,
 and judged as it is: a path that holds or sits in a layer, that holds a unit, or that does not exist fails, and the code
 in it is judged by no check (not the direction, not the markers, not the structure). What `rotproof check` does with
-it is to count it and say which files to move first (see "The code that is moving"). `rotproof init` writes
+it is to count it and say which files to move first (see "The code that is moving"), and, as for `unchecked`, to list
+every import of it by the code of an inner layer (see "The inner layers do no I/O"). `rotproof init` writes
 `moving = []` into a declaration it makes, `rotproof create` adds it to none, and a Rotproof older than the one that
 brought it cannot read a declaration that holds it, as for `todo_link`. A repository with `stack = "none"` has no code
 to move, so `moving` must be empty there.
@@ -331,11 +340,33 @@ manifests and the tree cannot: `imports` maps the name of an import to the distr
 writes the name (`dotenv`), and a dotted name covers the modules below it (`google.cloud.storage`), the longest entry
 winning; and `without_import` lists the dependencies the code uses without importing them, as the manifest lists them
 (`openpyxl`, which `pandas` loads). `imports` is Python's: an import and a dependency are one name in the other stacks,
-so it fails there, and so does either with `stack = "none"`, which has no code. A name that `without_import` lists and no
-manifest of the project lists as a runtime dependency fails, so the table does not keep what is gone. `rotproof init` and
-`rotproof create` write neither, a project adds the table by hand, and a Rotproof older than the one that brought it
-cannot read a declaration that holds it, as for `todo_link`. The verdict is decided from this table and the tree alone:
-nothing is installed, so it is the same on every machine and in CI.
+so it fails there, and so does any key of the table with `stack = "none"`, which has no code. A name that
+`without_import` lists and no manifest of the project lists as a runtime dependency fails, so the table does not keep
+what is gone. `rotproof init` and `rotproof create` write none of it, a project adds the table by hand, and a Rotproof
+older than the one that brought it cannot read a declaration that holds it, as for `todo_link`. The verdict is decided
+from this table and the tree alone: nothing is installed, so it is the same on every machine and in CI.
+
+`allowed` lists the packages the inner layers may import, in Python and TypeScript (see "The inner layers do no I/O",
+"Packages"): a table whose keys are a layer (`domain`, `protocol`, `application`, `presentation`) or a level of one
+(`protocol.inbound`, `presentation.models`) and whose values are lists of package names, as the manifest lists them (a
+Python distribution, compared as PEP 503 compares names; an npm package as written, `@scope/name` included). A layer's
+key covers its levels, and a level's key adds to that level. A `[[unit]]` table has an `allowed` of its own, **added**
+to the project's for the code of that unit. A key written with a dot is written in quotes
+(`"presentation.models" = ["zustand"]`): without them TOML reads `presentation.models = [...]` as the table `models`
+inside the table `presentation`, which the declaration refuses, naming the key to quote. The declaration fails on: a key
+that is no layer or level of the table; a key for `infrastructure`, `composition` or `ui` (and their levels), which
+import any package; a key for a layer or level the project lacks, which is a project-level key that no unit has, or a
+unit's own key for a place that unit lacks (declared absent, or left out by the UI, as `presentation` is with `ui =
+"none"`); a value that is no list of names, or a name that is empty; a name allowed twice for the same code (in one
+list, in a layer's key and the key of its level, in the project's list and a unit's, or one the layout allows already);
+`allowed` in a Rust project, in the project's table or a unit's, and with `stack = "none"`, as for `imports`. A name that
+no manifest of the project lists as a dependency of any kind fails, and so does one that no file of the layer or level
+(of the unit, for a unit's own list) it is allowed for imports, so that the list does not keep what is gone; these two
+are said under the heading of the check of the inner layers, and the first is not judged while no manifest of the
+project was read. What the layout of the stack allows (TypeScript: `react` in `presentation.models`, and not
+`react-dom`; Python: nothing) is in `layers/<stack>.toml`, is no name of the declaration, and is never judged gone.
+Allowing a package is a person's decision: no command writes `allowed`, nothing drafts it from the code, and the guide
+tells an agent never to add, change or take out a name to pass the check.
 
 What the layers are is written once, in `layers/table.toml`, on the onion architecture:
 
@@ -366,7 +397,7 @@ Where they live is written once per stack:
 | Stack | A layer is | A level is | The entry file | Code Rotproof looks at |
 |---|---|---|---|---|
 | `python` | `<layer>/__init__.py`, the role as its docstring | `<layer>/<level>/__init__.py` | `__main__.py` | `.py` files anywhere (`.PY` too), except `tests/`; with `ui = "rendered"`, template files too (below) |
-| `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/` |
+| `typescript` | `src/<layer>/index.ts`, the role as a doc comment | `src/<layer>/<level>/index.ts` | `src/main.tsx` (Vite's entry point) | every file in `src/`, except the tests (below) |
 | `rust` | a crate, `crates/<layer>/`, the role as `//!` | a module, `crates/<layer>/src/<level>/mod.rs` (no UI yet: `ui = "none"`) | `src/main.rs` of the root package | every crate in `crates/`, and every `.rs` file in `src/` of the root package but the entry file |
 
 `stack = "none"` declares a repository that keeps records only: `rotproof create` makes no layer, only `docs/`, the
@@ -389,6 +420,459 @@ case (`stray.PY`, `cargo.toml`): Windows runs or reads it all the same.
 
 A project made of several parts that each hold the layers declares them as units, with `[[unit]]` tables (see
 "Units"); without them the whole project is one unit, which is what the rest of this file describes.
+
+### Tests
+
+A test is no code of a layer, and every rule reads it as one thing, whatever the stack: where a stack's tests sit decides
+only how Rotproof tells them.
+
+- **Python:** a file in `tests/` (at the root of the project, and in the directory and the root of each unit): a place
+  that is no layer (`not_layers` of the layout).
+- **TypeScript:** a file named as Vitest and Jest take tests by default, since a TypeScript project has no place for
+  tests outside `src/` and keeps them beside the code they test: a source file (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
+  `.jsx`, `.mjs` or `.cjs`) named `*.test.*` or `*.spec.*`, in any case, and any file, source or not, in a directory
+  named `__tests__`, at any depth. It is a test wherever it sits in `src/`: in a layer, beside the levels of one, or in
+  no layer. The names are the `tests` of `layers/typescript.toml`, which is data and not code; a project cannot
+  change them. A test whose name says nothing (`src/domain/songs.ts` that only a runner reads) is code of its layer.
+- **Rust:** a test is `#[cfg(test)]` code in a crate, or a file in the `tests/` of a crate or of the root package,
+  which Cargo keeps apart from `src/`: no name tells one, and what this section says of the two stacks above does not
+  apply.
+
+What a test is in each rule that follows, the same in Python and TypeScript:
+
+| Rule | A test |
+|---|---|
+| No code outside the layers, none beside the levels of a layer, and no view in `presentation` | is none of them, wherever it sits |
+| The layers import only what the table allows | its imports are not read, so it imports any layer and another test |
+| No code that is not a test imports a test | an import of a test fails, from a layer, the entry file and a unit's `__init__.py` |
+| The manifest lists what is imported | its imports are read, as a test's: it uses development dependencies too |
+| The code of a layer imports no development dependency | only a test may |
+| A runtime dependency only tests import fails | the imports of tests are the ones that count |
+| Only `infrastructure` reads the environment | it is not judged |
+| The inner layers do no I/O | it is not judged (see "The inner layers do no I/O") |
+| No marker (`TODO` and the like) in a comment, and no comment that switches the type checker off | its comments are read, as the code's |
+
+In Rust no name tells a test: `[dev-dependencies]` are never judged, a crate's `tests/` are read by the dependencies
+check with its `src/`, and the marker check reads them. **The environment check and the check of the I/O of the inner
+layers read a Rust test the same way,** by one judgement the two share: the items under `#[cfg(test)]` (a module with a
+body, a function, a `use`; a file that starts with `#![cfg(test)]` as a whole), the file of a `#[cfg(test)] mod x;`
+(`x.rs` or `x/mod.rs`, with the files under `x/`) and everything outside a crate's `src/` (`tests/`, `benches/`,
+`examples/`, `build.rs`) are free. `cfg(all(test, ...))` and `cfg(any(test, ...))` are not read as tests, and a
+`#[cfg(test)] mod x;` inside a module with a body is not followed to its file.
+
+A path in `unchecked` or `moving` is not read by any check, tests included. `rotproof check` prints, on every run and
+only for the TypeScript stack, how many source files it read as tests and by which names, apart from the findings and
+failing nothing:
+
+```text
+tests: 12 files read as tests (*.test.*, *.spec.*, __tests__/)
+```
+
+It is printed with a count of 0 too (`tests: 0 files read as tests (...)`), so that a project whose tests are named
+otherwise (`song.tests.ts`, a directory `test/`), and which Rotproof therefore reads as code, sees it on every run. The
+count is of source files outside `unchecked` and `moving`, each once (a non-source file in `__tests__/`, a snapshot or a
+fixture, is a test and is not counted).
+
+### The inner layers do no I/O
+
+The code of `domain`, `protocol`, `application` and `presentation`, and of their levels (`protocol.outbound`,
+`presentation.models`), reads and writes nothing outside the program: the files, the network, the processes and the
+terminal are `infrastructure`'s, behind a port in `protocol.outbound` that a use case is given. `rotproof check` fails an
+**import of an entry of a table of what does I/O wholly**, which Rotproof keeps for each stack and a project cannot
+change. The rule reads imports and, in Python and TypeScript, the names a file uses of a module it has imported; what a
+module does only in part (`os`, `pathlib`, `time`, `datetime`, `logging` itself) is not in the table, and is judged by
+the name it is used through: in Python by the lists of "Python: what is judged by the name", below; in TypeScript by
+those of "TypeScript: what is judged by the name", after them (the globals, which are no import); in Rust by "Rust: what
+is judged by the name", after TypeScript's (`std::env`, the clocks, the methods of a path).
+
+- **Where:** the code of the four layers and their levels. Not `infrastructure` (it does the I/O), not `composition` and
+  `ui` (they wire and draw), not the entry file, and not a test: in Python a file in `tests/`; in TypeScript a file named
+  as a test (see "Tests"); in Rust the items under `#[cfg(test)]` (and a file that starts with `#![cfg(test)]`), the file
+  of a module declared `#[cfg(test)] mod x;` (`x.rs` or `x/mod.rs` beside the file that declares it, in the directory of
+  the file for `lib.rs`, `main.rs` and `mod.rs` and in the directory named as the file otherwise, and what is under it),
+  and everything outside a crate's `src/` (`tests/`, `benches/`, `examples/`, `build.rs`). A `cfg` other than the plain
+  `#[cfg(test)]` (`cfg(any(test, ...))`) is not read as a test, and a `#[cfg(test)] mod x;` inside a module with a body
+  is not followed to its file.
+- **The finding is a forbidden import,** kept as the layer table's are (see "Approving a forbidden import"): `rotproof
+  approve <file> <entry> --reason "<why>"` approves it, the file and the **entry of the table** are what the approval is
+  made for, and **one approval covers every use of that entry in that file**, whatever names it uses under it. The
+  entry is the module (`shutil`, `urllib.request`, `asyncio.open_connection`), Node's module by its bare name (`fs` for
+  `fs`, `node:fs` and `fs/promises`), a scheme by the scheme (`bun:`), and in Rust a row of the table: `std::fs`,
+  `std::net`, `std::process`, `std::path` (for `std::path::absolute`), `std::io` (the terminal items and the print
+  macros together; a name of `std::env` that is I/O is an entry `std::env`, see "Rust: what is judged by the name"),
+  `std::os::fs`, `std::os::net` and `std::os::process` (the module of every platform of `std::os`: `std::os::unix::fs`
+  and `std::os::windows::fs` are one entry), and a glob above them as `std::*` or `std::os::unix::*`. Each approval is
+  printed on every run, as any is, **with the names the file now uses under the entry** (`; now used: copyfile,
+  rmtree`), so that a reason that no longer fits the code is seen; an approval that matches nothing fails.
+- **A finding starts with what to do,** by layer, then says what it found: "move the I/O into
+  `infrastructure.outbound`, behind a port in `protocol.outbound` that the use case is given" for `domain`, `protocol` and
+  `application`, and "a screen's model does no I/O: it gets what it needs from its page, or through a use case of
+  `protocol.inbound` it is given" for `presentation` (whose models import only `protocol.inbound`; in TypeScript "from
+  its page, through a hook in `ui.atoms`, or through a use case"). It names the line,
+  the entry and the names used under it. Approving, renaming the import, or moving the code to a path in `unchecked` or
+  `moving` is no fix, and the guide says so.
+- **A file is one finding for each entry, with every line that uses it.** The key of an approval is the file and the
+  entry, so the check says one finding for that key and not one for each line: a file that prints on 13 lines is one
+  finding of the entry `terminal`. The finding starts with the first line (`domain/a.py:2: ...`), says what it found
+  with the names used under the entry on every line (the names an approval prints as `now used`), ends that sentence
+  with `, on lines 2, 3, 4, 5, 7, 8` (every line in ascending order, the first included; nothing when the entry is on
+  one line), and shows the source text of the first line. The findings of a file are in the order of the first line of
+  each. What is said differently is not one finding: a glob of an entry (`use std::fs::*;`), a scheme, a star import
+  or a module used as a value says what it is, and a use of the same entry by name on other lines is a finding apart
+  with the same key. This changes how the findings are printed and never which files fail or what an approval
+  matches: the entries, the keys and the names are those of the check before, and so is every approval. The findings
+  of the other checks (the direction of the layers, the environment, the markers) are one for each line, as they were.
+- **What an inner layer reads of the code outside the layers is listed, and judged by no one.** The direction check
+  lets a layer import the code of its own unit that is in no layer (the paths of `unchecked` and `moving` are there),
+  and this check judges the file that imports it and not the file it imports, so the I/O of a helper moved to such a
+  path would be seen by none. `rotproof check` prints, on every run and apart from the findings, as it does the
+  approvals, every import by the code of `domain`, `protocol`, `application` or `presentation` (and their levels) of a
+  file in a path of `unchecked` or `moving`, in the order of the file and the line, and fails nothing for it:
+
+  ```text
+  inner layers read code outside the layers (not judged) (2):
+    domain/x.py:3 imports legacy.io_helper, in a path of moving
+    domain/x.py:4 imports scripts.tool, in a path of unchecked
+  ```
+
+  The import is named as the direction check names it (a dotted name in Python, a specifier in TypeScript, the
+  dependency in Rust, where the line is the line of the `Cargo.toml` that declares it), and the path is the one it lands
+  in as an import is resolved there. The list asks for nothing and approves nothing: it says where to look. Nothing is
+  printed when there is none, or when the declaration lists no path. An import of a path that holds or sits in a layer
+  (which switches nothing off), of a file that is in no listed path, and by `infrastructure`, `composition`, `ui`, the
+  entry file or a test, is not listed.
+- **Seen through every spelling the file binds an entry by.** In Python, an import is matched by its dotted name as a
+  prefix of the entry: `urllib.request` is matched by `import urllib.request`, `import urllib.request as r`,
+  `from urllib import request` and `from urllib.request import urlopen`, and not by `from urllib import parse`;
+  `from m import *` is the import of `m`; an import under `if TYPE_CHECKING:` and a call of `importlib.import_module` with
+  a literal are imports; and the names the file uses are read as Python's scopes read them, so `import urllib` then
+  `urllib.request.urlopen(...)`, and `import asyncio` then `asyncio.open_connection(...)`, are uses of the entries
+  `urllib.request` and `asyncio.open_connection`. A use in a type position (`def f(a: argparse.Namespace)`,
+  `Callable[[argparse.ArgumentParser], None]`) is never judged, by the table either: the import it names fails at its
+  own line, an `import argparse` under `if TYPE_CHECKING:` too. In TypeScript, a specifier is matched with `node:` or without it, a
+  specifier of `import`, `export ... from`, `import()` and `require` with a literal included, `import type` too; a name
+  taken from it is said (`"node:fs".readFile`). In Rust, an item is found as the scanner finds the items of a module
+  (see the environment check, in "What `rotproof check` checks"): by its whole path, through a `use` of the module or of one above it, through a rename of
+  either (`use std::fs as f;`, `use std as s;`), from `::std`, and a module that does I/O whatever is used of it is also
+  found where it is imported (`use std::fs;`, `pub use std::os::unix::{fs, net};`). A glob of an entry, or of a module
+  above one (`use std::fs::*;`, `use std::*;`), fails, as its names cannot be read.
+- **The table is matched before the manifest.** A bare `fs` is Node's `fs` even when `package.json` lists a package of
+  that name: the table decides, and the dependencies check is a rule of its own. **A scheme other than `node:`**
+  (`bun:`, `npm:`, `jsr:`, `https:`, `data:`, `virtual:`, any URL) **fails in an inner layer**, as what it names cannot
+  be judged; it is approved by the scheme (`bun:`).
+
+**The table, by stack.** An entry is the module or the item; a module is matched with what is under it.
+
+- **Python:** the network (`socket`, `socketserver`, `ssl`, `select`, `selectors`, `http.client`, `http.server`,
+  `urllib.request`, `ftplib`, `smtplib`, `imaplib`, `poplib`, `xmlrpc.client`, `xmlrpc.server`, `wsgiref.simple_server`,
+  `nntplib`, `telnetlib`, `asyncore`, `asynchat`, `smtpd`); storage and the file system (`sqlite3`, `dbm`, `shelve`,
+  `mailbox`, `shutil`, `tempfile`, `filecmp`, `fileinput`, `glob`, `netrc`, `zipapp`, `py_compile`, `compileall`,
+  `linecache`, `importlib.resources`, `importlib.metadata`, `logging.handlers`, `logging.config`); processes and what
+  the processes of a program share (`subprocess`, `multiprocessing.connection`, `multiprocessing.shared_memory`,
+  `asyncio.streams`, `asyncio.subprocess`, and the functions of `asyncio` that start a process or a connection when
+  taken by name: `asyncio.create_subprocess_exec`, `asyncio.create_subprocess_shell`, `asyncio.open_connection`,
+  `asyncio.start_server`, `asyncio.open_unix_connection`, `asyncio.start_unix_server`); the terminal, the console and the
+  system around the program (`pty`, `tty`, `termios`, `fcntl`, `curses`, `readline`, `msvcrt`, `winreg`, `winsound`,
+  `syslog`, `getpass`, `webbrowser`, `tkinter`, `turtle`, `pwd`, `grp`, `resource`, `pdb`, `code`, `pydoc`, `mailcap`,
+  `nis`, `spwd`, `ossaudiodev`, `msilib`, `antigravity`, `argparse`, `optparse`, `platform`, `locale`); and the private
+  twins the standard library holds, which are the C modules the public ones are made of (`_socket`, `_ssl`, `_sqlite3`,
+  `_posixsubprocess`, `_winapi`, `_multiprocessing`, `_posixshmem`, `_curses`, `_curses_panel`, `_tkinter`, `_dbm`,
+  `_gdbm`, `_locale`, `_msi`) and five private modules of the same kind that have no public name to be a twin of
+  (`_overlapped`, the C half of asyncio's Windows event loop; `_bootsubprocess`; `_wmi`; `_scproxy`; `_pyrepl`). The
+  names are those of `sys.stdlib_module_names` of Python 3.10 to 3.14, and a test keeps each entry among them.
+- **TypeScript:** Node's `fs` (and `fs/promises`), `net`, `dgram`, `dns` (and `dns/promises`), `tls`, `http`, `https`,
+  `http2`, `child_process`, `cluster`, `readline` (and `readline/promises`), `repl`, `tty`, `wasi`, `process`, the
+  internal aliases `_http_agent`, `_http_client`, `_http_common`, `_http_incoming`, `_http_outgoing`, `_http_server`,
+  `_tls_common` and `_tls_wrap`, each with or without `node:`; `sqlite` with `node:` alone (a bare `sqlite` is a package
+  of npm); and any other scheme.
+- **Rust:** `std::fs` whole; `std::os::<platform>::fs`, `std::os::<platform>::net` and `std::os::<platform>::process`
+  whole, for every platform `std::os` has; of `std::net`, `TcpListener`, `TcpStream`, `UdpSocket`, `ToSocketAddrs` and
+  `Incoming`; of `std::process`, `Command`, `Child`, `ChildStdin`, `ChildStdout`, `ChildStderr` and `Stdio`; of `std::io`,
+  `stdin`, `stdout`, `stderr`, `Stdin`, `Stdout`, `Stderr`, `StdinLock`, `StdoutLock`, `StderrLock` and `IsTerminal`,
+  and the macros `print!`, `println!`, `eprint!`, `eprintln!` and `dbg!` (also written `std::println!`), which count
+  under `std::io`; of `std::path`, `absolute`. The macros are found as words followed by `!`, not as a path of another
+  crate (`log::println!`); a macro renamed with `use std::println as p;` is found at the `use` and not at `p!`.
+  `std::env` has no row: it is judged by an allowlist of the names that are pure, in "Rust: what is judged by the name".
+
+**What is out of the table, on purpose.** What is I/O only through some of its names or calls, which a later rule
+judges: Python's `io`, `logging` itself, `asyncio` as a whole (its tasks, queues and locks are pure), `os`, `os.path`,
+`pathlib`, `sys`, `time` and `datetime`; TypeScript's `os`, `crypto`, `stream`, `path`, `url`, `util`, `events`,
+`buffer`, `zlib`, `worker_threads`, `timers`, `perf_hooks`, `console` and `test`; Rust's `std::process::exit`,
+`ExitCode`, `std::net::IpAddr` and the other plain values of `std::net`, `std::io::{Read, Write, BufRead, Cursor,
+Result, Error}` and `std::path` but for `absolute`. What is pure when it holds bytes in memory: `zipfile`, `tarfile`,
+`gzip`, `bz2` and `lzma`, which read a file only when handed one, `mmap` and `ctypes`, which need a file or a library
+to be given, and `json` and `csv`. A TypeScript global (`fetch`, `console.log`) is no import: it is judged by its name,
+in the section after Python's.
+
+**Not seen:** in every stack, a name bound in one
+file and used through another (in Rust, `pub use std::fs;` in a module and `reexport::fs::read` in the next: the `use`
+itself is found), a path a macro builds from pieces, a module of the project that is named as one of the table (a bare
+`import code` is the standard library's), and a type-only import, which counts as any (but for the classes of
+`pathlib.Path`, whose import is free when the file uses the name in a type position alone). What Python, TypeScript and Rust
+do not see is in their sections that follow.
+
+#### Python: what is judged by the name
+
+What a Python module does only in part is judged by the name that is used, after the table, on the names the file's
+scopes resolve (`import os as o` then `o.getcwd()` is `os.getcwd`; a parameter called `os` is nothing). **A reference
+counts as a call** (`default_factory=datetime.now`, `f = uuid.uuid4`), and a use in a type position is never judged
+(`x: sys.stdout`, `def f(a: os.PathLike)`), but a call inside an annotation is
+(`Annotated[str, Field(default_factory=uuid.uuid4)]`). The finding is a forbidden import as the table's are, approved by
+the file and the **entry**; a name of an allowlist-judged module is an entry of its own (`os.getcwd`, `sys.platform`,
+`logging.basicConfig`, `pathlib.Path`, and `read_text` for a method of the net), and **an act that more than one name
+does is one entry, a group**: `clock`, `random`, `terminal` and `argv`. The approval prints the names the file uses
+under the entry now (`; now used: datetime.datetime.now, time.time`). The environment check's names (`os.environ`,
+`os.getenv`, `os.putenv`, `os.unsetenv`, `os.environb`, `os.getenvb`, `os.path.expandvars`, `os.path.expanduser`,
+`pathlib.Path.home`, and the star imports of `os`, `os.path` and `pathlib`) are left to it, and are never reported twice;
+the environment check is not approved.
+
+- **Allowlists: what is pure is listed, everything else of the module is I/O.** They start narrow: a name added later
+  is a patch, a name taken away is a major change. The guide of a Python project prints each in full.
+  - `os` (and `posix` and `nt`): `fspath`, `fsencode`, `fsdecode`, `PathLike`, `error`, `strerror`, `curdir`, `pardir`,
+    `extsep`. The constants `sep`, `altsep`, `pathsep`, `name`, `linesep` and `devnull` are I/O for now. `os.urandom` and
+    `os.getrandom` are randomness.
+  - `os.path` (and `posixpath`, `ntpath` and `genericpath`): `join`, `split`, `splitext`, `basename`, `dirname`,
+    `normpath`, `normcase`, `isabs`, `commonpath`, `commonprefix`, `splitdrive`, `splitroot`. `exists`, `isfile`,
+    `getsize`, `realpath`, `abspath`, `relpath` and the rest are I/O.
+  - `sys`: `version_info`, `version`, `hexversion`, `maxsize`, `maxunicode`, `byteorder`, `float_info`, `int_info`,
+    `hash_info`, `implementation`, `getsizeof`, `intern`, `exc_info`, `exception`. `stdin`, `stdout`, `stderr` and the
+    `__std*__` are the terminal, `argv` and `orig_argv` the arguments, and `exit`, `path`, `modules`, `platform`,
+    `getrecursionlimit` and the rest are I/O.
+  - `time`: `struct_time`, `strptime`, and `sleep`, which is on this side on purpose (waiting reads nothing from outside;
+    the program that waits is the program that is given the clock); `gmtime`, `localtime`, `ctime` and `asctime` are pure
+    only with an argument that is not `None` (no argument, `None`, a `*args` or a reference is the clock), and `strftime`
+    only with two arguments. The clock is `time`, `time_ns`, `monotonic`, `perf_counter`, `process_time`, `thread_time`
+    and `clock_gettime`, each with `_ns` where it has one; `mktime` (the time zone), `tzset`, `timezone`, `tzname`,
+    `clock_settime` and the rest are I/O.
+  - `logging`: `getLogger`, `Logger`, `LoggerAdapter`, `Filter`, `Formatter`, `LogRecord`, `getLevelName`, `NOTSET`,
+    `DEBUG`, `INFO`, `WARNING`, `WARN`, `ERROR`, `CRITICAL`, `FATAL`. `basicConfig`, the functions of the root logger,
+    every handler class, `disable`, `shutdown`, `captureWarnings`, `config` and `handlers` are I/O. A method of a logger
+    (`logger.info`) is not seen, and is free.
+- **The clock** (`clock`): `datetime.datetime.now`, `utcnow` and `today`, `datetime.date.today` (also through `from
+  datetime import datetime`), and the clock of `time` above. Clocks of packages (`pendulum.now()`,
+  `django.utils.timezone.now`) are in no table, and are not seen.
+- **Randomness** (`random`): the functions of `random` (`random`, `randint`, `randrange`, `choice`, `choices`, `shuffle`,
+  `sample`, `uniform`, `gauss` and the other distributions, `getrandbits`, `randbytes`, `seed`, `getstate`, `setstate`),
+  `random.SystemRandom`, `random.Random()` with no seed or `None` (`random.Random(1)` is pure), all of `secrets` (found
+  at its import), `uuid.uuid1` and `uuid.uuid4`, `os.urandom`. `uuid.uuid3`, `uuid.uuid5` and `uuid.UUID(...)` are pure.
+- **The terminal and the files a builtin opens** (`terminal`): the builtins `print`, `input`, `open`, `breakpoint`,
+  `exit`, `quit` and `help` (a bare name no scope of the file binds, read as `builtins.<name>`: a parameter called
+  `input` is its own), `io.open`, `io.FileIO`, `io.open_code`, `codecs.open`, and the streams of `sys`. Archives
+  (`zipfile`, `tarfile`, `gzip.open`) are not I/O here.
+- **The command-line arguments** (`argv`): `sys.argv` and `sys.orig_argv`; the outer layers and the entry file read them.
+- **`pathlib.Path`, `pathlib.PosixPath` and `pathlib.WindowsPath` are I/O by name:** a use of one fails (one entry for
+  each): constructing it, `Path.cwd()`, `Path.home()` (the environment check's, so it is not reported for the call, but
+  it counts as a use that runs), `isinstance(x, Path)`, a reference (`f = Path`), and any use outside a type position.
+  Its import line fails with them, **but not when every other use of the imported name in the file is in a type
+  position, or there is none:** `from pathlib import Path` with `def load_config(path: str | Path = "config.yaml")` is
+  free, also under `if TYPE_CHECKING:` and through an alias (`from pathlib import Path as P`: the uses of `P` count; the
+  uses are read as the name they resolve to, so two bindings of one class are not told apart, which changes no verdict
+  since the file fails at the use that runs). A module of the table (`import argparse`) or a star import is not freed:
+  only these three by-name entries are. The pure way is `PurePath`, `PurePosixPath` and `PureWindowsPath` (a path as a
+  value), and `isinstance(x, PurePath)` narrows a `Path` too; the finding says so. A type checker may ask for `Path`
+  where a `PurePath` is returned (a `Path` method called on it, a port that takes `Path`): writing `Path` in a type
+  position alone is the way, and it is not judged. A switch per file that is stricter was rejected, since a `Path`
+  value reaches files that never name `Path` through attributes and return values.
+- **A method is judged by its name on any receiver, the net,** because the type of what it is called on cannot be read:
+  `read_text`, `write_text`, `read_bytes`, `write_bytes`, `iterdir`, `rglob`, `mkdir`, `unlink`, `rmdir`, `symlink_to`,
+  `hardlink_to`, `readlink`, `lstat`, `touch`, `chmod`, `lchmod`, `samefile`, `is_symlink`, `is_mount`, `is_junction`,
+  `copy_into`, `move_into` and `absolute` always; `exists`, `is_file`, `is_dir`, `stat`, `owner` and `resolve`
+  only called with no argument; `open` only called with no argument at all (`x.open()`: no positional argument, no
+  keyword and nothing unpacked, which is a file read in practice), with a string literal first (the mode) or a keyword
+  `mode`, `encoding`, `newline` or `buffering` (`x.open(name)` is not judged). `group` (`Path.group()`) is left out of the net on purpose, because
+  `re.Match.group()` shares the name, is pure and is common in domain code. A call whose callee is a name of a module
+  that is judged already
+  (`os.mkdir(p)`, `shutil.rmtree(p)`) is judged as that name and not again by the net. **A name is left out of the net
+  when the project defines a method of the same name and the same number of parameters** (a `def` in a class body,
+  anywhere in the project, a test and a file in `unchecked` included; not counting `self`, `cls` of a `@classmethod`,
+  and counting all of a `@staticmethod`; `*args` and `**kwargs` one each): a call of `mkdir` with one argument is left
+  out when the project has a `mkdir(self, name)`, and one with none is not. `rotproof check` prints every name left out
+  on every run, apart from the findings: `I/O net: left out, as the project defines a method of the same name and number
+  of parameters: exists(0), mkdir(1)`; nothing is printed when the project defines none.
+- **What cannot be read fails.** A module used as a value, other than through an attribute a rule judges: `sh = os`,
+  `getattr(os, "system")`, `vars(os)`, `check(os)` (the modules of every list above, and `datetime`, `random`, `secrets`,
+  `uuid`, `io`, `codecs`, `builtins` and `pathlib`; `from os import path` takes a module and is no value). `eval` and
+  `exec`, called or referenced, and `importlib.import_module` and `__import__` with a name that is no string literal
+  (`Source::unread`); their entries are `eval`, `exec`, `importlib.import_module` and `__import__`. A star import of a
+  module with a name that is I/O (`from time import *`, `datetime`, `random`, `sys`, `logging`, `uuid`, `io`, `codecs`,
+  `builtins`, `posix`, `nt`) fails, as the names it brings in cannot be read; the entry is the module.
+- **Each finding starts with what to do,** by layer: for the clock, randomness and the arguments, pass the time, the id
+  or the value in as an argument, or take it from a port in `protocol.outbound` that the use case is given (a port may be
+  a callable alias: `Clock = Callable[[], datetime]`); a screen's model, which imports only `protocol.inbound`, gets it
+  from its page or through a use case. The guide lists what is not a fix: approving it, renaming or respelling it,
+  moving the code to a layer that is not judged or to a path in `unchecked` or `moving`, and listing it as allowed.
+
+**What Python does not see:** a method on an object whose type the reader cannot know and whose name is not in the net
+(`logger.info`, `connection.execute`), a name an object holds (`self.clock.now()`), a name reached through a module held
+in a variable (`o = os` then `o.system`: the `os` of `o = os` is a module used as a value, and fails there), a string
+annotation, a name a star import of a module without an entry brings in, `compile`, the clocks and ids of packages, and a
+method of the net on a name an import brings in whose module is not one of the lists (`from app import repo`, then
+`repo.mkdir()`: judged by the net, and left out only by a definition in the project).
+
+#### TypeScript: what is judged by the name
+
+A TypeScript or JavaScript global is judged by its name after the table, on the names the file's scopes resolve (a
+parameter or a variable called `fetch` is its own, and `function f(process) { process.cwd() }` is no use of the global).
+**A global is a name no scope binds, and what the global object holds is the global:** `window.fetch`,
+`globalThis.fetch`, `self.fetch` and `global.fetch` are `fetch`. **A reference counts as a call** (`useState(Date.now)`,
+`const f = fetch`), and a name in a type position (`let x: Date`, `type T = typeof window`) and the operand of `typeof`
+(`typeof window !== "undefined"`) are never judged, a name taken from a module included (`typeof fs.readFile`: the import fails at its own line). A name
+taken from a module (`"node:fs".readFile`) is the table's.
+The finding is a forbidden import as the table's are, approved by the file and the **entry**: a global is an entry of
+its own by its name (`fetch`, `localStorage` for `localStorage.getItem`, `document`; the finding names the member), and
+`process` by its member as a module is (`process.cwd`); **an act that more than one name does is one entry, a group:**
+`clock`, `random`, `terminal` and `argv`, which the approval prints with the names the file uses under it now. The
+environment check's `process.env` (and `import.meta.env`) is left to it, never reported twice, and not approved.
+
+- **An allowlist of the globals that are pure; every other global is I/O.** It starts narrow: a name added later is a
+  patch, a name taken away is a major change. The guide of a TypeScript project prints it in full. Pure are `Object`,
+  `Array`, `Map`, `Set`, `WeakMap`, `WeakSet`, `WeakRef`, `FinalizationRegistry`, `Promise`, `JSON`, `Math` (but
+  `Math.random` is randomness), `Number`, `String`, `Boolean`, `Symbol`, `BigInt`, `Error` and its subclasses (`EvalError`,
+  `RangeError`, `ReferenceError`, `SyntaxError`, `TypeError`, `URIError`), `AggregateError`, `RegExp`, `Date` (but see the
+  clock), `Intl`, `Reflect`, `Proxy`, `ArrayBuffer`, `SharedArrayBuffer`, `DataView`, the typed arrays (`Int8Array`,
+  `Uint8Array`, `Uint8ClampedArray`, `Int16Array`, `Uint16Array`, `Int32Array`, `Uint32Array`, `Float16Array`,
+  `Float32Array`, `Float64Array`, `BigInt64Array`, `BigUint64Array`), `Atomics`, `Iterator`, `parseInt`, `parseFloat`,
+  `isNaN`, `isFinite`, `encodeURI`, `encodeURIComponent`, `decodeURI`, `decodeURIComponent`, `undefined`, `NaN`,
+  `Infinity`, `globalThis` alone, `structuredClone`, `queueMicrotask`, the timers `setTimeout`, `clearTimeout`,
+  `setInterval` and `clearInterval` (waiting reads nothing from outside), `AbortController`, `AbortSignal`, `URL`,
+  `URLSearchParams`, `TextEncoder`, `TextDecoder`, `Blob`, `atob`, `btoa`, `DOMException`, `EventTarget`, `Event`,
+  `CustomEvent`, `Headers`, `Request`, `Response` (constructing them is pure; `fetch` is not) and `FormData`. `Function`
+  is not on it: it is unreadable code. Everything else global is I/O, an entry of its own: `fetch`, `XMLHttpRequest`,
+  `WebSocket`, `EventSource`, `document`, `window` and its members, `localStorage`, `sessionStorage`, `indexedDB`,
+  `navigator`, `location`, `history`, `screen`, `alert`, `confirm`, `prompt`, `matchMedia`, `requestAnimationFrame`,
+  `crypto` (but see randomness), `Worker`, `BroadcastChannel`, `Notification`, the observers, `Buffer`, `require`,
+  `module`, `Temporal` (but `Temporal.Now` is the clock) and the rest.
+- **`process`** is judged as a module is: `process.env` is the environment check's; `process.argv` is `argv`,
+  `process.hrtime` is the clock, `process.stdin`, `process.stdout` and `process.stderr` are the terminal, and every
+  other name (`process.cwd`, `process.platform`, `process.exit`, `process.uptime`) is I/O, an entry of its own
+  (`process.cwd`). `process` used as a value (`const p = process`, `check(process)`) fails, as what is done through it
+  cannot be read; `typeof process` does not.
+- **The clock** (`clock`): `Date.now`, `new Date()` with no argument (and `new Date(...args)`, which may be none),
+  `Date()` called (it is the time now as text whatever it is given), all of `performance`, `process.hrtime` and
+  `Temporal.Now.*`. `new Date(x)`, `Date.parse` and `Date.UTC` are pure. Clocks of packages (`dayjs()`) are in no table,
+  and are not seen.
+- **Randomness** (`random`): `Math.random`, `crypto.randomUUID` and `crypto.getRandomValues`. The rest of `crypto`
+  (`crypto.subtle`) is I/O under the entry `crypto`.
+- **The terminal** (`terminal`): all of `console`, and the streams of `process`. **The command-line arguments** (`argv`):
+  `process.argv`; the outer layers and the entry file read them.
+- **What cannot be read fails.** `eval` and `Function`, called, constructed (`new Function(...)`) or taken as a value, and
+  `import()` and `require` of what is no string literal (`Source::unread`); their entries are `eval`, `Function`,
+  `import()` and `require`. A reference to `require` (`const r = require`, `require.resolve`) is I/O under the entry
+  `require`; `require("m")` with a literal is the table's, by the module.
+- **Each finding starts with what to do,** by layer, as Python's does: pass the time, the id or the value in as an
+  argument, or take it from a port in `protocol.outbound` that the use case is given (a port may be a callable alias:
+  `() => Date`). A screen's model, which imports only `protocol.inbound`, **has no exception:** the state of the browser
+  it needs (`matchMedia`, `localStorage`, `document.title`) comes from a hook in `ui.atoms` that its page uses, or through
+  a use case. The guide lists what is not a fix: approving it, renaming or respelling it, moving the code to a layer that
+  is not judged or to a path in `unchecked` or `moving`, and listing it as allowed.
+
+**What TypeScript does not see:** a method on an object whose type the reader cannot know (`client.fetch()`,
+`store.getItem()`, `this.clock.now()`), a global reached through a name assigned at run time (`const g = globalThis;
+g.fetch(x)`, `window[name]`), the clocks and ids of packages (`dayjs()`, `uuid()`, `nanoid()`), and a global another file
+brings in (`declare global`), which is a global and, not being on the list, fails. A name taken from a module is not
+judged by the allowlist (`import { fetch } from "./net"` is the project's own).
+
+#### Rust: what is judged by the name
+
+What the Rust standard library does only in part is judged by the name, after the table, on the names the scanner finds as
+it finds the items of a module (see the environment check): by the whole path, through a `use` of the module or of one
+above it, through a rename (`use std::time::Instant as I;`, `use std as s;`), and from `::std`. **A reference counts as a
+call** (`let now = Instant::now;`). Only the code outside `#[cfg(test)]` is judged, as the table is: the items under it,
+the file of a `#[cfg(test)] mod x;`, and what is outside a crate's `src/` (`tests/`, `benches/`, `examples/`,
+`build.rs`) are free. The finding is a forbidden import as the table's are, approved by the file and the **entry**: a
+name of `std::env` or of `std::path` that is I/O is an entry of its own under the module (`std::env`, which covers every
+such name of it in that file, `std::path`), a method of the net by its name (`canonicalize`), `extern` for an `extern`
+block, and **an act that more than one name does is one entry, a group:** `clock` and `argv`, which the approval prints
+with the names the file uses under it now. The environment check's names are left to it, never reported twice, and the
+environment check is not approved.
+
+- **`std::env`: an allowlist of the names that are pure; everything else of it is I/O.** It starts narrow: a name added
+  later is a patch, a name taken away is a major change. The guide of a Rust project prints it in full. Pure are
+  `consts`, `split_paths`, `join_paths`, `VarError`, `JoinPathsError` and `SplitPaths`, and nothing else. `args` and
+  `args_os` are the command-line arguments (`argv`: the outer layers and the entry file read them). The functions of the
+  environment (`var`, `var_os`, `vars`, `vars_os`, `set_var`, `remove_var`, `home_dir`, `temp_dir`) are the environment
+  check's. Every other name (`current_dir`, `set_current_dir`, `current_exe`, the type `Args`, ...) is I/O, an entry of
+  its own by its name under `std::env`; the finding names it. A glob of `std::env` fails, as the names it brings in cannot
+  be read. `std::env` is one place: it has no row in the table.
+- **The clock** (`clock`): `std::time::SystemTime::now`, `std::time::Instant::now`, and `UNIX_EPOCH.elapsed()`, which is
+  the time now as `now` is, written `std::time::UNIX_EPOCH.elapsed()`, `SystemTime::UNIX_EPOCH.elapsed()` or, after a
+  `use` or a rename, `UNIX_EPOCH.elapsed()` and `E.elapsed()`. A glob of `std::time` (`use std::time::*;`) fails, as the
+  names it brings in (`Instant`, `SystemTime`) cannot be read; it is an entry of its own, `std::time`. Randomness has no
+  name in `std`. The clocks of crates (`chrono::Utc::now`, `time::OffsetDateTime::now_utc`) are in no table, and are not
+  seen.
+- **The method net, with no gate on the file:** a method is judged by its name on any receiver, because the scanner
+  cannot know the type of what it is called on. **Always judged:** `canonicalize`, `read_dir`, `read_link`,
+  `try_exists`, `symlink_metadata` and `is_symlink`. **Judged only with no argument:** `exists`, `is_file`, `is_dir` and
+  `metadata` (with an argument, `.exists(x)` is another method). `std::path::absolute` is I/O, a row of the table under
+  `std::path`; so is a method of `std::path::Path` named by its path (`Path::exists`, `.filter(Path::is_file)`), which is
+  the standard library's whatever the project defines, an entry by the method's name (`exists`).
+- **The exclusion:** a method name is left out of the net when the project itself defines a method (a `fn` in an `impl`
+  block or a `trait`) of the **same name and the same number of parameters, not counting `self`**, anywhere in the
+  project: any code file of it, a test, another layer, a file in `unchecked`. The names left out this way are printed on
+  every run of `rotproof check`, in the one line that Python's are, so that the exclusion is not silent (`I/O net: left
+  out, as the project defines a method of the same name and number of parameters: exists(0), read_dir(1)`). What the
+  net leaves out only for the calls of that many arguments: `read_dir()` is still judged where the project defines
+  `read_dir(path)`.
+- **What cannot be read fails:** an `extern` block (`extern "C" { ... }`, `unsafe extern "C" { ... }`), which declares
+  what another language defines; its entry is `extern`. `extern crate` and an `extern "C" fn` with a body are no block.
+- **Each finding starts with what to do,** by layer, as Python's and TypeScript's do: pass the time now in as an
+  argument, or take it from a port in `protocol.outbound` that the use case is given; **a port may be a callable alias**
+  (`Box<dyn Fn() -> SystemTime>`, or a generic `F: Fn() -> SystemTime`). The arguments are read where the program
+  starts. A screen's model, which imports only `protocol.inbound`, gets the value from its page or through a use case.
+  The guide lists what is not a fix: approving it, renaming or respelling it, moving the code to a layer that is not
+  judged or to a path in `unchecked` or `moving`, and listing it as allowed.
+
+**What Rust does not see:** a method on a value whose type the scanner cannot know, where no definition in the project
+leaves it out (`store.exists()` is judged, and left out only by a definition), `instant.elapsed()` on an `Instant` held
+in a variable (the `Instant::now` that made it is seen), a name bound in one file and used through another
+(`pub use std::time::Instant;` in a module, `reexport::Instant::now()` in the next), a path a macro builds from pieces,
+a name a glob brings in (a glob of `std::time` fails, but the names it brought in are not followed after it is
+approved), a function of the standard library held in a variable and called through it (`let f = std::path::absolute;
+f(x)` is seen at `absolute`, but `let g = f; g(x)` only where `f` is), and the clocks of crates. A name a `use` renames
+away (`UNIX_EPOCH` in `use std::time::UNIX_EPOCH as E;`) is read as still bound, which is the side that fails.
+
+#### Packages: what is allowed in an inner layer
+
+What a package of PyPI or npm does is unknown to Rotproof, so the same four layers import **no package unless it is
+allowed for the layer or level**, in Python and TypeScript. An import of a package is what the check of the
+dependencies calls one (see "What `rotproof check` checks"): not another unit, not the standard library or a builtin
+of Node, and not a module of the project, whether the unit has a manifest or not, and `import type` and an import under
+`if TYPE_CHECKING:` count as any. The package is the distribution the import is of (Python, through `imports` under
+`[dependencies]`) or the name before the subpath (`zod/v4` is `zod`, `@shop/kernel/utils` is `@shop/kernel`).
+
+- **Where it is allowed** is the list of `allowed` under `[dependencies]` of the declaration and of the unit (see "The
+  layers", where the keys and what makes the declaration fail are written), added to what the layout of the stack
+  allows: TypeScript allows `react` in `presentation.models` (a model keeps its state with React's hooks) and not
+  `react-dom`, which draws; Python's layout allows nothing. A layer's key covers its levels, and a level's key adds to
+  that level, so `presentation = ["zod"]` allows it in `presentation.display` too. The code of the same four layers and
+  levels is judged as for I/O: not `infrastructure`, `composition` or `ui`, not the entry file, and not a test.
+- **The finding** is a forbidden import of its own, kept as the I/O of the layers is, under the same heading, **one for
+  each package in a file, with every line that imports it** (`, on lines 3, 9` after the sentence when it is imported
+  on more than one; the key is the file and the package, as for the other entries of the heading), listed after the I/O
+  findings of the same file: `domain/model.py:3: move the code that needs the
+  package to infrastructure, behind a port the use case is given, or, when the package does no I/O, ask the person
+  whether to allow it for domain (allowed under [dependencies] in .config/rotproof.toml; an agent never adds it to pass
+  the check): imports requests.get, of the package requests, which domain may not import`. It is approved by its file
+  and the package (`rotproof approve domain/model.py requests --reason "..."`), and one approval covers every import of
+  that package in the file; the names it prints on every run (`; now used: requests.get`) are the imports the file
+  makes of it. A package named as one of Node's modules (`fs` listed in `package.json`) is two findings under one
+  key, the table's and this one, and one approval covers both.
+- **Allowing is a person's decision.** The guide says, as for `todo_link` and `approved_max`, that an agent never adds,
+  changes or takes out a name to pass the check; `rotproof init` and `rotproof create` never write `allowed`, and
+  nothing drafts it from the code. A finding is fixed by moving the code that needs the package to `infrastructure`,
+  behind a port, or, when the package does no I/O, by asking the person whether to allow it for the layer.
+- **The list keeps nothing that is gone:** a name that no manifest of the project lists, or that no file of the layer or
+  level it is allowed for imports, fails, and so do the other forms of the declaration that cannot be kept (see "The
+  layers"). A `@types/*` package is no exception: a package the code names is a package.
+- **Rust has no list.** Cargo stops a crate that names a crate its `Cargo.toml` does not list, and the dependencies
+  check fails a dependency that nothing names, so the `[dependencies]` of the crate of an inner layer is that layer's
+  list, and a second one would hold one fact twice. `allowed` in a Rust project fails, in the project's table and in a
+  unit's, and says so; the guide says that adding a dependency to the crate of an inner layer is a person's decision.
+
+**What the rule does not see:** a package that is loaded by a name built at run time (the reader of Python and of
+TypeScript fails it already, as what cannot be read), one a file takes through another file of the same layer that
+re-exports it (the file that imports it is judged, in its own layer), and the packages a Python file reaches through the
+module of the project it imports, as that module is judged for itself.
 
 ### Views that are templates
 
@@ -849,9 +1333,10 @@ entry can be told, is one.
   its code goes now. In Python with `ui = "rendered"`, a template (`.html`, `.htm`, `.jinja`, `.jinja2`, `.j2`) is code
   too, so one outside the levels of `ui` fails as code outside the layers (see "Views that are templates"). In
   TypeScript, a `.tsx` or `.jsx` file in `presentation` fails, by its extension alone (case
-  does not count): a view written with `createElement` in a `.ts` file passes, and so does a test outside `src/`,
-  which Rotproof does not read; a test in `presentation` that needs a JSX `wrapper` writes it with `createElement`,
-  or sits outside `src/`.
+  does not count): a view written with `createElement` in a `.ts` file passes, and so does a test, wherever it sits
+  (`useForm.test.tsx`, `__tests__/wrapper.tsx`: see "Tests"), and one outside `src/`, which Rotproof does not read.
+  A test is no code outside the layers and none beside the levels of a layer, in TypeScript as the files of `tests/`
+  are in Python.
 - **The layers import only what the table allows** (Python): every `import` and `from ... import` in the layers,
   relative ones and those inside functions or under `if TYPE_CHECKING:` included, and those of the entry file. A
   layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own
@@ -864,6 +1349,13 @@ entry can be told, is one.
   importlib import import_module`) whose module is a string literal is an import of that module, read as one; a module
   that is not a literal (a variable, an f-string, a concatenation with `+`) or is relative (`".x"`) is built at run
   time and is not seen. A file that is not UTF-8 or has a syntax error fails, since its imports cannot all be read.
+- **No code that is not a test imports a test** (Python): a layer, the entry file and a unit's `__init__.py` import
+  no module of `tests/` (at the root of the project, in the directory of a unit, and at its root), whatever the place
+  they would be in: `imports tests.helper, in tests/, which holds tests; code that is not a test imports no test: move
+  what it needs out of the test into a layer`. It is a forbidden import, approved as any other is by its file and its
+  import (`rotproof approve domain/model.py tests.helper --reason ...`). The files of `tests/` are read by no check of
+  the direction, so a test imports any layer, and another test. A project with no `tests/` directory has none to
+  import: `import tests` names a package of someone else's there.
 - **The layers import only what the table allows** (TypeScript): every `import` (`import type` too), `export ...
   from`, `import x = require(...)`, and `import(...)`, `import.meta.resolve(...)` and `require(...)` with a literal
   string, in the `.ts`, `.tsx`, `.js` and `.jsx` files (and `.mts`, `.cts`, `.mjs`, `.cjs`) of the layers, read with
@@ -900,7 +1392,16 @@ entry can be told, is one.
   package an import names. Limits: the `tsconfig` of a
   unit is not read (its `paths` are not applied; only those at the project's root are), `imports` (`#name`) and a
   condition other than the three are not read, and an import that lands outside every unit's path (a package
-  whose `exports` point to build output such as `./dist/client.js`) is not judged.
+  whose `exports` point to build output such as `./dist/client.js`) is not judged. The imports of a test (a file named
+  `*.test.*` or `*.spec.*`, or in `__tests__/`: see "Tests") are not read: it is no code of a layer.
+- **No code that is not a test imports a test** (TypeScript): a file of a layer or the entry file whose import lands on
+  a test fails: `imports ../domain/song.test (src/domain/song.test), a test (*.test.*, *.spec.*, __tests__/); code that
+  is not a test imports no test: move what it needs out of the test into a layer`. The import lands on a test when
+  the path it resolves to (through the aliases and the packages of the units, as above) is in a directory named
+  `__tests__`, or is a file named as a test, or is written without its extension and a file named as a test is there
+  for it (`./song.test` for `song.test.ts`, `./__tests__` for the `index` in it). It is a forbidden import,
+  approved as any other is by its file and its import; a test importing a test, or code, passes. The import is judged
+  by this rule alone: a rule of the table that it would also break is not said, since a test is in no layer.
 - **The templates refer only to what the table allows** (Python, `ui = "rendered"`): every `{% extends %}`,
   `{% include %}`, `{% import %}` and `{% from %}` of the tags the template languages read have, with a literal name,
   in the templates of the levels of `ui`, judged by the level of the file it names under `ui/` as an import is. Which
@@ -1063,7 +1564,9 @@ entry can be told, is one.
   paths, and only for a project of the `python` stack.
 - **The manifests list the dependencies the code imports, both ways** (TypeScript): the manifest is the `package.json`
   at the root of each unit, and at the root of the project when it declares none; the code is the source files the
-  direction check reads (the layers and the entry files in `src/`), with the imports it collects (`import`, `export ...
+  direction check reads (the layers and the entry files in `src/`) and the tests (see "Tests": the files named
+  `*.test.*` or `*.spec.*`, or in `__tests__/`, wherever they sit in the `path` of the unit, in no layer too, outside
+  `unchecked` and `moving`), with the imports it collects (`import`, `export ...
   from`, `import(...)` and `require(...)` with a literal string). A unit with no `package.json` at its root is not compared
   with one, and one that cannot be read as UTF-8 or JSON fails. The runtime dependencies are `dependencies`; the
   optional ones `peerDependencies` and `optionalDependencies`; the development ones `devDependencies`. An import is
@@ -1078,14 +1581,19 @@ entry can be told, is one.
   1. **an import of a package the manifest does not list fails**, once for the package with how many more imports there
      are of it; any kind of dependency lists it. A unit below the root of the project may also use the
      `devDependencies` of the project's own `package.json`, which npm hoists to every package of the workspace;
-  2. **a package in `dependencies` that no source file imports fails**, unless `without_import` lists it. The
-     development, peer and optional dependencies are never judged unused, nor is `@types/*`, which declares types and
-     is imported by nothing.
+  2. **the code of a layer uses runtime and optional dependencies only**, as in Python: an import of a package that
+     only `devDependencies` lists (the unit's own, or the root's hoisted) by a file that is not a test fails, once for
+     the package with how many more imports there are, and says to move it to `dependencies` (to list it there, for the
+     root's), or to import it in a test alone (`imports vitest, which package.json:8 lists for development only: the
+     code of a layer uses runtime dependencies only, so move vitest to dependencies, or import it in a test alone (a
+     file named *.test.* or *.spec.*, or in __tests__/)`). A test uses all of them. The types of `@types/*`
+     may be named anywhere, since they are erased when the code is built;
+  3. **a package in `dependencies` that no source file imports fails**, unless `without_import` lists it, and one that
+     only tests import fails too, and says to move it to `devDependencies`. The development, peer and optional
+     dependencies are never judged unused, nor is `@types/*`, which declares types and is imported by nothing.
 
-  A development dependency may be imported anywhere, since a test sits in `src/` and cannot be told from the code of a
-  layer (the tests of a TypeScript project are not read apart: see the layers). `imports` of the declaration is not
-  used: an import and a dependency are one name. Not read: a file outside `src/` (`vite.config.ts`, a test beside it),
-  so a package only that file imports is listed in `devDependencies`, or in `without_import`.
+  `imports` of the declaration is not used: an import and a dependency are one name. Not read: a file outside `src/`
+  (`vite.config.ts`), so a package only that file imports is listed in `devDependencies`, or in `without_import`.
 - **The manifests list the dependencies the code imports, both ways** (Rust): Cargo stops a crate that names a crate its
   `Cargo.toml` does not list, so the other half is judged: a dependency in `[dependencies]` (`[target.<cfg>.dependencies]`
   too, from a registry, git or a path alike) that no code of the crate names fails. The crates are those the direction
@@ -1106,13 +1614,79 @@ entry can be told, is one.
 - **Only `infrastructure` reads or writes the environment variables:** the environment is input from outside, as
   unchecked as a request, so `infrastructure` reads it into a settings type it validates, and `composition` passes
   that on. The code of every other layer and the entry file fails on `os.environ`, `os.environb`, `os.getenv`,
-  `os.getenvb`, `os.putenv` and `os.unsetenv` in Python, `process.env` and `import.meta.env` in TypeScript, and
-  `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var` and `remove_var` in Rust, each through an alias the file
-  binds too (`import os as o`, `from os import getenv as g`, `import { env } from "node:process"`,
-  `const { env } = process`, `use std::env;` then `env::var`, `::std::env::var`). Not judged: the command line (`sys.argv`,
-  `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of
-  `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
-  (`getattr(os, "environ")`, `from os import *`), and the code outside the layers (`tests/` in Python).
+  `os.getenvb`, `os.putenv` and `os.unsetenv` in Python, and on the two functions that expand a variable or the home
+  directory, `os.path.expandvars` and `os.path.expanduser` (also as `posixpath`, `ntpath` and `genericpath` name
+  them), and on `pathlib.Path.home` (also `PosixPath.home` and `WindowsPath.home`); `process.env` and
+  `import.meta.env` in TypeScript; and `std::env::var`, `var_os`, `vars`, `vars_os`, `set_var`, `remove_var`,
+  `home_dir` and `temp_dir` in Rust. Each is found through an alias the file binds too (`import os as o`,
+  `from os import getenv as g`, `import os.path as p` then `p.expanduser`, `from pathlib import Path` then
+  `Path.home()`, `import { env } from "node:process"`, `const { env } = process`, `use std::env;` then `env::var`,
+  `use std::env as e;` then `e::var`, `use std as s;` then `s::env::var`, `::std::env::var`), and in Python and
+  TypeScript at the import (`from os import getenv`, `import { env } from "node:process"`) and at each line that then
+  uses the name. A star import of a module whose names
+  count fails too, as the names it brings in cannot be read, so name them: in Python `from os import *`,
+  `from os.path import *` (also `posixpath`, `ntpath`, `genericpath`) and `from pathlib import *`, in Rust a glob of
+  `std::env` or of `std` (`use std::env::*;`, `use std::*;`, then `use std::env::var;`). Python's names are read as
+  Python's scopes read them (module, function and lambda, class body, comprehension; a name is the one of the scope it
+  is bound in at all, by assignment, parameter, `def`, `class`, `import`, `for`, `with`, `except ... as`, `match`,
+  `:=`, `del`, `global` and `nonlocal`): a parameter or a variable that is called `os` is not the module, and
+  `os.getenv` through it passes, as an `import os` in one function does not bind `os` in another; an import under
+  `if TYPE_CHECKING:` is an import as any. TypeScript's names are read as the language's scopes read them (a
+  parameter, a `var` hoisted to its function, a `let` or `const` of its block, a `catch` binding, a function or class
+  name, an import, and a name the file `declare`s): a `process` that a function, a block or the module binds is not the
+  global, and `process.env` through it passes, while the `process.env` outside that scope is read. What the global
+  object holds is the global, so `window.process.env`, `globalThis.process.env`, `self.process.env` and
+  `global.process.env` read as `process.env`, also through parentheses, a cast (`(globalThis as any).process.env`),
+  `!`, optional chaining and a literal in brackets (`process["env"]`, `window["process"].env`). `process` imported from
+  `process` or `node:process`, by default or as a namespace, is the global, and so is `env` imported from them, which
+  is also read at the import. What `require` and `import()` with a literal string bind is read as an import binds it,
+  wherever the declaration is: a `const`, `let` or `var` whose initializer is exactly the call, optionally awaited (in
+  parentheses or not), cast and followed by `.default`, binds the namespace (`const process = require("process")`,
+  `const p = await import("node:process")`, then `p.env`), and a destructuring binds the names it takes, each read at
+  its key as a named import is (`const { env } = require("process")`), only when `require` is the global one; a
+  `require` or `import()` of what is no literal is not seen. `const { env } = process`, `const { env: e } = globalThis.process` and `const { env: { A }
+  } = process` take it apart; `import.meta.env` is read whole (`const all = import.meta.env`), by a member
+  (`import.meta.env.VITE_URL`) and by a destructuring that takes a name Vite does not set itself or a rest element. A
+  type position (`type T = typeof process.env`) is not a read, and neither is `import type`. Not judged: the command
+  line (`sys.argv`, `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the
+  values of `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
+  (`getattr(os, "environ")`, `process[key]`, `globalThis["pro" + "cess"]`, `eval`), in Python and TypeScript a name
+  bound through an assignment (`o = os`, then `o.environ`; `const p = process`, then `p.env`; `const { process } =
+  globalThis`, then `process.env`) and, in TypeScript, a `require` or `import()` that is no declarator's whole
+  initializer (`wrap(require("process"))`, `require("process").env.A`, `(await import("process")).env.A`) and a name
+  assigned after it is bound (`let p = require("path"); p = process`, which stays the module), a destructuring that is
+  an assignment (`({ env } = process)`) or a parameter's
+  default (`function f({ env } = process)`), and `export { env } from "node:process"`; a method of an object
+  (`Path("~").expanduser()`, which needs the type of what it is called on), a name a star import of another module
+  brings in and a name in a string annotation, in Rust a name bound in one file and used through another (`pub use
+  std::env;` in one module, `reexport::env::var` in the next) and a path a macro builds from pieces, and the code
+  outside the layers (`tests/` in Python) and the tests (in TypeScript, the files named `*.test.*` or `*.spec.*`, or in
+  `__tests__/`; in Rust, the items under `#[cfg(test)]`, the file of a `#[cfg(test)] mod x;` and what is outside a
+  crate's `src/`, as the check of the I/O reads them: see "Tests").
+- **The inner layers do no I/O** (see "The inner layers do no I/O"): the code of `domain`, `protocol`, `application` and
+  `presentation`, and of their levels, imports nothing of the table Rotproof keeps of what does I/O wholly (in Python
+  `shutil`, `subprocess`, `socket`, `urllib.request`, `tempfile` and the like; in TypeScript Node's `fs`, `net`,
+  `child_process`, `http` and the like, with or without `node:`, and any other scheme; in Rust `std::fs`,
+  `std::process::Command`, `std::net::TcpStream`, the terminal items of `std::io` and the print macros). The table is
+  Rotproof's, and a project cannot change it. `infrastructure`, `composition`, `ui`, the entry file and the tests are
+  not judged. It is a forbidden import as the layer table's are: it is approved by its file and the entry of the table
+  (`rotproof approve domain/report.py shutil --reason "..."`), the approval is printed on every run with the names the
+  file now uses under the entry, and one that matches nothing fails. Each finding says first what to do (move the I/O
+  into `infrastructure.outbound`, behind a port in `protocol.outbound` the use case is given; a screen's model gets what
+  it needs from its page or through a use case), and approving it, renaming it or moving the code to a path in
+  `unchecked` or `moving` is no fix. In Python the rule also judges what a module does in part by the name used (the
+  allowlists of `os`, `os.path`, `sys`, `time` and `logging`, the clock, randomness, the terminal, the command-line
+  arguments, `pathlib.Path`, the net of method names, and what cannot be read), by entries of its own: a name
+  (`os.getcwd`), a group (`clock`, `random`, `terminal`, `argv`) or a method (`read_text`); it prints on every run the
+  methods of the project that the net leaves out. In TypeScript it judges the globals by the name used (an allowlist of
+  the pure ones, `process`, the clock, randomness, `console`, the arguments and what cannot be read), by entries of its
+  own: a global (`fetch`, `localStorage`, `process.cwd`) or a group (`clock`, `random`, `terminal`, `argv`). In Python
+  and TypeScript the same four layers import **only the packages they are allowed** (`allowed` under `[dependencies]`,
+  and the layout's `react` for `presentation.models` in TypeScript): a package no list allows for the layer or level is
+  a finding of its own under the same heading, approved by its file and the package, and a list that keeps a name no
+  manifest lists or no file of its place imports fails (see "The inner layers do no I/O", "Packages"). In Rust the
+  `[dependencies]` of the crate of the layer is that list, and `allowed` fails. What these layers import of a path in
+  `unchecked` or `moving`, which no check judges, is listed on every run, apart from the findings, and fails nothing.
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
@@ -1130,7 +1704,7 @@ entry can be told, is one.
   what `rotproof create` writes, are there, and fail each on a line of its own, with the command that applies as for
   the guide.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
-  outside `unchecked` and `moving` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`,
+  outside `unchecked` and `moving` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`, the tests among them,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
   a crate's `tests/` and `build.rs` included, read by Rotproof's own scanner, which skips strings, raw strings and
   character literals as Rust's lexer does. The first four put off a finding: it is fixed now, written as one line in
@@ -1225,7 +1799,7 @@ entry can be told, is one.
   shared units"). It fails as ``out of date, run `rotproof index`: .rotproof/readers.md``, for a list that is missing,
   edited, or no longer what the code says, with the names that changed under it (see "Who reads the shared units").
 
-What a check finds file by file (the layers' imports, the markers, `NOTE`, the environment variables and the
+What a check finds file by file (the layers' imports, the markers, `NOTE`, the environment variables, the I/O of the inner layers and the
 type-checker suppressions; the dependencies by manifest, each in the order of the files that need it) is listed in the byte order of the whole path, written with `/` from the root and compared
 as bytes compare: `Beta.py`, `_under.py`, `alpha.py`, and `mid2.py` before `mid2/x.py`, since `.` comes before `/`. It
 is the same on every operating system, whatever order its file system lists files in, so two machines that run the
@@ -1276,8 +1850,21 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next (th
   when the project declares units (`domain of unit billing`). Only the places that are there are offered, and a file's
   imports of the other files that are moving are not counted: where those go is not known yet. Which of the layers
   that pass is the one is decided by what the code is for, and Rotproof never says it: that a file belongs to `domain`
-  or to `application` is for the person who moves it. Nor does it say that a file that does I/O belongs in
-  `infrastructure`: it names no module that does.
+  or to `application` is for the person who moves it.
+- **In Python and TypeScript, a place the check of the I/O of the inner layers judges is left out for a file that
+  would fail it there** (see "The inner layers do no I/O"): `domain`, `protocol`, `application` and `presentation`, and
+  their levels. The file is read by the same functions that read a file in those layers, as if it sat in the place:
+  an import of an entry of the table (`shutil`, `fs`), a name judged by its name (the allowlists of `os`, `sys`, `time`
+  and `logging`, the clock, randomness, the terminal, the arguments, `pathlib.Path`, a TypeScript global, a method of a
+  path unless the project defines a method of that name and number of parameters anywhere, a test and the code outside
+  the layers included), a star import and what cannot be read (`eval`, an import by a name built at run time) fail the
+  file in each of those places; a package that the `allowed` of the project and of the unit holding the file, and the
+  layout's, do not list for a place fails it in that place alone. The places that judge nothing (`infrastructure`,
+  `composition` and `ui`) are offered as before. A file left with no place, because a layer that may not import what
+  is left imports it, is told as none passing. Rotproof still never says that a file belongs in `infrastructure`, or in
+  `domain` or in `application`: it says where the check would pass it and, by what it sees of its I/O, where it would
+  not. What it does not see (a method on an object whose type cannot be known and whose name is no path's, a name an
+  object holds) narrows nothing, as in a layer.
 - **In Rust the files are counted and no order is given:** a layer is a crate, and what a crate imports is the
   dependencies of its manifest, which are no files' to order.
 

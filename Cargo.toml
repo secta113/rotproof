@@ -50,6 +50,7 @@ oxc_allocator = "=0.152.0"
 oxc_ast = "=0.152.0"
 oxc_ast_visit = "=0.152.0"
 oxc_parser = "=0.152.0"
+oxc_semantic = "=0.152.0"
 oxc_span = "=0.152.0"
 percent-encoding = "2.3.2"
 pulldown-cmark = { version = "0.13.4", default-features = false }

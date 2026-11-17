@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 551da880. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 05f5a1ea. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -24,11 +24,17 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
 - **モノレポの各部分が、自分の層を守ります。** モノレポのパッケージやモジュラーモノリスのモジュールをユニットとして
   宣言すると、そのあいだの import がすべて検査されます。ある部分が別の部分に届くのは、届いてよい層を通るときだけです。
   誰も必要としないものを集めてしまう共有ユニットは、差分に出る一覧で見つかります（「ユニット」を参照）。
+- **内側の層は I/O をしません。** `domain`、`protocol`、`application`、`presentation` は、ファイル、ネットワーク、
+  プロセス、端末に触れるものを import せず、時計、乱数、コマンドライン引数も直接は読みません。Python と TypeScript
+  では、そのうえで宣言が許したパッケージだけを import します。I/O は `infrastructure` が、ポートの向こうで行います
+  （[The inner layers do no I/O](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-inner-layers-do-no-io)
+  を参照）。
 - **マニフェストが、コードの import と食い違いません。** Python のユニットの `pyproject.toml` と TypeScript のユニットの
   `package.json` を、何もインストールせずに import と突き合わせます。import しているのに書いていないパッケージは失敗し、
   どのコードも import しない実行時の依存も失敗します（Rust は、書いていない crate を Cargo が止めるので、crate の
-  `[dependencies]` の使われていないものを見ます）。Python では、層のコードが使えるのは実行時の依存だけで、テストは
-  両方を使えます。import 名と配布名の対応（`dotenv` は `python-dotenv`）と、import せずに使う依存は宣言に書き、
+  `[dependencies]` の使われていないものを見ます）。Python と TypeScript では、層のコードが使えるのは実行時の依存だけで、
+  テストは両方を使えます（Python では `tests/` のファイル、TypeScript では Vitest と Jest が既定で拾う `*.test.*`、
+  `*.spec.*`、`__tests__/` の中のファイルで、`rotproof check` が毎回その数を表示します）。import 名と配布名の対応（`dotenv` は `python-dotenv`）と、import せずに使う依存は宣言に書き、
   判定はどの環境でも同じです。
 - **Python のプロジェクトはロックされ、仮想環境は 1 つです。** 依存は `pyproject.toml` に書き（`requirements.txt` は
   数えません）、ロックファイル（`uv.lock`、`poetry.lock`、`pdm.lock`、`pylock.toml`）をコミットします。たまたまある

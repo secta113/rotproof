@@ -7,8 +7,11 @@
   writes nothing). Code outside every layer fails too: move it into a layer, or
   list its path in `unchecked` (helper scripts, generated code). Code of the project that is not in a layer yet is
   listed in `moving` instead: no check reads it, and while a path is listed `rotproof check` prints how many files are
-  left, which to move next and the layers each could go in. Move them into the layers in the order it gives, and
-  choose among the layers that pass by what the code is for.{not_layers}
+  left, which to move next and the layers each could go in (not `domain`, `protocol`, `application` or
+  `presentation`, for a file that would do I/O there or import a package no list allows there, in Python and
+  TypeScript). Move them into the layers in the order it gives, and choose among the layers that pass by what the code
+  is for. It lists, too, every import of such a path (`unchecked` as well) by those four layers, which no check
+  judges: a helper moved there is not a fix.{not_layers}
 {direction}
 
 {table}

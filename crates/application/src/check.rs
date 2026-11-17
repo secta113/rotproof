@@ -9,11 +9,13 @@ use std::io;
 
 use crate::finding::{under, warn};
 use crate::tree::{exactly, read_text};
-use domain::approvals::{over_limit, shown, sort, stale};
+use domain::approvals::{over_limit, shown_all, sort, stale};
 use domain::declaration::Declared;
+use domain::direction::Rule;
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
 use domain::moving::Candidates;
+use domain::outside::Outside;
 use domain::project::MAP_HEADING;
 use domain::schema::Time;
 use domain::skill::{PATHS as SKILL_PATHS, SKILL};
@@ -29,6 +31,7 @@ pub fn check(tree: &dyn Tree, parsers: &dyn Parsers, now: Time) -> io::Result<Re
     let structure = crate::structure::problems(tree)?;
     let mut report = Report {
         skipped: structure.skipped,
+        tests: structure.tests,
         ..Report::default()
     };
     report.findings.extend(under(
@@ -86,19 +89,39 @@ fn code(
             .collect(),
         more: order.more,
     });
+    report.outside = direction.outside.iter().map(Outside::said).collect();
     report.templates = direction.templates.map(|premise| Templates {
         read_as: premise.read_as,
         not_judged: premise.not_judged,
     });
     let listed = crate::readers::problems(tree, declared, &direction.reads);
     let approvals = crate::approvals::read(tree)?;
-    let sorted = sort(&direction.forbidden, &approvals.entries);
+    // What the layer table forbids and the I/O of the inner layers are kept the same way: one approval for a file and
+    // what it imports, or the entry of the table of I/O it uses
+    let io = crate::inner_io::problems(tree, parsers, declared)?;
+    report.io_net = io.excluded.line();
+    let forbidden: Vec<_> = direction
+        .forbidden
+        .iter()
+        .chain(&io.forbidden)
+        .cloned()
+        .collect();
+    let sorted = sort(&forbidden, &approvals.entries);
+    let of_rule = |direction: bool| {
+        sorted
+            .forbidden
+            .iter()
+            .filter(move |f| (f.rule == Rule::Direction) == direction)
+            .map(|f| f.detail.clone())
+            .collect::<Vec<_>>()
+    };
     report.findings.extend(under(
         "the layers import only what the layer table in .rotproof/AGENTS.md allows",
-        direction
-            .problems
-            .into_iter()
-            .chain(sorted.forbidden.iter().map(|f| f.detail.clone())),
+        direction.problems.into_iter().chain(of_rule(true)),
+    ));
+    report.findings.extend(under(
+        domain::inner_io::HEADING,
+        io.problems.into_iter().chain(of_rule(false)),
     ));
     report.findings.extend(under(
         crate::dependencies::HEADING,
@@ -122,11 +145,7 @@ fn code(
     report
         .findings
         .extend(under(domain::readers::HEADING, listed));
-    report.approved = sorted
-        .approved
-        .iter()
-        .map(|(_, entry)| shown(entry))
-        .collect();
+    report.approved = shown_all(&sorted);
     report.approved.sort();
     report.approved.dedup();
     let comments = crate::markers::problems(tree, parsers, declared)?;
@@ -209,4 +228,146 @@ fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
         }),
     ));
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::fake::Fake;
+    use domain::code::{Aliases, Import, Manifest, Source};
+    use domain::definitions::Definition;
+    use domain::dependencies::Listing;
+    use domain::layers::Language;
+    use infrastructure::outbound::readers::{Readers, Remembering};
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+
+    /// Readers that count how many times each path is asked of the readers of code.
+    #[derive(Default)]
+    struct Counting {
+        asked: RefCell<BTreeMap<String, usize>>,
+    }
+
+    impl Counting {
+        fn count(&self, path: &str) {
+            *self.asked.borrow_mut().entry(path.to_string()).or_default() += 1;
+        }
+    }
+
+    impl Parsers for Counting {
+        fn python(&self, source: &str, path: &str) -> Source<Vec<String>> {
+            self.count(path);
+            Readers.python(source, path)
+        }
+
+        fn outline(
+            &self,
+            language: Language,
+            source: &str,
+            path: &str,
+        ) -> Result<Vec<Definition>, (usize, String)> {
+            Readers.outline(language, source, path)
+        }
+
+        fn typescript(&self, source: &str, path: &str) -> Source<Import> {
+            self.count(path);
+            Readers.typescript(source, path)
+        }
+
+        fn typescript_aliases(&self, tree: &dyn Tree, roots: &[String]) -> io::Result<Aliases> {
+            Readers.typescript_aliases(tree, roots)
+        }
+
+        fn manifest(&self, source: &str) -> Result<Manifest, (usize, String)> {
+            Readers.manifest(source)
+        }
+
+        fn listing(&self, language: Language, source: &str) -> Result<Listing, (usize, String)> {
+            Readers.listing(language, source)
+        }
+    }
+
+    /// How many times each file of code was asked of the readers of code when `rotproof check` ran over `files`, with
+    /// readers that remember what they read or that do not.
+    fn asked(stack: &str, files: &[(&str, &str)], remember: bool) -> BTreeMap<String, usize> {
+        let declaration = format!(
+            "stack = \"{stack}\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\"]\nfiles = \"2.0.0\"\n"
+        );
+        let mut all = vec![(".config/rotproof.toml", declaration.as_str())];
+        all.extend_from_slice(files);
+        let tree = Fake::new(&all);
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-15T12:00:00+09:00").unwrap();
+        if remember {
+            let readers = Remembering::new(Counting::default());
+            check(&tree, &readers, now).unwrap();
+            readers.inner().asked.take()
+        } else {
+            let readers = Counting::default();
+            check(&tree, &readers, now).unwrap();
+            readers.asked.take()
+        }
+    }
+
+    #[test]
+    fn a_run_reads_each_file_of_python_code_once_the_code_that_is_moving_included() {
+        let files = [
+            (
+                "domain/a.py",
+                "import os\nfrom legacy import old\n\n\nclass A:\n    def go(self):\n        return os.getcwd()\n",
+            ),
+            ("application/b.py", "import json\nfrom domain import a\n"),
+            ("legacy/old.py", "import shutil\nimport legacy.older\n"),
+            ("legacy/older.py", "import sys\n"),
+            ("tests/test_a.py", "import domain.a\n"),
+            ("__main__.py", "import application.b\n"),
+        ];
+        let once = asked("python", &files, true);
+        for path in [
+            "domain/a.py",
+            "application/b.py",
+            "legacy/old.py",
+            "legacy/older.py",
+        ] {
+            assert_eq!(once.get(path), Some(&1), "{path}: {once:?}");
+        }
+        assert!(once.values().all(|times| *times == 1), "{once:?}");
+        // The same run with readers that forget asks for some files again and again, which this test would see
+        let forgetting = asked("python", &files, false);
+        assert!(
+            forgetting.values().any(|times| *times > 1),
+            "{forgetting:?}"
+        );
+    }
+
+    #[test]
+    fn a_run_reads_each_file_of_typescript_code_once_the_code_that_is_moving_included() {
+        let files = [
+            (
+                "src/domain/a.ts",
+                "import fs from 'node:fs';\nimport { old } from '../../legacy/old';\n",
+            ),
+            ("src/application/b.ts", "import { a } from '../domain/a';\n"),
+            (
+                "legacy/old.ts",
+                "import path from 'node:path';\nimport { older } from './older';\n",
+            ),
+            ("legacy/older.ts", "export const older = 1;\n"),
+            ("package.json", "{\"name\":\"x\"}\n"),
+        ];
+        let once = asked("typescript", &files, true);
+        for path in [
+            "src/domain/a.ts",
+            "src/application/b.ts",
+            "legacy/old.ts",
+            "legacy/older.ts",
+        ] {
+            assert_eq!(once.get(path), Some(&1), "{path}: {once:?}");
+        }
+        assert!(once.values().all(|times| *times == 1), "{once:?}");
+        let forgetting = asked("typescript", &files, false);
+        assert!(
+            forgetting.values().any(|times| *times > 1),
+            "{forgetting:?}"
+        );
+    }
 }

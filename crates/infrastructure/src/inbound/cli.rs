@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use protocol::inbound::{
     Commands, Initialized, LinkedTodo, LogEntry, Made, Moving, MovingFile, Names, NewDocument,
-    Templates, Warning,
+    Templates, TestFiles, Warning,
 };
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
@@ -71,14 +71,26 @@ layers, with ui = rendered in Python no template (.html, .htm, .jinja, .jinja2, 
 declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
 what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that the manifest of each package \
 (the pyproject.toml of a Python unit, the package.json of a TypeScript one, the Cargo.toml of a crate, whose [dependencies] no path of its code names) lists the dependencies its code imports (a package imported and not \
-listed fails, and so does a runtime dependency no code imports; development dependencies are never judged unused, and \
-in Python the code of a layer uses runtime dependencies only; the distribution an import is of and a dependency used without an \
+listed fails, and so does a runtime dependency no code imports or only tests import; development dependencies are never judged unused, and \
+the code of a layer uses runtime dependencies only, a test both (in Python a file in tests/, in TypeScript a file named \
+*.test.* or *.spec.* or in __tests__/); the distribution an import is of and a dependency used without an \
 import are said in [dependencies] of the declaration; nothing is installed, and what a .venv provides only words a \
 message), that a Python project is locked (a pyproject.toml at the root of each unit, a lock file in that directory or \
 above it: uv.lock, poetry.lock, pdm.lock or pylock.toml, committed; and no virtual environment but a .venv beside a lock \
 file that the .gitignore excludes: a directory that holds a pyvenv.cfg is found even where the .gitignore hides it), that only \
 infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
-import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
+import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that the inner layers \
+(domain, protocol, application, presentation) do no I/O (an import of what Rotproof lists as doing I/O wholly: shutil, \
+subprocess and socket in Python, fs and child_process in Node, std::fs and std::process and the print macros in Rust; \
+not in infrastructure, composition, ui, the entry file or a test; in Python also the names of what is I/O in part: os, \
+os.path, sys, time and logging by an allowlist of what is pure, the clock, randomness, the terminal and the arguments, \
+pathlib.Path (free in a type position alone), and a method of a path judged by its name, which a method of the project of the same name and number of \
+parameters leaves out, said on every run; one finding for each entry of a file, with every line it is on; approved as an import is, by its file and the entry), that in Python and \
+TypeScript they import only the packages allowed for the layer or level (allowed under [dependencies] of the \
+declaration, the person's decision, to which a unit adds in its own table; the layout allows react in \
+presentation.models in TypeScript; a name no manifest lists or no file of its place imports fails; in Rust the \
+[dependencies] of the layer's crate are that list, and allowed fails; a package no list allows is approved by its \
+file and the package), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that .rotproof/AGENTS.md and the two copies of the skill rotproof (.claude/skills/rotproof/SKILL.md and .agents/skills/rotproof/SKILL.md) are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
@@ -96,12 +108,19 @@ number or key of the issue that tracks the work, is not a finding: every one is 
 TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. With \
 paths in moving in the declaration (the project's code that is not in a layer yet, which no check reads), prints on \
 every run how many files are left and which to move next, those that import no other file still moving first, each \
-with the layers it could go in (where the direction check would pass it), and fails nothing for it. With ui = \
+with the layers it could go in (where the direction check would pass it, and, in Python and TypeScript, where the \
+check of the I/O of the inner layers would too: a file that does I/O it fails, or imports a package no list allows \
+there, is not offered domain, protocol, application or presentation), and fails nothing for it. With paths in \
+unchecked or moving, prints on every run, too, each import from the code of an inner layer into them, which no check \
+reads, so that the I/O hidden in a helper there is seen (inner layers read code outside the layers (not judged)), and \
+fails nothing for it. With ui = \
 rendered in Python, judges the references between templates ({% extends %}, {% include %}, {% import %} and {% from %} \
 with a literal name, a path from the directory ui of the unit) by the level each file is in, as imports are, and prints \
 on every run the template languages and versions it reads them as (templates:); where a unit's pyproject.toml asks for \
 another version of the package of a language, the references are not read as it, or not judged at all, and it says so. \
-Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+A test is no code of a layer: its imports and its reads of the environment are not judged, and no code that is not a \
+test imports one (in Python a module of tests/, in TypeScript a file named *.test.* or *.spec.* or in __tests__/); in \
+TypeScript it prints on every run how many files it read as tests (tests:). Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
 cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
@@ -202,7 +221,10 @@ enum Command {
     /// `rotproof approve <file> <import> --reason "<why>"` keeps an import the layer table forbids, as `rotproof check`
     /// names it: the file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each
     /// name of `from m import n`; a TypeScript specifier; a crate's dependency; the name of a template as written in a
-    /// reference). It shows the forbidden import, signs with git's user.name, and adds the entry, with the reason, to
+    /// reference; for the I/O of the inner layers, the entry of Rotproof's table that the finding names: `shutil`,
+    /// `urllib.request`, `fs`, `bun:`, `std::fs`, `std::os::fs`, `std::io`, one approval for a file and an entry,
+    /// whatever names it uses; for a package no list allows in an inner layer, the package the finding names). It shows
+    /// the forbidden import, signs with git's user.name, and adds the entry, with the reason, to
     /// .config/rotproof-approved.toml, which keeps a byte
     /// order mark and its line endings (CRLF on every line when one line had it), as does --prune. It asks nothing and
     /// needs no terminal, but it takes no approval without a reason, and `rotproof check` prints every approval on
@@ -616,11 +638,26 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
             println!("{line}");
         }
     }
+    // What the inner layers read of the code no check reads, on every run: the I/O hidden in a helper there is seen by
+    // none, so the import of it is listed
+    for line in outside_lines(&report.outside) {
+        println!("{line}");
+    }
     // How the references between templates were read, on every run: what the check assumed is not for a reader to guess
     if let Some(templates) = &report.templates {
         for line in template_lines(templates) {
             println!("{line}");
         }
+    }
+    // How many files were read as tests, on every run: a name that matches nothing is seen as a zero, and not as tests
+    // that were read as code
+    if let Some(tests) = &report.tests {
+        println!("{}", test_line(tests));
+    }
+    // The methods the net of method names leaves out, on every run: the project's own method of the same name is not
+    // the standard library's, and what is left out is not left out silently
+    if let Some(line) = &report.io_net {
+        println!("{line}");
     }
     // A warning: printed on every run, under the heading of its kind, and failing nothing
     for (heading, details) in warnings(&report.warnings) {
@@ -679,6 +716,20 @@ fn linked_lines(linked: &[LinkedTodo]) -> Vec<String> {
     lines
 }
 
+/// What `check` prints of the imports from an inner layer into a path of `unchecked` or `moving`: the heading with the
+/// count, then a line for each, indented by two spaces. Nothing when there are none. Nothing fails for them.
+fn outside_lines(outside: &[String]) -> Vec<String> {
+    if outside.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "inner layers read code outside the layers (not judged) ({}):",
+        outside.len()
+    )];
+    lines.extend(outside.iter().map(|line| format!("  {line}")));
+    lines
+}
+
 /// What `check` prints of how the references between templates were read: one line that says the languages and
 /// versions, then a line for each unit that is not read as every one of them, and why. Nothing fails for them.
 fn template_lines(templates: &Templates) -> Vec<String> {
@@ -693,6 +744,15 @@ fn template_lines(templates: &Templates) -> Vec<String> {
             .map(|line| format!("templates: {line}")),
     );
     lines
+}
+
+/// What `check` prints of the files it read as tests: how many, and by which names. Nothing fails for it.
+fn test_line(tests: &TestFiles) -> String {
+    let count = match tests.count {
+        1 => "1 file read as a test".to_string(),
+        n => format!("{n} files read as tests"),
+    };
+    format!("tests: {count} ({})", tests.patterns.join(", "))
 }
 
 /// What `check` prints for the code that is moving: how much there is and that none of it is checked, then the files
@@ -749,7 +809,8 @@ fn moving_file(file: &MovingFile) -> String {
     let layers = match &file.candidates {
         None => "any layer".to_string(),
         Some(places) if places.is_empty() => {
-            "no layer passes the direction check, for what it imports and what imports it"
+            "no layer passes the direction check and the check of the I/O of the inner layers, for what it imports, \
+             what it does and what imports it"
                 .to_string()
         }
         Some(places) => places.join(", "),

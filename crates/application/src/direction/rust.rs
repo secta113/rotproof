@@ -6,15 +6,16 @@ use std::io;
 use super::{Direction, layer_files};
 use crate::tree::{code_files, is_file, read_code};
 use domain::code::{Dependency as ManifestDependency, Manifest, Origin};
+use domain::declaration::Declared;
 use domain::direction::{
     Forbidden, Landing, Way, edge, judged_landing, landing_of, workspace_dirs,
 };
 use domain::layers::{Layout, Place};
 use domain::modules::{Dependency, judged_crate};
+use domain::outside::outside as outside_of;
 use domain::paths::{join, parent};
 use domain::readers::{Read, read_of};
 use domain::rust::{code, is_source as is_rust, paths, renames};
-use domain::units::Unit;
 use domain::units_doc::link;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -25,16 +26,18 @@ use protocol::outbound::Tree;
 pub(super) fn rust<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
+    declared: &'a Declared,
     layout: &Layout,
     places: &[&'a Place],
     entries: &'a [Place],
-    units: &'a [Unit],
 ) -> io::Result<Direction> {
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
     let mut reads = Vec::new();
     let mut links = Vec::new();
+    let mut outside = Vec::new();
+    let units = &declared.units;
     let mut manifests = Manifests::new(parsers);
     // Each manifest's dependencies that land in a place, by the name the crate's code uses
     let mut depends: BTreeMap<String, Vec<(String, &Place)>> = BTreeMap::new();
@@ -51,6 +54,15 @@ pub(super) fn rust<'a>(
             else {
                 continue;
             };
+            // What an inner layer reads of a crate that no check reads, which the direction check lets through
+            outside.extend(outside_of(
+                declared,
+                from,
+                &path,
+                dependency.line,
+                &dependency.name,
+                std::slice::from_ref(&target),
+            ));
             let Some(to) = landing_of(&target, places, units) else {
                 continue;
             };
@@ -92,6 +104,7 @@ pub(super) fn rust<'a>(
         links,
         moving: None,
         templates: None,
+        outside,
     })
 }
 
@@ -435,7 +448,8 @@ mod tests {
 
     use crate::direction::problems;
     use crate::tree::fake::Fake;
-    use domain::declaration::{Declared, parse_declaration};
+    use domain::declaration::parse_declaration;
+    use domain::units::Unit;
     use infrastructure::outbound::readers::Readers;
 
     /// The text of the manifest of a package `name` with the path dependencies `deps` (name, path from its directory).

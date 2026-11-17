@@ -13,10 +13,19 @@ doc_prefix = " * "
 language = "typescript"
 # The UIs a project may declare besides "none" (the layers of table.toml that name one in `ui`)
 uis = ["atomic"]
-# A view is JSX, and a file with JSX is `.tsx` (or `.jsx`): `presentation` holds none, whatever the file is called, so
-# a test of a hook that needs a wrapper written in JSX goes outside `src/` (nothing there is looked at) or writes the
-# wrapper with `createElement`. The extension is all Rotproof goes by: it reads the imports of a file, not what it
-# draws, so a view written with `createElement` in a `.ts` file is not caught
+# A test sits beside the code it tests, since the layout has no place for tests outside `src/`, so a file is a test by
+# its name, the default of Vitest and Jest: a source file named `*.test.*` or `*.spec.*`, and any file in a
+# `__tests__/` directory. Every rule reads such a file as a test, as it reads what is in Python's `tests/`: no layer
+# holds it, its imports and its reads of the environment are not judged, it may import what the code of a layer may
+# not (a development dependency), and no code that is not a test imports it
+tests = { names = ["*.test.*", "*.spec.*"], directories = ["__tests__"] }
+# The packages an inner layer (`domain`, `protocol`, `application`, `presentation`) may import in every project, by the
+# layer or level of the table: a screen's model keeps its state with React's hooks, so `react` (not `react-dom`, which
+# draws) is allowed there. A project adds to it with `allowed` under `[dependencies]` of its declaration
+allowed = { "presentation.models" = ["react"] }
+# A view is JSX, and a file with JSX is `.tsx` (or `.jsx`): `presentation` holds none, whatever the file is called,
+# unless it is a test (a test of a hook that needs a wrapper written in JSX). The extension is all Rotproof goes by: it
+# reads the imports of a file, not what it draws, so a view written with `createElement` in a `.ts` file is not caught
 no_view = { layers = ["presentation"], extensions = ["tsx", "jsx"], goes = "keep what the screen holds and decides in .ts files, and move the component into src/ui (a provider that hands a model's state to the parts of one screen into src/ui/pages, one of the whole program into src/composition), leaving its context and its state hooks here" }
 # The entry file, where Vite's React starter (`npm create vite -- --template react-ts`) puts it and `index.html` loads
 # it: moving it would mean editing `index.html` too

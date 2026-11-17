@@ -110,6 +110,61 @@ pub struct NoView {
     pub goes: String,
 }
 
+/// How a layout tells a test from the code by its name, where the stack has no place for tests outside the code (a
+/// TypeScript test sits beside the file it tests): the names that the test runners take by default, as data.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tests {
+    /// Patterns on the name of a source file, in any case: `*` stands for any run of characters (`*.test.*`)
+    pub names: Vec<String>,
+    /// Directories whose every file, at any depth, is a test (`__tests__`)
+    pub directories: Vec<String>,
+}
+
+impl Tests {
+    /// Whether the file at `path` is a test: a source file with one of the names, or any file in one of the
+    /// directories.
+    pub fn holds(&self, path: &str) -> bool {
+        let (directories, name) = path.rsplit_once('/').unwrap_or(("", path));
+        self.directories.iter().any(|directory| {
+            directories
+                .split('/')
+                .any(|part| part.eq_ignore_ascii_case(directory))
+        }) || (crate::code::is_source(name) && self.names.iter().any(|pattern| glob(pattern, name)))
+    }
+
+    /// The patterns as `rotproof check` says them: the names, then each directory with a `/`.
+    pub fn patterns(&self) -> Vec<String> {
+        self.names
+            .iter()
+            .cloned()
+            .chain(self.directories.iter().map(|d| format!("{d}/")))
+            .collect()
+    }
+}
+
+/// Whether `text` is matched by `pattern`, in any case, where `*` stands for any run of characters.
+fn glob(pattern: &str, text: &str) -> bool {
+    let (pattern, text) = (pattern.to_ascii_lowercase(), text.to_ascii_lowercase());
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or_default();
+    let Some(mut left) = text.strip_prefix(first) else {
+        return false;
+    };
+    let rest: Vec<&str> = parts.collect();
+    let Some((last, middle)) = rest.split_last() else {
+        // No `*`: the whole name
+        return left.is_empty();
+    };
+    for part in middle {
+        match left.find(part) {
+            Some(at) => left = &left[at + part.len()..],
+            None => return false,
+        }
+    }
+    left.ends_with(last)
+}
+
 /// A template language whose references between templates a layout reads: named by its package and the major versions
 /// it is read as, which the check says on every run.
 #[derive(Debug, Clone, Deserialize)]
@@ -210,6 +265,15 @@ pub struct Layout {
     /// extension
     #[serde(default)]
     pub no_view: Option<NoView>,
+    /// How a test is told from code by its name, in a stack whose tests sit beside the code. `None` while this stack
+    /// keeps its tests in a place of their own (`not_layers`) or in a file the language marks
+    #[serde(default)]
+    pub tests: Option<Tests>,
+    /// The packages an inner layer may import in every project of this stack, by the layer or level of the table
+    /// (`presentation.models`): what the stack's own framework needs there, which a project does not write. Empty
+    /// while this stack has none (Python's; Rust's lists a layer's packages in the crate's own manifest)
+    #[serde(default)]
+    pub allowed: BTreeMap<String, Vec<String>>,
     /// The template files of the UI the layout is for, when its views are templates: code like the code of the layout
     /// where the structure is judged, and read for the references between them. `None` for every other UI, which
     /// [`layout`] sets
@@ -237,6 +301,23 @@ pub enum Language {
     /// The dependencies each crate declares in its `Cargo.toml` (`cargo.rs`), and the comments of `.rs` files with
     /// Rotproof's own scanner (`rust.rs`)
     Rust,
+}
+
+impl Language {
+    /// What the guide calls a test that the checks of what the program does (the environment, the I/O of the inner
+    /// layers) do not judge, in this language.
+    pub fn tests_in_the_guide(self) -> &'static str {
+        match self {
+            Language::Python => "a test (a file in `tests/`)",
+            Language::TypeScript => {
+                "a test (a source file named `*.test.*` or `*.spec.*`, or a file in a `__tests__/` directory)"
+            }
+            Language::Rust => {
+                "a test (the items under `#[cfg(test)]`, the file of a `#[cfg(test)] mod x;`, and what is outside a \
+                 crate's `src/`: `tests/`, `benches/`, `examples/` and `build.rs`)"
+            }
+        }
+    }
 }
 
 /// The unit a place belongs to, as much of it as a rule on places needs (`units.rs` has the rest). A project that
@@ -609,6 +690,13 @@ impl Layout {
             .any(|own| own.eq_ignore_ascii_case(file_name))
     }
 
+    /// Whether the file at `path`, from the root, is a test by its name ([`Layout::tests`]): in every rule a test is
+    /// the one thing code is not, as `not_layers` makes the files of `tests/` in Python. False in a stack that tells
+    /// no test by its name.
+    pub fn is_test_file(&self, path: &str) -> bool {
+        self.tests.as_ref().is_some_and(|tests| tests.holds(path))
+    }
+
     /// The paths that are not layers ([`Layout::not_layers`]) of a unit whose layers sit in `base`.
     pub fn not_layers_in(&self, base: &str) -> Vec<String> {
         self.not_layers
@@ -831,6 +919,21 @@ mod tests {
                     "{stack}: the templates of another UI"
                 );
                 assert_eq!(layout.language, Language::Python, "{stack}: templates");
+            }
+            // The names of a test are those of a source file the readers of the language read, and a directory is one
+            // name
+            if let Some(tests) = &layout.tests {
+                assert_eq!(layout.language, Language::TypeScript, "{stack}: tests");
+                assert!(!tests.names.is_empty(), "{stack}: no name of a test");
+                for name in &tests.names {
+                    assert!(name.contains('*'), "{stack}: {name} names no run");
+                }
+                for directory in &tests.directories {
+                    assert!(
+                        !directory.is_empty() && !directory.contains(['/', '*']),
+                        "{stack}: {directory} is no directory name"
+                    );
+                }
             }
             // The Python reader names a module after its `.py` file, and the marker check reads every code file of a
             // Python layout without asking
@@ -1175,6 +1278,63 @@ mod tests {
     }
 
     #[test]
+    fn a_typescript_test_is_told_by_the_names_of_the_test_runners_and_no_other_stack_tells_one_by_its_name()
+     {
+        let layout = layout("typescript", "atomic").unwrap();
+        for test in [
+            "src/domain/song.test.ts",
+            "src/domain/song.spec.tsx",
+            "src/domain/song.test.js",
+            "src/domain/Song.TEST.TS",
+            "src/domain/song.test.d.ts",
+            "src/domain/a.b.spec.mts",
+            "src/domain/__tests__/helper.ts",
+            "src/domain/__tests__/deep/fixture.json",
+            "src/__tests__/a.ts",
+            "src/domain/song.test.min.ts",
+        ] {
+            assert!(layout.is_test_file(test), "{test}");
+        }
+        for code in [
+            "src/domain/song.ts",
+            "src/domain/test.ts",
+            "src/domain/spec.ts",
+            "src/domain/song-test.ts",
+            "src/domain/contest.ts",
+            "src/domain/song.tests.ts",
+            "src/domain/song.test",
+            "src/domain/song.test.json",
+            "src/domain/tests/helper.ts",
+            "src/domain/__tests__.ts",
+            "src/domain/__snapshots__/a.ts",
+            "src/test/a.ts",
+        ] {
+            assert!(!layout.is_test_file(code), "{code}");
+        }
+        assert_eq!(
+            layout.tests.as_ref().unwrap().patterns(),
+            ["*.test.*", "*.spec.*", "__tests__/"]
+        );
+        // Python's tests are a place, and Rust's sit in `#[cfg(test)]` or outside `src/`: no name tells one
+        for stack in ["python", "rust"] {
+            let layout = super::layout(stack, NO_UI).unwrap();
+            assert!(layout.tests.is_none(), "{stack}");
+            assert!(!layout.is_test_file("src/a.test.ts") && !layout.is_test_file("tests/a.py"));
+        }
+    }
+
+    #[test]
+    fn a_pattern_is_matched_in_any_case_and_a_star_stands_for_any_run() {
+        assert!(glob("*.test.*", "a.test.ts") && glob("*.TEST.*", "a.test.ts"));
+        assert!(glob("*.test.*", "a.b.test.c.ts") && !glob("*.test.*", "atest.ts"));
+        assert!(glob("a*c*e", "abcde") && glob("a*c*e", "ace") && !glob("a*c*e", "abde"));
+        assert!(glob("exact.ts", "Exact.ts") && !glob("exact.ts", "exact.tsx"));
+        assert!(glob("*", "anything") && !glob("a*", "ba"));
+        // The parts do not overlap: `*.test.*` needs both dots
+        assert!(!glob("*.test.*", "a.test") && !glob("a*a", "a"));
+    }
+
+    #[test]
     fn a_template_is_code_in_the_layout_for_the_ui_whose_views_they_are_and_nowhere_else() {
         let rendered = layout("python", "rendered").unwrap();
         assert!(rendered.uis.contains(&"rendered".to_string()));
@@ -1193,6 +1353,37 @@ mod tests {
         }
         assert!(layout("typescript", "atomic").unwrap().templates.is_none());
         assert!(layout("typescript", "rendered").is_none());
+    }
+
+    #[test]
+    fn the_packages_a_layout_allows_are_for_the_places_of_the_layers_the_rule_judges() {
+        let table = table();
+        for (stack, _) in STACKS {
+            let layout = layout(stack, "atomic").or_else(|| super::layout(stack, NO_UI));
+            let layout = layout.unwrap();
+            for (key, names) in &layout.allowed {
+                let place = layout
+                    .places(&table)
+                    .into_iter()
+                    .find(|place| &place.name == key)
+                    .unwrap_or_else(|| panic!("{stack}: {key} is no place"));
+                assert!(
+                    crate::inner_io::is_judged(&place),
+                    "{stack}: {key} is not a layer the rule judges"
+                );
+                assert!(!names.is_empty() && names.iter().all(|name| name == name.trim()));
+            }
+        }
+        // React's hooks keep the state of a screen's model; nothing draws there, so `react-dom` is no name of it
+        let typescript = layout("typescript", "atomic").unwrap();
+        assert_eq!(
+            typescript.allowed,
+            BTreeMap::from([("presentation.models".to_string(), vec!["react".to_string()])])
+        );
+        for stack in ["python", "rust"] {
+            let ui = if stack == "rust" { NO_UI } else { "atomic" };
+            assert!(layout(stack, ui).unwrap().allowed.is_empty(), "{stack}");
+        }
     }
 
     #[test]

@@ -1,6 +1,8 @@
-//! Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl`.
+//! Where a TypeScript import lands, the tree asked whether a module is under a `baseUrl`, and whether the module is a
+//! test.
 
 use domain::code::{Aliases, Landing, Reach, module_files};
+use domain::layers::Layout;
 use protocol::outbound::Tree;
 
 /// The declaration and the TypeScript source an import of a `.js` file stands for, which a project that writes `.js` in
@@ -48,6 +50,16 @@ fn is_there(tree: &dyn Tree, path: &str) -> bool {
     module_candidates(path)
         .iter()
         .any(|file| tree.found(file) == Some(false))
+}
+
+/// Whether the module an import lands at, `path` from the root, is a test of the layout ([`Layout::is_test_file`]): a
+/// path in a directory of tests, a file named as a test, or a module written without its extension that a file named
+/// as a test is there for (`./song.test` is `song.test.ts`, which is no test only by its extension's absence).
+pub fn is_test_module(tree: &dyn Tree, layout: &Layout, path: &str) -> bool {
+    layout.is_test_file(path)
+        || module_candidates(path)
+            .iter()
+            .any(|file| layout.is_test_file(file) && tree.found(file) == Some(false))
 }
 
 /// The files a module at `path` can be, any one of them enough, which `is_there` looks for and the code that is moving

@@ -18,6 +18,7 @@ use crate::direction::present_places;
 use crate::tree::{is_file, read_code};
 use domain::declaration::Declared;
 use domain::dependencies::Listing;
+pub use domain::dependencies::Use;
 use domain::layers::{Language, table};
 use protocol::outbound::{Parsers, Tree};
 
@@ -31,6 +32,55 @@ struct Read {
     any: bool,
     /// The runtime dependencies every manifest read lists, as the language compares names
     runtime: BTreeSet<String>,
+    /// Every dependency every manifest read lists, of any kind, as the language compares names
+    listed: BTreeSet<String>,
+    /// Every import of a package (not of a unit, the standard library or a module of the project) in the code the
+    /// check reads, tests included, whether or not the unit has a manifest: Python and TypeScript, and none in Rust,
+    /// whose crates are not told from the paths that name them
+    packages: Vec<Use>,
+    /// Every import of a package in the files that are moving, which the check reads for nothing else: they are no part
+    /// of what the manifests are compared with. Only for the files `read_all` was asked for (`Ask::Moving`)
+    moving: Vec<Use>,
+}
+
+/// The packages the code of a project imports, and what its manifests list: what the allowlist of the inner layers
+/// (`inner_io.rs`) is judged by, read as the dependencies check reads them.
+#[derive(Debug, Default)]
+pub struct Packages {
+    /// Whether any manifest was read
+    pub manifests: bool,
+    /// What every manifest read lists, of any kind, as the language compares names
+    pub listed: BTreeSet<String>,
+    /// Each import of a package, in the order of the files and the lines of the code of the layers and the entry
+    /// files, then the tests
+    pub uses: Vec<Use>,
+}
+
+/// What the dependencies check reads of `declared`, with the findings dropped: Python and TypeScript only.
+pub fn packages(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    declared: &Declared,
+) -> io::Result<Packages> {
+    let read = read_all(tree, parsers, declared, Ask::Whole, &mut Vec::new())?;
+    Ok(Packages {
+        manifests: read.any,
+        listed: read.listed,
+        uses: read.packages,
+    })
+}
+
+/// Every import of a package, as the check reads one, in each of the code files `files` that are moving into the
+/// layers (`moving` in the declaration): the packages they need as the code of a layer would, by the unit whose
+/// directory holds each file. They are compared with no manifest, as the code of no layer is. Python and TypeScript
+/// only.
+pub fn packages_of(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    declared: &Declared,
+    files: &[String],
+) -> io::Result<Vec<Use>> {
+    Ok(read_all(tree, parsers, declared, Ask::Moving(files), &mut Vec::new())?.moving)
 }
 
 /// Every finding of the dependencies check of `declared`, in the order of the manifests. An error is a file that
@@ -44,20 +94,8 @@ pub fn problems(
         // A repository of records only has no code to compare
         return Ok(Vec::new());
     };
-    let places = present_places(tree, declared);
-    let entries = declared.entries(&table());
     let mut found = Vec::new();
-    let read = match layout.language {
-        Language::Python => python::python(
-            tree, parsers, declared, layout, &places, &entries, &mut found,
-        )?,
-        Language::TypeScript => typescript::typescript(
-            tree, parsers, declared, layout, &places, &entries, &mut found,
-        )?,
-        Language::Rust => rust::rust(
-            tree, parsers, declared, layout, &places, &entries, &mut found,
-        )?,
-    };
+    let read = read_all(tree, parsers, declared, Ask::Whole, &mut found)?;
     if read.any {
         for name in
             domain::dependencies::stale(&without_import(declared, layout.language), &read.runtime)
@@ -70,6 +108,40 @@ pub fn problems(
         }
     }
     Ok(found)
+}
+
+/// What a reading is for.
+#[derive(Clone, Copy)]
+enum Ask<'a> {
+    /// The manifests and every import of the code the check reads, compared
+    Whole,
+    /// The imports of a package in these files that are moving, and nothing else: the code of the layers is not read
+    Moving(&'a [String]),
+}
+
+/// The manifests and the code of `declared` read by the reader of its language, the findings of the comparison into
+/// `found`, or, when only the files that are moving are asked for, the imports of a package in them.
+fn read_all(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    declared: &Declared,
+    ask: Ask,
+    found: &mut Vec<String>,
+) -> io::Result<Read> {
+    let Some(layout) = &declared.layout else {
+        return Ok(Read::default());
+    };
+    let places = present_places(tree, declared);
+    match layout.language {
+        Language::Python => python::python(tree, parsers, declared, layout, &places, ask, found),
+        Language::TypeScript => {
+            typescript::typescript(tree, parsers, declared, layout, &places, ask, found)
+        }
+        Language::Rust => {
+            let entries = declared.entries(&table());
+            rust::rust(tree, parsers, declared, layout, &places, &entries, found)
+        }
+    }
 }
 
 /// The names `without_import` lists, as the language compares names.

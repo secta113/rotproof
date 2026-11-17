@@ -11,6 +11,10 @@
 //!   that module; one built at run time (a variable, an f-string, a relative name) is not seen.
 //! - The entry file, which is no layer, is judged as a place of its own that may import what the table's `entry` lists.
 //!   Nothing may import it.
+//! - A test is no code of a layer, and its imports are not read: Python's `tests/` (a path that is no layer) and, in
+//!   TypeScript, the files the layout names as tests (`*.test.*`, `__tests__/`). Code that is not a test imports no
+//!   test, whatever layer it is in: an import that lands in one is forbidden ([`imports_test`]), and approved as
+//!   any other is.
 //!
 //! The layout's `language` says how the code is read. For `python`, a module is named by its dotted name
 //! (`python.rs`), and its parts joined with `/` are its path. For `typescript`, an import is resolved to a path
@@ -220,12 +224,25 @@ pub struct Edge {
 
 /// An import the table forbids: the file that imports, what it imports as the check names it (a Python dotted name,
 /// `m.n` for `from m import n`; a TypeScript specifier; a crate's dependency), and the finding. The file and the
-/// import are what an approval is keyed by (`approvals.rs`).
+/// import are what an approval is keyed by (`approvals.rs`). An entry of the table of I/O the inner layers do none of
+/// ([`crate::inner_io`]) is kept the same way, as the `import`: `shutil`, `std::fs`, `fs`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Forbidden {
     pub file: String,
     pub import: String,
     pub detail: String,
+    /// The rule that found it, which says where the finding is printed
+    pub rule: Rule,
+}
+
+/// The rule that forbids an import.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rule {
+    /// The layer table: the import lands where the layer may not import
+    Direction,
+    /// The inner layers do no I/O: the import is of a table entry, and these are the names the file uses under it,
+    /// which an approval prints on every run
+    InnerIo { names: Vec<String> },
 }
 
 /// The import of `import` by `file`, on `line`, that lands in `to`, when the table forbids it from `from`. `what`
@@ -239,6 +256,22 @@ pub fn judged(
     to: &Place,
 ) -> Option<Forbidden> {
     judged_landing(file, line, import, what, from, to, &Way::default())
+}
+
+/// The import of `import` by `file`, on `line`, of a test, which code that is not a test never imports: a test is no
+/// layer's code, so what is imported out of it belongs to no layer. `what` says what was imported, as "imports x", and
+/// `test` where it is: "a test file (*.test.*, __tests__/)" or "in tests/, which holds tests". A test importing a test
+/// is not judged.
+pub fn imports_test(file: &str, line: usize, import: &str, what: &str, test: &str) -> Forbidden {
+    Forbidden {
+        file: file.to_string(),
+        import: import.to_string(),
+        detail: format!(
+            "{file}:{line}: {what}, {test}; code that is not a test imports no test: move what it needs out of the \
+             test into a layer"
+        ),
+        rule: Rule::Direction,
+    }
 }
 
 /// [`judged`] for an import that lands in a place or in a unit's code outside its layers. `way` says how the stack
@@ -273,6 +306,7 @@ pub fn judged_landing<'a>(
         file: file.to_string(),
         import: import.to_string(),
         detail: format!("{file}:{line}: {what}, {described}; {reason}{hint}"),
+        rule: Rule::Direction,
     })
 }
 

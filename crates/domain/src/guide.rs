@@ -82,6 +82,7 @@ fn layers_section(layout: &Layout) -> String {
         Language::Rust => DIRECTION_CARGO,
     };
     let rules = [
+        crate::inner_io::guide(layout.language),
         crate::environment::guide(layout.language),
         crate::suppressions::guide(layout.language).to_string(),
         crate::dependencies::guide(layout.language).to_string(),
@@ -185,21 +186,40 @@ fn capitalized(text: &str) -> String {
         .collect()
 }
 
-/// The paths of the layout that are no layer, on a line of their own in the list item; nothing when there are none.
+/// The paths of the layout that are no layer, and the names that make a file a test, each on a line of their own in the
+/// list item; nothing when there are none.
 fn not_layers(layout: &Layout) -> String {
-    if layout.not_layers.is_empty() {
-        return String::new();
+    let mut text = String::new();
+    if !layout.not_layers.is_empty() {
+        // Paths from the root, as `unchecked` writes them
+        text.push_str(&format!(
+            "\n  {} {}, and may hold code: a test imports any layer, and no code that is not a test imports one.",
+            listed(&layout.not_layers),
+            if layout.not_layers.len() == 1 {
+                "is not a layer"
+            } else {
+                "are not layers"
+            }
+        ));
     }
-    // Paths from the root, as `unchecked` writes them
-    format!(
-        "\n  {} {}, and may hold code.",
-        listed(&layout.not_layers),
-        if layout.not_layers.len() == 1 {
-            "is not a layer"
-        } else {
-            "are not layers"
-        }
-    )
+    if let Some(tests) = &layout.tests {
+        let names: Vec<String> = tests.names.iter().map(|n| format!("`{n}`")).collect();
+        let directories: Vec<String> = tests
+            .directories
+            .iter()
+            .map(|d| format!("`{d}/`"))
+            .collect();
+        text.push_str(&format!(
+            "\n  A source file named {}, and any file in {}, is a test: the names Vitest and Jest take by\n  default, \
+             and the only way Rotproof tells a test, since a test sits beside the code it tests. A test is no\n  code \
+             of a layer: it imports any layer, uses the packages of `devDependencies`, reads the environment and\n  \
+             sits in any directory of `src/`, and `rotproof check` prints how many files it read as tests\n  \
+             (`tests:`). No code that is not a test imports one: move what both need out of the test into a layer.",
+            names.join(" or "),
+            directories.join(" or ")
+        ));
+    }
+    text
 }
 
 /// The rules of the screens, when the layout has `ui`: atomic design, and where a view may not go.

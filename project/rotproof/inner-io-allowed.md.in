@@ -1,0 +1,18 @@
+- **The inner layers import only the packages they are allowed.** {what} `rotproof check` fails on an import, in the
+  code of `domain`, `protocol`, `application` and `presentation` and of their levels, of a package that is not allowed
+  for that layer or level (another unit, the standard library and a module of the project are no package, and a test
+  is not judged), and the finding starts with what to do: move the code that needs the package to `infrastructure`,
+  behind a port the use case is given, or, when the package does no I/O, ask the person whether to allow it. What is
+  allowed is written under `allowed` in `[dependencies]` of `.config/rotproof.toml`, by layer or level:
+  `allowed = { domain = ["pydantic"], protocol = ["pydantic"], "presentation.models" = ["zustand"] }`. A layer's key
+  covers its levels, a level's key adds to that level, and a name is the one the manifest lists. **Write a dotted key in
+  quotes:** `presentation.models = [...]` without them is read as a table inside `presentation`, and the declaration
+  fails. A `[[unit]]` table has its own `allowed`, added to the project's for the code of that unit. {default}The
+  declaration fails on a key for a layer or level that the project (or the unit) lacks, and for `infrastructure`,
+  `composition` or `ui`, which import any package; and on a name that no manifest of the project lists, that no file
+  of that layer or level imports, or that is allowed twice for the same code: take it out, so that the list does not
+  keep what is gone. **Allowing a package is a decision of the person.** Never add, change or take out a name of
+  `allowed` to pass the check, as with `todo_link` and `approved_max`; `rotproof init` and `rotproof create` never
+  write it, and nothing drafts it from the code. A finding that cannot be fixed now is approved as any forbidden
+  import is, with `rotproof approve <file> <package> --reason "<why>"` (the user asks for it; the package as the finding
+  names it): one approval covers every import of that package in that file, and `rotproof check` prints it with the imports the file now makes of it.

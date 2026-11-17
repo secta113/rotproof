@@ -11,6 +11,8 @@
 //!
 //! [`outline`] reads the definitions of a file from its tokens, for a knowledge document that follows one.
 
+use std::collections::BTreeMap;
+
 mod outline;
 
 pub use outline::outline;
@@ -278,46 +280,142 @@ fn path_tree(
     }
 }
 
+/// What the code names of a module: an item of it, or every item of it or of a module above it at once.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Item {
+    /// The item that follows the module in the path, wherever the path goes on after it: `Command` for
+    /// `std::process::Command::new` and for `std::process::Command`
+    Named(String),
+    /// A glob (`use std::process::*;`) of the module, or of a module above it (`use std::*;`), which brings in names
+    /// the scanner cannot tell. The path it is of.
+    Glob(Vec<String>),
+}
+
 /// Every item of the module at `module` (`["std", "env"]`) the code alone ([`code`]) names, with the offset where the
-/// path starts, in order: by its whole path (`std::env::var`), in a `use` (`use std::env::var`, `use std::env::{self,
-/// var}`), and through the module's last name once a `use` binds it (`use std::env;` or `use std::{env, fs}`, then
-/// `env::var`). A rename (`use std::env as e`) and a path from `::` are not followed, as [`paths`] drops them.
-pub fn items(code: &str, module: &[&str]) -> Vec<(usize, String)> {
-    let (Some(first), Some(last)) = (module.first(), module.last()) else {
+/// path starts, in order. A path names an item of the module when it goes through the module and on to a name:
+///
+/// - by its whole path, in an expression, a type or a `use` (`std::env::var`, `std::process::Command::new`, `use
+///   std::env::{self, var}`), from `::` too;
+/// - through a name a `use` binds to the module or to a module above it (`use std::env;` or `use std::{env, fs}`, then
+///   `env::var`);
+/// - through a rename of the module or of a module above it, and a rename of a rename (`use std::env as e;`, `use std
+///   as s;` then `s::env::var`, `use std::{self as s, env as e}`, `extern crate std as s;`).
+///
+/// A glob of the module or of a module above it (`use std::env::*;`, `use std::*;`) is an [`Item::Glob`], whatever it
+/// is used for. What is not followed: a name bound in one file and used through another (`pub use std::env;` in one
+/// module, `reexport::env::var` in the next), a path a macro builds from pieces, and a name that stands for another
+/// module where it is bound a second time: a file is one scope, so a name bound twice stands for both.
+pub fn items(code: &str, module: &[&str]) -> Vec<(usize, Item)> {
+    let Some(first) = module.first() else {
         return Vec::new();
     };
-    let item = |segments: &[String], prefix: &[&str]| match segments.split_last() {
-        Some((name, rest)) if rest.iter().map(String::as_str).eq(prefix.iter().copied()) => {
-            Some(name.clone())
-        }
-        _ => None,
-    };
+    let module: Vec<String> = module.iter().map(|s| s.to_string()).collect();
+    let names = names_for(code, &module);
+    let mut starts = vec![*first];
+    starts.extend(names.keys().map(String::as_str));
     let mut found = Vec::new();
-    let mut binds = false;
-    for (at, segments) in paths(code, &[first]) {
-        if segments
-            .iter()
-            .map(String::as_str)
-            .eq(module.iter().copied())
-        {
-            binds = true;
-        } else if let Some(name) = item(&segments, module) {
-            if name == "self" {
-                binds = true;
-            } else {
-                found.push((at, name));
+    for (at, segments) in paths(code, &starts) {
+        let mut roots = names.get(&segments[0]).cloned().unwrap_or_default();
+        if segments[0] == module[0] && !roots.contains(&module[..1].to_vec()) {
+            roots.push(module[..1].to_vec());
+        }
+        for root in roots {
+            let full: Vec<String> = root
+                .into_iter()
+                .chain(segments[1..].iter().cloned())
+                .collect();
+            if let Some(item) = reach(&full, &module) {
+                found.push((at, item));
             }
         }
     }
-    if binds {
-        found.extend(
-            paths(code, &[last])
-                .into_iter()
-                .filter_map(|(at, segments)| item(&segments, &[last]).map(|name| (at, name))),
-        );
-    }
     found.sort();
+    found.dedup();
     found
+}
+
+/// What the path `full`, written from the start of the crate's dependencies, names of `module`, if it goes through it.
+fn reach(full: &[String], module: &[String]) -> Option<Item> {
+    let n = module.len();
+    if full.len() > n && full[..n] == *module {
+        return match full[n].as_str() {
+            // `use std::env::self` binds the module and names no item of it
+            "self" => None,
+            "*" => Some(Item::Glob(module.to_vec())),
+            name => Some(Item::Named(name.to_string())),
+        };
+    }
+    match full.split_last() {
+        Some((last, parent)) if last == "*" && !parent.is_empty() && parent.len() < n => module
+            .starts_with(parent)
+            .then(|| Item::Glob(parent.to_vec())),
+        _ => None,
+    }
+}
+
+/// The names the code alone ([`code`]) binds to the item at `item` itself (`["std", "time", "UNIX_EPOCH"]`), which a
+/// use with no `::` after it names: by a `use` that names it (`use std::time::UNIX_EPOCH;` binds `UNIX_EPOCH`), and by
+/// a rename of it or of a name that stands for it (`use std::time::UNIX_EPOCH as E;`). A name that stands for a module
+/// above the item (`use std::time;`) is no name of the item: [`items`] reads what is reached through it. The name a
+/// rename leaves (`UNIX_EPOCH` of `UNIX_EPOCH as E`) is read as bound as well, which is the side that fails.
+pub fn bound_names(code: &str, item: &[&str]) -> Vec<String> {
+    if item.is_empty() {
+        return Vec::new();
+    }
+    let item: Vec<String> = item.iter().map(|s| s.to_string()).collect();
+    names_for(code, &item)
+        .into_iter()
+        .filter(|(_, paths)| paths.contains(&item))
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// The names the code alone binds to the module, or to a module above it (a prefix of `module`, the whole of it
+/// included), with every path each stands for: by a `use` that names it (`use std::env;` binds `env`), by a rename
+/// (`use std::env as e;`), and by a rename of a name bound so (`use std as s;`, `use s::env as e;`).
+fn names_for(code: &str, module: &[String]) -> BTreeMap<String, Vec<Vec<String>>> {
+    let mut names: BTreeMap<String, Vec<Vec<String>>> = BTreeMap::new();
+    let is_above = |path: &[String]| path.len() <= module.len() && module.starts_with(path);
+    for (_, mut segments) in paths(code, &[module[0].as_str()]) {
+        if segments.len() > 1 && segments.last().map(String::as_str) == Some("self") {
+            segments.pop();
+        }
+        if is_above(&segments) {
+            let entry = names
+                .entry(segments[segments.len() - 1].clone())
+                .or_default();
+            if !entry.contains(&segments) {
+                entry.push(segments);
+            }
+        }
+    }
+    let renamed = renames(code);
+    // A chain of renames (`use s::env as e;`) is followed one link a round
+    for _ in 0..=renamed.len() {
+        let mut changed = false;
+        for (_, name, target) in &renamed {
+            let mut roots = names.get(&target[0]).cloned().unwrap_or_default();
+            if target[0] == module[0] {
+                roots.push(module[..1].to_vec());
+            }
+            for root in roots {
+                let full: Vec<String> = root
+                    .into_iter()
+                    .chain(target[1..].iter().cloned())
+                    .collect();
+                let entry = names.entry(name.clone()).or_default();
+                if is_above(&full) && !entry.contains(&full) {
+                    entry.push(full);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    names.retain(|_, paths| !paths.is_empty());
+    names
 }
 
 /// Every module the code alone ([`code`]) declares with a body (`mod tests { ... }`): its name, and the offsets of its
@@ -376,6 +474,97 @@ pub fn attributes(code: &str, name: &str) -> Vec<usize> {
         }
     }
     out
+}
+
+/// The end of the item that starts at `start` in the code alone ([`code`]): past the `}` that closes its first `{`, or
+/// past the `;` that ends it before any `{`, a `;` inside parentheses or brackets (`[u8; 4]`) not counted. An item left
+/// open runs to the end.
+pub fn item_end(code: &str, start: usize) -> usize {
+    let b = code.as_bytes();
+    let (mut depth, mut nested) = (0usize, 0usize);
+    for (i, &c) in b.iter().enumerate().skip(start) {
+        match c {
+            b'(' | b'[' => nested += 1,
+            b')' | b']' => nested = nested.saturating_sub(1),
+            b';' if depth == 0 && nested == 0 => return i + 1,
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    b.len()
+}
+
+/// The text a test item is marked with: the one form `rustfmt` writes. `cfg(all(test, ...))` and `cfg(any(test, ...))`
+/// are not read as tests.
+const CFG_TEST: &str = "#[cfg(test)]";
+
+/// The code alone ([`code`]) with every item under `#[cfg(test)]` blanked with spaces, its line breaks kept (`mod
+/// tests { ... }`, a function, a `use`, a `mod tests;`), and the whole of it for a file that starts with
+/// `#![cfg(test)]`: what a test compiles and the program does not. The same offsets and lines as `code`.
+pub fn without_tests(code: &str) -> String {
+    if code.contains("#![cfg(test)]") {
+        return blanked(code, &[(0, code.len())]);
+    }
+    let skipped: Vec<(usize, usize)> = code
+        .match_indices(CFG_TEST)
+        .map(|(at, _)| (at, item_end(code, at)))
+        .collect();
+    blanked(code, &skipped)
+}
+
+/// The names of the modules a file declares without a body under `#[cfg(test)]` (`#[cfg(test)] mod tests;`), whose
+/// files are tests.
+pub fn test_modules(code: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for (at, _) in code.match_indices(CFG_TEST) {
+        let end = item_end(code, at);
+        let tokens = tokens(&code[at + CFG_TEST.len()..end]);
+        // The depth of each token: a module inside one that has a body is that body's, not this file's
+        let mut depth = 0usize;
+        let depths: Vec<usize> = tokens
+            .iter()
+            .map(|(_, token)| {
+                match token {
+                    Token::Punct('{') => depth += 1,
+                    Token::Punct('}') => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                depth
+            })
+            .collect();
+        for (i, window) in tokens.windows(3).enumerate() {
+            if let [
+                (_, Token::Word(keyword)),
+                (_, Token::Word(name)),
+                (_, Token::Punct(';')),
+            ] = window
+                && keyword == "mod"
+                && depths[i] == 0
+            {
+                found.push(name.clone());
+            }
+        }
+    }
+    found
+}
+
+/// `code` with each byte range of `ranges` blanked with spaces, its line breaks kept.
+fn blanked(code: &str, ranges: &[(usize, usize)]) -> String {
+    let mut bytes = code.as_bytes().to_vec();
+    for &(start, end) in ranges {
+        for byte in &mut bytes[start..end] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+    }
+    String::from_utf8(bytes).expect("only whole characters are blanked, each byte with a space")
 }
 
 /// What the scanner sets apart from the code.
@@ -553,11 +742,7 @@ mod m { pub fn x() {} }
 fn c() { m::x(); std::fs::read(\"f\"); }
 ",
         );
-        let names: Vec<String> = items(&named, &["std", "env"])
-            .into_iter()
-            .map(|(_, name)| name)
-            .collect();
-        assert_eq!(names, ["var", "args", "vars"]);
+        assert_eq!(named_in(&named, &["std", "env"]), ["var", "args", "vars"]);
         // Without a `use` of the module, its last name is the file's own
         assert!(
             items(
@@ -566,6 +751,146 @@ fn c() { m::x(); std::fs::read(\"f\"); }
             )
             .is_empty()
         );
+    }
+
+    /// What a source names of `module`, as text: an item by its name, a glob as the path it is of and `::*`
+    fn named_in(source: &str, module: &[&str]) -> Vec<String> {
+        items(&code(source), module)
+            .into_iter()
+            .map(|(_, item)| match item {
+                Item::Named(name) => name,
+                Item::Glob(path) => format!("{}::*", path.join("::")),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_item_is_named_wherever_the_path_goes_on_after_it() {
+        let source = "\
+fn a() { std::process::Command::new(\"x\").arg(\"y\"); }
+use std::process;
+fn b(_: process::Child) { process::Command::new(\"x\"); process::exit(1); }
+fn c() { ::std::process::Stdio::piped(); }
+use std::process::{ExitCode, self as q};
+";
+        assert_eq!(
+            named_in(source, &["std", "process"]),
+            ["Command", "Child", "Command", "exit", "Stdio", "ExitCode"]
+        );
+        // The module's own name, bound and not followed by anything, names no item
+        assert!(
+            named_in(
+                "use std::process;\nuse std::process::self;\n",
+                &["std", "process"]
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_rename_of_the_module_or_of_a_module_above_it_is_followed() {
+        let source = "\
+use std::io as sio;
+fn a() { sio::stdin(); }
+use std as s;
+fn b() { s::io::stdout(); }
+use std::{self as t, fs};
+fn c() { t::io::stderr(); }
+use std::{io::{self as u}};
+fn d() { u::Stdin::new(); }
+extern crate std as v;
+fn e() { v::io::empty(); }
+";
+        assert_eq!(
+            named_in(source, &["std", "io"]),
+            ["stdin", "stdout", "stderr", "Stdin", "empty"]
+        );
+    }
+
+    #[test]
+    fn the_names_that_stand_for_an_item_itself_are_the_ones_a_use_or_a_rename_binds() {
+        let names = |source: &str| {
+            let mut found = bound_names(&code(source), &["std", "time", "UNIX_EPOCH"]);
+            found.sort();
+            found
+        };
+        assert_eq!(names("use std::time::UNIX_EPOCH;"), ["UNIX_EPOCH"]);
+        // The name a rename leaves is read as bound too, which is the side that fails
+        assert_eq!(
+            names("use std::time::{self, UNIX_EPOCH as E};"),
+            ["E", "UNIX_EPOCH"]
+        );
+        assert_eq!(names("use std as s;\nuse s::time::UNIX_EPOCH as e;"), ["e"]);
+        // A module above it is no name of the item, nor is another item
+        assert!(names("use std::time;\nuse std::time::Instant;").is_empty());
+        assert!(bound_names("", &[]).is_empty());
+    }
+
+    #[test]
+    fn a_rename_of_a_rename_is_followed_in_any_order_of_the_file() {
+        let source = "\
+fn a() { e::stdin(); }
+use s::io as e;
+use std as s;
+use std::fs as f;
+fn b() { f::read(\"x\"); g::read(\"y\"); }
+";
+        assert_eq!(named_in(source, &["std", "io"]), ["stdin"]);
+        assert_eq!(named_in(source, &["std", "fs"]), ["read"]);
+    }
+
+    #[test]
+    fn a_module_of_three_names_is_followed_through_each_of_its_parents() {
+        let source = "\
+use std::os::unix as u;
+use std::os;
+fn a() { u::fs::symlink(); os::unix::process::exit(); std::os::unix::io::x(); }
+use std::os::windows as w;
+fn b() { w::fs::symlink(); }
+";
+        assert_eq!(
+            named_in(source, &["std", "os", "unix"]),
+            ["fs", "process", "io"]
+        );
+    }
+
+    #[test]
+    fn a_glob_of_the_module_or_of_a_module_above_it_is_named_as_a_glob() {
+        let source = "\
+use std::io::*;
+use std::{io::*, fs::*};
+use std as s;
+use s::io::*;
+use std::*;
+use std::process::*;
+use std::io as e;
+use e::*;
+";
+        assert_eq!(
+            named_in(source, &["std", "io"]),
+            [
+                "std::io::*",
+                "std::io::*",
+                "std::io::*",
+                "std::*",
+                "std::io::*"
+            ]
+        );
+    }
+
+    #[test]
+    fn what_stands_for_another_module_or_is_not_code_is_not_named() {
+        let source = "\
+use std::io::Read;
+use my::io;
+use other as o;
+// std::io::stdin();
+fn a() { let _ = \"std::io::stdin()\"; o::io::stdin(); crate::io::stdin(); a::std::io::stdin(); }
+use std::fs as f;
+use std::io::{Read as _};
+fn b() { f::read(\"x\"); }
+";
+        assert_eq!(named_in(source, &["std", "io"]), ["Read", "Read"]);
     }
 
     fn texts(source: &str) -> Vec<String> {
@@ -748,6 +1073,65 @@ let k = '/'; let l = 'é'; let m = '\u{2F}'; // four
             attributes(&code(source), "path"),
             [0, source.find("#![").unwrap()]
         );
+    }
+
+    #[test]
+    fn an_item_ends_at_its_closing_brace_or_its_semicolon_but_not_one_inside_brackets() {
+        let source = "#[cfg(test)] fn f(a: [u8; 2]) -> [u8; 4] { [0; 4] } fn g() {}";
+        let end = item_end(source, 0);
+        assert_eq!(
+            &source[..end],
+            "#[cfg(test)] fn f(a: [u8; 2]) -> [u8; 4] { [0; 4] }"
+        );
+        let source = "#[cfg(test)] use std::fs; fn g() {}";
+        assert_eq!(&source[..item_end(source, 0)], "#[cfg(test)] use std::fs;");
+        let source = "#[cfg(test)] struct S { a: [u8; 2] }\nstruct T;";
+        assert_eq!(
+            &source[..item_end(source, 0)],
+            "#[cfg(test)] struct S { a: [u8; 2] }"
+        );
+        // One left open runs to the end
+        assert_eq!(item_end("fn f() {", 0), 8);
+    }
+
+    #[test]
+    fn the_items_under_cfg_test_are_blanked_with_the_lines_kept() {
+        let source = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n#[cfg(test)]\nuse x::y;\nfn b() {}\n";
+        let blanked = without_tests(&code(source));
+        assert_eq!(blanked.len(), source.len());
+        assert_eq!(blanked.lines().count(), source.lines().count());
+        assert!(blanked.contains("fn a() {}") && blanked.contains("fn b() {}"));
+        assert!(
+            !blanked.contains("tests") && !blanked.contains("x::y") && !blanked.contains("cfg")
+        );
+        // A file that is a test as a whole, and a `cfg` that is not the one form
+        assert!(
+            without_tests(&code("#![cfg(test)]\nfn a() {}\n"))
+                .trim()
+                .is_empty()
+        );
+        let other = "#[cfg(not(test))]\nfn a() {}\n#[cfg(any(test, unix))]\nfn b() {}\n";
+        assert_eq!(without_tests(&code(other)), other);
+        // In a string or a comment it is nothing
+        let text = "// #[cfg(test)]\nfn a() { let _ = \"#[cfg(test)]\"; }\n";
+        assert_eq!(without_tests(&code(text)), code(text));
+    }
+
+    #[test]
+    fn the_modules_declared_under_cfg_test_without_a_body_are_named() {
+        let source = "\
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+pub(crate) mod more_tests;
+#[cfg(test)]
+mod inline { mod inner; }
+mod real;
+#[cfg(test)]
+use x::y;
+";
+        // An inline one has no file of its own, and a module that is not under `cfg(test)` is code
+        assert_eq!(test_modules(&code(source)), ["tests", "more_tests"]);
     }
 
     #[test]

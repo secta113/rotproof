@@ -1,13 +1,16 @@
 //! The structure check, read from the tree: the declaration, the paths the rules name and the code files of the
 //! directories they list, judged by the rules in `domain`.
 
+use std::collections::BTreeSet;
 use std::io;
 
 use crate::layers::read;
 use crate::tree::{code_files, exactly};
+use domain::code::is_source;
 use domain::declaration::{DECLARATION, Declared};
 use domain::paths::file_name;
 use domain::structure::{Seen, declares_units, listed, named, problems as judged};
+use protocol::inbound::TestFiles;
 use protocol::outbound::Tree;
 
 /// What the structure check found.
@@ -22,6 +25,9 @@ pub struct Structure {
     /// The areas it declares, when it can be read: the check of the records takes them from here, so the declaration
     /// is read once
     pub areas: Option<Vec<String>>,
+    /// How many source files were read as tests, and by which patterns: `None` for a stack that tells no test by its
+    /// name
+    pub tests: Option<TestFiles>,
 }
 
 /// Every way `tree` differs from its declaration. An error is a file or directory that could not be read.
@@ -55,6 +61,7 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
             )),
             declared: Some(declared),
             areas,
+            tests: None,
         });
     };
     let mut seen = Seen::default();
@@ -62,10 +69,26 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
         let exact = exactly(tree, &path).map(|_| ());
         seen.named.insert(path, exact);
     }
+    // A test is no code of a layer, as the files of Python's `tests/` are none: the rules on code outside the layers
+    // and on views never see it. The source files among them are counted, once each, for what `check` says of them
+    let mut tests = BTreeSet::new();
     for dir in listed(&declared, layout, &seen) {
-        let code = code_files(tree, &dir, |name| layout.is_code_in(&dir, name))?;
+        let mut code = code_files(tree, &dir, |name| layout.is_code_in(&dir, name))?;
+        code.retain(|path| {
+            if !layout.is_test_file(path) {
+                return true;
+            }
+            if is_source(path) && !declared.is_not_checked(path) {
+                tests.insert(path.clone());
+            }
+            false
+        });
         seen.code.insert(dir, code);
     }
+    let tests = layout.tests.as_ref().map(|names| TestFiles {
+        count: tests.len(),
+        patterns: names.patterns(),
+    });
     // Every manifest of the tree, which only a project that declares units is judged by: it is where a package that no
     // unit says it is shows
     if declares_units(&declared) {
@@ -80,6 +103,7 @@ pub fn problems(tree: &dyn Tree) -> io::Result<Structure> {
         skipped: None,
         declared: Some(declared),
         areas,
+        tests,
     })
 }
 
@@ -131,6 +155,70 @@ mod tests {
         let found = problems(&Fake::new(&files)).unwrap().found;
         // `tools/` holds code of no layer only through its manifest, which is no code
         assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_test_beside_the_code_is_no_code_outside_the_layers_and_no_view_and_is_counted_once() {
+        let declaration = "stack = \"typescript\"\nareas = [\"a\"]\nui = \"atomic\"\nunchecked = [\"src/legacy\"]\n";
+        let layers = [
+            "composition",
+            "domain",
+            "application",
+            "protocol/inbound",
+            "protocol/outbound",
+            "infrastructure/inbound",
+            "infrastructure/outbound",
+            "ui/atoms",
+            "ui/molecules",
+            "ui/organisms",
+            "ui/templates",
+            "ui/pages",
+            "presentation/models",
+            "presentation/display",
+        ];
+        let mut files: Vec<(String, &str)> =
+            vec![(".config/rotproof.toml".to_string(), declaration)];
+        for layer in layers {
+            files.push((format!("src/{layer}/index.ts"), ""));
+        }
+        for layer in ["protocol", "infrastructure", "ui", "presentation"] {
+            files.push((format!("src/{layer}/index.ts"), ""));
+        }
+        files.extend(
+            [
+                // In a layer, beside its levels, in a level that holds no view, in no layer, and in a directory of
+                // tests
+                "src/domain/a.test.ts",
+                "src/ui/a.spec.ts",
+                "src/presentation/models/useA.test.tsx",
+                "src/a.test.ts",
+                "src/__tests__/setup.ts",
+                // Not source, so not counted: a file in a directory of tests is a test, and a JSON file with the name
+                // of one is not
+                "src/__tests__/data.json",
+                // In a path `unchecked` keeps
+                "src/legacy/old.test.ts",
+            ]
+            .map(|path| (path.to_string(), "")),
+        );
+        let found = |files: &[(String, &str)]| {
+            let files: Vec<(&str, &str)> = files.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+            problems(&Fake::new(&files)).unwrap()
+        };
+        let passes = found(&files);
+        assert!(passes.found.is_empty(), "{:#?}", passes.found);
+        // The same name that is no test's is code beside the levels of `ui`, as it is anywhere
+        files.push(("src/ui/b.test.json".to_string(), ""));
+        let fails = found(&files);
+        assert_eq!(fails.found.len(), 1, "{:#?}", fails.found);
+        assert!(
+            fails.found[0].starts_with("code in ui outside its levels: src/ui/b.test.json ("),
+            "{:#?}",
+            fails.found
+        );
+        let tests = passes.tests.unwrap();
+        assert_eq!(tests.count, 5, "{tests:?}");
+        assert_eq!(tests.patterns, ["*.test.*", "*.spec.*", "__tests__/"]);
     }
 
     #[test]

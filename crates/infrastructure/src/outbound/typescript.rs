@@ -1,12 +1,13 @@
-//! Reading TypeScript and JavaScript with oxc. [`read`] gives what a file imports, its comments and its reads of the
-//! environment; the outline, the aliases and the packages are read apart, by a module each in `typescript/`.
+//! Reading TypeScript and JavaScript with oxc. [`read`] gives what a file imports, its comments and its uses of names;
+//! the outline, the aliases and the packages are read apart, by a module each in `typescript/`.
 //!
 //! - **What a file imports** (here): `import` (`import type` too), `export ... from`, `import("...")`,
 //!   `import.meta.resolve("...")` and `require("...")` with a literal string, `import x = require("...")`, and
 //!   `import("...")` in a type. A specifier built at run time is not seen.
 //! - **Its comments** (here), `//` and `/* */`. JSX text is not a comment.
-//! - **Its reads of the environment** (`environment.rs`, for `domain::environment`): `process.env` and
-//!   `import.meta.env`, given by [`read`] with the rest.
+//! - **Its uses of names** (`uses.rs`, for `domain::environment`), with the scopes of the language, which oxc's
+//!   semantic analysis (`oxc_semantic`) resolves: a name an import binds, and a global. `process.env` and
+//!   `import.meta.env` are read from them. What a file cannot be read for is in `unread`.
 //! - **Its outline** ([`outline`], in `outline.rs`), every definition with its names and its range, for a knowledge
 //!   document that follows one.
 //! - **The aliases an import resolves through** ([`aliases`], in `aliases.rs`): `compilerOptions.paths` and `baseUrl`
@@ -18,14 +19,14 @@
 //!
 //! The imports and the comments stay here because they are what [`read`] returns: a module for them would hold the
 //! visitor and leave `read` calling it. Here too is what more than one reader needs: how a file is parsed
-//! ([`source_type`], [`first_error`]) and [`literal`], the text of a literal string, which the imports and the reads of
-//! the environment both look for.
+//! ([`source_type`], [`first_error`]) and [`literal`], the text of a literal string, which the imports and the uses
+//! both look for.
 
 mod aliases;
 pub mod dependencies;
-mod environment;
 mod outline;
 mod packages;
+mod uses;
 
 pub use outline::outline;
 
@@ -37,6 +38,7 @@ use oxc_ast::ast::{
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::{Parser, ParserReturn};
+use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 
 use std::io;
@@ -44,8 +46,6 @@ use std::io;
 use domain::code::{Aliases, Import, Source};
 use domain::text::line_of;
 use protocol::outbound::Tree;
-
-use environment::environment;
 
 /// The aliases an import resolves through in the project in `tree`: those of its `tsconfig*.json` files, and the
 /// packages of the units whose roots are `roots` (from the root of the project). An error is a file that cannot be
@@ -76,11 +76,16 @@ pub fn read(source: &str, path: &str) -> Source<Import> {
             (start, source[start..end].to_string())
         })
         .collect();
+    // Scopes are read from the tree as the parser left it, whatever its errors: oxc recovers
+    let semantic = SemanticBuilder::new().build(&parsed.program);
+    let found = uses::read(source, &parsed.program, semantic.semantic.scoping());
     Source {
         imports: imports.found,
         comments,
-        environment: environment(source, &parsed.program),
+        uses: found.uses,
+        unread: found.unread,
         error: first_error(source, &parsed),
+        ..Source::default()
     }
 }
 
