@@ -355,7 +355,16 @@ mod tests {
         .unwrap()
     }
 
-    /// The findings of a tree, as `file: entry (names)`, one for each line
+    /// The lines a finding says: the one it starts with, or all of them, as `3,5,9`, when it says more than one
+    fn lines_of(detail: &str) -> String {
+        let first = detail.lines().next().unwrap_or_default();
+        match first.rsplit_once(", on lines ") {
+            Some((_, lines)) => lines.replace(", ", ","),
+            None => detail.split(':').nth(1).unwrap_or_default().to_string(),
+        }
+    }
+
+    /// The findings of a tree, as `file:lines (names) entry`: one for each entry in a file, with every line it is on
     fn judged(files: &[(&str, &str)], stack: &str, ui: &str) -> Vec<String> {
         let tree = Fake::new(files);
         let found = problems(&tree, &Readers, &declared(stack, ui)).unwrap();
@@ -370,11 +379,7 @@ mod tests {
                     }
                     _ => String::new(),
                 };
-                format!(
-                    "{}:{}{names}",
-                    f.file,
-                    f.detail.split(':').nth(1).unwrap_or_default()
-                ) + &format!(" {}", f.import)
+                format!("{}:{}{names}", f.file, lines_of(&f.detail)) + &format!(" {}", f.import)
             })
             .collect()
     }
@@ -401,8 +406,7 @@ mod tests {
             found,
             [
                 "application/d.py:1 subprocess",
-                "domain/a.py:1 shutil",
-                "domain/a.py:2 (rmtree) shutil",
+                "domain/a.py:1,2 (rmtree) shutil",
                 "protocol/inbound/b.py:1 (socket) socket",
                 "protocol/outbound/c.py:1 sqlite3",
             ]
@@ -475,10 +479,7 @@ mod tests {
             "typescript",
             "none",
         );
-        assert_eq!(
-            found,
-            ["src/domain/a.ts:1 fs", "src/domain/a.ts:4 (readFile) fs"]
-        );
+        assert_eq!(found, ["src/domain/a.ts:1,4 (readFile) fs"]);
     }
 
     #[test]
@@ -583,11 +584,42 @@ mod tests {
         );
     }
 
-    /// What a Python file in `domain/` is found to do, as `line (names) entry`.
+    /// What a Python file in `domain/` is found to do, as `lines (names) entry`: one for each entry, with every line
+    /// of the file that does it.
     fn says(source: &str) -> Vec<String> {
         judged(&[("domain/a.py", source)], "python", "none")
             .iter()
             .map(|found| found.strip_prefix("domain/a.py:").unwrap().to_string())
+            .collect()
+    }
+
+    /// What a Python file in `domain/` is found to do, as `line (names) entry`, line by line as the check finds it
+    /// before it groups the lines of an entry: what a test of the names a rule judges asks, since which name is on
+    /// which line is what it checks.
+    fn says_each(source: &str) -> Vec<String> {
+        let read = Readers.python(source, "domain/a.py");
+        let mut found = in_python(
+            &read.imports,
+            &read.uses,
+            &read.methods,
+            &python_excluded(&read.defined),
+        );
+        found.extend(unread(&read.unread));
+        let mut lines: BTreeMap<(usize, String), BTreeSet<String>> = BTreeMap::new();
+        for one in found {
+            let names = lines.entry((one.line, one.entry)).or_default();
+            names.extend(one.name);
+        }
+        lines
+            .into_iter()
+            .map(|((line, entry), names)| {
+                let names = if names.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", names.into_iter().collect::<Vec<_>>().join(", "))
+                };
+                format!("{line}{names} {entry}")
+            })
             .collect()
     }
 
@@ -669,7 +701,7 @@ pp.getsize('z')
 now()
 ";
         assert_eq!(
-            says(source),
+            says_each(source),
             [
                 "2 os.getcwd",
                 "3 os.path.exists",
@@ -730,7 +762,7 @@ k = time.monotonic
 l = datetime.fromtimestamp(0)
 ";
         assert_eq!(
-            says(source),
+            says_each(source),
             [
                 "9 (uuid.uuid4) random",
                 "10 (datetime.datetime.now) clock",
@@ -762,7 +794,7 @@ i = time.ctime()
 j = time.asctime(t)
 ";
         assert_eq!(
-            says(source),
+            says_each(source),
             [
                 "3 (random.Random) random",
                 "5 (random.Random) random",
@@ -802,7 +834,7 @@ builtins.print('y')
 breakpoint()
 ";
         assert_eq!(
-            says(source),
+            says_each(source),
             [
                 "1 (open) terminal",
                 "2 (print) terminal",
@@ -829,7 +861,7 @@ d = pathlib.PurePosixPath('x')
 e = PurePosixPath('x').name
 ";
         assert_eq!(
-            says(source),
+            says_each(source),
             ["1 pathlib.Path", "3 pathlib.Path", "5 pathlib.PosixPath"]
         );
     }
@@ -849,7 +881,7 @@ e = PurePosixPath('x').name
         }
         // Any other use of the name fails at the import and at the use
         let both = |line: &str| {
-            says(&format!(
+            says_each(&format!(
                 "from pathlib import Path\n\n\ndef f(p: Path, x):\n    {line}\n"
             ))
         };
@@ -870,7 +902,7 @@ e = PurePosixPath('x').name
         assert_eq!(both("return Path.home()"), ["1 pathlib.Path"]);
         // An alias: the uses of the alias count
         assert_eq!(
-            says("from pathlib import Path as P\nx = P('a')\n"),
+            says_each("from pathlib import Path as P\nx = P('a')\n"),
             ["1 pathlib.Path", "2 pathlib.Path"]
         );
         // A module of the table is not freed by a type position
@@ -967,7 +999,10 @@ def f(a: argparse.Namespace) -> None:
     parser = argparse.ArgumentParser()
     x: list[argparse.Namespace] = []
 ";
-        assert_eq!(says(source), ["1 argparse", "3 (ArgumentParser) argparse"]);
+        assert_eq!(
+            says_each(source),
+            ["1 argparse", "3 (ArgumentParser) argparse"]
+        );
     }
 
     #[test]
@@ -1011,11 +1046,9 @@ def f(a: argparse.Namespace) -> None:
         assert_eq!(
             found,
             [
-                "application/b.py:1 (sys.argv) argv",
-                "application/b.py:2 (sys.argv) argv",
+                "application/b.py:1,2 (sys.argv) argv",
                 "application/b.py:2 (print) terminal",
-                "domain/a.py:2 (sys.argv) argv",
-                "domain/a.py:3 (sys.orig_argv) argv",
+                "domain/a.py:2,3 (sys.argv, sys.orig_argv) argv",
             ]
         );
     }
@@ -1039,7 +1072,7 @@ from typing import *
 from os import *
 ";
         assert_eq!(
-            says(source),
+            says_each(source),
             [
                 "3 os",
                 "4 os",
@@ -1112,9 +1145,8 @@ def f(p, repo):
             [
                 "domain/a.py:2 read_text",
                 "domain/a.py:3 exists",
-                "domain/a.py:6 open",
-                // `open()` with no argument is judged too
-                "domain/a.py:7 open",
+                // `open('w')` and `open()` with no argument: one entry, both lines
+                "domain/a.py:6,7 open",
                 "domain/a.py:9 mkdir",
             ]
         );
@@ -1137,11 +1169,9 @@ def f(p, repo):
                 found,
                 [
                     "domain/a.py:2 read_text",
-                    "domain/a.py:5 mkdir",
-                    "domain/a.py:6 open",
-                    "domain/a.py:7 open",
+                    "domain/a.py:5,9 mkdir",
+                    "domain/a.py:6,7 open",
                     "domain/a.py:8 stat",
-                    "domain/a.py:9 mkdir",
                 ],
                 "{place}"
             );
@@ -1168,7 +1198,7 @@ def f(p, repo):
     fn a_method_a_module_judges_is_not_judged_again_by_its_name() {
         let source = "import os\nimport shutil\nos.mkdir('x')\nshutil.rmtree('y')\n";
         assert_eq!(
-            says(source),
+            says_each(source),
             ["2 shutil", "3 os.mkdir", "4 (rmtree) shutil"]
         );
     }
@@ -1270,6 +1300,122 @@ from time import *
 
     const PYPROJECT: &str = "[project]\nname = \"shop\"\ndependencies = [\"pydantic\", \"attrs\", \"requests\", \
                              \"python-dotenv\"]\n";
+
+    #[test]
+    fn a_package_imported_on_several_lines_is_one_finding_of_the_file_and_the_package() {
+        let (found, problems) = allowing(
+            "python",
+            "none",
+            "",
+            &[
+                ("pyproject.toml", PYPROJECT),
+                (
+                    "domain/a.py",
+                    "import requests\nimport attrs\nfrom requests import get\n\n\ndef f():\n    import requests.adapters\n",
+                ),
+            ],
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(
+            found,
+            [
+                "domain/a.py:1 requests (requests, requests.adapters, requests.get)",
+                "domain/a.py:2 attrs (attrs)",
+            ]
+        );
+        let tree = Fake::new(&[
+            ("pyproject.toml", PYPROJECT),
+            (
+                "domain/a.py",
+                "import requests\nimport attrs\nfrom requests import get\n",
+            ),
+        ]);
+        let declared = Declared::new(
+            domain::declaration::parse_declaration(
+                "stack = \"python\"\nareas = []\nui = \"none\"\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let judged = texts_of(&tree, &declared);
+        assert_eq!(judged.len(), 2, "{judged:?}");
+        assert!(
+            judged[0].ends_with(", on lines 1, 3\nimport requests"),
+            "{}",
+            judged[0]
+        );
+        assert!(!judged[1].contains("on lines"), "{}", judged[1]);
+    }
+
+    /// The findings of a tree as their texts, in the order they are printed
+    fn texts_of(tree: &Fake, declared: &Declared) -> Vec<String> {
+        problems(tree, &Readers, declared)
+            .unwrap()
+            .forbidden
+            .into_iter()
+            .map(|f| f.detail)
+            .collect()
+    }
+
+    #[test]
+    fn the_lines_of_an_entry_are_one_finding_and_an_approval_of_the_entry_matches_it() {
+        use domain::approvals::{Approved, Kept, shown_all, sort};
+        let source =
+            "import time\nprint('a')\nx = time.time()\nprint('b')\ny = time.time()\nprint('c')\n";
+        let tree = Fake::new(&[("domain/a.py", source)]);
+        let found = problems(&tree, &Readers, &declared("python", "none"))
+            .unwrap()
+            .forbidden;
+        // Two entries in the file, however many lines each is on, in the order of their first lines
+        assert_eq!(found.len(), 2, "{found:?}");
+        let imports: Vec<&str> = found.iter().map(|f| f.import.as_str()).collect();
+        assert_eq!(imports, ["terminal", "clock"]);
+        assert!(
+            found[0].detail.starts_with("domain/a.py:2: ")
+                && found[0].detail.ends_with(
+                    "uses the terminal or opens a file (print), which does I/O (entry `terminal`), on lines 2, 4, 6\nprint('a')"
+                ),
+            "{}",
+            found[0].detail
+        );
+        assert!(
+            found[1].detail.ends_with(
+                "reads the clock (time.time), which does I/O (entry `clock`), on lines 3, 5\nx = time.time()"
+            ),
+            "{}",
+            found[1].detail
+        );
+        // The approval is made for the file and the entry as it was: it approves the one finding of the entry, and
+        // prints the names the file uses under it
+        let kept = |import: &str| Kept {
+            from: "domain/a.py".into(),
+            import: import.into(),
+            reason: "the framework asks for it".into(),
+            approved: Approved {
+                by: "someone".into(),
+                at: "2026-11-17T09:00:00+09:00".into(),
+            },
+        };
+        let entries = [kept("terminal")];
+        let sorted = sort(&found, &entries);
+        assert_eq!(sorted.approved.len(), 1);
+        assert_eq!(sorted.forbidden.len(), 1);
+        assert_eq!(sorted.forbidden[0].import, "clock");
+        assert!(sorted.stale.is_empty());
+        assert!(
+            shown_all(&sorted)[0].ends_with("; now used: print"),
+            "{:?}",
+            shown_all(&sorted)
+        );
+        // An entry for a file that does the act on one line only is just as stale or not as before
+        let tree = Fake::new(&[("domain/a.py", "print('a')\n")]);
+        let found = problems(&tree, &Readers, &declared("python", "none"))
+            .unwrap()
+            .forbidden;
+        assert_eq!(found.len(), 1);
+        assert!(!found[0].detail.contains("on lines"));
+        assert_eq!(sort(&found, &entries).approved.len(), 1);
+    }
 
     #[test]
     fn a_python_package_is_judged_by_the_layer_or_level_that_may_import_it() {

@@ -3,7 +3,10 @@
   system around it), and `rotproof check` fails on an import of one of these, through every spelling the file binds it
   by (an alias, a name taken from it, a rename). The table is Rotproof's, and a project cannot change it. `infrastructure`,
   `composition`, `ui`, the entry file and {tests} are not judged.
-{table}  What fails is the entry of the table, whatever name is used under it, and the finding says each name it found.
+{table}  What fails is the entry of the table, whatever name is used under it, and the finding says each name it found. A
+  file is one finding for each entry: it starts with the first line (`domain/a.py:2:`), lists every line the entry is on
+  (`, on lines 2, 5, 9`) and shows the text of the first, so a file that prints on 13 lines is one finding of
+  `terminal`, and the lines to change are all in it.
 {names}  **The I/O goes in `infrastructure.outbound`, behind a port in `protocol.outbound` that the use case is given:** the
   use case passes the values on to `domain`, and a screen's model (`presentation.models`, which imports only
   `protocol.inbound`) gets what it needs from its page{hook}, or through a use case it is given.{passed} Approving the import,

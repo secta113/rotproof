@@ -497,8 +497,19 @@ is judged by the name", after TypeScript's (`std::env`, the clocks, the methods 
   `application`, and "a screen's model does no I/O: it gets what it needs from its page, or through a use case of
   `protocol.inbound` it is given" for `presentation` (whose models import only `protocol.inbound`; in TypeScript "from
   its page, through a hook in `ui.atoms`, or through a use case"). It names the line,
-  the entry and the names used on it. Approving, renaming the import, or moving the code to a path in `unchecked` or
+  the entry and the names used under it. Approving, renaming the import, or moving the code to a path in `unchecked` or
   `moving` is no fix, and the guide says so.
+- **A file is one finding for each entry, with every line that uses it.** The key of an approval is the file and the
+  entry, so the check says one finding for that key and not one for each line: a file that prints on 13 lines is one
+  finding of the entry `terminal`. The finding starts with the first line (`domain/a.py:2: ...`), says what it found
+  with the names used under the entry on every line (the names an approval prints as `now used`), ends that sentence
+  with `, on lines 2, 3, 4, 5, 7, 8` (every line in ascending order, the first included; nothing when the entry is on
+  one line), and shows the source text of the first line. The findings of a file are in the order of the first line of
+  each. What is said differently is not one finding: a glob of an entry (`use std::fs::*;`), a scheme, a star import
+  or a module used as a value says what it is, and a use of the same entry by name on other lines is a finding apart
+  with the same key. This changes how the findings are printed and never which files fail or what an approval
+  matches: the entries, the keys and the names are those of the check before, and so is every approval. The findings
+  of the other checks (the direction of the layers, the environment, the markers) are one for each line, as they were.
 - **What an inner layer reads of the code outside the layers is listed, and judged by no one.** The direction check
   lets a layer import the code of its own unit that is in no layer (the paths of `unchecked` and `moving` are there),
   and this check judges the file that imports it and not the file it imports, so the I/O of a helper moved to such a
@@ -823,8 +834,10 @@ of Node, and not a module of the project, whether the unit has a manifest or not
   `react-dom`, which draws; Python's layout allows nothing. A layer's key covers its levels, and a level's key adds to
   that level, so `presentation = ["zod"]` allows it in `presentation.display` too. The code of the same four layers and
   levels is judged as for I/O: not `infrastructure`, `composition` or `ui`, not the entry file, and not a test.
-- **The finding** is a forbidden import of its own, kept as the I/O of the layers is, under the same heading, one for
-  each line and package, listed after the I/O findings of the same file: `domain/model.py:3: move the code that needs the
+- **The finding** is a forbidden import of its own, kept as the I/O of the layers is, under the same heading, **one for
+  each package in a file, with every line that imports it** (`, on lines 3, 9` after the sentence when it is imported
+  on more than one; the key is the file and the package, as for the other entries of the heading), listed after the I/O
+  findings of the same file: `domain/model.py:3: move the code that needs the
   package to infrastructure, behind a port the use case is given, or, when the package does no I/O, ask the person
   whether to allow it for domain (allowed under [dependencies] in .config/rotproof.toml; an agent never adds it to pass
   the check): imports requests.get, of the package requests, which domain may not import`. It is approved by its file

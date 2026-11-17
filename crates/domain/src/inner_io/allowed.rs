@@ -396,8 +396,10 @@ impl Allowlist {
     }
 
     /// The findings for the packages the file at `path` imports, whose text is `source`, in the place `place` of the
-    /// unit `unit`: one for each line and package that is not allowed there, as a [`Forbidden`] of the package, with
-    /// the imports of it the line holds as its names. The approval is made for the file and the package.
+    /// unit `unit`: one for each package that is not allowed there, as a [`Forbidden`] of the package, with the
+    /// imports of it in the file as its names, every line that imports it, and the source text of the first. The
+    /// approval is made for the file and the package, so a file that imports one package on five lines is one finding,
+    /// as a file that does one act on five lines is under the heading of the I/O ([`super::findings`]).
     pub fn findings(
         &self,
         path: &str,
@@ -406,24 +408,27 @@ impl Allowlist {
         place: &str,
         imported: &[Imported],
     ) -> Vec<Forbidden> {
-        let mut lines: BTreeMap<(usize, &str), BTreeSet<&str>> = BTreeMap::new();
+        let mut packages: BTreeMap<&str, (BTreeSet<usize>, BTreeSet<&str>)> = BTreeMap::new();
         for one in imported
             .iter()
             .filter(|one| !self.allows(unit, place, &one.package))
         {
-            lines
-                .entry((one.line, one.package.as_str()))
-                .or_default()
-                .insert(&one.shown);
+            let slot = packages.entry(one.package.as_str()).or_default();
+            slot.0.insert(one.line);
+            slot.1.insert(&one.shown);
         }
         let whose = if unit.is_empty() {
             place.to_string()
         } else {
             format!("{place} of unit {unit}")
         };
-        lines
+        let mut packages: Vec<_> = packages.into_iter().collect();
+        packages.sort_by_key(|(package, (lines, _))| (lines.first().copied(), *package));
+        packages
             .into_iter()
-            .map(|((line, package), shown)| {
+            .map(|(package, (lines, shown))| {
+                let lines: Vec<usize> = lines.into_iter().collect();
+                let line = lines[0];
                 let shown: Vec<&str> = shown.into_iter().collect();
                 Forbidden {
                     file: path.to_string(),
@@ -432,8 +437,9 @@ impl Allowlist {
                         "{path}:{line}: move the code that needs the package to infrastructure, behind a port the use \
                          case is given, or, when the package does no I/O, ask the person whether to allow it for \
                          {place} (allowed under [dependencies] in {DECLARATION}; an agent never adds it to pass the \
-                         check): imports {}, of the package {package}, which {whose} may not import\n{}",
+                         check): imports {}, of the package {package}, which {whose} may not import{}\n{}",
                         shown.join(", "),
+                        super::on_lines(&lines),
                         source.lines().nth(line - 1).unwrap_or("").trim()
                     ),
                     rule: Rule::InnerIo {

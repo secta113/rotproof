@@ -85,7 +85,7 @@ subprocess and socket in Python, fs and child_process in Node, std::fs and std::
 not in infrastructure, composition, ui, the entry file or a test; in Python also the names of what is I/O in part: os, \
 os.path, sys, time and logging by an allowlist of what is pure, the clock, randomness, the terminal and the arguments, \
 pathlib.Path (free in a type position alone), and a method of a path judged by its name, which a method of the project of the same name and number of \
-parameters leaves out, said on every run; approved as an import is, by its file and the entry), that in Python and \
+parameters leaves out, said on every run; one finding for each entry of a file, with every line it is on; approved as an import is, by its file and the entry), that in Python and \
 TypeScript they import only the packages allowed for the layer or level (allowed under [dependencies] of the \
 declaration, the person's decision, to which a unit adds in its own table; the layout allows react in \
 presentation.models in TypeScript; a name no manifest lists or no file of its place imports fails; in Rust the \

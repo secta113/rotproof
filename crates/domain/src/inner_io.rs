@@ -16,7 +16,8 @@
 //! - **A finding says what to do, by layer,** before it says what it found: the I/O goes in `infrastructure.outbound`,
 //!   behind a port in `protocol.outbound` the use case is given, and a screen's model gets what it needs from its page
 //!   or through a use case. The finding is a [`Forbidden`] of its own [`Rule`], so that `rotproof approve` and the
-//!   approvals file treat it as any other.
+//!   approvals file treat it as any other. It is **one for each entry of a file**, the key of an approval, with every
+//!   line the entry is on ([`findings`]): the key and the files that fail are what they were, only the print differs.
 //! - **A package is imported only where it is allowed** (Python and TypeScript, `allowed`): the code of the four layers
 //!   imports no package of PyPI or npm unless the declaration, or the layout of the stack, lists it for the layer or
 //!   level, since what a package does is unknown. The finding is a [`Forbidden`] too, approved by the file and the
@@ -509,10 +510,24 @@ fn remedy(layer: &str, language: Language) -> &'static str {
     }
 }
 
+/// What a finding of more than one line says after what it found, with every line in ascending order, the first
+/// included: `, on lines 3, 8, 21`. Nothing for one line, which the finding names at its start.
+fn on_lines(lines: &[usize]) -> String {
+    if lines.len() < 2 {
+        return String::new();
+    }
+    let lines: Vec<String> = lines.iter().map(usize::to_string).collect();
+    format!(", on lines {}", lines.join(", "))
+}
+
 /// The findings for `found` in the file at `path`, whose text is `source` and whose layer is `layer`, in a project of
-/// `language`: one for each line and entry, with the names used on it, as a [`Forbidden`] of the entry. A line that
-/// uses an entry by a glob says that and not the names, and one that does the act of a group says what to do about the
-/// act, with the example of the language.
+/// `language`: **one for each entry, with every line of the file that uses it**, as a [`Forbidden`] of the entry: the
+/// key of an approval is the file and the entry, so a file that does one act on 13 lines (`print`) is one finding that
+/// says the 13 lines, the source text of the first, and the names used under the entry. It says the line of the first
+/// where a finding says one (`file:line:`), and the others after it. What the lines say differently stays apart: a
+/// glob or a scheme is what its lines say, whatever else the same line has under the entry, and the lines that use an
+/// entry by name are one finding apart from the lines of a glob of it. One that does the act of a group says what to
+/// do about the act, with the example of the language.
 pub fn findings(
     path: &str,
     source: &str,
@@ -533,9 +548,20 @@ pub fn findings(
             slot.1 = &one.cause;
         }
     }
-    lines
+    // The lines that say the same of an entry are one finding; the lines come in ascending order
+    type Grouped<'a> = BTreeMap<(&'a str, &'a Cause), (Vec<usize>, BTreeSet<&'a str>)>;
+    let mut grouped = Grouped::new();
+    for ((line, entry), (names, cause)) in lines {
+        let slot = grouped.entry((entry, cause)).or_default();
+        slot.0.push(line);
+        slot.1.extend(names);
+    }
+    let mut grouped: Vec<_> = grouped.into_iter().collect();
+    grouped.sort_by_key(|((entry, _), (lines, _))| (lines[0], *entry));
+    grouped
         .into_iter()
-        .map(|((line, entry), (names, cause))| {
+        .map(|((entry, cause), (lines, names))| {
+            let line = lines[0];
             let used = if names.is_empty() {
                 String::new()
             } else {
@@ -582,6 +608,7 @@ pub fn findings(
                 _ => remedy(layer, language).to_string(),
             };
             let text = source.lines().nth(line - 1).unwrap_or("").trim();
+            let what = format!("{what}{}", on_lines(&lines));
             Forbidden {
                 file: path.to_string(),
                 import: entry.to_string(),
@@ -1291,20 +1318,34 @@ fn b() { std::fs::read(\"b\"); }
             found(3, "shutil", Some("rmtree"), Cause::Used),
             found(3, "shutil", Some("rmtree"), Cause::Used),
         ];
-        let findings = findings("domain/a.py", source, "domain", Language::Python, &found);
-        assert_eq!(findings.len(), 3);
+        // One finding of the entry for the file, with the lines of all three
+        let one = findings("domain/a.py", source, "domain", Language::Python, &found);
+        assert_eq!(one.len(), 1);
         assert_eq!(
-            findings[1].detail,
+            one[0].detail,
+            "domain/a.py:1: move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use \
+             case is given: uses `shutil` (copyfile, rmtree), which does I/O, on lines 1, 2, 3\nimport shutil"
+        );
+        assert_eq!(one[0].file, "domain/a.py");
+        assert_eq!(one[0].import, "shutil");
+        assert_eq!(
+            one[0].rule,
+            Rule::InnerIo {
+                names: vec!["copyfile".into(), "rmtree".into()]
+            }
+        );
+        // A line alone says its line and no more
+        let alone = findings(
+            "domain/a.py",
+            source,
+            "domain",
+            Language::Python,
+            &found[1..2],
+        );
+        assert_eq!(
+            alone[0].detail,
             "domain/a.py:2: move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use \
              case is given: uses `shutil` (copyfile), which does I/O\nshutil.copyfile(a, b)"
-        );
-        assert_eq!(findings[1].file, "domain/a.py");
-        assert_eq!(findings[1].import, "shutil");
-        assert_eq!(
-            findings[1].rule,
-            Rule::InnerIo {
-                names: vec!["copyfile".into()]
-            }
         );
         let model = super::findings(
             "ui/m.ts",
@@ -1329,6 +1370,81 @@ fn b() { std::fs::read(\"b\"); }
                 "{layer}"
             );
         }
+    }
+
+    #[test]
+    fn the_lines_of_one_entry_are_one_finding_and_two_entries_are_two() {
+        let source =
+            "print('a')\nx = time.time()\nprint('b')\ny = time.time()\nprint('c')\nimport shutil\n";
+        let terminal = |line| Found {
+            line,
+            entry: "terminal".into(),
+            name: Some("print".into()),
+            cause: Cause::Group(Group::Terminal),
+        };
+        let clock = |line| Found {
+            line,
+            entry: "clock".into(),
+            name: Some("time.time".into()),
+            cause: Cause::Group(Group::Clock),
+        };
+        let all = [
+            clock(4),
+            terminal(5),
+            found(6, "shutil", None, Cause::Used),
+            terminal(1),
+            clock(2),
+            terminal(3),
+        ];
+        let said = findings("domain/a.py", source, "domain", Language::Python, &all);
+        // In the order of the first line of each, whatever the order of `found`
+        let entries: Vec<&str> = said.iter().map(|one| one.import.as_str()).collect();
+        assert_eq!(entries, ["terminal", "clock", "shutil"]);
+        assert!(
+            said[0].detail.starts_with("domain/a.py:1: ")
+                && said[0].detail.ends_with(
+                    "uses the terminal or opens a file (print), which does I/O (entry `terminal`), on lines 1, 3, 5\nprint('a')"
+                ),
+            "{}",
+            said[0].detail
+        );
+        // The source text is the first line's, and the names are those of every line
+        assert!(
+            said[1].detail.ends_with(
+                "reads the clock (time.time), which does I/O (entry `clock`), on lines 2, 4\nx = time.time()"
+            ),
+            "{}",
+            said[1].detail
+        );
+        assert!(!said[2].detail.contains("on lines"), "{}", said[2].detail);
+        assert_eq!(
+            said[0].rule,
+            Rule::InnerIo {
+                names: vec!["print".into()]
+            }
+        );
+        // What the lines say differently is not one finding: a glob of an entry and a use of it by name
+        let said = findings(
+            "a.rs",
+            "use std::fs::*;\nfn a() { std::fs::read(\"a\"); }\nfn b() { std::fs::read(\"b\"); }\n",
+            "domain",
+            Language::Rust,
+            &[
+                found(1, "std::fs", None, Cause::Glob("std::fs".into())),
+                found(2, "std::fs", Some("read"), Cause::Used),
+                found(3, "std::fs", Some("read"), Cause::Used),
+            ],
+        );
+        assert_eq!(said.len(), 2);
+        assert!(
+            said[0].detail.contains("a glob of `std::fs`") && !said[0].detail.contains("on lines")
+        );
+        assert!(
+            said[1].detail.contains("on lines 2, 3"),
+            "{}",
+            said[1].detail
+        );
+        assert!(said.iter().all(|one| one.import == "std::fs"));
     }
 
     #[test]

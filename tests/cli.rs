@@ -2307,6 +2307,25 @@ fn checked(root: &Path) -> (Option<i32>, String) {
     (out.status.code(), stdout(&out))
 }
 
+/// The lines of `file` that the findings in `said` name, in ascending order: the line a finding starts with, and the
+/// ones it lists after "on lines" (a finding is one for each entry in a file, with every line of it)
+fn named_lines(said: &str, file: &str) -> Vec<usize> {
+    let mut lines = Vec::new();
+    for line in said.lines() {
+        let Some(rest) = line.strip_prefix(&format!("  {file}:")) else {
+            continue;
+        };
+        let (first, rest) = rest.split_once(": ").unwrap_or((rest, ""));
+        lines.extend(first.parse::<usize>());
+        if let Some((_, listed)) = rest.rsplit_once(", on lines ") {
+            lines.extend(listed.split(", ").filter_map(|n| n.parse::<usize>().ok()));
+        }
+    }
+    lines.sort_unstable();
+    lines.dedup();
+    lines
+}
+
 const IO_HEADING: &str =
     "the inner layers do no I/O (domain, protocol, application and presentation import nothing";
 const IO_FIX: &str = "move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use case is given";
@@ -2325,8 +2344,12 @@ fn plant_io(r: &Path, path: &str, forbidden: &[(&str, usize, &str)], free: &[&st
         } else {
             format!("uses {uses}, which does I/O")
         };
+        // A finding is one for each entry in a file: it starts with the first line of the entry and lists the others
         assert!(
-            said.contains(&format!("  {path}:{line}: {IO_FIX}: {what}")),
+            said.lines()
+                .any(|one| one.starts_with(&format!("  {path}:"))
+                    && one.contains(&format!("{IO_FIX}: {what}"))
+                    && named_lines(one, path).contains(line)),
             "{source}\n{said}"
         );
     }
@@ -2383,8 +2406,8 @@ fn the_inner_layers_do_no_io_in_python_and_each_form_planted_fails() {
             ("from logging import handlers\n", 1, "`logging.handlers`"),
             (
                 "import tempfile\n\nx = tempfile.mkdtemp()\n",
-                1,
-                "`tempfile`",
+                3,
+                "`tempfile` (mkdtemp)",
             ),
         ],
         &[
@@ -2443,8 +2466,12 @@ fn an_approved_use_of_io_prints_the_names_the_file_uses_now_and_a_stale_one_fail
     // One approval for the file and the entry covers every use of it, whatever the names
     let (code, said) = checked(r);
     assert_eq!(code, Some(1), "{said}");
+    // ... and the check says it as one finding, with every line, and the source text of the first
     assert!(
-        said.contains("domain/model.py:5: ") && said.contains("domain/model.py:7: "),
+        said.contains(
+            "  domain/model.py:1: move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use \
+             case is given: uses `shutil` (copyfile, rmtree), which does I/O, on lines 1, 5, 6, 7\n    import shutil\n"
+        ) && said.matches("domain/model.py:").count() == 1,
         "{said}"
     );
     let out = approve_with_git(
@@ -2701,8 +2728,9 @@ fn each_python_name_that_does_io_in_part_fails_alone_and_what_is_pure_passes() {
         let (code, said) = checked(r);
         assert_eq!(code, Some(1), "{source}\n{said}");
         assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        // The finding is one for the entry of the file: it names the first line and lists the others
         assert!(
-            said.contains(&format!("  domain/x.py:{line}: ")) && said.contains(what),
+            named_lines(&said, "domain/x.py").contains(&line) && said.contains(what),
             "{source}\n{said}"
         );
     }
@@ -2892,6 +2920,60 @@ fn a_method_the_project_defines_is_left_out_of_the_net_and_the_line_is_printed_o
 }
 
 #[test]
+fn a_file_is_one_finding_for_each_entry_whatever_the_number_of_lines_it_does_it_on() {
+    let root = clean_repo();
+    let r = root.path();
+    // Thirteen prints and two clocks: two findings, each with all its lines, the first line's text and the names
+    let mut source = String::from("import time\n");
+    for at in 0..13 {
+        source.push_str(&format!("print({at})\n"));
+        if at == 3 || at == 8 {
+            source.push_str("t = time.time()\n");
+        }
+    }
+    put(r, "domain/a.py", &source);
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(said.matches("  domain/a.py:").count(), 2, "{said}");
+    assert!(
+        said.contains("  domain/a.py:2: return what is to be shown")
+            && said.contains(
+                "uses the terminal or opens a file (print), which does I/O (entry `terminal`), on lines 2, 3, 4, 5, 7, 8, \
+                 9, 10, 11, 13, 14, 15, 16\n    print(0)\n"
+            ),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "reads the clock (time.time), which does I/O (entry `clock`), on lines 6, 12\n    t = time.time()\n"
+        ),
+        "{said}"
+    );
+    // The key of the approval is the file and the entry, as before: one approval of `terminal` covers the 13 prints
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let out = approve_with_git(
+        r,
+        named,
+        &[
+            "domain/a.py",
+            "terminal",
+            "--reason",
+            "the report is printed here",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert_eq!(said.matches("  domain/a.py:").count(), 1, "{said}");
+    assert!(
+        said.contains("reads the clock")
+            && said.contains("terminal in domain/a.py: the report is printed here"),
+        "{said}"
+    );
+    assert!(said.contains("; now used: print\n"), "{said}");
+}
+
+#[test]
 fn open_with_no_argument_is_judged_everywhere_unless_the_project_defines_one() {
     let root = clean_repo();
     let r = root.path();
@@ -2999,7 +3081,7 @@ fn the_inner_layers_do_no_io_in_typescript_and_the_table_comes_before_the_manife
             (
                 "import * as cp from \"child_process\";\ncp.exec('x');\n",
                 1,
-                "`child_process`",
+                "`child_process` (exec)",
             ),
             ("const net = require('node:net');\n", 1, "`net`"),
             ("export * from 'node:tty';\n", 1, "`tty`"),
@@ -3051,7 +3133,7 @@ fn the_inner_layers_do_no_io_in_typescript_and_the_table_comes_before_the_manife
     assert_eq!(code, Some(1), "{said}");
     assert!(
         said.contains(&format!(
-            "  src/domain/x.ts:1: {IO_FIX}: uses `fs`, which does I/O\n"
+            "  src/domain/x.ts:1: {IO_FIX}: uses `fs`, which does I/O, on lines 1, 2\n"
         )),
         "{said}"
     );
@@ -3104,13 +3186,13 @@ fn a_screens_model_is_told_to_get_what_it_needs_from_its_page() {
         said.contains(
             "  src/presentation/models/x.ts:1: a screen's model does no I/O: it gets what it needs from its page, \
              through a hook in `ui.atoms`, or through a use case of protocol.inbound it is given: uses `fs`, which does \
-             I/O\n"
+             I/O, on lines 1, 2\n"
         ),
         "{said}"
     );
     assert!(
         said.contains(&format!(
-            "  src/application/y.ts:1: {IO_FIX}: uses `fs`, which does I/O\n"
+            "  src/application/y.ts:1: {IO_FIX}: uses `fs`, which does I/O, on lines 1, 2\n"
         )),
         "{said}"
     );
@@ -4011,11 +4093,7 @@ fn a_rust_method_the_project_defines_is_left_out_of_the_net_and_the_line_is_prin
     let (code, said) = checked(r);
     assert_eq!(code, Some(1), "{said}");
     assert!(!said.contains("I/O net:"), "{said}");
-    let flagged = |said: &str| -> Vec<usize> {
-        (2..=6)
-            .filter(|line| said.contains(&format!("  {file}:{line}: ")))
-            .collect()
-    };
+    let flagged = |said: &str| named_lines(said, file);
     assert_eq!(flagged(&said), [2, 3, 4, 5, 6], "{said}");
     // The project defines a method of the same name and number of parameters, in any file of it: a trait of another
     // layer, an impl in a test
@@ -10090,8 +10168,11 @@ fn an_approved_package_prints_the_imports_the_file_makes_of_it_and_a_stale_appro
     );
     let (code, said) = checked(r);
     assert_eq!(code, Some(1), "{said}");
+    // The package is one finding of the file, with both lines the file imports it on
     assert!(
-        said.contains("domain/x.py:1: ") && said.contains("domain/x.py:2: "),
+        said.contains(
+            "which domain may not import, on lines 1, 2\n    from requests import get, post\n"
+        ) && said.matches("domain/x.py:").count() == 1,
         "{said}"
     );
     let named = Some("[user]\n\tname = Someone Else\n");
