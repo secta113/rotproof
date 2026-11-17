@@ -345,7 +345,9 @@ What the layers are is written once, in `layers/table.toml`, on the onion archit
 The levels of a layer other than `ui` and `presentation` never import each other. `ui` is the view and
 `presentation` the state and behaviour of the screens apart from it, the Presentation Model (Fowler) held to the
 inward direction of the onion: a model calls the use cases through `protocol.inbound`, as an entry point does, and
-draws nothing. The two come with `ui = "atomic"` (and with `ui = "rendered"`, below), and a project with `ui = "none"`
+draws nothing. A screen that serves several flows (a sign-in that returns to the screen that opened it, a picker)
+does not decide where to go next: whatever opens it passes the destination in (guidance in the role of
+`presentation.models` and in the guide; no check reads it). The two come with `ui = "atomic"` (and with `ui = "rendered"`, below), and a project with `ui = "none"`
 has neither: `ui` is chosen as the stack is, not switched off in `absent`, since a screen needs both or neither. In TypeScript, `presentation` also holds
 no view: a `.tsx` or `.jsx` file there fails `rotproof check`, so the state and the hooks of a screen are `.ts` files
 and a component goes in `ui` or `composition` (a provider keeps its context and state hook in `presentation` and its
