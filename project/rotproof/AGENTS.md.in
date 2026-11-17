@@ -5,7 +5,7 @@
 {kept}
 
 These rules come with the Rotproof version the project pins, and change only when the project upgrades it. The
-project's own map, its differences and its own rules are in `AGENTS.md`.
+project's own rules go in its own files, such as its `AGENTS.md`, never in this one.
 
 ## Running Rotproof
 

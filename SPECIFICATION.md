@@ -93,8 +93,6 @@ The project's files are written once, as a starting point, and are the project's
 
 | File | Content |
 |---|---|
-| `AGENTS.md` | The map (the layers present, each with the first sentence of its role to rewrite, and in a project that declares units a row for each layer of each unit, with the unit's name before the role), the differences from what Rotproof keeps, and the project's own rules. It points at `.rotproof/AGENTS.md` |
-| `CLAUDE.md` | `@AGENTS.md` and `@.rotproof/AGENTS.md` |
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack (`python` ignores `.venv/`); line endings as LF |
 | `docs/log.md` | The log, with its title |
@@ -205,9 +203,9 @@ the guide names it, and reads the guide only when the project points it there. I
 rewrites it only when its text changed; when `files` is behind, `rotproof check` names `rotproof init` for it, as for
 the guide.
 
-The guide only helps if your agent reads it. The `AGENTS.md` and `CLAUDE.md` that `rotproof create` writes point at it;
-a project that has its own points at it from its `AGENTS.md` (or whatever file its agent reads first), and imports it
-in `CLAUDE.md` for Claude Code:
+The guide only helps if your agent reads it. Rotproof writes no `AGENTS.md` or `CLAUDE.md`, nor anything else an agent
+reads by itself: what an agent is told is the project's to decide. A project points its agent at the guide from its
+`AGENTS.md` (or whatever file its agent reads first), and imports it in `CLAUDE.md` for Claude Code:
 
 ```markdown
 @AGENTS.md
@@ -1867,17 +1865,15 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next (th
 
 ### The map in `AGENTS.md`
 
-`AGENTS.md` is the project's own file, written once by `rotproof create` with a map: a table under `## Map` with a row
-for each layer present, whose first cell is the layer's path. The map goes behind when the declaration changes later: a
+`AGENTS.md` is the project's own file, which Rotproof never writes. A project may keep a map of its layers in it: a
+table under `## Map` with a row for each layer present, whose first cell is the layer's path. The map goes behind when the declaration changes later: a
 layer declared absent and made afterwards, a unit added, a layer taken out. `rotproof check` warns of it, on every run
 and failing nothing, under `the map in AGENTS.md lists the layers .config/rotproof.toml declares`: a line for each layer
 present that has no row (`AGENTS.md has no row in its map for packages/cli/src/cli/protocol/, the layer protocol of the
 unit cli: add it, or declare the layer absent in .config/rotproof.toml`), and for each row of a layer declared absent;
 after six lines it counts the rest. `rotproof init` says the same, each line after `note: `. The words of a row are the
 project's and are never judged, and a file with no `## Map` and table, or none at all, is not read: a project may keep
-its map as it likes. The map `rotproof create` writes names the unit in each row when the project declares units (`cli:
-The composition root: ...`), as the same layer in two units would otherwise read alike, and gives the whole first
-sentence of the layer's role, not its first line.
+its map as it likes.
 
 The frontmatter is read as YAML 1.2: quoting a date or a datetime never changes whether it passes. It holds no comment: a `#`
 after a space or at the start of a line starts one, which YAML reads as nothing, so an unquoted `title: PR #1` would

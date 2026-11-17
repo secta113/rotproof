@@ -1,19 +1,21 @@
-//! The project's files Rotproof writes once ([`project_files`]): `AGENTS.md`, `CLAUDE.md`, `README.md`, `.gitignore`,
-//! `.gitattributes`, a GitHub Actions workflow that installs the pinned Rotproof and runs `rotproof check` (with
+//! The project's files Rotproof writes once ([`project_files`]): `README.md`, `.gitignore`, `.gitattributes`, a GitHub
+//! Actions workflow that installs the pinned Rotproof and runs `rotproof check` (with
 //! a `pyproject.toml` that pins it in `dev` of `[dependency-groups]` where the stack installs it from PyPI, and a
 //! workflow for the tool of the lock file the project has (uv's when it has none); for `typescript` the pin goes in
 //! `package.json`, the project's own file, which Rotproof does not write), and the files the stack's layout lists for
 //! its toolchain (the workspace's `Cargo.toml` for `rust`). `rotproof create` writes each once, when it does not exist,
 //! and never again: from then on it is the project's. Rotproof's guide, which it rewrites, is `guide.rs`.
 //!
+//! It writes no `AGENTS.md` or `CLAUDE.md`, nor anything else an agent reads by itself: what an agent is told is the
+//! project's to decide, and the project points its agent at the guide with a line of its own. When the project keeps
+//! a map of its layers in its `AGENTS.md`, [`stale_map`] says what that map has gone behind on.
+//!
 //! The texts are in `project/`, built into the binary. Each is named after the file it becomes, without a leading dot
-//! and with `.in` added, so no agent working in Rotproof reads a project's `AGENTS.md` as its own.
+//! and with `.in` added, so no agent working in Rotproof reads a text meant for a project as its own.
 
 use crate::declaration::{DECLARATION, Declared};
 use crate::locked::{LOCK_NAMES, Locked, Tool};
 
-const AGENTS_TEXT: &str = include_str!("../../../project/AGENTS.md.in");
-const CLAUDE_TEXT: &str = include_str!("../../../project/CLAUDE.md.in");
 const README_TEXT: &str = include_str!("../../../project/README.md.in");
 const GITATTRIBUTES_TEXT: &str = include_str!("../../../project/gitattributes.in");
 /// Stack -> its `.gitignore`
@@ -121,11 +123,6 @@ pub fn project_files<'a>(
         .map(|(_, text)| *text)
         .expect("every stack has a .gitignore: a test reads every stack");
     let mut files = vec![
-        (
-            "AGENTS.md",
-            fill(&AGENTS_TEXT.replace("{map}", &map(declared))),
-        ),
-        ("CLAUDE.md", CLAUDE_TEXT.to_string()),
         (
             "README.md",
             fill(&README_TEXT.replace("{development}", development)),
@@ -275,51 +272,6 @@ fn package(name: &str) -> String {
     }
 }
 
-/// The rows of the map for the layers present in the declaration, each with the first sentence of its role, which the
-/// project rewrites into what the layer holds there. A project that declares units has a row for the layers of each
-/// unit, with the unit's name in front of the role: the same layer in two units is two rows that would read alike.
-fn map(declared: &Declared) -> String {
-    let units = declared.units.iter().any(|unit| unit.declared);
-    declared
-        .places
-        .iter()
-        .filter(|p| p.is_layer() && !declared.is_absent(p))
-        .map(|place| {
-            let role = first_sentence(&place.role);
-            let role = match place.unit.name.as_str() {
-                name if units && !name.is_empty() => format!("{name}: {role}"),
-                _ => role,
-            };
-            format!("| `{}/` | {} |\n", place.path, role.replace('|', "\\|"))
-        })
-        .collect()
-}
-
-/// The first sentence of a role, with the lines of its paragraph joined: up to the first full stop that ends a word
-/// (not the one of `e.g.` or `i.e.`), or the whole paragraph when it has none.
-fn first_sentence(role: &str) -> String {
-    let paragraph = role
-        .trim()
-        .lines()
-        .take_while(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join(" ");
-    let end = paragraph
-        .char_indices()
-        .filter(|(at, c)| {
-            *c == '.' && !paragraph[..*at].ends_with("e.g") && !paragraph[..*at].ends_with("i.e")
-        })
-        .map(|(at, _)| at + 1)
-        .find(|end| {
-            paragraph[*end..]
-                .chars()
-                .next()
-                .is_none_or(char::is_whitespace)
-        });
-    paragraph[..end.unwrap_or(paragraph.len())].to_string()
-}
-
 /// What `rotproof check` says, as a warning, when the map is out of date
 pub const MAP_HEADING: &str =
     "the map in AGENTS.md lists the layers .config/rotproof.toml declares";
@@ -328,7 +280,7 @@ pub const MAP_HEADING: &str =
 const LISTED: usize = 6;
 
 /// What is out of date in the map of the project's `AGENTS.md`, `agents` being its text, against the layers `declared`
-/// has: a layer present with no row (a layer that was declared absent and then made, or a unit added after the file was
+/// has: a layer present with no row (a layer that was declared absent and then made, or a unit added after the map was
 /// written), and a row for a layer the declaration says is absent. The rows are found by the path in the first cell,
 /// under the heading `## Map`; their words are the project's, as it rewrote them, and are never judged. Nothing when
 /// there is no such heading and table: a project may keep its map as it likes, or not at all.
@@ -384,7 +336,7 @@ pub fn stale_map(declared: &Declared, agents: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layers::{NO_UI, RECORDS_ONLY, known_stacks, uis};
+    use crate::layers::{NO_UI, RECORDS_ONLY, known_stacks};
 
     #[test]
     fn every_file_in_project_is_built_in() {
@@ -520,123 +472,29 @@ ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
         Declared::new(crate::declaration::parse_declaration(&text).unwrap()).unwrap()
     }
 
-    #[test]
-    fn the_first_sentence_of_a_role_is_whole_and_ends_at_a_full_stop_that_ends_a_word() {
-        assert_eq!(
-            first_sentence(
-                "The view: what the user sees (e.g. a button). `composition` registers it.\nMore."
-            ),
-            "The view: what the user sees (e.g. a button)."
-        );
-        assert_eq!(
-            first_sentence(
-                "The concepts and rules of the business: types, calculations and decisions. No I/O,\nand no ports."
-            ),
-            "The concepts and rules of the business: types, calculations and decisions."
-        );
-        // Over the lines of a paragraph, and no further than it
-        assert_eq!(
-            first_sentence("One sentence that\nruns on\n\nThe next paragraph."),
-            "One sentence that runs on"
-        );
-        assert_eq!(first_sentence("`a.b` is a name. It."), "`a.b` is a name.");
-    }
-
-    #[test]
-    fn every_role_of_every_layer_has_a_first_sentence_that_ends_at_a_full_stop_and_fits_a_cell() {
-        use crate::declaration::Declaration;
-        for stack in known_stacks()
-            .into_iter()
-            .filter(|stack| *stack != RECORDS_ONLY)
-        {
-            for ui in uis(stack).unwrap() {
-                let declared = Declared::new(Declaration {
-                    stack: stack.to_string(),
-                    areas: Vec::new(),
-                    ui: Some(ui.clone()),
-                    absent: Vec::new(),
-                    unchecked: Vec::new(),
-                    moving: Vec::new(),
-                    todo_link: None,
-                    approved_max: None,
-                    files: None,
-                    declined: Vec::new(),
-                    dependencies: Default::default(),
-                    units: Vec::new(),
-                })
-                .unwrap();
-                for place in declared.places.iter().filter(|p| p.is_layer()) {
-                    let sentence = first_sentence(&place.role);
-                    assert!(
-                        sentence.ends_with('.'),
-                        "{stack} {ui} {}: {sentence}",
-                        place.name
-                    );
-                    assert!(!sentence.contains('\n'), "{stack} {ui} {}", place.name);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn a_project_that_declares_units_has_a_row_for_each_layer_of_each_unit_with_the_unit_named() {
-        let declared =
-            two_units("\"domain\", \"application\", \"infrastructure.outbound\", \"protocol\"");
-        let rows = map(&declared);
-        let cell = |row: &str| {
-            row.split(" | ")
-                .nth(1)
-                .unwrap()
-                .trim_end_matches(" |")
-                .to_string()
-        };
-        let lines: Vec<&str> = rows.lines().collect();
-        assert_eq!(
-            lines
-                .iter()
-                .map(|line| line.split(" | ").next().unwrap())
-                .collect::<Vec<_>>(),
-            [
-                "| `packages/core/src/core/domain/`",
-                "| `apps/cli/src/cli/composition/`",
-                "| `apps/cli/src/cli/infrastructure/`",
-            ]
-        );
-        assert_eq!(
-            cell(lines[0]),
-            "core: The concepts and rules of the business: types, calculations and decisions."
-        );
-        assert!(
-            cell(lines[1])
-                .starts_with("cli: The composition root: the one place that wires the program."),
-            "{rows}"
-        );
-        // A project of one unit names none
-        let one = Declared::new(
-            crate::declaration::parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"none\"\n",
-            )
-            .unwrap(),
+    /// A map as a project might keep it in its `AGENTS.md`: a row for each layer `declared` has present, with words of
+    /// the project's own.
+    fn kept_map(declared: &Declared) -> String {
+        let rows: String = declared
+            .places
+            .iter()
+            .filter(|p| p.is_layer() && !declared.is_absent(p))
+            .map(|place| format!("| `{}/` | What {} holds here |\n", place.path, place.name))
+            .collect();
+        format!(
+            "# AGENTS.md\n\n## Map\n\n| Path | Content |\n|---|---|\n{rows}\n## Rules\n\n- Mine.\n"
         )
-        .unwrap();
-        assert!(
-            map(&one)
-                .lines()
-                .all(|line| line.starts_with("| `") && !line.contains("core: "))
-        );
-        assert!(map(&one).contains(
-            "| `composition/` | The composition root: the one place that wires the program. |\n"
-        ));
     }
 
     #[test]
     fn a_map_is_stale_for_a_layer_with_no_row_and_a_row_of_a_layer_declared_absent() {
         let absent = "\"domain\", \"application\", \"protocol\", \"infrastructure.outbound\"";
         let declared = two_units(absent);
-        let written = AGENTS_TEXT.replace("{map}", &map(&declared));
+        let written = kept_map(&declared);
         assert_eq!(stale_map(&declared, &written), Vec::<String>::new());
         // The words are the project's: what a person rewrote in a row is never judged
-        let rewritten = written.replace("core: The concepts and rules", "Mine, the rules");
+        let rewritten = written.replace("What domain holds here", "Mine, the rules");
+        assert_ne!(rewritten, written);
         assert_eq!(stale_map(&declared, &rewritten), Vec::<String>::new());
         // `protocol` declared absent when the map was made, and made after
         let later = two_units("\"domain\", \"application\", \"infrastructure.outbound\"");
@@ -648,7 +506,7 @@ ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
         );
         // The other way: the row stays after the layer is declared absent
         assert_eq!(
-            stale_map(&declared, &AGENTS_TEXT.replace("{map}", &map(&later))),
+            stale_map(&declared, &kept_map(&later)),
             [
                 "AGENTS.md has a row in its map for apps/cli/src/cli/protocol/, the layer protocol of the unit cli, which .config/rotproof.toml declares absent: take the row out"
             ]

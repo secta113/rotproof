@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 0bb1191c. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 7f60c2fe. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -50,8 +50,8 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
   では、追っている Issue を名指す `TODO` は残せて、毎回の検査がそれを一覧に出します。型検査を止めるコメントも
   通りません。環境変数を読めるのは `infrastructure` だけです。
 - **バイナリしか持たないエージェントも、迷いません。** `rotproof --help` が始める順番を示します。規則はプロジェクトの
-  スタックに合わせて `.rotproof/AGENTS.md` に書かれ、`rotproof create` が書く `AGENTS.md` と `CLAUDE.md` が
-  エージェントをそこへ案内します。Rotproof の上げ方と、コマンドをいつ走らせるかは `.rotproof/running.md` にあり、
+  スタックに合わせて `.rotproof/AGENTS.md` に書かれ、プロジェクトはエージェントが最初に読むファイルからそこを指します。
+  Rotproof の上げ方と、コマンドをいつ走らせるかは `.rotproof/running.md` にあり、
   ガイドがそれを名指します。
 - **規則は、固定した版のものです。** プロジェクトは Rotproof の版を 1 つ、厳密に固定します。規則が変わるのは、
   プロジェクト自身のコミットの中だけです（「互換性」を参照）。
@@ -130,9 +130,9 @@ wrote docs/knowledge/index.md
 next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md
 ```
 
-層はそれぞれディレクトリで、`__init__.py` にその役割が書いてあります。`docs/` には記録が入ります。残りは、エージェントが
-読むもの（`AGENTS.md` と `CLAUDE.md`。どちらも、スタックに合わせて書かれた規則 `.rotproof/AGENTS.md` を指します）と、
-`rotproof check` を実行する CI のワークフローです。Python のプロジェクトはロックされます。依存は `pyproject.toml` に書き
+層はそれぞれディレクトリで、`__init__.py` にその役割が書いてあります。`docs/` には記録が、`.rotproof/AGENTS.md` には
+スタックに合わせて書かれた規則が入ります。残りは `rotproof check` を実行する CI のワークフローです。Rotproof は
+`AGENTS.md` も `CLAUDE.md` も書きません。エージェントに何を伝えるかは、プロジェクトが決めることです。Python のプロジェクトはロックされます。依存は `pyproject.toml` に書き
 （`create` は、`[dependency-groups]` の `dev` に Rotproof を固定して書きました）、ロックファイルをコミットします。
 ロックファイルは道具にしか作れないので、それまで `rotproof check` は失敗します。
 

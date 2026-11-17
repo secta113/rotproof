@@ -792,7 +792,7 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
 }
 
 /// The project's files at the root that `rotproof create` writes, outside hidden directories
-const PROJECT_FILES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "README.md"];
+const PROJECT_FILES: [&str; 1] = ["README.md"];
 
 #[test]
 fn create_writes_the_projects_files_once() {
@@ -822,37 +822,22 @@ fn create_writes_the_projects_files_once() {
         let arg = root_arg(&root);
         let out = create(&["--root", &arg, "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
-        for path in [
-            "AGENTS.md",
-            "CLAUDE.md",
-            "README.md",
-            ".gitignore",
-            ".gitattributes",
-        ] {
+        for path in ["README.md", ".gitignore", ".gitattributes"] {
             let text = fs::read_to_string(root.join(path))
                 .unwrap_or_else(|_| panic!("{stack}: {path} was not written"));
-            for placeholder in ["{name}", "{map}", "{development}", "{version}", "{stack}"] {
+            for placeholder in ["{name}", "{development}", "{version}", "{stack}"] {
                 assert!(!text.contains(placeholder), "{stack}: {path}: {text}");
             }
         }
-        let agents = fs::read_to_string(root.join("AGENTS.md")).unwrap();
-        assert!(agents.starts_with("# AGENTS.md (my-app)\n"), "{agents}");
+        // Nothing an agent reads by itself: what an agent is told is the project's
+        for path in ["AGENTS.md", "CLAUDE.md"] {
+            assert!(!root.join(path).exists(), "{stack}: {path}");
+        }
         assert!(
             fs::read_to_string(root.join("README.md"))
                 .unwrap()
                 .starts_with("# my-app\n")
         );
-        assert_eq!(
-            fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
-            "@AGENTS.md\n@.rotproof/AGENTS.md\n"
-        );
-        // The map has the layers present, and not the one declared absent
-        assert_eq!(
-            agents.contains("composition/` | The composition root"),
-            stack != "none",
-            "{stack}: {agents}"
-        );
-        assert!(!agents.contains("application/` |"), "{stack}: {agents}");
         let requirements = root.join("requirements-dev.txt");
         let workflow = root.join(".github/workflows/ci.yml");
         let readme = fs::read_to_string(root.join("README.md")).unwrap();
@@ -973,16 +958,20 @@ fn create_writes_the_projects_files_once() {
         assert!(run(&["--root", &arg, "check"]).status.success());
 
         // From then on the files are the project's: an edit stays, and only a missing file is written again
-        fs::write(root.join("AGENTS.md"), "mine\n").unwrap();
-        fs::remove_file(root.join("CLAUDE.md")).unwrap();
+        fs::write(root.join("README.md"), "mine\n").unwrap();
+        fs::remove_file(root.join(".gitattributes")).unwrap();
         let out = create(&["--root", &arg, "create"]);
         assert_eq!(
-            fs::read_to_string(root.join("AGENTS.md")).unwrap(),
+            fs::read_to_string(root.join("README.md")).unwrap(),
             "mine\n"
         );
-        assert!(stdout(&out).contains("wrote CLAUDE.md"), "{}", stdout(&out));
         assert!(
-            !stdout(&out).contains("wrote AGENTS.md"),
+            stdout(&out).contains("wrote .gitattributes"),
+            "{}",
+            stdout(&out)
+        );
+        assert!(
+            !stdout(&out).contains("wrote README.md"),
             "{}",
             stdout(&out)
         );
@@ -7775,7 +7764,7 @@ fn a_project_that_declares_units_gets_the_layers_of_each_and_is_checked_as_one()
 }
 
 #[test]
-fn the_map_in_agents_md_names_the_unit_of_each_row_and_check_and_init_tell_when_it_is_behind() {
+fn the_map_a_project_keeps_in_agents_md_is_told_when_it_is_behind_by_check_and_init() {
     let absent = "path = \"packages/billing/src/billing\"\n";
     let root =
         declared(&two_units("true").replace(absent, &format!("{absent}absent = [\"protocol\"]\n")));
@@ -7783,28 +7772,42 @@ fn the_map_in_agents_md_names_the_unit_of_each_row_and_check_and_init_tell_when_
     let arg = root_arg(r);
     let out = create(&["--root", &arg, "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
-    let agents = fs::read_to_string(r.join("AGENTS.md")).unwrap();
-    // A row for each layer of each unit, the unit named, and the whole first sentence of the role
-    assert!(
-        agents.contains(
-            "| `packages/core/src/core/domain/` | core: The concepts and rules of the business: types, \
-             calculations and decisions. |\n"
-        ),
-        "{agents}"
-    );
-    assert!(
-        agents.contains("| `packages/billing/src/billing/domain/` | billing: "),
-        "{agents}"
-    );
-    assert!(
-        !agents.contains("packages/billing/src/billing/protocol/"),
-        "{agents}"
-    );
+    // Rotproof writes no AGENTS.md: a project without one has no map to judge
+    assert!(!r.join("AGENTS.md").exists());
+    assert!(!r.join("CLAUDE.md").exists());
     fs::write(
         r.join("docs/log.md"),
         "# Log\n\n## 2026-10-02\n\n* Something\n",
     )
     .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        out.status.success() && !stdout(&out).contains("the map in AGENTS.md"),
+        "{}",
+        stdout(&out)
+    );
+
+    // The project keeps a map of its own, a row for each layer of each unit, in its own words
+    let row = |unit: &str, layer: &str| {
+        format!("| `packages/{unit}/src/{unit}/{layer}/` | {unit}: mine |\n")
+    };
+    let mut rows = String::new();
+    for layer in [
+        "composition",
+        "infrastructure",
+        "application",
+        "protocol",
+        "domain",
+    ] {
+        rows.push_str(&row("core", layer));
+        if layer != "protocol" {
+            rows.push_str(&row("billing", layer));
+        }
+    }
+    let agents = format!(
+        "# AGENTS.md\n\n## Map\n\n| Path | Content |\n|---|---|\n{rows}| `docs/` | Records |\n"
+    );
+    fs::write(r.join("AGENTS.md"), &agents).unwrap();
     let out = run(&["--root", &arg, "check"]);
     assert!(
         out.status.success() && !stdout(&out).contains("AGENTS.md has no row"),
@@ -7842,10 +7845,13 @@ fn the_map_in_agents_md_names_the_unit_of_each_row_and_check_and_init_tell_when_
     );
 
     // Add the row, and both are quiet; the file is the project's, and was never written over
-    let row = "| `packages/billing/src/billing/protocol/` | billing: Mine. |\n";
+    assert_eq!(fs::read_to_string(r.join("AGENTS.md")).unwrap(), agents);
     fs::write(
         r.join("AGENTS.md"),
-        agents.replace("| `docs/`", &format!("{row}| `docs/`")),
+        agents.replace(
+            "| `docs/`",
+            &format!("{}| `docs/`", row("billing", "protocol")),
+        ),
     )
     .unwrap();
     let said = stdout(&run(&["--root", &arg, "check"]));

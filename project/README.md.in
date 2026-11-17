@@ -5,5 +5,4 @@
 ## Development
 
 {development}
-The map of the repository and its rules are in `AGENTS.md`, and the rules Rotproof keeps are in
-`.rotproof/AGENTS.md`.
+The rules Rotproof keeps are in `.rotproof/AGENTS.md`.

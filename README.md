@@ -47,9 +47,9 @@ If LLM agents write the code of a repository, these are the things nobody has to
   `TODO` that names the issue tracking it, which every run lists. No comment switches the type checker off, and only
   `infrastructure` reads the environment variables.
 - **An agent that has only the binary finds its way.** `rotproof --help` gives the order to start in, and the rules
-  are written for the project's stack in `.rotproof/AGENTS.md`, which the `AGENTS.md` and `CLAUDE.md` that
-  `rotproof create` writes point the agent at. How to upgrade Rotproof and when to run each command is in
-  `.rotproof/running.md`, which the guide names.
+  are written for the project's stack in `.rotproof/AGENTS.md`, which the project points its agent at from the file
+  the agent reads first. How to upgrade Rotproof and when to run each command is in `.rotproof/running.md`, which the
+  guide names.
 - **The rules are the ones you pinned.** A project pins one exact version of Rotproof, so the rules change only in a
   commit of the project's own (see "Compatibility").
 
@@ -126,9 +126,9 @@ wrote docs/knowledge/index.md
 next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md
 ```
 
-Each layer is a directory whose `__init__.py` says its role. `docs/` holds the records, and the rest is what an agent
-reads (`AGENTS.md` and `CLAUDE.md`, which point at `.rotproof/AGENTS.md`, the rules written for the stack) and a CI
-workflow that runs `rotproof check`. A Python project is locked: its dependencies are in `pyproject.toml`, which
+Each layer is a directory whose `__init__.py` says its role. `docs/` holds the records, `.rotproof/AGENTS.md` the rules
+written for the stack, and the rest is a CI workflow that runs `rotproof check`. Rotproof writes no `AGENTS.md` or
+`CLAUDE.md`: what an agent is told is the project's to decide. A Python project is locked: its dependencies are in `pyproject.toml`, which
 `create` wrote with Rotproof pinned in the `dev` group of its `[dependency-groups]`, and a lock file is committed, which
 only a tool can make. Until then `rotproof check` fails:
 

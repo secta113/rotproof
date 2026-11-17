@@ -170,7 +170,7 @@ enum Command {
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, docs/knowledge/, docs/log.md, and
     /// the project's files
-    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes,
+    /// (README.md, .gitignore, .gitattributes,
     /// a CI workflow that installs the pinned Rotproof (from the lock file of the project, with the tool that made it,
     /// uv's when there is none, for python, whose pyproject.toml pins Rotproof in dev of [dependency-groups]; from npm
     /// with the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
