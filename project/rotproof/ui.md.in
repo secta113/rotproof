@@ -7,6 +7,7 @@
   values of `presentation.display` and take actions as callbacks; `atoms` and `molecules` know nothing of
   `presentation` and take plain values; `ui` knows neither `application`, `domain` nor `infrastructure`. A model calls
   the input ports of `protocol.inbound` and draws nothing: a provider that hands its state to the view is a part of
-  `ui`. What the whole UI shares goes in the lowest level that may know what it knows: a part that renders nothing (a
-  design value, a hook, a provider of a theme) is an atom when it knows no project concept, and code beside the levels
-  fails `rotproof check`.
+  `ui`. A screen that serves several flows (a sign-in that returns to the screen that opened it, a picker) does not
+  decide where to go next: whatever opens it passes the destination in. What the whole UI shares goes in the lowest
+  level that may know what it knows: a part that renders nothing (a design value, a hook, a provider of a theme) is an
+  atom when it knows no project concept, and code beside the levels fails `rotproof check`.

@@ -10,3 +10,8 @@
   let one level reach another, and fails. Every other file in `src/` sits in a level, and `#[path]` is not allowed.
 - **The entry file, `src/main.rs` of the root package, depends on `composition` only:** the root `Cargo.toml` is read
   for it.
+- **Run cargo over the workspace, locally and in CI.** A project that declares no units has a root package of its own
+  beside the workspace of the layer crates, so a plain `cargo test`, `cargo clippy` or `cargo fmt --check` runs the root
+  package only, and the tests and the lint of the layers are skipped without a word: write `cargo test --workspace`,
+  `cargo clippy --workspace` and `cargo fmt --all --check`, as the same commands are right when units make the
+  workspace virtual.

@@ -148,8 +148,15 @@ that has a declaration:
   `docs/knowledge/`, the log and the project's files where they are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
   names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
   on the onion architecture, it says where the code of each layer that is gone goes (`handler`, `utils`) and that the
-  ports move from `domain` to `protocol.outbound`, as "move by hand" lines; it moves no code, and keeps nothing behind:
-  `rotproof check` names what is not moved yet. Crossing 1.0.0-rc.3, which splits the UI into the view (`ui`) and the
+  ports move from `domain` to `protocol.outbound`, as "move by hand" lines, and, when a directory of a layer that is
+  gone is there, one line more that names the directories it found and says to search the files Rotproof does not read
+  (documents, scripts, configuration, comments) for those paths once the code has moved, since no check reads them;
+  it moves no code, and keeps nothing behind: `rotproof check` names what is not moved yet. Crossing 1.0.0-rc.1, the first version that reads no record of work, it says, for a
+  project whose `docs/work/` is there, as one more "move by hand" line, that Rotproof reads none of that directory and
+  writes no `index.md`, `closed.md` or `rules.md` in it, so those stay as they were, that `docs/index.md` no longer
+  links to it, and that its open items need a home the person chooses (the project's issues, or kept as frozen
+  history); it moves and deletes nothing there, and says nothing for a project without the directory. Crossing
+  1.0.0-rc.3, which splits the UI into the view (`ui`) and the
   state of the screens (`presentation`) and declares the UI, the refresh adds `ui` to the declaration: `"atomic"` when
   `ui/` is there, `"none"` otherwise. With `"atomic"`, it says, as the same lines, that `presentation` is to be made
   (`rotproof create --yes`), and that the state of a page and its calls of the use cases move to
@@ -345,7 +352,9 @@ What the layers are is written once, in `layers/table.toml`, on the onion archit
 The levels of a layer other than `ui` and `presentation` never import each other. `ui` is the view and
 `presentation` the state and behaviour of the screens apart from it, the Presentation Model (Fowler) held to the
 inward direction of the onion: a model calls the use cases through `protocol.inbound`, as an entry point does, and
-draws nothing. The two come with `ui = "atomic"` (and with `ui = "rendered"`, below), and a project with `ui = "none"`
+draws nothing. A screen that serves several flows (a sign-in that returns to the screen that opened it, a picker)
+does not decide where to go next: whatever opens it passes the destination in (guidance in the role of
+`presentation.models` and in the guide; no check reads it). The two come with `ui = "atomic"` (and with `ui = "rendered"`, below), and a project with `ui = "none"`
 has neither: `ui` is chosen as the stack is, not switched off in `absent`, since a screen needs both or neither. In TypeScript, `presentation` also holds
 no view: a `.tsx` or `.jsx` file there fails `rotproof check`, so the state and the hooks of a screen are `.ts` files
 and a component goes in `ui` or `composition` (a provider keeps its context and state hook in `presentation` and its
