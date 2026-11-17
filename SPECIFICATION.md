@@ -524,7 +524,9 @@ is judged by the name", after TypeScript's (`std::env`, the clocks, the methods 
   `from m import *` is the import of `m`; an import under `if TYPE_CHECKING:` and a call of `importlib.import_module` with
   a literal are imports; and the names the file uses are read as Python's scopes read them, so `import urllib` then
   `urllib.request.urlopen(...)`, and `import asyncio` then `asyncio.open_connection(...)`, are uses of the entries
-  `urllib.request` and `asyncio.open_connection`. In TypeScript, a specifier is matched with `node:` or without it, a
+  `urllib.request` and `asyncio.open_connection`. A use in a type position (`def f(a: argparse.Namespace)`,
+  `Callable[[argparse.ArgumentParser], None]`) is never judged, by the table either: the import it names fails at its
+  own line, an `import argparse` under `if TYPE_CHECKING:` too. In TypeScript, a specifier is matched with `node:` or without it, a
   specifier of `import`, `export ... from`, `import()` and `require` with a literal included, `import type` too; a name
   taken from it is said (`"node:fs".readFile`). In Rust, an item is found as the scanner finds the items of a module
   (see the environment check, in "What `rotproof check` checks"): by its whole path, through a `use` of the module or of one above it, through a rename of
@@ -678,7 +680,8 @@ parameter or a variable called `fetch` is its own, and `function f(process) { pr
 **A global is a name no scope binds, and what the global object holds is the global:** `window.fetch`,
 `globalThis.fetch`, `self.fetch` and `global.fetch` are `fetch`. **A reference counts as a call** (`useState(Date.now)`,
 `const f = fetch`), and a name in a type position (`let x: Date`, `type T = typeof window`) and the operand of `typeof`
-(`typeof window !== "undefined"`) are never judged. A name taken from a module (`"node:fs".readFile`) is the table's.
+(`typeof window !== "undefined"`) are never judged, a name taken from a module included (`typeof fs.readFile`: the import fails at its own line). A name
+taken from a module (`"node:fs".readFile`) is the table's.
 The finding is a forbidden import as the table's are, approved by the file and the **entry**: a global is an entry of
 its own by its name (`fetch`, `localStorage` for `localStorage.getItem`, `document`; the finding names the member), and
 `process` by its member as a module is (`process.cwd`); **an act that more than one name does is one entry, a group:**

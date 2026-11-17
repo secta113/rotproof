@@ -176,8 +176,8 @@ fn python_entry(dotted: &str) -> Option<(&'static str, Option<String>)> {
 /// Every use of an entry of the table in a Python file, from what it imports (the modules, as parts, each with its
 /// line: `from m import n` is `m.n`) and from the names it uses: `import asyncio` then `asyncio.open_connection(...)`
 /// is a use of the entry `asyncio.open_connection`, and `import urllib` then `urllib.request.urlopen(...)` one of
-/// `urllib.request`. A name in a type position counts for the table, as an annotation still names it, and is never
-/// judged for the rest.
+/// `urllib.request`. A use in a type position is never judged, by the table or by the name: an annotation runs
+/// nothing, and the import it names fails at its own line.
 ///
 /// What is I/O in part is judged by the name after the table ([`python`]): the allowlists, the groups, `pathlib.Path`,
 /// a module used as a value and a star import of one, and the calls of an attribute (`methods`) whose name is a path's,
@@ -195,6 +195,10 @@ pub fn in_python(
         })
         .collect();
     for used in uses {
+        // An annotation runs nothing, and the import it names is found at its own line
+        if used.in_type {
+            continue;
+        }
         // The module `from m import *` brings the names of is its import, which is already one when it is in the table
         if used.how == How::Star {
             found.extend(python::judge_star(used));
@@ -288,7 +292,8 @@ fn node_entry(name: &str, prefixed: bool) -> Option<String> {
 ///
 /// What is I/O in part is judged by the name after the table ([`typescript`]): a global (a name no scope binds, which
 /// `window.` and `globalThis.` do not change) is I/O unless it is on the allowlist, and the clock, randomness, the
-/// terminal and the arguments are groups.
+/// terminal and the arguments are groups. A name in a type position and the operand of `typeof` are never judged, by
+/// the table or by the name.
 pub fn in_typescript(imports: &[(usize, Import)], uses: &[Use]) -> Vec<Found> {
     let mut found = Vec::new();
     for (line, import) in imports {
@@ -315,6 +320,10 @@ pub fn in_typescript(imports: &[(usize, Import)], uses: &[Use]) -> Vec<Found> {
         }
     }
     for used in uses {
+        // A type position and the operand of `typeof` run nothing, and the import is found at its own line
+        if used.in_type || used.how == How::TypeOf {
+            continue;
+        }
         let (Some(module), parts) = split_typescript_name(&used.name) else {
             found.extend(typescript::judge(used));
             continue;
@@ -740,6 +749,27 @@ mod tests {
     }
 
     #[test]
+    fn a_python_use_in_a_type_position_is_not_judged_by_the_table_and_the_import_is() {
+        let mut typed = called(3, "argparse.ArgumentParser");
+        typed.in_type = true;
+        let mut value = typescript_use(4, "shutil.copyfile", How::Value);
+        value.in_type = true;
+        let found = in_python(
+            &[(1, vec!["argparse".to_string()])],
+            &[typed, value, called(5, "argparse.ArgumentParser")],
+            &[],
+            &Excluded::default(),
+        );
+        assert_eq!(
+            found
+                .iter()
+                .map(|f| (f.line, f.entry.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "argparse"), (5, "argparse")]
+        );
+    }
+
+    #[test]
     fn a_python_name_used_under_an_entry_is_said_and_a_star_import_is_the_import() {
         let found = in_python(
             &[
@@ -917,6 +947,33 @@ mod tests {
                 (4, "fs", Some("promises")),
                 (5, "fs", None),
             ]
+        );
+    }
+
+    #[test]
+    fn the_operand_of_typeof_and_a_type_position_are_not_judged_by_the_table_and_the_import_is() {
+        let imports = [(
+            1,
+            Import {
+                specifier: "node:fs".into(),
+                names: vec!["readFile".into()],
+            },
+        )];
+        let mut typed = typescript_use(3, "\"node:fs\".readFile", How::Value);
+        typed.in_type = true;
+        let uses = [
+            typescript_use(1, "\"node:fs\".readFile", How::Imported),
+            typescript_use(2, "\"node:fs\".readFile", How::TypeOf),
+            typed,
+            typescript_use(4, "\"fs\".readFileSync", How::Value),
+        ];
+        let found = in_typescript(&imports, &uses);
+        assert_eq!(
+            found
+                .iter()
+                .map(|f| (f.line, f.entry.as_str(), f.name.as_deref()))
+                .collect::<Vec<_>>(),
+            [(1, "fs", Some("readFile")), (4, "fs", Some("readFileSync")),]
         );
     }
 

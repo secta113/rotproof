@@ -465,6 +465,23 @@ mod tests {
     }
 
     #[test]
+    fn a_typescript_name_of_a_module_as_the_operand_of_typeof_is_not_judged_and_the_import_is() {
+        let found = judged(
+            &[(
+                "src/domain/a.ts",
+                "import * as fs from 'node:fs';\nlet a: typeof fs.readFile;\nconst b = typeof fs.readFile;\n\
+                 const c = fs.readFile;\n",
+            )],
+            "typescript",
+            "none",
+        );
+        assert_eq!(
+            found,
+            ["src/domain/a.ts:1 fs", "src/domain/a.ts:4 (readFile) fs"]
+        );
+    }
+
+    #[test]
     fn a_package_that_the_manifest_lists_does_not_make_fs_another_module() {
         let tree = Fake::new(&[
             (
@@ -833,6 +850,71 @@ def f(a: os.PathLike, b: datetime.datetime, c: os.sep) -> sys.argv:
             says("import os\nx: list[os.getcwd()] = []\n"),
             ["2 os.getcwd"]
         );
+    }
+
+    #[test]
+    fn a_name_of_the_table_in_a_type_position_is_not_judged_and_the_import_is() {
+        // The annotations of a project that measured it: the import line fails, each annotation does not
+        let source = "\
+import argparse
+from typing import Any, Callable, Optional
+
+
+class Command:
+    describe: Callable[[Any, argparse.Namespace], list[int]]
+
+    def build(
+        self,
+        add_arguments: Optional[Callable[[argparse.ArgumentParser], None]] = None,
+    ) -> None:
+        pass
+";
+        assert_eq!(says(source), ["1 argparse"]);
+        // An import under `TYPE_CHECKING` still fails, its annotations do not
+        let source = "\
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    import argparse
+    from shutil import copyfile
+
+
+def f(a: argparse.Namespace, b: 'argparse.ArgumentParser') -> None:
+    pass
+
+
+def g(c: copyfile) -> None:
+    pass
+";
+        assert_eq!(says(source), ["3 argparse", "4 (copyfile) shutil"]);
+        // A use that runs is judged beside the import, in a type position or not
+        let source = "\
+import argparse
+def f(a: argparse.Namespace) -> None:
+    parser = argparse.ArgumentParser()
+    x: list[argparse.Namespace] = []
+";
+        assert_eq!(says(source), ["1 argparse", "3 (ArgumentParser) argparse"]);
+    }
+
+    #[test]
+    fn a_name_in_a_type_position_does_not_narrow_the_layers_of_code_that_is_moving() {
+        let does = |source: &str| {
+            let tree = Fake::new(&[("moving/a.py", source)]);
+            let files = ["moving/a.py".to_string()];
+            of_files(&tree, &Readers, &declared("python", "none"), &files)
+                .unwrap()
+                .remove("moving/a.py")
+                .unwrap()
+                .io
+        };
+        // The import line of a module of the table is what narrows the layers; an annotation adds nothing
+        assert!(does(
+            "import argparse\ndef f(a: argparse.Namespace) -> None:\n    pass\n"
+        ));
+        assert!(!does(
+            "import os\ndef f(a: os.PathLike, b: os.sep) -> None:\n    pass\n"
+        ));
+        assert!(does("import os\nx = os.sep\n"));
     }
 
     #[test]
