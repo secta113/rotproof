@@ -18,10 +18,14 @@ use protocol::outbound::{Files, Machine, Parsers};
 
 use crate::outbound::disk::Disk;
 use crate::outbound::git::Git;
-use crate::outbound::readers::Readers;
+use crate::outbound::readers::{Readers, Remembering};
 
-/// The machine Rotproof runs on: the disk, git, Ruff, oxc and toml_edit, and the local clock.
-pub struct Local;
+/// The machine Rotproof runs on: the disk, git, Ruff, oxc and toml_edit (which remember each file they read, so that
+/// one run reads it once), and the local clock.
+#[derive(Default)]
+pub struct Local {
+    readers: Remembering<Readers>,
+}
 
 impl Files for Disk {
     fn name(&self) -> Result<String, String> {
@@ -35,7 +39,7 @@ impl Machine for Local {
     }
 
     fn parsers(&self) -> &dyn Parsers {
-        &Readers
+        &self.readers
     }
 
     fn user_name(&self, root: &Path) -> Option<String> {

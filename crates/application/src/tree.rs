@@ -1,6 +1,8 @@
 //! Reading a project's files through the [`Tree`] port: a path read name by name, the code files of a directory, and
 //! the text of a file as the checks read it, with how it was written.
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::io;
 
 use domain::paths::{file_name, join, parent};
@@ -142,6 +144,33 @@ pub fn resolved(tree: &dyn Tree, path: &str) -> String {
         }
         rest.push(file_name(at));
         at = parent(at);
+    }
+}
+
+/// [`resolved`], each path asked once: a check that places every import of a project asks about the same module as
+/// many times as files import it, and each asking is a call to the operating system. Kept for one reading of the tree,
+/// which nothing writes meanwhile.
+pub struct Resolver<'a> {
+    tree: &'a dyn Tree,
+    known: RefCell<BTreeMap<String, String>>,
+}
+
+impl<'a> Resolver<'a> {
+    pub fn new(tree: &'a dyn Tree) -> Self {
+        Resolver {
+            tree,
+            known: RefCell::new(BTreeMap::new()),
+        }
+    }
+
+    /// What [`resolved`] says of `path`.
+    pub fn of(&self, path: &str) -> String {
+        if let Some(known) = self.known.borrow().get(path) {
+            return known.clone();
+        }
+        let at = resolved(self.tree, path);
+        self.known.borrow_mut().insert(path.to_string(), at.clone());
+        at
     }
 }
 

@@ -49,7 +49,7 @@ use ruff_python_ast::{
 
 use domain::code::{Defined, First, How, Method, Use};
 use domain::python_builtins::is_builtin;
-use domain::text::line_of;
+use domain::text::Lines;
 
 use super::base_of;
 
@@ -77,7 +77,7 @@ pub struct Found {
 /// Read a file's body, whose relative imports start from `package`.
 pub fn read(source: &str, body: &[Stmt], package: &[String]) -> Found {
     let mut reader = Reader {
-        source,
+        lines: Lines::new(source),
         package,
         scopes: vec![Scope::new(Kind::Module, None)],
         current: 0,
@@ -179,7 +179,7 @@ enum Resolved {
 }
 
 struct Reader<'s> {
-    source: &'s str,
+    lines: Lines,
     package: &'s [String],
     scopes: Vec<Scope>,
     current: usize,
@@ -191,7 +191,7 @@ struct Reader<'s> {
 
 impl Reader<'_> {
     fn line(&self, at: usize) -> usize {
-        line_of(self.source, at)
+        self.lines.line(at)
     }
 
     /// Open a scope inside the current one, and make it the current.

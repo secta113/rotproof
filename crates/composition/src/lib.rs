@@ -15,6 +15,6 @@ use infrastructure::outbound::Local;
 
 /// Build Rotproof on the machine it runs on, and run the command line with it.
 pub fn run() -> ExitCode {
-    let machine = Local;
+    let machine = Local::default();
     cli::run(&Rotproof::new(&machine))
 }

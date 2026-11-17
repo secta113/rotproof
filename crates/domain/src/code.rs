@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::paths::{join, normalize, parent};
 
 /// What one file of code holds: what it imports, as `I`, its comments and its first syntax error.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Source<I> {
     /// Everything the file imports, each with the line (from 1) it is imported on
     pub imports: Vec<(usize, I)>,

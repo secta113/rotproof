@@ -14,7 +14,7 @@ use std::io;
 use super::moving::{Moving, python_files};
 use super::templates::templates;
 use super::{Direction, entry_files, layer_files, misread, test_dirs};
-use crate::tree::{exactly, read_code, resolved};
+use crate::tree::{Resolver, exactly, read_code};
 use domain::code::module_parts;
 use domain::declaration::Declared;
 use domain::direction::{Landing, Way, edge, imports_test, judged_landing, landing_of};
@@ -57,6 +57,7 @@ pub(super) fn python<'a>(
     let imported: BTreeMap<&str, &str> = units.iter().filter_map(Unit::python_import).collect();
     // The files read are the layers', the entry files' and the packages': none is a test, and no test is read
     let tests = test_dirs(tree, layout, units);
+    let resolver = Resolver::new(tree);
     for (path, from) in files {
         let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
             continue;
@@ -67,7 +68,7 @@ pub(super) fn python<'a>(
         }
         for (line, module) in read.imports {
             let (target, by_unit) = path_of(&module, &imported);
-            let at = resolved(tree, &target);
+            let at = resolver.of(&target);
             moving.read_by(from, || python_files(&at));
             let dotted = module.join(".");
             if let Some(dir) = tests.iter().find(|dir| within(&at, dir)) {
@@ -110,7 +111,7 @@ pub(super) fn python<'a>(
             links.extend(link(from, to));
         }
     }
-    read_moving(tree, parsers, &imported, places, units, moving)?;
+    read_moving(tree, parsers, &resolver, &imported, places, units, moving)?;
     let templates = templates(tree, layout, places, units, &mut found, &mut forbidden)?;
     Ok(Direction {
         problems: found,
@@ -130,6 +131,7 @@ pub(super) fn python<'a>(
 fn read_moving<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
+    resolver: &Resolver,
     imported: &BTreeMap<&str, &str>,
     places: &[&'a Place],
     units: &'a [Unit],
@@ -141,7 +143,7 @@ fn read_moving<'a>(
         };
         for (_, module) in parsers.python(&source, &path).imports {
             let (target, _) = path_of(&module, imported);
-            let at = resolved(tree, &target);
+            let at = resolver.of(&target);
             moving.imports(&path, python_files(&at), landing_of(&at, places, units));
         }
     }
