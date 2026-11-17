@@ -20,8 +20,10 @@
 //!
 //! - **What is I/O in part is judged by the name,** in Python: the allowlists of `os`, `os.path`, `sys`, `time` and
 //!   `logging`, the clock, randomness, the terminal, the command-line arguments, `pathlib.Path`, the net of method
-//!   names and what cannot be read (`python`). A group of one act (the clock, randomness, the terminal, the arguments)
-//!   is one entry, whichever name it is reached by (`groups`).
+//!   names and what cannot be read (`python`); in TypeScript: the allowlist of the globals (a global not on it is
+//!   I/O), `process`, the clock, randomness, `console`, the arguments and what cannot be read (`typescript`). A group
+//!   of one act (the clock, randomness, the terminal, the arguments) is one entry, whichever name it is reached by
+//!   (`groups`).
 //!
 //! Python and TypeScript are read by their readers of imports and uses ([`in_python`], [`in_typescript`]); Rust by
 //! Rotproof's own scanner ([`in_rust`]).
@@ -29,6 +31,7 @@
 mod groups;
 mod python;
 mod table;
+mod typescript;
 
 pub use groups::{Excluded, Group};
 pub use python::excluded as python_excluded;
@@ -76,17 +79,27 @@ pub fn guide(language: Language) -> String {
              crate's `src/`: `tests/`, `benches/`, `examples/` and `build.rs`)"
         }
     };
-    // What a stack says of the names it judges besides the table: Python's so far
+    // What a stack says of the names it judges besides the table: Python's and TypeScript's so far
     let (names, passed, keys) = match language {
         Language::Python => (
             python::listing(),
             groups::passed_in(language),
             groups::KEYS.to_string(),
         ),
-        Language::TypeScript | Language::Rust => (String::new(), String::new(), String::new()),
+        Language::TypeScript => (
+            typescript::listing(),
+            groups::passed_in(language),
+            groups::KEYS_TYPESCRIPT.to_string(),
+        ),
+        Language::Rust => (String::new(), String::new(), String::new()),
+    };
+    let hook = match language {
+        Language::TypeScript => ", through a hook in `ui.atoms`",
+        Language::Python | Language::Rust => "",
     };
     GUIDE_TEXT
         .replace("{tests}", tests)
+        .replace("{hook}", hook)
         .replace("{table}", &listing(language))
         .replace("{names}", &names)
         .replace("{passed}", &passed)
@@ -251,6 +264,10 @@ fn node_entry(name: &str, prefixed: bool) -> Option<String> {
 /// names it takes) and from the names it uses of a module (`"node:fs".readFile`). The manifest is not asked: `fs` is
 /// Node's `fs` whatever `package.json` lists. A scheme other than `node:` fails, as what it names cannot be judged. An
 /// `import type` is an import as any.
+///
+/// What is I/O in part is judged by the name after the table ([`typescript`]): a global (a name no scope binds, which
+/// `window.` and `globalThis.` do not change) is I/O unless it is on the allowlist, and the clock, randomness, the
+/// terminal and the arguments are groups.
 pub fn in_typescript(imports: &[(usize, Import)], uses: &[Use]) -> Vec<Found> {
     let mut found = Vec::new();
     for (line, import) in imports {
@@ -278,6 +295,7 @@ pub fn in_typescript(imports: &[(usize, Import)], uses: &[Use]) -> Vec<Found> {
     }
     for used in uses {
         let (Some(module), parts) = split_typescript_name(&used.name) else {
+            found.extend(typescript::judge(used));
             continue;
         };
         let Some((entry, cause)) = typescript_entry(&module) else {
@@ -431,13 +449,22 @@ fn sorted(mut found: Vec<Found>) -> Vec<Found> {
     found
 }
 
-/// What to do about I/O in a layer, the first thing a finding says.
-fn remedy(layer: &str) -> &'static str {
-    if layer == "presentation" {
-        "a screen's model does no I/O: it gets what it needs from its page, or through a use case of protocol.inbound it \
-         is given"
-    } else {
-        "move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use case is given"
+/// What to do about I/O in a layer of a project in `language`, the first thing a finding says. A screen's model in
+/// TypeScript gets what the browser gives (`matchMedia`, `localStorage`, `document.title`) from a hook in `ui.atoms`
+/// that its page uses, or through a use case.
+fn remedy(layer: &str, language: Language) -> &'static str {
+    match (layer, language) {
+        ("presentation", Language::TypeScript) => {
+            "a screen's model does no I/O: it gets what it needs from its page, through a hook in `ui.atoms`, or through a \
+             use case of protocol.inbound it is given"
+        }
+        ("presentation", _) => {
+            "a screen's model does no I/O: it gets what it needs from its page, or through a use case of protocol.inbound it \
+             is given"
+        }
+        _ => {
+            "move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use case is given"
+        }
     }
 }
 
@@ -504,7 +531,7 @@ pub fn findings(
             };
             let first = match cause {
                 Cause::Group(group) => group.remedy(layer, language),
-                _ => remedy(layer).to_string(),
+                _ => remedy(layer, language).to_string(),
             };
             let text = source.lines().nth(line - 1).unwrap_or("").trim();
             Forbidden {
@@ -847,7 +874,7 @@ mod tests {
             typescript_use(4, "\"fs\".promises.readFile", How::Value),
             typescript_use(5, "\"fs\"", How::Value),
             typescript_use(6, "\"react\".default.useState", How::Value),
-            typescript_use(7, "fetch", How::Value),
+            typescript_use(7, "Math.max", How::Value),
         ];
         let found = in_typescript(&imports, &uses);
         assert_eq!(
@@ -861,6 +888,85 @@ mod tests {
                 (4, "fs", Some("promises")),
                 (5, "fs", None),
             ]
+        );
+    }
+
+    #[test]
+    fn a_global_is_judged_by_its_name_beside_the_table_and_what_cannot_be_read_is_found() {
+        let imports = [(
+            1,
+            Import {
+                specifier: "node:fs".into(),
+                names: vec!["readFile".into()],
+            },
+        )];
+        let uses = [
+            typescript_use(1, "\"node:fs\".readFile", How::Imported),
+            typescript_use(2, "localStorage.getItem", How::Value),
+            typescript_use(3, "Date.now", How::Value),
+            typescript_use(4, "Map", How::Value),
+            typescript_use(5, "process.env.A", How::Value),
+            typescript_use(6, "window", How::TypeOf),
+        ];
+        let found = in_typescript(&imports, &uses);
+        assert_eq!(
+            found
+                .iter()
+                .map(|f| (f.line, f.entry.as_str(), f.name.as_deref()))
+                .collect::<Vec<_>>(),
+            [
+                (1, "fs", Some("readFile")),
+                (2, "localStorage", Some("localStorage.getItem")),
+                (3, "clock", Some("Date.now")),
+            ]
+        );
+        let unread = unread(&[(7, "eval".into()), (8, "import()".into())]);
+        assert_eq!(
+            unread
+                .iter()
+                .map(|f| (f.line, f.entry.as_str(), f.cause.clone()))
+                .collect::<Vec<_>>(),
+            [
+                (7, "eval", Cause::Unread("eval".into())),
+                (8, "import()", Cause::Unread("import()".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_screens_model_in_typescript_is_told_of_the_hook_and_the_other_layers_are_not() {
+        let found = in_typescript(
+            &[],
+            &[typescript_use(1, "localStorage.getItem", How::Value)],
+        );
+        let said = |layer: &str| {
+            findings(
+                "src/x.ts",
+                "const a = localStorage.getItem('k');\n",
+                layer,
+                Language::TypeScript,
+                &found,
+            )[0]
+            .detail
+            .clone()
+        };
+        assert!(
+            said("presentation").contains(
+                "it gets what it needs from its page, through a hook in `ui.atoms`, or through a use case of \
+                 protocol.inbound it is given: uses `localStorage` (localStorage.getItem), which does I/O"
+            ),
+            "{}",
+            said("presentation")
+        );
+        assert!(
+            said("domain").contains("move the I/O into infrastructure.outbound, behind a port"),
+            "{}",
+            said("domain")
+        );
+        // Python has no hook
+        assert!(
+            !remedy("presentation", Language::Python).contains("hook"),
+            "no hook in Python"
         );
     }
 
@@ -1206,6 +1312,24 @@ fn b() { std::fs::read(\"b\"); }
                 assert!(text.contains(name), "{language:?}: {name}");
             }
             assert!(text.contains("rotproof approve"));
+            // Every placeholder is filled
+            assert!(!text.contains('{'), "{language:?}");
+            // The hook is a TypeScript screen's way to the browser
+            assert_eq!(
+                text.contains("gets what it needs from its page, through a hook in `ui.atoms`, or through a use case"),
+                language == Language::TypeScript,
+                "{language:?}"
+            );
         }
+    }
+
+    #[test]
+    fn the_guide_of_typescript_prints_the_allowlist_in_full() {
+        let text = guide(Language::TypeScript);
+        for name in typescript::GLOBALS_PURE {
+            assert!(text.contains(&format!("`{name}`")), "{name}");
+        }
+        assert!(text.contains("`fetch`, `localStorage` or `process.cwd` for a global"));
+        assert!(!text.contains("`os.getcwd`"));
     }
 }

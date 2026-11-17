@@ -131,6 +131,12 @@ pub fn passed_in(language: Language) -> String {
     )
 }
 
+/// The entries of a TypeScript project's approvals file besides the table's: a global is an entry by its name, and
+/// `process` by its member.
+pub const KEYS_TYPESCRIPT: &str = ", and `fetch`, `localStorage` or `process.cwd` for a global judged by its name, `eval` \
+                                  for what cannot be read, and `clock`, `random`, `terminal` or `argv` for an act more \
+                                  than one name does";
+
 /// The entries of the approvals file besides the table's, as the guide lists them after the table's.
 pub const KEYS: &str = ", and `os.getcwd` or `sys.platform` for a name of a module judged by its names, `read_text` for \
                        a method judged by its name, `eval` for what cannot be read, and `clock`, `random`, `terminal` \

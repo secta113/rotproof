@@ -94,7 +94,11 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
                 found.extend(unread(&read.unread));
                 found
             }
-            Parsed::TypeScript(read) => in_typescript(&read.imports, &read.uses),
+            Parsed::TypeScript(read) => {
+                let mut found = in_typescript(&read.imports, &read.uses);
+                found.extend(unread(&read.unread));
+                found
+            }
             Parsed::Rust => in_rust(&file.source),
         };
         judged.forbidden.extend(findings(

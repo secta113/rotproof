@@ -442,8 +442,8 @@ terminal are `infrastructure`'s, behind a port in `protocol.outbound` that a use
 **import of an entry of a table of what does I/O wholly**, which Rotproof keeps for each stack and a project cannot
 change. The rule reads imports and, in Python and TypeScript, the names a file uses of a module it has imported; what a
 module does only in part (`os`, `pathlib`, `time`, `datetime`, `logging` itself) is not in the table, and is judged by
-the name it is used through: in Python by the lists of "Python: what is judged by the name", below; in TypeScript and
-Rust not yet.
+the name it is used through: in Python by the lists of "Python: what is judged by the name", below; in TypeScript by
+those of "TypeScript: what is judged by the name", after them (the globals, which are no import); in Rust not yet.
 
 - **Where:** the code of the four layers and their levels. Not `infrastructure` (it does the I/O), not `composition` and
   `ui` (they wire and draw), not the entry file, and not a test: in Python a file in `tests/`; in TypeScript a file named
@@ -466,7 +466,8 @@ Rust not yet.
 - **A finding starts with what to do,** by layer, then says what it found: "move the I/O into
   `infrastructure.outbound`, behind a port in `protocol.outbound` that the use case is given" for `domain`, `protocol` and
   `application`, and "a screen's model does no I/O: it gets what it needs from its page, or through a use case of
-  `protocol.inbound` it is given" for `presentation` (whose models import only `protocol.inbound`). It names the line,
+  `protocol.inbound` it is given" for `presentation` (whose models import only `protocol.inbound`; in TypeScript "from
+  its page, through a hook in `ui.atoms`, or through a use case"). It names the line,
   the entry and the names used on it. Approving, renaming the import, or moving the code to a path in `unchecked` or
   `moving` is no fix, and the guide says so.
 - **Seen through every spelling the file binds an entry by.** In Python, an import is matched by its dotted name as a
@@ -527,13 +528,14 @@ judges: Python's `io`, `logging` itself, `asyncio` as a whole (its tasks, queues
 `ExitCode`, `std::net::IpAddr` and the other plain values of `std::net`, `std::io::{Read, Write, BufRead, Cursor,
 Result, Error}`, `std::path` and `std::env::args`. What is pure when it holds bytes in memory: `zipfile`, `tarfile`,
 `gzip`, `bz2` and `lzma`, which read a file only when handed one, `mmap` and `ctypes`, which need a file or a library
-to be given, and `json` and `csv`. A TypeScript global (`fetch`, `console.log`) is no import and is not seen yet.
+to be given, and `json` and `csv`. A TypeScript global (`fetch`, `console.log`) is no import: it is judged by its name,
+in the section after Python's.
 
-**Not seen:** in TypeScript, an import built at run time (`require(name)`, `eval`); in every stack, a name bound in one
+**Not seen:** in every stack, a name bound in one
 file and used through another (in Rust, `pub use std::fs;` in a module and `reexport::fs::read` in the next: the `use`
 itself is found), a path a macro builds from pieces, a module of the project that is named as one of the table (a bare
-`import code` is the standard library's), and a type-only import, which counts as any. What Python does not see is in
-the section that follows.
+`import code` is the standard library's), and a type-only import, which counts as any. What Python and TypeScript do
+not see is in their sections that follow.
 
 #### Python: what is judged by the name
 
@@ -620,6 +622,68 @@ in a variable (`o = os` then `o.system`: the `os` of `o = os` is a module used a
 annotation, a name a star import of a module without an entry brings in, `compile`, the clocks and ids of packages, and a
 method of the net on a name an import brings in whose module is not one of the lists (`from app import repo`, then
 `repo.mkdir()`: judged by the net, and left out only by a definition in the project).
+
+#### TypeScript: what is judged by the name
+
+A TypeScript or JavaScript global is judged by its name after the table, on the names the file's scopes resolve (a
+parameter or a variable called `fetch` is its own, and `function f(process) { process.cwd() }` is no use of the global).
+**A global is a name no scope binds, and what the global object holds is the global:** `window.fetch`,
+`globalThis.fetch`, `self.fetch` and `global.fetch` are `fetch`. **A reference counts as a call** (`useState(Date.now)`,
+`const f = fetch`), and a name in a type position (`let x: Date`, `type T = typeof window`) and the operand of `typeof`
+(`typeof window !== "undefined"`) are never judged. A name taken from a module (`"node:fs".readFile`) is the table's.
+The finding is a forbidden import as the table's are, approved by the file and the **entry**: a global is an entry of
+its own by its name (`fetch`, `localStorage` for `localStorage.getItem`, `document`; the finding names the member), and
+`process` by its member as a module is (`process.cwd`); **an act that more than one name does is one entry, a group:**
+`clock`, `random`, `terminal` and `argv`, which the approval prints with the names the file uses under it now. The
+environment check's `process.env` (and `import.meta.env`) is left to it, never reported twice, and not approved.
+
+- **An allowlist of the globals that are pure; every other global is I/O.** It starts narrow: a name added later is a
+  patch, a name taken away is a major change. The guide of a TypeScript project prints it in full. Pure are `Object`,
+  `Array`, `Map`, `Set`, `WeakMap`, `WeakSet`, `WeakRef`, `FinalizationRegistry`, `Promise`, `JSON`, `Math` (but
+  `Math.random` is randomness), `Number`, `String`, `Boolean`, `Symbol`, `BigInt`, `Error` and its subclasses (`EvalError`,
+  `RangeError`, `ReferenceError`, `SyntaxError`, `TypeError`, `URIError`), `AggregateError`, `RegExp`, `Date` (but see the
+  clock), `Intl`, `Reflect`, `Proxy`, `ArrayBuffer`, `SharedArrayBuffer`, `DataView`, the typed arrays (`Int8Array`,
+  `Uint8Array`, `Uint8ClampedArray`, `Int16Array`, `Uint16Array`, `Int32Array`, `Uint32Array`, `Float16Array`,
+  `Float32Array`, `Float64Array`, `BigInt64Array`, `BigUint64Array`), `Atomics`, `Iterator`, `parseInt`, `parseFloat`,
+  `isNaN`, `isFinite`, `encodeURI`, `encodeURIComponent`, `decodeURI`, `decodeURIComponent`, `undefined`, `NaN`,
+  `Infinity`, `globalThis` alone, `structuredClone`, `queueMicrotask`, the timers `setTimeout`, `clearTimeout`,
+  `setInterval` and `clearInterval` (waiting reads nothing from outside), `AbortController`, `AbortSignal`, `URL`,
+  `URLSearchParams`, `TextEncoder`, `TextDecoder`, `Blob`, `atob`, `btoa`, `DOMException`, `EventTarget`, `Event`,
+  `CustomEvent`, `Headers`, `Request`, `Response` (constructing them is pure; `fetch` is not) and `FormData`. `Function`
+  is not on it: it is unreadable code. Everything else global is I/O, an entry of its own: `fetch`, `XMLHttpRequest`,
+  `WebSocket`, `EventSource`, `document`, `window` and its members, `localStorage`, `sessionStorage`, `indexedDB`,
+  `navigator`, `location`, `history`, `screen`, `alert`, `confirm`, `prompt`, `matchMedia`, `requestAnimationFrame`,
+  `crypto` (but see randomness), `Worker`, `BroadcastChannel`, `Notification`, the observers, `Buffer`, `require`,
+  `module`, `Temporal` (but `Temporal.Now` is the clock) and the rest.
+- **`process`** is judged as a module is: `process.env` is the environment check's; `process.argv` is `argv`,
+  `process.hrtime` is the clock, `process.stdin`, `process.stdout` and `process.stderr` are the terminal, and every
+  other name (`process.cwd`, `process.platform`, `process.exit`, `process.uptime`) is I/O, an entry of its own
+  (`process.cwd`). `process` used as a value (`const p = process`, `check(process)`) fails, as what is done through it
+  cannot be read; `typeof process` does not.
+- **The clock** (`clock`): `Date.now`, `new Date()` with no argument (and `new Date(...args)`, which may be none),
+  `Date()` called (it is the time now as text whatever it is given), all of `performance`, `process.hrtime` and
+  `Temporal.Now.*`. `new Date(x)`, `Date.parse` and `Date.UTC` are pure. Clocks of packages (`dayjs()`) are in no table,
+  and are not seen.
+- **Randomness** (`random`): `Math.random`, `crypto.randomUUID` and `crypto.getRandomValues`. The rest of `crypto`
+  (`crypto.subtle`) is I/O under the entry `crypto`.
+- **The terminal** (`terminal`): all of `console`, and the streams of `process`. **The command-line arguments** (`argv`):
+  `process.argv`; the outer layers and the entry file read them.
+- **What cannot be read fails.** `eval` and `Function`, called, constructed (`new Function(...)`) or taken as a value, and
+  `import()` and `require` of what is no string literal (`Source::unread`); their entries are `eval`, `Function`,
+  `import()` and `require`. A reference to `require` (`const r = require`, `require.resolve`) is I/O under the entry
+  `require`; `require("m")` with a literal is the table's, by the module.
+- **Each finding starts with what to do,** by layer, as Python's does: pass the time, the id or the value in as an
+  argument, or take it from a port in `protocol.outbound` that the use case is given (a port may be a callable alias:
+  `() => Date`). A screen's model, which imports only `protocol.inbound`, **has no exception:** the state of the browser
+  it needs (`matchMedia`, `localStorage`, `document.title`) comes from a hook in `ui.atoms` that its page uses, or through
+  a use case. The guide lists what is not a fix: approving it, renaming or respelling it, moving the code to a layer that
+  is not judged or to a path in `unchecked` or `moving`, and listing it as allowed.
+
+**What TypeScript does not see:** a method on an object whose type the reader cannot know (`client.fetch()`,
+`store.getItem()`, `this.clock.now()`), a global reached through a name assigned at run time (`const g = globalThis;
+g.fetch(x)`, `window[name]`), the clocks and ids of packages (`dayjs()`, `uuid()`, `nanoid()`), and a global another file
+brings in (`declare global`), which is a global and, not being on the list, fails. A name taken from a module is not
+judged by the allowlist (`import { fetch } from "./net"` is the project's own).
 
 ### Views that are templates
 
@@ -1424,7 +1488,9 @@ entry can be told, is one.
   allowlists of `os`, `os.path`, `sys`, `time` and `logging`, the clock, randomness, the terminal, the command-line
   arguments, `pathlib.Path`, the net of method names, and what cannot be read), by entries of its own: a name
   (`os.getcwd`), a group (`clock`, `random`, `terminal`, `argv`) or a method (`read_text`); it prints on every run the
-  methods of the project that the net leaves out.
+  methods of the project that the net leaves out. In TypeScript it judges the globals by the name used (an allowlist of
+  the pure ones, `process`, the clock, randomness, `console`, the arguments and what cannot be read), by entries of its
+  own: a global (`fetch`, `localStorage`, `process.cwd`) or a group (`clock`, `random`, `terminal`, `argv`).
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an

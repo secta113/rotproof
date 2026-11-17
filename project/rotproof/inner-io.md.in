@@ -6,7 +6,7 @@
 {table}  What fails is the entry of the table, whatever name is used under it, and the finding says each name it found.
 {names}  **The I/O goes in `infrastructure.outbound`, behind a port in `protocol.outbound` that the use case is given:** the
   use case passes the values on to `domain`, and a screen's model (`presentation.models`, which imports only
-  `protocol.inbound`) gets what it needs from its page, or through a use case it is given.{passed} Approving the import,
+  `protocol.inbound`) gets what it needs from its page{hook}, or through a use case it is given.{passed} Approving the import,
   renaming or respelling it (an alias, a string, a module held in a variable), listing it as allowed anywhere
   in the declaration, moving the code to a layer that is not judged (`infrastructure`, `composition`, `ui`), or
   moving the code to a path in `unchecked` or `moving` is not a fix. A finding that cannot be fixed now is approved as any

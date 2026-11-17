@@ -2274,7 +2274,7 @@ fn each_typescript_form_that_reads_the_environment_fails_alone_and_a_shadowed_na
         "export function f() { try { return 1; } catch (process: any) { return process.env; } }\n",
         "export const x = [1].map((process) => process.toString());\n",
         "export type E = typeof process.env;\n",
-        "export const x = process.argv;\n",
+        "export const x = typeof process.argv;\n",
         "export const x = import.meta.env.DEV && import.meta.env.MODE;\n",
         "const { DEV, PROD } = import.meta.env;\nexport const x = DEV || PROD;\n",
         "const config = { env: 'dev' };\nexport const x = config.env;\n",
@@ -2899,7 +2899,7 @@ fn the_guide_of_a_python_project_lists_the_allowlists_in_full_and_the_way_out() 
         guide.contains("Approving the import,\n  renaming or respelling it"),
         "{guide}"
     );
-    // The other stacks do not claim what is not checked for them yet
+    // The other stacks do not claim what is not checked for them yet, or what is another stack's
     for stack in ["typescript", "rust"] {
         let guide = stdout(&run(&["guide", "--stack", stack]));
         assert!(
@@ -2907,7 +2907,11 @@ fn the_guide_of_a_python_project_lists_the_allowlists_in_full_and_the_way_out() 
             "{stack}"
         );
         assert!(!guide.contains("`fspath`"), "{stack}");
+        assert!(!guide.contains("`os.getcwd` or `sys.platform`"), "{stack}");
     }
+    let guide = stdout(&run(&["guide", "--stack", "rust"]));
+    assert!(!guide.contains("`() => Date`"));
+    assert!(!guide.contains("`Math.random`"));
 }
 
 #[test]
@@ -3032,8 +3036,9 @@ fn a_screens_model_is_told_to_get_what_it_needs_from_its_page() {
     assert_eq!(code, Some(1), "{said}");
     assert!(
         said.contains(
-            "  src/presentation/models/x.ts:1: a screen's model does no I/O: it gets what it needs from its page, or \
-             through a use case of protocol.inbound it is given: uses `fs`, which does I/O\n"
+            "  src/presentation/models/x.ts:1: a screen's model does no I/O: it gets what it needs from its page, \
+             through a hook in `ui.atoms`, or through a use case of protocol.inbound it is given: uses `fs`, which does \
+             I/O\n"
         ),
         "{said}"
     );
@@ -3042,6 +3047,537 @@ fn a_screens_model_is_told_to_get_what_it_needs_from_its_page() {
             "  src/application/y.ts:1: {IO_FIX}: uses `fs`, which does I/O\n"
         )),
         "{said}"
+    );
+}
+
+#[test]
+fn each_typescript_global_that_does_io_fails_alone_and_what_is_pure_passes() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // (what the file holds, the line, what the finding says it found)
+    let forbidden = [
+        (
+            "export const x = fetch('a');\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        (
+            "export const x = window.fetch('a');\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        (
+            "export const x = globalThis.fetch('a');\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        (
+            "export const x = (self as any).fetch('a');\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        // A reference counts as a call
+        (
+            "export const f = fetch;\n",
+            1,
+            "uses `fetch`, which does I/O",
+        ),
+        (
+            "export const x = document.title;\n",
+            1,
+            "uses `document` (document.title), which does I/O",
+        ),
+        (
+            "export const x = window.localStorage.getItem('a');\n",
+            1,
+            "uses `localStorage` (localStorage.getItem), which does I/O",
+        ),
+        (
+            "export const x = sessionStorage.length;\n",
+            1,
+            "uses `sessionStorage` (sessionStorage.length), which does I/O",
+        ),
+        (
+            "export const x = matchMedia('(min-width: 1px)').matches;\n",
+            1,
+            "uses `matchMedia`, which does I/O",
+        ),
+        (
+            "export const x = navigator.userAgent;\n",
+            1,
+            "uses `navigator` (navigator.userAgent), which does I/O",
+        ),
+        (
+            "export const x = new WebSocket('ws://a');\n",
+            1,
+            "uses `WebSocket`, which does I/O",
+        ),
+        (
+            "export const x = new XMLHttpRequest();\n",
+            1,
+            "uses `XMLHttpRequest`, which does I/O",
+        ),
+        (
+            "export const x = requestAnimationFrame(() => 1);\n",
+            1,
+            "uses `requestAnimationFrame`, which does I/O",
+        ),
+        (
+            "export const x = new IntersectionObserver(() => 1);\n",
+            1,
+            "uses `IntersectionObserver`, which does I/O",
+        ),
+        (
+            "export const x = crypto.subtle.digest('SHA-256', new Uint8Array(1));\n",
+            1,
+            "uses `crypto` (crypto.subtle), which does I/O",
+        ),
+        (
+            "export const x = Buffer.from('a');\n",
+            1,
+            "uses `Buffer` (Buffer.from), which does I/O",
+        ),
+        // `process`, but for `process.env`
+        (
+            "export const x = process.cwd();\n",
+            1,
+            "uses `process.cwd`, which does I/O",
+        ),
+        (
+            "export const x = process.platform;\n",
+            1,
+            "uses `process.platform`, which does I/O",
+        ),
+        (
+            "const { cwd } = process;\nexport const x = cwd();\n",
+            1,
+            "uses `process.cwd`, which does I/O",
+        ),
+        (
+            "export const x = process;\n",
+            1,
+            "uses the module `process` as a value",
+        ),
+        // The clock
+        (
+            "export const x = Date.now();\n",
+            1,
+            "reads the clock (Date.now), which does I/O (entry `clock`)",
+        ),
+        (
+            "export const x = new Date();\n",
+            1,
+            "reads the clock (new Date()), which does I/O (entry `clock`)",
+        ),
+        (
+            "export const x = Date();\n",
+            1,
+            "reads the clock (Date()), which does I/O (entry `clock`)",
+        ),
+        (
+            "export const f = (...a: number[]) => new Date(...(a as []));\n",
+            1,
+            "reads the clock (new Date())",
+        ),
+        (
+            "export const x = performance.now();\n",
+            1,
+            "reads the clock (performance.now)",
+        ),
+        (
+            "export const x = process.hrtime.bigint();\n",
+            1,
+            "reads the clock (process.hrtime)",
+        ),
+        (
+            "export const x = Temporal.Now.instant();\n",
+            1,
+            "reads the clock (Temporal.Now.instant)",
+        ),
+        // A reference counts as a call
+        (
+            "import { useState } from 'react';\nexport const x = useState(Date.now);\n",
+            2,
+            "reads the clock (Date.now)",
+        ),
+        (
+            "export const f = Date.now;\n",
+            1,
+            "reads the clock (Date.now)",
+        ),
+        // Randomness
+        (
+            "export const x = Math.random();\n",
+            1,
+            "draws on randomness (Math.random), which does I/O (entry `random`)",
+        ),
+        (
+            "export const x = crypto.randomUUID();\n",
+            1,
+            "draws on randomness (crypto.randomUUID)",
+        ),
+        (
+            "export const x = globalThis.crypto.getRandomValues(new Uint8Array(1));\n",
+            1,
+            "draws on randomness (crypto.getRandomValues)",
+        ),
+        (
+            "export const f = Math.random;\n",
+            1,
+            "draws on randomness (Math.random)",
+        ),
+        // The terminal and the arguments
+        (
+            "console.log('a');\n",
+            1,
+            "uses the terminal or opens a file (console.log), which does I/O (entry `terminal`)",
+        ),
+        (
+            "export const f = console.error;\n",
+            1,
+            "uses the terminal or opens a file (console.error)",
+        ),
+        (
+            "process.stdout.write('a');\n",
+            1,
+            "uses the terminal or opens a file (process.stdout)",
+        ),
+        (
+            "export const x = process.argv.slice(2);\n",
+            1,
+            "reads the command-line arguments (process.argv), which does I/O (entry `argv`)",
+        ),
+        // What cannot be read
+        (
+            "export const x = eval('1');\n",
+            1,
+            "uses `eval`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const x = window.eval('1');\n",
+            1,
+            "uses `eval`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = new Function('return 1');\n",
+            1,
+            "uses `Function`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = Function('return 1');\n",
+            1,
+            "uses `Function`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = eval;\n",
+            1,
+            "uses `eval`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = (name: string) => import(name);\n",
+            1,
+            "uses `import()`: what it runs or imports cannot be read",
+        ),
+        (
+            "export const f = (name: string) => require(name);\n",
+            1,
+            "uses `require`: what it runs or imports cannot be read",
+        ),
+    ];
+    for (source, line, what) in forbidden {
+        put(r, "src/domain/x.ts", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        assert!(
+            said.contains(&format!("  src/domain/x.ts:{line}: ")) && said.contains(what),
+            "{source}\n{said}"
+        );
+    }
+    // What is pure, a name the file binds, a name in a type position and the operand of `typeof`
+    let free = [
+        "export const x = [new Map(), new Set(), JSON.stringify({}), Math.max(1, 2), Number('1'), Object.keys({}), \
+         Symbol('a'), new Error('x'), new TypeError('x'), parseInt('1'), Intl.NumberFormat, structuredClone(1)];\n",
+        "export const x = [new URL('http://a'), new URLSearchParams(), new Headers(), new TextEncoder(), \
+         new AbortController(), new Uint8Array(1), setTimeout, clearTimeout, queueMicrotask, atob, btoa];\n",
+        // A moment that is given is pure
+        "export const x = [new Date(0), new Date(2020, 1), new Date('2020-01-01'), Date.parse('x'), Date.UTC(1), Date];\n",
+        "export const x = globalThis;\n",
+        "export type W = typeof window;\nexport let c: Date | undefined;\nexport const w: Window | undefined = undefined;\n",
+        "export const x = typeof window !== 'undefined' && typeof document !== 'undefined' && typeof process === 'object';\n",
+        "export const x = typeof process.argv + typeof Date.now + typeof fetch;\n",
+        "export function f(fetch: (u: string) => void) { return fetch('a'); }\n",
+        "export const g = (Date: { now(): number }) => Date.now();\n",
+        "export function h(localStorage: Storage) { return localStorage.getItem('a'); }\n",
+        "export function k() { const console = { log: (s: string) => s }; return console.log('a'); }\n",
+        "export function m(process: { cwd(): string }) { return process.cwd(); }\n",
+        "import { fetch } from './net';\nexport const x = fetch('a');\n",
+        "import { readFile } from './files';\nexport const x = readFile;\n",
+        "export const x = import.meta.url;\n",
+    ];
+    for source in free {
+        put(r, "src/domain/x.ts", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(0), "{source}\n{said}");
+    }
+    // `process.env` is the environment check's alone, and is not reported twice
+    put(r, "src/domain/x.ts", "export const x = process.env.A;\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("src/domain/x.ts:1: process.env") && !said.contains(IO_HEADING),
+        "{said}"
+    );
+    // The layers that do the I/O, wire and draw, the entry file and the tests do all of it
+    put(r, "src/domain/x.ts", "");
+    let all = "export const x = [fetch('a'), Date.now(), Math.random(), localStorage.length, process.cwd()];\n\
+               console.log(process.argv, eval('1'));\n";
+    for path in [
+        "src/infrastructure/outbound/x.ts",
+        "src/infrastructure/inbound/x.ts",
+        "src/composition/x.ts",
+        "src/ui/atoms/x.ts",
+        "src/main.tsx",
+        "src/domain/x.test.ts",
+        "src/domain/x.spec.tsx",
+        "src/domain/__tests__/x.ts",
+    ] {
+        put(r, path, all);
+    }
+    let (_, said) = checked(r);
+    assert!(
+        !said.contains(IO_HEADING) && !said.contains("does I/O"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_global_that_does_io_says_what_to_do_in_the_layer_it_is_in() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    put(
+        r,
+        "src/presentation/models/x.ts",
+        "export const x = window.matchMedia('(min-width: 1px)').matches;\nexport const y = Date.now();\n",
+    );
+    put(
+        r,
+        "src/application/y.ts",
+        "export const y = Date.now();\nexport const z = localStorage.length;\nexport const a = process.argv;\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // A screen's model gets it from its page, through a hook in `ui.atoms`, or through a use case
+    assert!(
+        said.contains(
+            "  src/presentation/models/x.ts:1: a screen's model does no I/O: it gets what it needs from its page, \
+             through a hook in `ui.atoms`, or through a use case of protocol.inbound it is given: uses `matchMedia`, \
+             which does I/O\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "  src/presentation/models/x.ts:2: a screen's model does no I/O: it gets the time now from its page, \
+             through a hook in `ui.atoms`, or through a use case of protocol.inbound it is given: reads the clock \
+             (Date.now), which does I/O (entry `clock`)\n"
+        ),
+        "{said}"
+    );
+    // The other layers pass the value in, or take it from a port that may be a callable alias
+    assert!(
+        said.contains(
+            "  src/application/y.ts:1: pass the time now in as an argument, or take it from a port in protocol.outbound \
+             that the use case is given (a port may be a callable alias, `() => Date`): reads the clock (Date.now), \
+             which does I/O (entry `clock`)\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!(
+            "  src/application/y.ts:2: {IO_FIX}: uses `localStorage` (localStorage.length), which does I/O\n"
+        )),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "  src/application/y.ts:3: read the arguments in infrastructure and pass the value in as an argument: \
+             reads the command-line arguments (process.argv), which does I/O (entry `argv`)\n"
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn an_approved_typescript_global_is_an_entry_by_its_name_and_a_group_is_one_entry() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let approve = |entry: &str| {
+        let out = approve_with_git(
+            r,
+            named,
+            &[
+                "src/domain/model.ts",
+                entry,
+                "--reason",
+                "the port comes later",
+            ],
+        );
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{entry}: {}{}",
+            stdout(&out),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let source = |body: &str| format!("export function f() {{\n{body}}}\n");
+    put(
+        r,
+        "src/domain/model.ts",
+        &source(
+            "  const a = Date.now();\n  const b = performance.now();\n  const c = localStorage.getItem('k');\n  \
+             const d = process.cwd();\n  const e = fetch('u');\n  return [a, b, c, d, e];\n",
+        ),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The act of a group is one entry, whichever names the file reaches it by
+    approve("clock");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("reads the clock"), "{said}");
+    assert!(
+        said.contains("clock in src/domain/model.ts: the port comes later (Someone Else, ")
+            && said.contains("; now used: Date.now, performance.now\n"),
+        "{said}"
+    );
+    // A global is an entry of its own, and so is a member of `process`
+    approve("localStorage");
+    approve("process.cwd");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("uses `fetch`")
+            && !said.contains("uses `localStorage`")
+            && !said.contains("uses `process.cwd`"),
+        "{said}"
+    );
+    approve("fetch");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("approved in .config/rotproof-approved.toml (4):")
+            && said.contains("  fetch in src/domain/model.ts: the port comes later")
+            && said.contains("  localStorage in src/domain/model.ts: the port comes later")
+            && said.contains("; now used: localStorage.getItem\n"),
+        "{said}"
+    );
+    // The names change, so the reason is read again; and what is no longer used is a stale entry
+    put(
+        r,
+        "src/domain/model.ts",
+        &source("  const a = Date.now();\n  const c = localStorage.length;\n  return [a, c];\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("; now used: localStorage.length\n")
+            && !said.contains("; now used: localStorage.getItem"),
+        "{said}"
+    );
+    for stale in ["process.cwd", "fetch"] {
+        assert!(
+            said.contains(&format!(
+                "approved, but no such forbidden import: {stale} in src/domain/model.ts"
+            )),
+            "{stale}\n{said}"
+        );
+    }
+    // A group not approved is not covered by another's approval
+    put(
+        r,
+        "src/domain/model.ts",
+        &source("  const a = Math.random();\n  const c = localStorage.length;\n  return [a, c];\n"),
+    );
+    let (_, said) = checked(r);
+    assert!(said.contains("draws on randomness (Math.random)"), "{said}");
+    // Only what the check finds is approved
+    let out = approve_with_git(
+        r,
+        named,
+        &["src/domain/model.ts", "navigator", "--reason", "no"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no forbidden import of navigator"));
+    // The environment check is not approved
+    put(
+        r,
+        "src/domain/model.ts",
+        "export const x = process.env.A;\n",
+    );
+    let out = approve_with_git(
+        r,
+        named,
+        &["src/domain/model.ts", "process.env", "--reason", "no"],
+    );
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn the_guide_of_a_typescript_project_lists_the_allowlist_in_full_and_the_way_out() {
+    let guide = stdout(&run(&["guide", "--stack", "typescript"]));
+    for name in [
+        // the allowlist of globals
+        "`Object`",
+        "`FinalizationRegistry`",
+        "`AggregateError`",
+        "`Intl`",
+        "`Float64Array`",
+        "`encodeURIComponent`",
+        "`structuredClone`",
+        "`setInterval`",
+        "`URLSearchParams`",
+        "`TextDecoder`",
+        "`DOMException`",
+        "`FormData`",
+        // what is not on it, and the groups
+        "`localStorage`",
+        "`matchMedia`",
+        "`Date.now`",
+        "`new Date()`",
+        "`performance`",
+        "`Temporal.Now.*`",
+        "`Math.random`",
+        "`randomUUID`",
+        "`getRandomValues`",
+        "`console`",
+        "`process.argv`",
+        "`process.cwd`",
+        "`() => Date`",
+        "`eval`",
+        "`Function`",
+        "`clock`",
+        "`random`",
+        "`terminal`",
+        "`argv`",
+    ] {
+        assert!(guide.contains(name), "{name}\n{guide}");
+    }
+    assert!(
+        guide.contains("`fetch`, `localStorage` or `process.cwd` for a global judged by its name"),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("through a hook in `ui.atoms`, or through a use case it is given"),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("Approving the import,\n  renaming or respelling it"),
+        "{guide}"
     );
 }
 
