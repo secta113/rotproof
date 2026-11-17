@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
-use crate::tree::{code_files, read_code};
+use crate::tree::{code_files, program_files, read_code};
 use domain::code::{Defined, Import, Source};
 use domain::declaration::Declared;
 use domain::direction::Forbidden;
@@ -19,7 +19,7 @@ use domain::inner_io::{
 };
 use domain::layers::{Language, Layout, Place};
 use domain::moving::Does;
-use domain::paths::{file_name, join, parent, within};
+use domain::paths::within;
 use protocol::outbound::{Parsers, Tree};
 
 /// What the check found: the I/O of the inner layers, and every file that could not be read.
@@ -76,18 +76,8 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
         .iter()
         .filter(|p| p.is_layer() && !declared.is_absent(p) && is_judged(p))
     {
-        // The files of the layer, with their text, in the order of their paths
-        let mut layer_files = Vec::new();
-        for path in files_of(tree, layout, layer)? {
-            if let Some(source) = read_code(tree, &path, "I/O", &mut judged.problems)? {
-                layer_files.push((path, source));
-            }
-        }
-        let tests = test_paths(layout, &layer_files);
-        for (path, source) in layer_files {
-            if tests.iter().any(|test| is_under(&path, test)) {
-                continue;
-            }
+        // The files of the layer that are not tests, with their text, in the order of their paths
+        for (path, source) in program_files(tree, layout, layer, "I/O", &mut judged.problems)? {
             let parsed = match layout.language {
                 Language::Python => Parsed::Python(parsers.python(&source, &path)),
                 Language::TypeScript => Parsed::TypeScript(parsers.typescript(&source, &path)),
@@ -291,51 +281,6 @@ fn defined_in(
         }
     }
     Ok(defined)
-}
-
-/// The files of `layer` that are code, but for a test by its name: the whole of the layer's directory in Python and
-/// TypeScript, and in Rust the crate's `src/` alone, since Cargo keeps a crate's tests, benches, examples and build
-/// script beside it.
-fn files_of(tree: &dyn Tree, layout: &Layout, layer: &Place) -> io::Result<Vec<String>> {
-    let dir = match layout.language {
-        Language::Rust => join(&layer.path, "src"),
-        Language::Python | Language::TypeScript => layer.path.clone(),
-    };
-    Ok(code_files(tree, &dir, |name| layout.has_comments(name))?
-        .into_iter()
-        .filter(|path| !layout.is_test_file(path))
-        .collect())
-}
-
-/// The paths of the test modules of a Rust crate, from the files of `files` (path, text): a module declared
-/// `#[cfg(test)] mod x;` in a file is `x.rs` or `x/mod.rs`, in the directory of the file for `lib.rs`, `main.rs` and
-/// `mod.rs` and in the directory named as the file for any other. A file under such a path is a test. Each is a path
-/// of the file, or of the directory, that is a test as a whole. None in a stack that tells no module apart.
-fn test_paths(layout: &Layout, files: &[(String, String)]) -> BTreeSet<String> {
-    let mut found = BTreeSet::new();
-    if layout.language != Language::Rust {
-        return found;
-    }
-    for (path, source) in files {
-        let names = domain::rust::test_modules(&domain::rust::code(source));
-        if names.is_empty() {
-            continue;
-        }
-        let stem = file_name(path).trim_end_matches(".rs");
-        let dir = match stem {
-            "lib" | "main" | "mod" => parent(path).to_string(),
-            _ => join(parent(path), stem),
-        };
-        for name in names {
-            found.insert(join(&dir, &name));
-        }
-    }
-    found
-}
-
-/// Whether `path` is the file `base.rs` or sits in the directory `base/`.
-fn is_under(path: &str, base: &str) -> bool {
-    path == format!("{base}.rs") || path.starts_with(&format!("{base}/"))
 }
 
 #[cfg(test)]

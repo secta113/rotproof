@@ -84,16 +84,7 @@ const GUIDE_ALLOWED_RUST: &str =
 /// What the guide says of this rule in the section on the layers, for a project of `language`: the whole table, since
 /// an agent reads the guide and not the specification.
 pub fn guide(language: Language) -> String {
-    let tests = match language {
-        Language::Python => "a test (a file in `tests/`)",
-        Language::TypeScript => {
-            "a test (a source file named `*.test.*` or `*.spec.*`, or a file in a `__tests__/` directory)"
-        }
-        Language::Rust => {
-            "a test (the items under `#[cfg(test)]`, the file of a `#[cfg(test)] mod x;`, and what is outside a \
-             crate's `src/`: `tests/`, `benches/`, `examples/` and `build.rs`)"
-        }
-    };
+    let tests = language.tests_in_the_guide();
     // What a stack says of the names it judges besides the table
     let (names, passed, keys) = match language {
         Language::Python => (

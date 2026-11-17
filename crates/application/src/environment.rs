@@ -3,11 +3,10 @@
 
 use std::io;
 
-use crate::tree::{code_files, is_file, read_code};
+use crate::tree::{is_file, program_files, read_code};
 use domain::declaration::Declared;
-use domain::environment::{BUILD_SCRIPT, finding, in_python, in_rust, in_typescript, is_judged};
+use domain::environment::{finding, in_python, in_rust, in_typescript, is_judged};
 use domain::layers::{Language, table};
-use domain::paths::join;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -22,35 +21,36 @@ pub fn problems(
         // A repository of records only has no code to read
         return Ok(Vec::new());
     };
+    let mut found = Vec::new();
     let mut files = Vec::new();
-    // A layer's levels sit in its directory, so walking each layer reads them
+    // A layer's levels sit in its directory, so walking each layer reads them. A test is judged no more than the files
+    // of Python's `tests/` (a TypeScript `*.test.ts`, a Rust test module and a crate's `tests/`), as the check of the
+    // I/O of the inner layers reads them: `program_files` is the one place that says which they are, and a crate's
+    // `build.rs`, which Rust runs before it compiles the crate, is outside the `src/` it reads
     for layer in declared
         .places
         .iter()
         .filter(|p| p.is_layer() && !declared.is_absent(p) && is_judged(p))
     {
-        // A crate's build script runs before Rust compiles it, and reads what Cargo sets for it
-        let build_script = join(&layer.path, BUILD_SCRIPT);
-        // A test beside the code (a TypeScript `*.test.ts`) is judged no more than the files of Python's `tests/`
-        files.extend(
-            code_files(tree, &layer.path, |name| layout.has_comments(name))?
-                .into_iter()
-                .filter(|path| layout.language != Language::Rust || *path != build_script)
-                .filter(|path| !layout.is_test_file(path)),
-        );
+        files.extend(program_files(
+            tree,
+            layout,
+            layer,
+            "reads of the environment",
+            &mut found,
+        )?);
     }
-    files.extend(
-        declared
-            .entries(&table())
-            .into_iter()
-            .filter(|entry| is_file(tree, &entry.path))
-            .map(|entry| entry.path),
-    );
-    let mut found = Vec::new();
-    for path in files {
-        let Some(source) = read_code(tree, &path, "reads of the environment", &mut found)? else {
-            continue;
-        };
+    for entry in declared
+        .entries(&table())
+        .into_iter()
+        .filter(|entry| is_file(tree, &entry.path))
+    {
+        if let Some(source) = read_code(tree, &entry.path, "reads of the environment", &mut found)?
+        {
+            files.push((entry.path, source));
+        }
+    }
+    for (path, source) in files {
         let reads = match layout.language {
             Language::Python => in_python(&parsers.python(&source, &path).uses),
             Language::TypeScript => in_typescript(&parsers.typescript(&source, &path).uses),
@@ -505,6 +505,43 @@ const all = import.meta.env;
                 "src/domain/a.ts:1: process.env",
                 "src/domain/b.tests.ts:1: process.env"
             ]
+        );
+    }
+
+    #[test]
+    fn a_rust_test_is_read_as_the_check_of_the_io_reads_it() {
+        let read = "pub fn t() { let _ = std::env::temp_dir(); }\n";
+        let tree = crate::tree::fake::Fake::new(&[
+            (
+                "crates/composition/Cargo.toml",
+                "[package]\nname = \"composition\"\n",
+            ),
+            // A module declared under `#[cfg(test)]`, as `tests.rs` and as `checks/mod.rs`, with a file under it
+            (
+                "crates/composition/src/lib.rs",
+                "pub fn a() {}\n#[cfg(test)]\nmod tests;\n#[cfg(test)]\nmod checks;\n#[cfg(test)]\nmod inline {\n    fn t() { let _ = std::env::temp_dir(); }\n}\n",
+            ),
+            ("crates/composition/src/tests.rs", read),
+            ("crates/composition/src/checks/mod.rs", read),
+            ("crates/composition/src/checks/deeper.rs", read),
+            // What Cargo keeps beside the crate's `src/` is outside what the program does
+            ("crates/composition/tests/it.rs", read),
+            ("crates/composition/benches/b.rs", read),
+            ("crates/composition/build.rs", read),
+            // A module nothing declares as a test, and the same read in a function of the crate
+            ("crates/composition/src/plain.rs", read),
+        ]);
+        let declared = Declared::new(
+            domain::declaration::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            problems(&tree, &Readers, &declared).unwrap(),
+            [format!(
+                "crates/composition/src/plain.rs:1: std::env::temp_dir\n{}",
+                read.trim()
+            )]
         );
     }
 

@@ -444,9 +444,12 @@ What a test is in each rule that follows, the same in Python and TypeScript:
 | No marker (`TODO` and the like) in a comment, and no comment that switches the type checker off | its comments are read, as the code's |
 
 In Rust no name tells a test: `[dev-dependencies]` are never judged, a crate's `tests/` are read by the dependencies
-check with its `src/`, the environment check reads a crate's `tests/` as the rest of the crate (they sit in its
-directory), the check of the I/O of the inner layers does not read them (a crate's `tests/`, `benches/`, `examples/` and
-`build.rs`, and the items under `#[cfg(test)]`, are free), and the marker check reads them.
+check with its `src/`, and the marker check reads them. **The environment check and the check of the I/O of the inner
+layers read a Rust test the same way,** by one judgement the two share: the items under `#[cfg(test)]` (a module with a
+body, a function, a `use`; a file that starts with `#![cfg(test)]` as a whole), the file of a `#[cfg(test)] mod x;`
+(`x.rs` or `x/mod.rs`, with the files under `x/`) and everything outside a crate's `src/` (`tests/`, `benches/`,
+`examples/`, `build.rs`) are free. `cfg(all(test, ...))` and `cfg(any(test, ...))` are not read as tests, and a
+`#[cfg(test)] mod x;` inside a module with a body is not followed to its file.
 
 A path in `unchecked` or `moving` is not read by any check, tests included. `rotproof check` prints, on every run and
 only for the TypeScript stack, how many source files it read as tests and by which names, apart from the findings and
@@ -1649,7 +1652,8 @@ entry can be told, is one.
   brings in and a name in a string annotation, in Rust a name bound in one file and used through another (`pub use
   std::env;` in one module, `reexport::env::var` in the next) and a path a macro builds from pieces, and the code
   outside the layers (`tests/` in Python) and the tests (in TypeScript, the files named `*.test.*` or `*.spec.*`, or in
-  `__tests__/`: see "Tests").
+  `__tests__/`; in Rust, the items under `#[cfg(test)]`, the file of a `#[cfg(test)] mod x;` and what is outside a
+  crate's `src/`, as the check of the I/O reads them: see "Tests").
 - **The inner layers do no I/O** (see "The inner layers do no I/O"): the code of `domain`, `protocol`, `application` and
   `presentation`, and of their levels, imports nothing of the table Rotproof keeps of what does I/O wholly (in Python
   `shutil`, `subprocess`, `socket`, `urllib.request`, `tempfile` and the like; in TypeScript Node's `fs`, `net`,

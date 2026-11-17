@@ -2,9 +2,10 @@
 //! the text of a file as the checks read it, with how it was written.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
+use domain::layers::{Language, Layout, Place};
 use domain::paths::{file_name, join, parent};
 use domain::tree::{Written, as_windows_reads, with_lf};
 use protocol::outbound::Tree;
@@ -189,6 +190,73 @@ pub fn code_files(
         .into_iter()
         .filter(|path| is_code(file_name(path)))
         .collect())
+}
+
+/// The code of `layer` that a rule on what the program does judges, each file with its text: a test is not one, and
+/// this is the one place that says which files those are, for the check of the I/O of the inner layers and the check
+/// of the environment. A file that cannot be read as UTF-8 is a finding of `what` it cannot read, and is left out.
+///
+/// - **Python and TypeScript:** every code file of the layer's directory but one the layout tells is a test by its name
+///   ([`Layout::is_test_file`]). Python's `tests/` is outside the layers, and so is no file of it.
+/// - **Rust:** the files of the crate's `src/` alone, since Cargo keeps a crate's tests, benches, examples and build
+///   script beside it, and a module's file that a `#[cfg(test)] mod x;` declares (`x.rs` or `x/mod.rs`, in the
+///   directory of the file for `lib.rs`, `main.rs` and `mod.rs`, and in the directory named as the file for any other)
+///   is a test with the files under it. The items under `#[cfg(test)]` inside a file are the rule's to leave out
+///   ([`domain::rust::without_tests`]).
+pub fn program_files(
+    tree: &dyn Tree,
+    layout: &Layout,
+    layer: &Place,
+    what: &str,
+    found: &mut Vec<String>,
+) -> io::Result<Vec<(String, String)>> {
+    let dir = match layout.language {
+        Language::Rust => join(&layer.path, "src"),
+        Language::Python | Language::TypeScript => layer.path.clone(),
+    };
+    let mut files = Vec::new();
+    for path in code_files(tree, &dir, |name| layout.has_comments(name))? {
+        if layout.is_test_file(&path) {
+            continue;
+        }
+        if let Some(source) = read_code(tree, &path, what, found)? {
+            files.push((path, source));
+        }
+    }
+    let tests = test_paths(layout, &files);
+    files.retain(|(path, _)| !tests.iter().any(|test| is_under(path, test)));
+    Ok(files)
+}
+
+/// The paths of the test modules of a Rust crate, from the files of `files` (path, text): a module declared
+/// `#[cfg(test)] mod x;` in a file is `x.rs` or `x/mod.rs`, in the directory of the file for `lib.rs`, `main.rs` and
+/// `mod.rs` and in the directory named as the file for any other. A file under such a path is a test. Each is a path
+/// of the file, or of the directory, that is a test as a whole. None in a stack that tells no module apart.
+fn test_paths(layout: &Layout, files: &[(String, String)]) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    if layout.language != Language::Rust {
+        return found;
+    }
+    for (path, source) in files {
+        let names = domain::rust::test_modules(&domain::rust::code(source));
+        if names.is_empty() {
+            continue;
+        }
+        let stem = file_name(path).trim_end_matches(".rs");
+        let dir = match stem {
+            "lib" | "main" | "mod" => parent(path).to_string(),
+            _ => join(parent(path), stem),
+        };
+        for name in names {
+            found.insert(join(&dir, &name));
+        }
+    }
+    found
+}
+
+/// Whether `path` is the file `base.rs` or sits in the directory `base/`.
+fn is_under(path: &str, base: &str) -> bool {
+    path == format!("{base}.rs") || path.starts_with(&format!("{base}/"))
 }
 
 /// A tree in memory, for the tests: files by their path, and the directories their paths make or

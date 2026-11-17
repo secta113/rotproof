@@ -3857,6 +3857,85 @@ fn the_inner_crates_do_no_io_in_rust_and_a_test_is_free() {
     }
 }
 
+#[test]
+fn the_environment_check_reads_a_rust_test_as_the_check_of_the_io_does() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let lib = std::fs::read_to_string(r.join("crates/domain/src/lib.rs")).unwrap();
+    let reads = "std::env::temp_dir()";
+    let read = |what: &str| format!("pub fn t() {{ let _ = ({what}, std::env::var(\"A\")); }}\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // The same read in a file of the layer's `src/` that is no test fails, and says where
+    put(r, "crates/domain/src/other.rs", &read(reads));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("crates/domain/src/other.rs:1: std::env::temp_dir")
+            && said.contains("crates/domain/src/other.rs:1: std::env::var"),
+        "{said}"
+    );
+    std::fs::remove_file(r.join("crates/domain/src/other.rs")).unwrap();
+    // Each form that is a test passes: the items under `#[cfg(test)]` (a module with a body, a function, a use), the
+    // file of a `#[cfg(test)] mod x;` as `x.rs` and as `x/mod.rs`, with the files under it, a file that starts
+    // with `#![cfg(test)]`, and a crate's `tests/`
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!(
+            "{lib}#[cfg(test)]\nmod tests {{\n    fn t() {{ let _ = {reads}; }}\n}}\n#[cfg(test)]\nfn u() {{ let _ = std::env::var(\"B\"); }}\n#[cfg(test)]\nuse std::env::var;\n"
+        ),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}#[cfg(test)]\nmod checks;\n#[cfg(test)]\nmod more;\n"),
+    );
+    put(r, "crates/domain/src/checks.rs", &read(reads));
+    put(r, "crates/domain/src/more/mod.rs", &read(reads));
+    put(r, "crates/domain/src/more/deeper.rs", &read(reads));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}#[cfg(test)]\nmod checks;\n"),
+    );
+    std::fs::remove_dir_all(r.join("crates/domain/src/more")).unwrap();
+    put(
+        r,
+        "crates/domain/src/checks.rs",
+        &format!("#![cfg(test)]\n{}", read(reads)),
+    );
+    put(r, "crates/domain/tests/it.rs", &read(reads));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // What is no test of the same crate fails still, whatever sits beside it: the module not declared under
+    // `#[cfg(test)]`, and the same read in the code outside the item
+    put(r, "crates/domain/src/checks.rs", &read(reads));
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}mod checks;\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("crates/domain/src/checks.rs:1: std::env::temp_dir"),
+        "{said}"
+    );
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}#[cfg(test)]\nmod t {{}}\npub fn u() {{ let _ = {reads}; }}\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("std::env::temp_dir"), "{said}");
+}
+
 /// Plant each source in the domain crate of a Rust project: the check fails under the heading of the I/O of the inner
 /// layers, on `line`, and says `said`. The crate is put back as it was.
 fn plant_rust(r: &Path, planted: &[(&str, usize, &str)], reset: &str) {

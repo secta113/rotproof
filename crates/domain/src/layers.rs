@@ -303,6 +303,23 @@ pub enum Language {
     Rust,
 }
 
+impl Language {
+    /// What the guide calls a test that the checks of what the program does (the environment, the I/O of the inner
+    /// layers) do not judge, in this language.
+    pub fn tests_in_the_guide(self) -> &'static str {
+        match self {
+            Language::Python => "a test (a file in `tests/`)",
+            Language::TypeScript => {
+                "a test (a source file named `*.test.*` or `*.spec.*`, or a file in a `__tests__/` directory)"
+            }
+            Language::Rust => {
+                "a test (the items under `#[cfg(test)]`, the file of a `#[cfg(test)] mod x;`, and what is outside a \
+                 crate's `src/`: `tests/`, `benches/`, `examples/` and `build.rs`)"
+            }
+        }
+    }
+}
+
 /// The unit a place belongs to, as much of it as a rule on places needs (`units.rs` has the rest). A project that
 /// declares no unit has the one implicit unit, whose tag is the default but for `app`: no name, not shared.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -22,15 +22,17 @@
 //!   not seen (`getattr(os, "environ")`, `globalThis["pro" + "cess"]`), as the direction check does not see an import
 //!   built at run time.
 //! - **Where:** the code of every layer but `infrastructure`, and the entry file; not `tests/` or another path that is
-//!   no layer, and not a test beside the code, which a TypeScript layout tells by its name (`*.test.*`, `__tests__/`):
-//!   a test is no code of a layer.
+//!   no layer, and not a test beside the code, which a TypeScript layout tells by its name (`*.test.*`, `__tests__/`)
+//!   and Rust's by the items under `#[cfg(test)]`, the file of a `#[cfg(test)] mod x;` and everything outside a crate's
+//!   `src/`: a test is no code of a layer, and the check of the I/O of the inner layers reads the same files as tests
+//!   (`application::tree::program_files` for the files, [`crate::rust::without_tests`] for the items).
 //!
 //! Python and TypeScript are read by their readers of uses ([`in_python`] and [`in_typescript`] judge them); Rust by
 //! Rotproof's own scanner, here.
 
 use crate::code::{How, Use, split_typescript_name};
 use crate::layers::{Language, Place};
-use crate::rust::{Item, code, items};
+use crate::rust::{Item, code, items, without_tests};
 use crate::text::line_of;
 
 /// The names of Python's `os` that read or write the environment.
@@ -84,9 +86,6 @@ const PYTHON_STAR_MODULES: [&str; 6] = [
 /// The modules whose default export or namespace is Node's `process`, and whose `env` is its `env`.
 const TYPESCRIPT_PROCESS: [&str; 2] = ["process", "node:process"];
 
-/// The file Cargo runs before it compiles a crate, from the crate's root.
-pub const BUILD_SCRIPT: &str = "build.rs";
-
 /// The layer that alone may read the environment.
 pub const READER: &str = "infrastructure";
 
@@ -114,7 +113,9 @@ pub fn guide(language: Language) -> String {
              you use)"
         }
     };
-    GUIDE_TEXT.replace("{reads}", reads)
+    GUIDE_TEXT
+        .replace("{reads}", reads)
+        .replace("{tests}", language.tests_in_the_guide())
 }
 
 /// Whether the code of `place` is judged: every place but `infrastructure` and its levels. The entry file is a place
@@ -225,9 +226,10 @@ fn counted_in_typescript(name: &str) -> Option<String> {
 }
 
 /// Every read or write of the environment in a Rust source: the line, and the path it names (`std::env::var`), or the
-/// glob of `std::env`, or of `std`, that brings in names the scanner cannot tell, which fails as a read does.
+/// glob of `std::env`, or of `std`, that brings in names the scanner cannot tell, which fails as a read does. What is
+/// under `#[cfg(test)]` is a test, and reads nothing the program does ([`without_tests`]), as in the check of the I/O.
 pub fn in_rust(source: &str) -> Vec<(usize, String)> {
-    items(&code(source), &["std", "env"])
+    items(&without_tests(&code(source)), &["std", "env"])
         .into_iter()
         .filter_map(|(at, item)| {
             let what = match item {
@@ -247,6 +249,57 @@ mod tests {
 
     fn names(source: &str) -> Vec<(usize, String)> {
         in_rust(source)
+    }
+
+    #[test]
+    fn the_guide_says_what_a_test_is_in_each_stack_as_the_io_guide_does() {
+        for language in [Language::Python, Language::TypeScript, Language::Rust] {
+            let tests = language.tests_in_the_guide();
+            assert!(guide(language).contains(&format!("does not judge {tests}.")));
+            assert!(crate::inner_io::guide(language).contains(tests));
+        }
+        assert!(guide(Language::Rust).contains("the file of a `#[cfg(test)] mod x;`"));
+    }
+
+    #[test]
+    fn what_is_under_cfg_test_in_rust_reads_nothing_the_program_does() {
+        // A module with a body, a function, a `use` and a nested item, each under `#[cfg(test)]`
+        let source = "\
+pub fn a() { let _ = 1; }
+#[cfg(test)]
+mod tests {
+    fn t() { let _ = std::env::temp_dir(); }
+}
+#[cfg(test)]
+fn u() { let _ = std::env::var(\"B\"); }
+#[cfg(test)]
+use std::env::*;
+";
+        assert_eq!(names(source), []);
+        // The same code outside the item is read, at the line it is on, the test around it or not
+        let source = "\
+#[cfg(test)]
+mod tests {
+    fn t() { let _ = std::env::temp_dir(); }
+}
+pub fn a() { let _ = std::env::temp_dir(); }
+";
+        assert_eq!(names(source), [(5, "std::env::temp_dir".to_string())]);
+        // A file that is a test as a whole
+        assert_eq!(
+            names("#![cfg(test)]\nfn t() { let _ = std::env::var(\"A\"); }\n"),
+            []
+        );
+        // `cfg(not(test))` is code, and so is a `cfg(all(test, ...))`, which is not read as a test
+        for cfg in ["not(test)", "all(test, unix)"] {
+            assert_eq!(
+                names(&format!(
+                    "#[cfg({cfg})]\nfn a() {{ let _ = std::env::var(\"A\"); }}\n"
+                )),
+                [(2, "std::env::var".to_string())],
+                "{cfg}"
+            );
+        }
     }
 
     #[test]
