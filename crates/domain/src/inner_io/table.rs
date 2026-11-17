@@ -204,6 +204,7 @@ pub struct RustRow {
 }
 
 /// The rows of Rust's table but for `std::os`, which has a row for each of [`RUST_OS_MODULES`] across the platforms.
+/// `std::env` has none: it is judged by an allowlist of the names that are pure (`rust.rs`).
 pub const RUST: &[RustRow] = &[
     RustRow {
         key: "std::fs",
@@ -250,9 +251,9 @@ pub const RUST: &[RustRow] = &[
         ]),
     },
     RustRow {
-        key: "std::env",
-        module: &["std", "env"],
-        names: Some(&["current_dir", "set_current_dir", "current_exe"]),
+        key: "std::path",
+        module: &["std", "path"],
+        names: Some(&["absolute"]),
     },
 ];
 

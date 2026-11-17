@@ -443,7 +443,8 @@ terminal are `infrastructure`'s, behind a port in `protocol.outbound` that a use
 change. The rule reads imports and, in Python and TypeScript, the names a file uses of a module it has imported; what a
 module does only in part (`os`, `pathlib`, `time`, `datetime`, `logging` itself) is not in the table, and is judged by
 the name it is used through: in Python by the lists of "Python: what is judged by the name", below; in TypeScript by
-those of "TypeScript: what is judged by the name", after them (the globals, which are no import); in Rust not yet.
+those of "TypeScript: what is judged by the name", after them (the globals, which are no import); in Rust by "Rust: what
+is judged by the name", after TypeScript's (`std::env`, the clocks, the methods of a path).
 
 - **Where:** the code of the four layers and their levels. Not `infrastructure` (it does the I/O), not `composition` and
   `ui` (they wire and draw), not the entry file, and not a test: in Python a file in `tests/`; in TypeScript a file named
@@ -458,7 +459,8 @@ those of "TypeScript: what is judged by the name", after them (the globals, whic
   made for, and **one approval covers every use of that entry in that file**, whatever names it uses under it. The
   entry is the module (`shutil`, `urllib.request`, `asyncio.open_connection`), Node's module by its bare name (`fs` for
   `fs`, `node:fs` and `fs/promises`), a scheme by the scheme (`bun:`), and in Rust a row of the table: `std::fs`,
-  `std::net`, `std::process`, `std::env`, `std::io` (the terminal items and the print macros together),
+  `std::net`, `std::process`, `std::path` (for `std::path::absolute`), `std::io` (the terminal items and the print
+  macros together; a name of `std::env` that is I/O is an entry `std::env`, see "Rust: what is judged by the name"),
   `std::os::fs`, `std::os::net` and `std::os::process` (the module of every platform of `std::os`: `std::os::unix::fs`
   and `std::os::windows::fs` are one entry), and a glob above them as `std::*` or `std::os::unix::*`. Each approval is
   printed on every run, as any is, **with the names the file now uses under the entry** (`; now used: copyfile,
@@ -517,16 +519,16 @@ those of "TypeScript: what is judged by the name", after them (the globals, whic
   `Incoming`; of `std::process`, `Command`, `Child`, `ChildStdin`, `ChildStdout`, `ChildStderr` and `Stdio`; of `std::io`,
   `stdin`, `stdout`, `stderr`, `Stdin`, `Stdout`, `Stderr`, `StdinLock`, `StdoutLock`, `StderrLock` and `IsTerminal`,
   and the macros `print!`, `println!`, `eprint!`, `eprintln!` and `dbg!` (also written `std::println!`), which count
-  under `std::io`; of `std::env`, `current_dir`, `set_current_dir` and `current_exe`. The macros are found as words
-  followed by `!`, not as a path of another crate (`log::println!`); a macro renamed with `use std::println as p;` is
-  found at the `use` and not at `p!`. The functions of `std::env` that read the variables are the environment check's.
+  under `std::io`; of `std::path`, `absolute`. The macros are found as words followed by `!`, not as a path of another
+  crate (`log::println!`); a macro renamed with `use std::println as p;` is found at the `use` and not at `p!`.
+  `std::env` has no row: it is judged by an allowlist of the names that are pure, in "Rust: what is judged by the name".
 
 **What is out of the table, on purpose.** What is I/O only through some of its names or calls, which a later rule
 judges: Python's `io`, `logging` itself, `asyncio` as a whole (its tasks, queues and locks are pure), `os`, `os.path`,
 `pathlib`, `sys`, `time` and `datetime`; TypeScript's `os`, `crypto`, `stream`, `path`, `url`, `util`, `events`,
 `buffer`, `zlib`, `worker_threads`, `timers`, `perf_hooks`, `console` and `test`; Rust's `std::process::exit`,
 `ExitCode`, `std::net::IpAddr` and the other plain values of `std::net`, `std::io::{Read, Write, BufRead, Cursor,
-Result, Error}`, `std::path` and `std::env::args`. What is pure when it holds bytes in memory: `zipfile`, `tarfile`,
+Result, Error}` and `std::path` but for `absolute`. What is pure when it holds bytes in memory: `zipfile`, `tarfile`,
 `gzip`, `bz2` and `lzma`, which read a file only when handed one, `mmap` and `ctypes`, which need a file or a library
 to be given, and `json` and `csv`. A TypeScript global (`fetch`, `console.log`) is no import: it is judged by its name,
 in the section after Python's.
@@ -534,8 +536,8 @@ in the section after Python's.
 **Not seen:** in every stack, a name bound in one
 file and used through another (in Rust, `pub use std::fs;` in a module and `reexport::fs::read` in the next: the `use`
 itself is found), a path a macro builds from pieces, a module of the project that is named as one of the table (a bare
-`import code` is the standard library's), and a type-only import, which counts as any. What Python and TypeScript do
-not see is in their sections that follow.
+`import code` is the standard library's), and a type-only import, which counts as any. What Python, TypeScript and Rust
+do not see is in their sections that follow.
 
 #### Python: what is judged by the name
 
@@ -684,6 +686,65 @@ environment check's `process.env` (and `import.meta.env`) is left to it, never r
 g.fetch(x)`, `window[name]`), the clocks and ids of packages (`dayjs()`, `uuid()`, `nanoid()`), and a global another file
 brings in (`declare global`), which is a global and, not being on the list, fails. A name taken from a module is not
 judged by the allowlist (`import { fetch } from "./net"` is the project's own).
+
+#### Rust: what is judged by the name
+
+What the Rust standard library does only in part is judged by the name, after the table, on the names the scanner finds as
+it finds the items of a module (see the environment check): by the whole path, through a `use` of the module or of one
+above it, through a rename (`use std::time::Instant as I;`, `use std as s;`), and from `::std`. **A reference counts as a
+call** (`let now = Instant::now;`). Only the code outside `#[cfg(test)]` is judged, as the table is: the items under it,
+the file of a `#[cfg(test)] mod x;`, and what is outside a crate's `src/` (`tests/`, `benches/`, `examples/`,
+`build.rs`) are free. The finding is a forbidden import as the table's are, approved by the file and the **entry**: a
+name of `std::env` or of `std::path` that is I/O is an entry of its own under the module (`std::env`, which covers every
+such name of it in that file, `std::path`), a method of the net by its name (`canonicalize`), `extern` for an `extern`
+block, and **an act that more than one name does is one entry, a group:** `clock` and `argv`, which the approval prints
+with the names the file uses under it now. The environment check's names are left to it, never reported twice, and the
+environment check is not approved.
+
+- **`std::env`: an allowlist of the names that are pure; everything else of it is I/O.** It starts narrow: a name added
+  later is a patch, a name taken away is a major change. The guide of a Rust project prints it in full. Pure are
+  `consts`, `split_paths`, `join_paths`, `VarError`, `JoinPathsError` and `SplitPaths`, and nothing else. `args` and
+  `args_os` are the command-line arguments (`argv`: the outer layers and the entry file read them). The functions of the
+  environment (`var`, `var_os`, `vars`, `vars_os`, `set_var`, `remove_var`, `home_dir`, `temp_dir`) are the environment
+  check's. Every other name (`current_dir`, `set_current_dir`, `current_exe`, the type `Args`, ...) is I/O, an entry of
+  its own by its name under `std::env`; the finding names it. A glob of `std::env` fails, as the names it brings in cannot
+  be read. `std::env` is one place: it has no row in the table.
+- **The clock** (`clock`): `std::time::SystemTime::now`, `std::time::Instant::now`, and `UNIX_EPOCH.elapsed()`, which is
+  the time now as `now` is, written `std::time::UNIX_EPOCH.elapsed()`, `SystemTime::UNIX_EPOCH.elapsed()` or, after a
+  `use` or a rename, `UNIX_EPOCH.elapsed()` and `E.elapsed()`. A glob of `std::time` (`use std::time::*;`) fails, as the
+  names it brings in (`Instant`, `SystemTime`) cannot be read; it is an entry of its own, `std::time`. Randomness has no
+  name in `std`. The clocks of crates (`chrono::Utc::now`, `time::OffsetDateTime::now_utc`) are in no table, and are not
+  seen.
+- **The method net, with no gate on the file:** a method is judged by its name on any receiver, because the scanner
+  cannot know the type of what it is called on. **Always judged:** `canonicalize`, `read_dir`, `read_link`,
+  `try_exists`, `symlink_metadata` and `is_symlink`. **Judged only with no argument:** `exists`, `is_file`, `is_dir` and
+  `metadata` (with an argument, `.exists(x)` is another method). `std::path::absolute` is I/O, a row of the table under
+  `std::path`; so is a method of `std::path::Path` named by its path (`Path::exists`, `.filter(Path::is_file)`), which is
+  the standard library's whatever the project defines, an entry by the method's name (`exists`).
+- **The exclusion:** a method name is left out of the net when the project itself defines a method (a `fn` in an `impl`
+  block or a `trait`) of the **same name and the same number of parameters, not counting `self`**, anywhere in the
+  project: any code file of it, a test, another layer, a file in `unchecked`. The names left out this way are printed on
+  every run of `rotproof check`, in the one line that Python's are, so that the exclusion is not silent (`I/O net: left
+  out, as the project defines a method of the same name and number of parameters: exists(0), read_dir(1)`). What the
+  net leaves out only for the calls of that many arguments: `read_dir()` is still judged where the project defines
+  `read_dir(path)`.
+- **What cannot be read fails:** an `extern` block (`extern "C" { ... }`, `unsafe extern "C" { ... }`), which declares
+  what another language defines; its entry is `extern`. `extern crate` and an `extern "C" fn` with a body are no block.
+- **Each finding starts with what to do,** by layer, as Python's and TypeScript's do: pass the time now in as an
+  argument, or take it from a port in `protocol.outbound` that the use case is given; **a port may be a callable alias**
+  (`Box<dyn Fn() -> SystemTime>`, or a generic `F: Fn() -> SystemTime`). The arguments are read where the program
+  starts. A screen's model, which imports only `protocol.inbound`, gets the value from its page or through a use case.
+  The guide lists what is not a fix: approving it, renaming or respelling it, moving the code to a layer that is not
+  judged or to a path in `unchecked` or `moving`, and listing it as allowed.
+
+**What Rust does not see:** a method on a value whose type the scanner cannot know, where no definition in the project
+leaves it out (`store.exists()` is judged, and left out only by a definition), `instant.elapsed()` on an `Instant` held
+in a variable (the `Instant::now` that made it is seen), a name bound in one file and used through another
+(`pub use std::time::Instant;` in a module, `reexport::Instant::now()` in the next), a path a macro builds from pieces,
+a name a glob brings in (a glob of `std::time` fails, but the names it brought in are not followed after it is
+approved), a function of the standard library held in a variable and called through it (`let f = std::path::absolute;
+f(x)` is seen at `absolute`, but `let g = f; g(x)` only where `f` is), and the clocks of crates. A name a `use` renames
+away (`UNIX_EPOCH` in `use std::time::UNIX_EPOCH as E;`) is read as still bound, which is the side that fails.
 
 ### Views that are templates
 

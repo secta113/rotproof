@@ -353,6 +353,23 @@ fn reach(full: &[String], module: &[String]) -> Option<Item> {
     }
 }
 
+/// The names the code alone ([`code`]) binds to the item at `item` itself (`["std", "time", "UNIX_EPOCH"]`), which a
+/// use with no `::` after it names: by a `use` that names it (`use std::time::UNIX_EPOCH;` binds `UNIX_EPOCH`), and by
+/// a rename of it or of a name that stands for it (`use std::time::UNIX_EPOCH as E;`). A name that stands for a module
+/// above the item (`use std::time;`) is no name of the item: [`items`] reads what is reached through it. The name a
+/// rename leaves (`UNIX_EPOCH` of `UNIX_EPOCH as E`) is read as bound as well, which is the side that fails.
+pub fn bound_names(code: &str, item: &[&str]) -> Vec<String> {
+    if item.is_empty() {
+        return Vec::new();
+    }
+    let item: Vec<String> = item.iter().map(|s| s.to_string()).collect();
+    names_for(code, &item)
+        .into_iter()
+        .filter(|(_, paths)| paths.contains(&item))
+        .map(|(name, _)| name)
+        .collect()
+}
+
 /// The names the code alone binds to the module, or to a module above it (a prefix of `module`, the whole of it
 /// included), with every path each stands for: by a `use` that names it (`use std::env;` binds `env`), by a rename
 /// (`use std::env as e;`), and by a rename of a name bound so (`use std as s;`, `use s::env as e;`).
@@ -788,6 +805,25 @@ fn e() { v::io::empty(); }
             named_in(source, &["std", "io"]),
             ["stdin", "stdout", "stderr", "Stdin", "empty"]
         );
+    }
+
+    #[test]
+    fn the_names_that_stand_for_an_item_itself_are_the_ones_a_use_or_a_rename_binds() {
+        let names = |source: &str| {
+            let mut found = bound_names(&code(source), &["std", "time", "UNIX_EPOCH"]);
+            found.sort();
+            found
+        };
+        assert_eq!(names("use std::time::UNIX_EPOCH;"), ["UNIX_EPOCH"]);
+        // The name a rename leaves is read as bound too, which is the side that fails
+        assert_eq!(
+            names("use std::time::{self, UNIX_EPOCH as E};"),
+            ["E", "UNIX_EPOCH"]
+        );
+        assert_eq!(names("use std as s;\nuse s::time::UNIX_EPOCH as e;"), ["e"]);
+        // A module above it is no name of the item, nor is another item
+        assert!(names("use std::time;\nuse std::time::Instant;").is_empty());
+        assert!(bound_names("", &[]).is_empty());
     }
 
     #[test]

@@ -109,9 +109,11 @@ impl Group {
             (Language::TypeScript, Group::Clock) => "`() => Date`",
             (Language::TypeScript, Group::Random) => "`() => string`",
             (Language::TypeScript, _) => "`(text: string) => void`",
-            (Language::Rust, Group::Clock) => "`fn() -> SystemTime`",
-            (Language::Rust, Group::Random) => "`fn() -> u64`",
-            (Language::Rust, _) => "`fn(&str)`",
+            (Language::Rust, Group::Clock) => {
+                "`Box<dyn Fn() -> SystemTime>`, a generic `F: Fn() -> SystemTime`"
+            }
+            (Language::Rust, Group::Random) => "`Box<dyn Fn() -> u64>`, a generic `F: Fn() -> u64`",
+            (Language::Rust, _) => "`Box<dyn Fn(&str)>`, a generic `F: Fn(&str)`",
         }
     }
 }
@@ -136,6 +138,12 @@ pub fn passed_in(language: Language) -> String {
 pub const KEYS_TYPESCRIPT: &str = ", and `fetch`, `localStorage` or `process.cwd` for a global judged by its name, `eval` \
                                   for what cannot be read, and `clock`, `random`, `terminal` or `argv` for an act more \
                                   than one name does";
+
+/// The entries of a Rust project's approvals file besides the table's: a name of `std::env` or `std::path` that is I/O
+/// is its own under the module, a method of a path is its own, `extern` is what cannot be read.
+pub const KEYS_RUST: &str = ", and `std::env` (`current_dir`) for a name of it that is I/O, `exists` or `canonicalize` \
+                            for a method judged by its name, `extern` for an `extern` block, and `clock` or `argv` for \
+                            an act more than one name does";
 
 /// The entries of the approvals file besides the table's, as the guide lists them after the table's.
 pub const KEYS: &str = ", and `os.getcwd` or `sys.platform` for a name of a module judged by its names, `read_text` for \

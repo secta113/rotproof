@@ -23,18 +23,21 @@
 //!   names and what cannot be read (`python`); in TypeScript: the allowlist of the globals (a global not on it is
 //!   I/O), `process`, the clock, randomness, `console`, the arguments and what cannot be read (`typescript`). A group
 //!   of one act (the clock, randomness, the terminal, the arguments) is one entry, whichever name it is reached by
-//!   (`groups`).
+//!   (`groups`); in Rust: the allowlist of `std::env`, the clocks, the net of `Path` method names and the `extern`
+//!   blocks (`rust`).
 //!
 //! Python and TypeScript are read by their readers of imports and uses ([`in_python`], [`in_typescript`]); Rust by
 //! Rotproof's own scanner ([`in_rust`]).
 
 mod groups;
 mod python;
+mod rust;
 mod table;
 mod typescript;
 
 pub use groups::{Excluded, Group};
 pub use python::excluded as python_excluded;
+pub use rust::{defined as rust_defined, excluded as rust_excluded};
 pub use table::listing;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -79,7 +82,7 @@ pub fn guide(language: Language) -> String {
              crate's `src/`: `tests/`, `benches/`, `examples/` and `build.rs`)"
         }
     };
-    // What a stack says of the names it judges besides the table: Python's and TypeScript's so far
+    // What a stack says of the names it judges besides the table
     let (names, passed, keys) = match language {
         Language::Python => (
             python::listing(),
@@ -91,7 +94,11 @@ pub fn guide(language: Language) -> String {
             groups::passed_in(language),
             groups::KEYS_TYPESCRIPT.to_string(),
         ),
-        Language::Rust => (String::new(), String::new(), String::new()),
+        Language::Rust => (
+            rust::listing(),
+            groups::passed_in(language),
+            groups::KEYS_RUST.to_string(),
+        ),
     };
     let hook = match language {
         Language::TypeScript => ", through a hook in `ui.atoms`",
@@ -125,6 +132,8 @@ pub enum Cause {
     Unread(String),
     /// A method called by a name that is a path's, on a receiver whose type cannot be read
     Method,
+    /// An `extern` block (Rust), which declares what another language defines
+    Extern,
 }
 
 /// One place a file does I/O by import: the line (from 1), the entry of the table, the name used under it, and how.
@@ -322,7 +331,11 @@ pub fn in_typescript(imports: &[(usize, Import)], uses: &[Use]) -> Vec<Found> {
 /// s;`), and as a glob of the module or of one above it, which fails whatever is used since the names it brings in
 /// cannot be read. The items under `#[cfg(test)]` are not read. Not followed: a name bound in one file and used through
 /// another, a path a macro builds from pieces, and a macro renamed with `use std::println as p;` (the `use` is found).
-pub fn in_rust(source: &str) -> Vec<Found> {
+///
+/// What is I/O in part is judged by the name after the table ([`rust`]): the allowlist of `std::env`, the clocks, the
+/// calls of a method whose name is a path's unless `excluded` (the methods the project defines) leaves it out, and
+/// the `extern` blocks.
+pub fn in_rust(source: &str, excluded: &Excluded) -> Vec<Found> {
     let code = without_tests(&code(source));
     let mut found = Vec::new();
     let module = |key: &str, path: &[&str], names: Option<&[&str]>, found: &mut Vec<Found>| {
@@ -440,6 +453,7 @@ pub fn in_rust(source: &str) -> Vec<Found> {
             cause: Cause::Used,
         });
     }
+    found.extend(rust::judge(source, &code, excluded));
     sorted(found)
 }
 
@@ -528,6 +542,9 @@ pub fn findings(
                     "calls `.{entry}(...)`, a method of a path that does I/O: a method is judged by its name on any \
                      receiver, as the type of what it is called on cannot be read"
                 ),
+                Cause::Extern => "declares an `extern` block: the functions of another language it brings in cannot be \
+                                  read, so it fails in an inner layer"
+                    .to_string(),
             };
             let first = match cause {
                 Cause::Group(group) => group.remedy(layer, language),
@@ -971,7 +988,7 @@ mod tests {
     }
 
     fn rust(source: &str) -> Vec<(usize, String, Option<String>)> {
-        in_rust(source)
+        in_rust(source, &Excluded::default())
             .into_iter()
             .map(|f| (f.line, f.entry, f.name))
             .collect()
@@ -997,6 +1014,8 @@ fn d() { let _ = env::current_dir(); let _ = env::var(\"X\"); let _ = env::args(
                 entry(3, "std::net", Some("TcpStream")),
                 entry(5, "std::io", Some("stdin")),
                 entry(6, "std::io", Some("stdout")),
+                // `env::args` is the arguments, a group; `env::var` is the environment check's
+                entry(8, "argv", Some("std::env::args")),
                 entry(8, "std::env", Some("current_dir")),
             ]
         );
@@ -1033,7 +1052,7 @@ use std::process::{ExitCode, ExitStatus, Output};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::io::{Read, Write, BufRead, Cursor, Result, ErrorKind, Error};
 use std::io::prelude::*;
-use std::env::{args, var};
+use std::env::{consts, var};
 fn a() { std::process::exit(1); let _ = std::process::id(); let _ = std::env::consts::OS; }
 use std::path::Path;
 use std::collections::HashMap;
@@ -1073,6 +1092,7 @@ fn d() { let _ = ::std::env::current_exe(); }
     fn a_glob_of_an_entry_or_of_a_module_above_it_fails_as_one_whose_names_cannot_be_read() {
         let found = in_rust(
             "use std::fs::*;\nuse std::io::*;\nuse std::*;\nuse std::os::unix::*;\nuse std::os::unix::fs::*;\nuse std::io::prelude::*;\nuse std::collections::*;\n",
+            &Excluded::default(),
         );
         let said: Vec<(usize, &str, &Cause)> = found
             .iter()
@@ -1331,5 +1351,31 @@ fn b() { std::fs::read(\"b\"); }
         }
         assert!(text.contains("`fetch`, `localStorage` or `process.cwd` for a global"));
         assert!(!text.contains("`os.getcwd`"));
+    }
+
+    #[test]
+    fn the_guide_of_rust_prints_the_allowlist_the_net_and_the_alias_of_a_port() {
+        let text = guide(Language::Rust);
+        for name in rust::ENV_PURE
+            .iter()
+            .chain(&rust::NET_ALWAYS)
+            .chain(&rust::NET_NO_ARGUMENT)
+        {
+            assert!(text.contains(&format!("`{name}`")), "{name}");
+        }
+        assert!(text.contains("`Box<dyn Fn() -> SystemTime>`, a generic `F: Fn() -> SystemTime`"));
+        assert!(text.contains("`std::env` (`current_dir`) for a name of it that is I/O"));
+        // `std::env` has one place: the allowlist, not a row of the table
+        assert!(!table::RUST.iter().any(|row| row.key == "std::env"));
+        assert!(!text.contains("`os.getcwd`") && !text.contains("`Date.now`"));
+    }
+
+    #[test]
+    fn a_remedy_of_rust_names_the_callable_ports_of_the_language() {
+        let said = Group::Clock.remedy("application", Language::Rust);
+        assert!(
+            said.ends_with("(a port may be a callable alias, `Box<dyn Fn() -> SystemTime>`, a generic `F: Fn() -> SystemTime`)"),
+            "{said}"
+        );
     }
 }

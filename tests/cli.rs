@@ -3633,7 +3633,7 @@ fn the_inner_crates_do_no_io_in_rust_and_a_test_is_free() {
         ],
         &[
             "use std::io::Write;\nuse std::path::PathBuf;\nuse std::process::{ExitCode, exit};\n",
-            "use std::env::args;\nuse std::net::{IpAddr, SocketAddr};\npub fn a() { let _ = format!(\"x\"); }\n",
+            "use std::env::{consts, split_paths};\nuse std::net::{IpAddr, SocketAddr};\npub fn a() { let _ = format!(\"x\"); }\n",
             "#[cfg(test)]\nmod tests {\n    use std::fs;\n    #[test]\n    fn t() { fs::read(\"x\").ok(); println!(\"x\"); }\n}\n",
             "#[cfg(test)]\nuse std::process::Command;\n",
             "#![cfg(test)]\nuse std::fs;\n",
@@ -3706,6 +3706,433 @@ fn the_inner_crates_do_no_io_in_rust_and_a_test_is_free() {
         "`current_exe`",
     ] {
         assert!(guide.contains(name), "{name}");
+    }
+}
+
+/// Plant each source in the domain crate of a Rust project: the check fails under the heading of the I/O of the inner
+/// layers, on `line`, and says `said`. The crate is put back as it was.
+fn plant_rust(r: &Path, planted: &[(&str, usize, &str)], reset: &str) {
+    let path = "crates/domain/src/lib.rs";
+    for (source, line, said_of) in planted {
+        put(r, path, source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        assert!(
+            said.contains(&format!("  {path}:{line}: ")) && said.contains(said_of),
+            "{source}\n{said_of}\n{said}"
+        );
+    }
+    put(r, path, reset);
+}
+
+#[test]
+fn each_rust_name_that_does_io_in_part_fails_alone_and_what_is_pure_passes() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let lib = std::fs::read_to_string(r.join("crates/domain/src/lib.rs")).unwrap();
+    let path_fn = |call: &str| format!("pub fn a(p: &std::path::Path) {{ let _ = p.{call}; }}\n");
+    let net = "a method of a path that does I/O";
+    let mut planted: Vec<(String, usize, String)> = Vec::new();
+    // The names of `std::env` that are I/O, each an entry of its own under `std::env`
+    for (source, name) in [
+        (
+            "pub fn a() { let _ = std::env::current_dir(); }\n",
+            "current_dir",
+        ),
+        (
+            "use std::env;\npub fn a() { env::set_current_dir(\"x\").ok(); }\n",
+            "set_current_dir",
+        ),
+        (
+            "use std::env as e;\npub fn a() { let _ = e::current_exe(); }\n",
+            "current_exe",
+        ),
+        ("pub fn a(x: std::env::Args) {}\n", "Args"),
+    ] {
+        let line = source.lines().count();
+        planted.push((
+            source.to_string(),
+            line,
+            format!("uses `std::env` ({name}), which does I/O"),
+        ));
+    }
+    // The command-line arguments are `argv`
+    for (source, name) in [
+        (
+            "pub fn a() { let _ = std::env::args(); }\n",
+            "std::env::args",
+        ),
+        (
+            "use std::env::args_os;
+",
+            "std::env::args_os",
+        ),
+    ] {
+        planted.push((
+            source.to_string(),
+            1,
+            format!(
+                "read the arguments in infrastructure and pass the value in as an argument: reads the command-line \
+                 arguments ({name}), which does I/O (entry `argv`)"
+            ),
+        ));
+    }
+    // The clocks: as a call, as a reference, through a rename and through `use`, and the epoch read as the time now
+    for (source, name) in [
+        (
+            "pub fn a() { let _ = std::time::SystemTime::now(); }\n",
+            "std::time::SystemTime::now",
+        ),
+        (
+            "use std::time::Instant;\npub fn a() { let _ = Instant::now(); }\n",
+            "std::time::Instant::now",
+        ),
+        (
+            "use std::time::Instant;\npub fn a() { let f = Instant::now; let _ = f; }\n",
+            "std::time::Instant::now",
+        ),
+        (
+            "use std::time::SystemTime as T;\npub fn a() { let _ = T::now(); }\n",
+            "std::time::SystemTime::now",
+        ),
+        (
+            "use std as s;\npub fn a() { let _ = s::time::Instant::now(); }\n",
+            "std::time::Instant::now",
+        ),
+        (
+            "pub fn a() { let _ = std::time::UNIX_EPOCH.elapsed(); }\n",
+            "std::time::UNIX_EPOCH.elapsed",
+        ),
+        (
+            "use std::time::SystemTime;\npub fn a() { let _ = SystemTime::UNIX_EPOCH.elapsed(); }\n",
+            "std::time::UNIX_EPOCH.elapsed",
+        ),
+        (
+            "use std::time::UNIX_EPOCH as E;\npub fn a() { let _ = E.elapsed(); }\n",
+            "std::time::UNIX_EPOCH.elapsed",
+        ),
+    ] {
+        planted.push((
+            source.to_string(),
+            source.lines().count(),
+            format!(
+                "pass the time now in as an argument, or take it from a port in protocol.outbound that the use case is \
+                 given (a port may be a callable alias, `Box<dyn Fn() -> SystemTime>`, a generic `F: Fn() -> \
+                 SystemTime`): reads the clock ({name}), which does I/O (entry `clock`)"
+            ),
+        ));
+    }
+    // The net of the names of a path's methods, on any receiver
+    for call in [
+        "canonicalize()",
+        "read_dir()",
+        "read_link()",
+        "try_exists()",
+        "symlink_metadata()",
+        "is_symlink()",
+        "exists()",
+        "is_file()",
+        "is_dir()",
+        "metadata()",
+    ] {
+        let name = call.trim_end_matches("()");
+        planted.push((path_fn(call), 1, format!("calls `.{name}(...)`, {net}")));
+    }
+    planted.push((
+        "pub fn a(store: &Store) { let _ = store.canonicalize(1, 2); }\n".to_string(),
+        1,
+        format!("calls `.canonicalize(...)`, {net}"),
+    ));
+    // A method named by the standard library's path, a reference included, and `std::path::absolute`
+    for (source, said_of) in [
+        (
+            "use std::path::Path;\npub fn a() -> bool { Path::exists(Path::new(\"x\")) }\n",
+            "uses `exists` (Path::exists), which does I/O",
+        ),
+        (
+            "pub fn a(v: Vec<&std::path::Path>) { let _ = v.into_iter().filter(|p| p.is_dir()).count(); let _ = std::path::Path::is_file; }\n",
+            "uses `is_file` (Path::is_file), which does I/O",
+        ),
+        (
+            "pub fn a() { let _ = std::path::absolute(\"x\"); }\n",
+            "uses `std::path` (absolute), which does I/O",
+        ),
+        (
+            "use std::path::absolute;\n",
+            "uses `std::path` (absolute), which does I/O",
+        ),
+    ] {
+        planted.push((
+            source.to_string(),
+            source.lines().count(),
+            said_of.to_string(),
+        ));
+    }
+    // What cannot be read: an `extern` block, and a glob of `std::env` or `std::time`
+    for (source, said_of) in [
+        (
+            "extern \"C\" {\n    fn abs(x: i32) -> i32;\n}\n",
+            "declares an `extern` block",
+        ),
+        (
+            "unsafe extern \"C\" {\n    pub safe fn sqrt(x: f64) -> f64;\n}\n",
+            "declares an `extern` block",
+        ),
+        ("use std::env::*;\n", "a glob of `std::env`"),
+        ("use std::time::*;\n", "a glob of `std::time`"),
+    ] {
+        planted.push((source.to_string(), 1, said_of.to_string()));
+    }
+    let planted: Vec<(&str, usize, &str)> = planted
+        .iter()
+        .map(|(source, line, said)| (source.as_str(), *line, said.as_str()))
+        .collect();
+    // `line` of a source is the line of its last statement, which is where each form above is written; the extern
+    // blocks and the globs start on the first
+    plant_rust(r, &planted, &lib);
+
+    // What is pure passes
+    let free = [
+        "use std::env::{consts, split_paths, join_paths, VarError, JoinPathsError, SplitPaths};\npub fn a() -> &'static str { std::env::consts::OS }\n",
+        "pub fn a(p: &std::path::Path, store: &Store) { let _ = (p.exists(1), p.is_file(2, 3), p.metadata(|a, b| a), p.get(), p.exist()); let _ = store; }\n",
+        "pub fn a(p: &std::path::Path) -> std::path::PathBuf { p.join(\"x\").to_path_buf() }\n",
+        "use std::time::{Duration, SystemTime};\npub fn a(t: SystemTime) -> Duration { Duration::from_secs(1) + t.duration_since(SystemTime::UNIX_EPOCH).unwrap() }\n",
+        "pub struct Instant;\nimpl Instant { pub fn now() -> u8 { 1 } }\npub fn a() -> u8 { Instant::now() }\n",
+        "extern crate alloc;\npub extern \"C\" fn callback() {}\npub type F = extern \"C\" fn(u8);\n",
+        "pub fn a() -> Vec<u8> { vec![] }\n#[cfg(test)]\nmod tests {\n    use std::time::Instant;\n    #[test]\n    fn t() { let _ = (Instant::now(), std::env::current_dir(), std::path::Path::new(\"x\").exists()); }\n    extern \"C\" { fn x(); }\n}\n",
+    ];
+    for source in free {
+        put(r, "crates/domain/src/lib.rs", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(0), "{source}\n{said}");
+    }
+    // The functions of the environment are the environment check's alone, and are not reported twice
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        "pub fn a() { let _ = std::env::var(\"A\"); let _ = std::env::temp_dir(); }\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("std::env::var") && !said.contains(IO_HEADING),
+        "{said}"
+    );
+    // The outer layers, the entry file and the tests do all of it
+    put(r, "crates/domain/src/lib.rs", &lib);
+    let all = "pub fn a(p: &std::path::Path) { let _ = (std::time::Instant::now(), std::env::args(), std::env::current_dir(), p.canonicalize(), p.exists()); }\nextern \"C\" { fn abs(x: i32) -> i32; }\n";
+    for path in [
+        "crates/infrastructure/src/outbound/mod.rs",
+        "crates/domain/tests/it.rs",
+        "crates/domain/benches/b.rs",
+        "crates/domain/build.rs",
+        "src/main.rs",
+    ] {
+        put(r, path, all);
+    }
+    let (_, said) = checked(r);
+    assert!(!said.contains(IO_HEADING), "{said}");
+}
+
+#[test]
+fn a_rust_method_the_project_defines_is_left_out_of_the_net_and_the_line_is_printed_on_every_run() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let file = "crates/domain/src/lib.rs";
+    let lib = "pub fn f(p: &std::path::Path, store: &Store) {\n    let a = p.exists();\n    let b = p.read_dir();\n    let c = store.exists();\n    let d = store.read_dir(p);\n    let e = store.is_file();\n    let _ = (a, b, c, d, e);\n}\n";
+    put(r, file, lib);
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("I/O net:"), "{said}");
+    let flagged = |said: &str| -> Vec<usize> {
+        (2..=6)
+            .filter(|line| said.contains(&format!("  {file}:{line}: ")))
+            .collect()
+    };
+    assert_eq!(flagged(&said), [2, 3, 4, 5, 6], "{said}");
+    // The project defines a method of the same name and number of parameters, in any file of it: a trait of another
+    // layer, an impl in a test
+    put(
+        r,
+        "crates/infrastructure/src/outbound/mod.rs",
+        "pub trait Store { fn exists(&self) -> bool; fn read_dir(&self, p: &std::path::Path); }\n",
+    );
+    put(
+        r,
+        "crates/domain/tests/fake.rs",
+        "struct Fake;\nimpl Fake { fn is_file(&self, a: u8, b: u8) {} fn metadata(&self) {} }\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "I/O net: left out, as the project defines a method of the same name and number of parameters: \
+             exists(0), metadata(0), read_dir(1)\n"
+        ),
+        "{said}"
+    );
+    // `exists()` and `read_dir(p)` are left out on any receiver; `read_dir()` takes none, and `is_file()` is called
+    // with none where the project's takes two
+    assert_eq!(flagged(&said), [3, 6], "{said}");
+    // The same names with another number of parameters leave nothing out of those calls
+    put(
+        r,
+        "crates/infrastructure/src/outbound/mod.rs",
+        "pub trait Store { fn exists(&self, a: u8) -> bool; fn read_dir(&self); }\n",
+    );
+    let (_, said) = checked(r);
+    assert_eq!(flagged(&said), [2, 4, 5, 6], "{said}");
+    // It is printed when nothing fails too
+    put(r, file, "pub fn f(a: u8) -> u8 { a }\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(said.contains("I/O net: left out"), "{said}");
+}
+
+#[test]
+fn an_approved_rust_name_is_an_entry_by_its_name_and_a_group_is_one_entry() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let file = "crates/domain/src/lib.rs";
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let approve = |entry: &str| {
+        let out = approve_with_git(r, named, &[file, entry, "--reason", "the port comes later"]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{entry}: {}{}",
+            stdout(&out),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    put(
+        r,
+        file,
+        "use std::time::{Instant, SystemTime};\npub fn f(p: &std::path::Path) {\n    let a = Instant::now();\n    let b = SystemTime::now();\n    let c = std::env::current_dir();\n    let d = std::env::args();\n    let e = p.canonicalize();\n    let g = std::path::absolute(\"x\");\n    let _ = (a, b, c, d, e, g);\n}\nextern \"C\" { fn abs(x: i32) -> i32; }\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The act of a group is one entry, whichever names the file reaches it by
+    approve("clock");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("reads the clock"), "{said}");
+    assert!(
+        said.contains("clock in crates/domain/src/lib.rs: the port comes later (Someone Else, ")
+            && said.contains("; now used: std::time::Instant::now, std::time::SystemTime::now\n"),
+        "{said}"
+    );
+    // A name of `std::env` is an entry of its own, a method of the net its own, and `std::path` its own
+    approve("std::env");
+    approve("canonicalize");
+    // A name of `std::env` approved does not cover the arguments, which are a group of their own
+    let (_, said) = checked(r);
+    assert!(said.contains("reads the command-line arguments"), "{said}");
+    approve("argv");
+    approve("std::path");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("declares an `extern` block")
+            && !said.contains("uses `std::env`")
+            && !said.contains("calls `.canonicalize(...)`")
+            && !said.contains("(entry `argv`)")
+            && !said.contains("uses `std::path`"),
+        "{said}"
+    );
+    assert!(
+        said.contains("; now used: current_dir\n") && said.contains("; now used: std::env::args\n"),
+        "{said}"
+    );
+    approve("extern");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("approved in .config/rotproof-approved.toml (6):"),
+        "{said}"
+    );
+    // The names change, so the reason is read again; and what is no longer used is a stale entry
+    put(
+        r,
+        file,
+        "use std::time::Instant;\npub fn f() {\n    let a = Instant::now();\n    let c = std::env::set_current_dir(\"x\");\n    let _ = (a, c);\n}\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("; now used: set_current_dir\n")
+            && !said.contains("; now used: current_dir\n"),
+        "{said}"
+    );
+    for stale in ["canonicalize", "argv", "std::path", "extern"] {
+        assert!(
+            said.contains(&format!(
+                "approved, but no such forbidden import: {stale} in {file}"
+            )),
+            "{stale}\n{said}"
+        );
+    }
+    // Only what the check finds is approved
+    let out = approve_with_git(r, named, &[file, "std::net", "--reason", "no"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no forbidden import of std::net"));
+    // The environment check is not approved
+    put(r, file, "pub fn f() { let _ = std::env::var(\"A\"); }\n");
+    let out = approve_with_git(r, named, &[file, "std::env::var", "--reason", "no"]);
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn the_guide_of_a_rust_project_lists_the_allowlist_in_full_and_the_way_out() {
+    let guide = stdout(&run(&["guide", "--stack", "rust"]));
+    for name in [
+        // std::env: what is pure, and what is not
+        "`consts`",
+        "`split_paths`",
+        "`join_paths`",
+        "`VarError`",
+        "`JoinPathsError`",
+        "`SplitPaths`",
+        "`current_dir`",
+        "`args_os`",
+        // the clocks, the net and what cannot be read
+        "`std::time::SystemTime::now`",
+        "`std::time::Instant::now`",
+        "`UNIX_EPOCH.elapsed()`",
+        "`canonicalize`",
+        "`read_dir`",
+        "`read_link`",
+        "`try_exists`",
+        "`symlink_metadata`",
+        "`is_symlink`",
+        "`exists`",
+        "`is_file`",
+        "`is_dir`",
+        "`metadata`",
+        "`std::path::absolute`",
+        "`extern`",
+        "`Path::exists`",
+        "`Box<dyn Fn() -> SystemTime>`",
+        "`F: Fn() -> SystemTime`",
+        "`clock`",
+        "`argv`",
+    ] {
+        assert!(guide.contains(name), "{name}\n{guide}");
+    }
+    assert!(
+        guide.contains("`std::env` (`current_dir`) for a name of it that is I/O"),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("Approving the import,\n  renaming or respelling it"),
+        "{guide}"
+    );
+    // The other stacks do not claim what is Rust's
+    for stack in ["python", "typescript"] {
+        let guide = stdout(&run(&["guide", "--stack", stack]));
+        assert!(!guide.contains("`Box<dyn Fn() -> SystemTime>`"), "{stack}");
+        assert!(!guide.contains("`UNIX_EPOCH.elapsed()`"), "{stack}");
     }
 }
 

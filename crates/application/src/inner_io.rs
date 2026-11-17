@@ -3,8 +3,8 @@
 //! a [`Forbidden`] of its own rule, kept as an import is: `rotproof approve` approves it, and an approval that matches
 //! nothing fails.
 //!
-//! In Python the net of method names leaves out the methods the project defines itself, which are read from every
-//! file of the project (a test, a file in `unchecked` too), not from the inner layers alone.
+//! In Python and in Rust the net of method names leaves out the methods the project defines itself, which are read from
+//! every file of the project (a test, a file in `unchecked` too), not from the inner layers alone.
 
 use std::collections::BTreeSet;
 use std::io;
@@ -14,7 +14,8 @@ use domain::code::{Defined, Import, Source};
 use domain::declaration::Declared;
 use domain::direction::Forbidden;
 use domain::inner_io::{
-    Excluded, findings, in_python, in_rust, in_typescript, is_judged, python_excluded, unread,
+    Excluded, findings, in_python, in_rust, in_typescript, is_judged, python_excluded,
+    rust_defined, rust_excluded, unread,
 };
 use domain::layers::{Language, Layout, Place};
 use domain::paths::{file_name, join, parent};
@@ -83,8 +84,15 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
             });
         }
     }
-    if layout.language == Language::Python {
-        judged.excluded = python_excluded(&defined_in(tree, parsers, declared, layout, &files)?);
+    match layout.language {
+        Language::Python => {
+            judged.excluded =
+                python_excluded(&defined_in(tree, parsers, declared, layout, &files)?);
+        }
+        Language::Rust => {
+            judged.excluded = rust_excluded(&defined_in(tree, parsers, declared, layout, &files)?);
+        }
+        Language::TypeScript => {}
     }
     for file in &files {
         let found = match &file.parsed {
@@ -99,7 +107,7 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
                 found.extend(unread(&read.unread));
                 found
             }
-            Parsed::Rust => in_rust(&file.source),
+            Parsed::Rust => in_rust(&file.source, &judged.excluded),
         };
         judged.forbidden.extend(findings(
             &file.path,
@@ -115,10 +123,10 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
     Ok(judged)
 }
 
-/// Every method a class of the project defines, in a Python project: the judged files as they were read, and every
-/// other code file of the project (a test, a file of another layer, one in `unchecked`) read here, so that a method the
-/// project defines is left out of the net wherever it is. A file that cannot be read as UTF-8 is not read here: the
-/// check of the code that is judged says so.
+/// Every method a class of the project defines in a Python project, or an `impl` block or a trait in a Rust one: the
+/// judged files as they were read, and every other code file of the project (a test, a file of another layer, one in
+/// `unchecked`) read here, so that a method the project defines is left out of the net wherever it is. A file that
+/// cannot be read as UTF-8 is not read here: the check of the code that is judged says so.
 fn defined_in(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -130,7 +138,8 @@ fn defined_in(
         .iter()
         .filter_map(|file| match &file.parsed {
             Parsed::Python(source) => Some(source.defined.clone()),
-            _ => None,
+            Parsed::Rust => Some(rust_defined(&file.source)),
+            Parsed::TypeScript(_) => None,
         })
         .flatten()
         .collect();
@@ -141,7 +150,11 @@ fn defined_in(
                 continue;
             }
             if let Some(source) = read_code(tree, &path, "I/O", &mut Vec::new())? {
-                defined.extend(parsers.python(&source, &path).defined);
+                defined.extend(match layout.language {
+                    Language::Rust => rust_defined(&source),
+                    Language::Python => parsers.python(&source, &path).defined,
+                    Language::TypeScript => Vec::new(),
+                });
             }
         }
     }
@@ -892,5 +905,36 @@ from time import *
             "atomic",
         );
         assert_eq!(found, ["presentation/models/m.py:2 (time.time) clock"]);
+    }
+
+    #[test]
+    fn a_rust_method_the_net_judges_is_left_out_by_a_definition_in_any_file_of_the_project() {
+        let files = [
+            ("crates/domain/Cargo.toml", "[package]\nname = \"domain\"\n"),
+            (
+                "crates/domain/src/lib.rs",
+                "pub fn f(p: &Path, s: &S) {\n    p.exists();\n    s.mkdir_all();\n    s.read_dir(p);\n    p.read_dir();\n}\n",
+            ),
+            (
+                "crates/domain/tests/fake.rs",
+                "struct F;\nimpl F { fn exists(&self) -> bool { true } fn read_dir(&self, p: &str) {} }\n",
+            ),
+        ];
+        let tree = Fake::new(&files);
+        let judged = problems(&tree, &Readers, &declared("rust", "none")).unwrap();
+        // `exists()` and `read_dir(p)` are the project's; `read_dir()` takes another number of parameters
+        let lines: Vec<&str> = judged
+            .forbidden
+            .iter()
+            .map(|f| f.detail.split(':').nth(1).unwrap())
+            .collect();
+        assert_eq!(lines, ["5"]);
+        assert_eq!(
+            judged.excluded.line().as_deref(),
+            Some(
+                "I/O net: left out, as the project defines a method of the same name and number of parameters: \
+                 exists(0), read_dir(1)"
+            )
+        );
     }
 }
