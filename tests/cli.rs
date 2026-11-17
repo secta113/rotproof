@@ -7414,6 +7414,94 @@ fn approve_needs_a_reason_and_asks_nothing_and_prune_removes_only_what_matches_n
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
 }
 
+#[test]
+fn approve_takes_several_imports_of_one_file_for_one_reason_all_or_none() {
+    let root = clean_repo();
+    let r = root.path();
+    fs::write(
+        r.join("domain/model.py"),
+        "import infrastructure.db\nimport infrastructure.web\n",
+    )
+    .unwrap();
+    let path = r.join(".config/rotproof-approved.toml");
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let said = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
+    let approve = |imports: &[&str]| {
+        let mut args = vec!["domain/model.py"];
+        args.extend_from_slice(imports);
+        args.extend_from_slice(&["--reason", "the framework wires both here"]);
+        approve_with_git(r, named, &args)
+    };
+
+    // One name that is not forbidden stops the others, and every name that cannot be approved is said
+    let out = approve(&[
+        "infrastructure.db",
+        "application",
+        "infrastructure.web",
+        "os",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        said(&out).contains("nothing is approved, as 2 of the 4 imports cannot be:"),
+        "{}",
+        said(&out)
+    );
+    assert!(
+        said(&out).contains("no forbidden import of application"),
+        "{}",
+        said(&out)
+    );
+    assert!(
+        said(&out).contains("no forbidden import of os"),
+        "{}",
+        said(&out)
+    );
+    assert!(!path.exists());
+    // A name given twice is refused before anything is read
+    let out = approve(&["infrastructure.db", "infrastructure.db"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("named twice"), "{}", said(&out));
+    assert!(!path.exists());
+
+    // Both, in one run: an entry for each, with the same reason, and the check passes
+    let out = approve(&["infrastructure.db", "infrastructure.web"]);
+    assert_eq!(out.status.code(), Some(0), "{}{}", stdout(&out), said(&out));
+    assert!(
+        stdout(&out).contains(
+            "wrote .config/rotproof-approved.toml: infrastructure.db, infrastructure.web in domain/model.py kept by \
+             Someone Else"
+        ),
+        "{}",
+        stdout(&out)
+    );
+    let written = fs::read_to_string(&path).unwrap();
+    assert_eq!(written.matches("[[kept]]").count(), 2, "{written}");
+    assert_eq!(
+        written
+            .matches("reason = \"the framework wires both here\"")
+            .count(),
+        2,
+        "{written}"
+    );
+    let out = run(&["--root", &root_arg(r), "check"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("approved in .config/rotproof-approved.toml (2):"),
+        "{}",
+        stdout(&out)
+    );
+    // One approved already stops the run again, and the file stays as it was
+    fs::write(
+        r.join("domain/model.py"),
+        "import infrastructure.db\nimport infrastructure.web\nimport infrastructure.mail\n",
+    )
+    .unwrap();
+    let out = approve(&["infrastructure.mail", "infrastructure.db"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("approved already"), "{}", said(&out));
+    assert_eq!(fs::read_to_string(&path).unwrap(), written);
+}
+
 /// Every key the check asks to pin in knowledge/model.md with `rotproof follows`, from its output.
 fn to_pin(said: &str) -> Vec<String> {
     said.split('`')

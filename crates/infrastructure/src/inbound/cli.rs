@@ -5,6 +5,7 @@
 //! exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a
 //! project's Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -220,27 +221,32 @@ enum Command {
     },
     /// Keep a forbidden import for a reason (--reason), or remove the approvals that match nothing (--prune)
     ///
-    /// `rotproof approve <file> <import> --reason "<why>"` keeps an import the layer table forbids, as `rotproof check`
-    /// names it: the file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each
-    /// name of `from m import n`; a TypeScript specifier; a crate's dependency; the name of a template as written in a
-    /// reference; for the I/O of the inner layers, the entry of Rotproof's table that the finding names: `shutil`,
-    /// `urllib.request`, `fs`, `bun:`, `std::fs`, `std::os::fs`, `std::io`, one approval for a file and an entry,
-    /// whatever names it uses; for a package no list allows in an inner layer, the package the finding names). It shows
-    /// the forbidden import, signs with git's user.name, and adds the entry, with the reason, to
-    /// .config/rotproof-approved.toml, which keeps a byte
-    /// order mark and its line endings (CRLF on every line when one line had it), as does --prune. It asks nothing and
-    /// needs no terminal, but it takes no approval without a reason, and `rotproof check` prints every approval on
-    /// every run. Run it only when the user asked for the exception, and say that you ran it.
+    /// `rotproof approve <file> <import>... --reason "<why>"` keeps an import the layer table forbids, as
+    /// `rotproof check` names it: the file from the root, and the import as the check writes it (a Python dotted name,
+    /// `m.n` for each name of `from m import n`; a TypeScript specifier; a crate's dependency; the name of a template
+    /// as written in a reference; for the I/O of the inner layers, the entry of Rotproof's table that the finding
+    /// names: `shutil`, `urllib.request`, `fs`, `bun:`, `std::fs`, `std::os::fs`, `std::io`, one approval for a file
+    /// and an entry, whatever names it uses; for a package no list allows in an inner layer, the package the finding
+    /// names). Several imports of the one file, kept for one reason, may be named together: each gets an entry of its
+    /// own, and when any of them cannot be approved, none is written and every reason is said. It shows the forbidden
+    /// import, signs with git's user.name, and adds the entry, with the reason, to .config/rotproof-approved.toml,
+    /// which keeps a byte order mark and its line endings (CRLF on every line when one line had it), as does --prune.
+    /// It asks nothing and needs no terminal, but it takes no approval without a reason, and `rotproof check` prints
+    /// every approval on every run. Run it only when the user asked for the exception, and say that you ran it.
     /// `rotproof approve --prune` removes every entry of .config/rotproof-approved.toml that matches no forbidden
     /// import, and never lets anything pass that failed before. Exits 2 when --reason is empty, git's user.name is not
-    /// set, the import is not forbidden or is approved already, or a file cannot be read or written.
+    /// set, an import is not forbidden, is approved already or is named twice, or a file cannot be read or written.
     Approve {
         /// The file that imports, from the root, as `rotproof check` names it
         #[arg(required_unless_present = "prune", conflicts_with = "prune")]
         file: Option<String>,
-        /// What it imports, as `rotproof check` names it
-        #[arg(required_unless_present = "prune", conflicts_with = "prune")]
-        import: Option<String>,
+        /// What it imports, as `rotproof check` names it: one or more, each approved by an entry of its own
+        #[arg(
+            value_name = "IMPORT",
+            required_unless_present = "prune",
+            conflicts_with = "prune"
+        )]
+        imports: Vec<String>,
         /// Why the import is kept: it is written in the entry and printed on every run
         #[arg(
             long,
@@ -396,13 +402,13 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Command::Index => index(commands, root).map(|()| true),
         Command::Approve {
             file,
-            import,
+            imports,
             reason,
             prune,
-        } => match (prune, file, import, reason) {
-            (true, _, _, _) => approve_prune(commands, &names, root).map(|()| true),
-            (false, Some(file), Some(import), Some(reason)) => {
-                approve(commands, root, &file, &import, &reason).map(|()| true)
+        } => match (prune, file, reason) {
+            (true, _, _) => approve_prune(commands, &names, root).map(|()| true),
+            (false, Some(file), Some(reason)) if !imports.is_empty() => {
+                approve(commands, root, &file, &imports, &reason).map(|()| true)
             }
             _ => {
                 unreachable!(
@@ -866,24 +872,49 @@ fn approve(
     commands: &dyn Commands,
     root: &Path,
     file: &str,
-    import: &str,
+    imports: &[String],
     reason: &str,
 ) -> Result<(), String> {
+    let named = imports.join(", ");
     let reason = reason.trim();
     if reason.is_empty() {
         return Err(format!(
-            "--reason is empty: say why {import} in {file} is kept"
+            "--reason is empty: say why {named} in {file} is kept"
         ));
     }
-    let pending = commands.pending(root, file, import)?;
+    let mut seen = BTreeSet::new();
+    if let Some(twice) = imports.iter().find(|import| !seen.insert(import.as_str())) {
+        return Err(format!("{twice} is named twice: name each import once"));
+    }
+    // All or none: every import is found forbidden and unapproved before anything is written
+    let mut pending = Vec::new();
+    let mut refused = Vec::new();
+    for import in imports {
+        match commands.pending(root, file, import) {
+            Ok(found) => pending.extend(found),
+            Err(why) => refused.push(why),
+        }
+    }
+    match refused.as_slice() {
+        [] => {}
+        [why] if imports.len() == 1 => return Err(why.clone()),
+        _ => {
+            return Err(format!(
+                "nothing is approved, as {} of the {} imports cannot be:\n  {}",
+                refused.len(),
+                imports.len(),
+                refused.join("\n  ")
+            ));
+        }
+    }
     let by = signer(commands, root)?;
     println!("forbidden by the layer table:");
     for detail in &pending {
         println!("  {detail}");
     }
-    let path = commands.approve(root, file, import, reason, &by)?;
+    let path = commands.approve(root, file, imports, reason, &by)?;
     println!(
-        "wrote {path}: {import} in {file} kept by {by}; `rotproof check` prints it on every run"
+        "wrote {path}: {named} in {file} kept by {by}; `rotproof check` prints it on every run"
     );
     Ok(())
 }

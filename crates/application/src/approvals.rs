@@ -130,14 +130,26 @@ pub fn pending(
     Ok(pending)
 }
 
-/// Add `entry` to the approvals file of `tree` through `out`, and return the file's path. The file keeps its line
-/// endings and its byte order mark.
-pub fn approve(tree: &dyn Tree, out: &dyn Writer, entry: &Kept) -> Result<&'static str, String> {
+/// Add `entries` to the approvals file of `tree` through `out`, in their order and in one write, and return the file's
+/// path. The file keeps its line endings and its byte order mark.
+pub fn approve(
+    tree: &dyn Tree,
+    out: &dyn Writer,
+    entries: &[Kept],
+) -> Result<&'static str, String> {
+    if entries.is_empty() {
+        return Err("no import to approve".to_string());
+    }
     let approvals = read(tree).map_err(|e| e.to_string())?;
     if let Some(why) = approvals.problems.first() {
         return Err(format!("fix the approvals file first: {why}"));
     }
-    let text = with_kept(approvals.text.as_deref(), entry)?;
+    // A file not there yet is started by the first entry, and the next ones go after it
+    let mut text = approvals.text;
+    for entry in entries {
+        text = Some(with_kept(text.as_deref(), entry)?);
+    }
+    let text = text.ok_or_else(|| "no import to approve".to_string())?;
     out.write(APPROVALS, &approvals.was.restore(&text))
         .map_err(|e| format!("{APPROVALS}: {e}"))?;
     Ok(APPROVALS)
@@ -209,7 +221,7 @@ mod tests {
         let before = format!("# our note\n{KEPT}");
         for (crlf, bom) in FORMS {
             let tree = Fake::new(&[(APPROVALS, &as_written(&before, crlf, bom))]);
-            approve(&tree, &tree, &entry()).unwrap();
+            approve(&tree, &tree, &[entry()]).unwrap();
             let written = tree.text(APPROVALS).unwrap();
             // Only the entry was added: the file as read is what with_kept gives, and every line ends as before
             let added = with_kept(Some(&before), &entry()).unwrap();

@@ -26,7 +26,7 @@ pub const APPROVALS: &str = ".config/rotproof-approved.toml";
 const HEADER: &str = "\
 # Imports the layer table forbids, kept with a reason. `rotproof check` passes each one and prints it on every run, and
 # fails on an entry that matches no forbidden import.
-# `rotproof approve <file> <import> --reason \"<why>\"` adds an entry, when the user asked for the exception;
+# `rotproof approve <file> <import>... --reason \"<why>\"` adds an entry for each, when the user asked for the exception;
 # `rotproof approve --prune` removes the entries that match nothing.
 ";
 

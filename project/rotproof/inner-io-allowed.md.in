@@ -14,5 +14,5 @@
   keep what is gone. **Allowing a package is a decision of the person.** Never add, change or take out a name of
   `allowed` to pass the check, as with `todo_link` and `approved_max`; `rotproof init` and `rotproof create` never
   write it, and nothing drafts it from the code. A finding that cannot be fixed now is approved as any forbidden
-  import is, with `rotproof approve <file> <package> --reason "<why>"` (the user asks for it; the package as the finding
+  import is, with `rotproof approve <file> <package>... --reason "<why>"` (the user asks for it; each package as the finding
   names it): one approval covers every import of that package in that file, and `rotproof check` prints it with the imports the file now makes of it.
