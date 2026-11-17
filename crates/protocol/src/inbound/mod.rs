@@ -35,6 +35,9 @@ pub struct Made {
     pub changed: Vec<(String, String)>,
     /// What the stack does not have Rotproof write yet, and why
     pub not_written: Option<String>,
+    /// The question the project has not answered, whether its agent reads Rotproof's guide, as lines to print: empty
+    /// once it is answered
+    pub question: Vec<String>,
 }
 
 /// What `rotproof init` did.

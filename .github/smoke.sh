@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 # Runs the Rotproof on PATH as a user runs it: ci.yml and release.yml call it after installing a wheel on each
-# platform, and release.yml in the oldest Linux the Linux wheel's tag claims too. A fresh project fails until it has a
-# lock file, which only a tool can make, then passes; the same project fails with exit 1 (a crash exits otherwise) on a
+# platform, and release.yml in the oldest Linux the Linux wheel's tag claims too. A fresh project is asked whether its
+# agent reads the guide, and fails until it has a lock file, which only a tool can make, then passes; the same project fails with exit 1 (a crash exits otherwise) on a
 # forbidden import and on a day in the log that has not come, and passes again once both are taken out
 set -euo pipefail
 
 rotproof --version
 project=$(mktemp -d)
 rotproof --root "$project" init --stack python --ui atomic
-rotproof --root "$project" create --yes
+
+# create makes the project and asks whether its agent reads the guide, which only a person answers: it exits 2 until
+# then. The answer here is the line it gives, in an AGENTS.md
+status=0
+rotproof --root "$project" create --yes || status=$?
+if [ "$status" -ne 2 ]; then
+  echo "rotproof create exited $status on a fresh project, not 2 for its question"
+  exit 1
+fi
+echo "The rules Rotproof keeps: @.rotproof/AGENTS.md" > "$project/AGENTS.md"
 
 # check exits with $1 on the project, or the smoke fails saying what it was doing
 expect() {

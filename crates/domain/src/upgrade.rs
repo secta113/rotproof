@@ -155,18 +155,25 @@ fn versions(files: &str, running: &str) -> Result<(Version, Version), String> {
     Ok((from, to))
 }
 
+/// What a project may name in `declined`: every update, and the question whether its agent reads the guide
+/// (`pointer.rs`), which belongs to no version and is asked until it is answered.
+pub fn declinable() -> Vec<&'static str> {
+    UPDATES
+        .iter()
+        .map(|update| update.name())
+        .chain([crate::pointer::NAME])
+        .collect()
+}
+
 /// What `rotproof check` finds in the declaration's `files` and `declined`, against the running version.
 pub fn problems(files: Option<&str>, declined: &[String], running: &str) -> Vec<String> {
     let mut found = Vec::new();
+    let known = declinable();
     for name in declined {
-        if !UPDATES.iter().any(|update| update.name() == name) {
+        if !known.contains(&name.as_str()) {
             found.push(format!(
-                "{DECLARATION}: declined names {name:?}, which is no update (known: {})",
-                UPDATES
-                    .iter()
-                    .map(|update| update.name())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "{DECLARATION}: declined names {name:?}, which is nothing Rotproof offers (known: {})",
+                known.join(", ")
             ));
         }
     }
@@ -318,8 +325,21 @@ mod tests {
         ] {
             let found = problems(Some("1.0.0"), &[name.into()], "1.0.0");
             assert_eq!(found.len(), 1, "{found:?}");
-            assert!(found[0].contains("which is no update"), "{found:?}");
+            assert!(
+                found[0].contains("which is nothing Rotproof offers"),
+                "{found:?}"
+            );
         }
+        // The question whether the agent reads the guide is declined by its name, and is no update to apply
+        assert_eq!(
+            problems(Some("1.0.0"), &[crate::pointer::NAME.into()], "1.0.0"),
+            Vec::<String>::new()
+        );
+        assert!(
+            UPDATES
+                .iter()
+                .all(|update| update.name() != crate::pointer::NAME)
+        );
         assert!(
             pending("0.3.0", "0.2.0", &[])
                 .unwrap_err()
@@ -349,7 +369,7 @@ mod tests {
         assert_eq!(problems(Some("0.2.0"), &[], "0.2.1").len(), 1);
         let misspelled = problems(Some("0.2.0"), &["claude-deny-approval".into()], "0.2.0");
         assert!(
-            misspelled[0].contains("which is no update"),
+            misspelled[0].contains("which is nothing Rotproof offers"),
             "{misspelled:?}"
         );
     }

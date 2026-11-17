@@ -67,7 +67,8 @@ project lacks. Run on a project that has a declaration, `rotproof init` upgrades
 `rotproof create` makes layers only with `--yes`. Without it, a run that would make one lists the layers, writes
 nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer the declaration names
 before anyone read the list, and it never deletes them again. A run that makes no layer, as after an upgrade, needs no
-`--yes`.
+`--yes`. A run that writes ends by asking whether the project's agent reads the guide, and exits 2, while the project
+has not answered it (see the guide under "Upgrading Rotproof").
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
 pin Rotproof in it (`npm install -D -E rotproof@2.0.0-rc.1`), then run `rotproof init --stack typescript --ui atomic`
@@ -78,9 +79,10 @@ names the rest of the starter (`App.tsx`, the styles, `assets/`) as code outside
 
 Run `rotproof create` when a project starts, and again after you change `.config/rotproof.toml` on purpose. It makes
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
-(below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, the skill `rotproof` in
-`.claude/skills/rotproof/SKILL.md` and `.agents/skills/rotproof/SKILL.md`, `.rotproof/readers.md` when a unit
-is shared, and the index files and the knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
+(below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, `.rotproof/running.md`,
+`.rotproof/readers.md` when a unit
+is shared, and the index files and the knowledge rules in `docs/`), so a new project passes its first check with
+nothing for a person to write but one answer: whether its agent reads the guide (below). It never
 overwrites a file it does not generate, apart from adding the fields the declaration lacks (below) and, in a Rust
 project, adding the crates it makes to the workspace's `members` when none names them (see "Units"), and never moves
 or deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
@@ -93,8 +95,6 @@ The project's files are written once, as a starting point, and are the project's
 
 | File | Content |
 |---|---|
-| `AGENTS.md` | The map (the layers present, each with the first sentence of its role to rewrite, and in a project that declares units a row for each layer of each unit, with the unit's name before the role), the differences from what Rotproof keeps, and the project's own rules. It points at `.rotproof/AGENTS.md` |
-| `CLAUDE.md` | `@AGENTS.md` and `@.rotproof/AGENTS.md` |
 | `README.md` | The project's name (its root directory's) and how to run Rotproof |
 | `.gitignore`, `.gitattributes` | For the stack (`python` ignores `.venv/`); line endings as LF |
 | `docs/log.md` | The log, with its title |
@@ -143,7 +143,7 @@ that has a declaration:
   or not an update applies, so every upgrade runs `rotproof init` once.
 - **`rotproof init` applies every update between `files` and the running version,** except those `declined` lists,
   does what `rotproof create` does after an upgrade without making a layer (the fields the declaration lacks,
-  `.rotproof/AGENTS.md`, the two copies of the skill `rotproof`, `.rotproof/readers.md` when a unit is shared, the
+  `.rotproof/AGENTS.md`, `.rotproof/running.md`, `.rotproof/readers.md` when a unit is shared, the
   generated files in `docs/`, and
   `docs/knowledge/`, the log and the project's files where they are missing), and sets `files` to the running version, adding `declined = []` when the declaration lacks it; it
   names every field it adds to the declaration, as `rotproof create` does. Crossing 0.4.0, which builds the layer table
@@ -191,30 +191,43 @@ check` as naming no update: take the name out. `rotproof create` writes no `.cla
 Among the files Rotproof generates is `.rotproof/AGENTS.md`: the rules Rotproof keeps, written for the project's
 stack. It lists the layers with where each lives and what it may import (from `layers/table.toml`), gives the rules of
 units, and gives the rules of the records, starting with reading the knowledge index before work, and where open work
-is kept (an issue); the rules every session needs are in it. For how to run Rotproof it says one thing, to use the
-skill `rotproof`. It names
+is kept (an issue); the rules every session needs are in it. For how to run Rotproof it says one thing, to read
+`.rotproof/running.md`. It names
 the Rotproof version that wrote it, so after an upgrade `rotproof check` fails until `rotproof init` (or
 `rotproof create`) has rewritten it. Edited by hand, it fails too: a project's own rules go in its own `AGENTS.md`.
 
-The skill `rotproof` is generated too, as `SKILL.md` in the two places agents look for skills:
-`.claude/skills/rotproof/SKILL.md` (Claude Code) and `.agents/skills/rotproof/SKILL.md` (Codex and Antigravity). Both
-copies hold the same text, whatever the stack, with the two fields every agent that loads skills reads, `name` and
-`description`. It holds what an agent needs only when it upgrades Rotproof or runs a command: when to run `check`,
-`create`, `index` and `follows`, and how to upgrade (in a commit of its own, `rotproof init`, and how to read each line it
-prints, with `declined`). It says how to judge, and never which command comes next: `rotproof check` and `rotproof init`
-say that, so a second place that did could drift from them. A skill is loaded when the agent finds it fits, which is not
-certain, and so the guide names it. A link from one place to the other would not be made on every system, so
-`rotproof create` writes both and neither is a link. It carries no version, so an upgrade rewrites it only when its
-text changed; when `files` is behind, `rotproof check` names `rotproof init` for it, as for the guide.
+`.rotproof/running.md` is generated too, the same text whatever the stack. It holds what an agent needs only when it
+upgrades Rotproof or runs a command: when to run each command, and how to upgrade (in a commit of its own,
+`rotproof init`, and how to read each line it prints, with `declined`). It says how to judge, and never which command
+comes next: `rotproof check` and `rotproof init` say that, so a second place that did could drift from them. It is
+written beside the guide and nowhere an agent loads by itself, such as a directory of skills: an agent reads it because
+the guide names it, and reads the guide only when the project points it there. It carries no version, so an upgrade
+rewrites it only when its text changed; when `files` is behind, `rotproof check` names `rotproof init` for it, as for
+the guide.
 
-The guide only helps if your agent reads it. The `AGENTS.md` and `CLAUDE.md` that `rotproof create` writes point at it;
-a project that has its own points at it from its `AGENTS.md` (or whatever file its agent reads first), and imports it
-in `CLAUDE.md` for Claude Code:
+The guide only helps if your agent reads it. Rotproof writes no `AGENTS.md` or `CLAUDE.md`, nor anything else an agent
+reads by itself: what an agent is told belongs to the person, and a line Rotproof wrote there would change what the
+agent obeys whenever Rotproof is upgraded. So it asks instead. When neither the root's `AGENTS.md` nor its `CLAUDE.md`
+names `.rotproof/AGENTS.md`, in any words, and `declined` does not name `guide-pointer`, `rotproof create` and
+`rotproof init` end by asking whether the project's agent should read the guide, and exit 2 (after doing all they do
+otherwise: `rotproof init` sets `files`):
 
-```markdown
-@AGENTS.md
-@.rotproof/AGENTS.md
+```text
+ask the person: should this project's agent read the rules Rotproof keeps, in .rotproof/AGENTS.md? The person decides; an agent asks before it adds the line or declines
+  yes: add this line to the file the agent reads first (here: AGENTS.md):
+    The rules Rotproof keeps: @.rotproof/AGENTS.md
+  no: add "guide-pointer" to declined in .config/rotproof.toml
 ```
+
+The question names the files of the two that are there, or, with neither, says to ask the person which file to make.
+The line is a sentence with the path bare, not in backticks: an agent that brings files in by `@path` (Claude Code,
+from `CLAUDE.md`) brings the guide in, and one that does not reads the path as where to look. Which file the agent reads
+first, and whether one file brings in another, is not looked at: that is the agent's own, and changes with its version.
+`rotproof check` fails on the same judgement until the question is answered (see "What `rotproof check` checks"), so it
+cannot be skipped; answered either way, nothing asks it again. A project that declines it is checked as any other, but
+its agent knows only the rules `rotproof check` enforces, not those it cannot (reading the knowledge index before work,
+asking a person before writing knowledge, keeping open work in an issue). A project that kept the `CLAUDE.md`
+`rotproof create` wrote before 2.0 imports the guide already, and is not asked.
 
 ## The hooks Rotproof no longer writes
 
@@ -1695,14 +1708,16 @@ entry can be told, is one.
   within it**: more entries than it lets fails, as one finding that names both files.
 - **The project's files are up to this version of Rotproof** (see "Upgrading Rotproof"): `files` in the declaration
   (0.1.0 when it is missing) is a version as `major.minor.patch`, neither older nor newer than the running Rotproof,
-  and every name in `declined` is an update.
+  and every name in `declined` is an update or `guide-pointer`.
 - **`.rotproof/AGENTS.md` is up to date:** it equals what `rotproof create` writes for the stack with this version of
   Rotproof (see "Upgrading Rotproof"), so it fails after an upgrade until `rotproof init` has run, and when edited by
   hand. The finding names the command that applies: `rotproof create` when `files` names the running version (the
   guide changed under it, as in a development build, or by hand), `rotproof init` otherwise.
-- **The skill is up to date:** `.claude/skills/rotproof/SKILL.md` and `.agents/skills/rotproof/SKILL.md` each equal
-  what `rotproof create` writes, are there, and fail each on a line of its own, with the command that applies as for
-  the guide.
+- **`.rotproof/running.md` is up to date:** it equals what `rotproof create` writes, and fails when missing or edited,
+  with the command that applies as for the guide.
+- **The project answered whether its agent reads the guide:** the root's `AGENTS.md` or `CLAUDE.md` names
+  `.rotproof/AGENTS.md`, or `declined` names `guide-pointer` (see "Upgrading Rotproof", at the guide). It reads only
+  whether the path is in those files, never what else they say.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
   outside `unchecked` and `moving` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`, the tests among them,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,
@@ -1870,17 +1885,15 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next (th
 
 ### The map in `AGENTS.md`
 
-`AGENTS.md` is the project's own file, written once by `rotproof create` with a map: a table under `## Map` with a row
-for each layer present, whose first cell is the layer's path. The map goes behind when the declaration changes later: a
+`AGENTS.md` is the project's own file, which Rotproof never writes. A project may keep a map of its layers in it: a
+table under `## Map` with a row for each layer present, whose first cell is the layer's path. The map goes behind when the declaration changes later: a
 layer declared absent and made afterwards, a unit added, a layer taken out. `rotproof check` warns of it, on every run
 and failing nothing, under `the map in AGENTS.md lists the layers .config/rotproof.toml declares`: a line for each layer
 present that has no row (`AGENTS.md has no row in its map for packages/cli/src/cli/protocol/, the layer protocol of the
 unit cli: add it, or declare the layer absent in .config/rotproof.toml`), and for each row of a layer declared absent;
 after six lines it counts the rest. `rotproof init` says the same, each line after `note: `. The words of a row are the
 project's and are never judged, and a file with no `## Map` and table, or none at all, is not read: a project may keep
-its map as it likes. The map `rotproof create` writes names the unit in each row when the project declares units (`cli:
-The composition root: ...`), as the same layer in two units would otherwise read alike, and gives the whole first
-sentence of the layer's role, not its first line.
+its map as it likes.
 
 The frontmatter is read as YAML 1.2: quoting a date or a datetime never changes whether it passes. It holds no comment: a `#`
 after a space or at the start of a line starts one, which YAML reads as nothing, so an unquoted `title: PR #1` would

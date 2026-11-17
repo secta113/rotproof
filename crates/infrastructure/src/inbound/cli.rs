@@ -26,7 +26,9 @@ Start a project:
                                      the project's files: go on to 5)
   4. rotproof create --yes           once absent lists every layer the project lacks: make the layers, docs/ and the
                                      project's files
-  5. rotproof check                  check them; this is the project's CI
+  5. answer what create asks         the person decides whether the agent reads .rotproof/AGENTS.md: a line in the
+                                     file the agent reads first, or a name in declined
+  6. rotproof check                  check them; this is the project's CI
 
 Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files), then
 `rotproof check`.
@@ -37,7 +39,8 @@ prints them before. `rotproof <command> --help` says what a command reads, write
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2 when there is no
 .config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
 its --root is not a directory, `rotproof create` would make layers
-without --yes, `rotproof init` leaves an update of the project's files to a person,
+without --yes, `rotproof create` or `rotproof init` asks a question the project has not answered (whether its agent
+reads .rotproof/AGENTS.md), `rotproof init` leaves an update of the project's files to a person,
 or `rotproof approve` is given no reason, or an import that is not forbidden.";
 
 /// What `rotproof new` asks, for a document of knowledge: what the code cannot tell, which only a person or the task
@@ -93,7 +96,7 @@ presentation.models in TypeScript; a name no manifest lists or no file of its pl
 file and the package), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
-updates them), that .rotproof/AGENTS.md and the two copies of the skill rotproof (.claude/skills/rotproof/SKILL.md and .agents/skills/rotproof/SKILL.md) are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
+updates them), that .rotproof/AGENTS.md and .rotproof/running.md are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
 would write it (there with a shared unit, not there without), that every knowledge document in docs/knowledge/ keeps its \
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
 follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \
@@ -170,7 +173,7 @@ enum Command {
     ///
     /// Makes only what is missing: each layer neither present nor declared absent, docs/knowledge/, docs/log.md, and
     /// the project's files
-    /// (AGENTS.md, CLAUDE.md, README.md, .gitignore, .gitattributes,
+    /// (README.md, .gitignore, .gitattributes,
     /// a CI workflow that installs the pinned Rotproof (from the lock file of the project, with the tool that made it,
     /// uv's when there is none, for python, whose pyproject.toml pins Rotproof in dev of [dependency-groups]; from npm
     /// with the pin package.json holds for typescript, which the project adds, and from the GitHub Release for rust and
@@ -178,9 +181,8 @@ enum Command {
     /// A Python project's lock file is the one thing it does not write: a tool makes it, and `rotproof check` fails
     /// until one is committed.
     /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
-    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), the skill rotproof (how to
-    /// upgrade Rotproof and when to run each command; the same text in .claude/skills/rotproof/SKILL.md and
-    /// .agents/skills/rotproof/SKILL.md), .rotproof/readers.md (who reads
+    /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), .rotproof/running.md (how to
+    /// upgrade Rotproof and when to run each command), .rotproof/readers.md (who reads
     /// each shared unit, when a unit is shared), and docs/index.md and the
     /// index and the rules of docs/knowledge/. Adds the fields the declaration lacks, keeping its comments and values.
     /// Never overwrites another file, and never moves or deletes one, except that in a rust project it adds the
@@ -203,7 +205,7 @@ enum Command {
     ///
     /// Prints the guide of the stack and the UI the project declares, or of the stack named with --stack, which needs
     /// no project: the layers of the stack with where each lives and what it may import, the rules of the records and
-    /// where the skill for running Rotproof is. The same text `rotproof create` writes to .rotproof/AGENTS.md. With
+    /// where the page on running Rotproof is. The same text `rotproof create` writes to .rotproof/AGENTS.md. With
     /// --stack, --ui picks the UI, as for `rotproof init` (with python, atomic, rendered or none; with typescript,
     /// atomic or none; the layers of the fullest UI the stack offers without it). Exits 2 for an unknown stack or UI,
     /// or when no stack is named and the declaration cannot be read.
@@ -551,6 +553,7 @@ fn init(
     for stale in &upgraded.stale_map {
         println!("note: {stale}");
     }
+    ask(&upgraded.made);
     if !upgraded.by_hand.is_empty() {
         for why in &upgraded.by_hand {
             println!("needs a person: {why}");
@@ -569,8 +572,21 @@ fn init(
     } else {
         println!("the project's files are up to {version} already");
     }
+    if !upgraded.made.question.is_empty() {
+        return Err(UNANSWERED.to_string());
+    }
     println!("next: run `rotproof check`");
     Ok(())
+}
+
+/// What `rotproof create` and `rotproof init` say, on stderr, as they exit 2 on the question they asked.
+const UNANSWERED: &str = "the question above is the person's to answer: `rotproof check` fails until it is answered, either way";
+
+/// Ask the question the project has not answered, if any, on standard output, where an agent reads what to do next.
+fn ask(made: &Made) {
+    for line in &made.question {
+        println!("{line}");
+    }
 }
 
 /// Say what `rotproof create`, or an upgrade (its refresh, and `files` set), wrote and added.
@@ -606,6 +622,10 @@ fn create(commands: &dyn Commands, names: &Names, root: &Path, yes: bool) -> Res
             "nothing to make: the tree has what {} declares",
             names.declaration
         );
+    }
+    if !made.question.is_empty() {
+        ask(&made);
+        return Err(UNANSWERED.to_string());
     }
     if wrote {
         println!("next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md");

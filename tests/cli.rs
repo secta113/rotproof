@@ -70,8 +70,19 @@ fn unlocked(declaration: &str) -> tempfile::TempDir {
         up_to_date(declaration),
     )
     .unwrap();
+    point_at_the_guide(root.path());
     root
 }
+
+/// The line that points the project's agent at the guide, in a `CLAUDE.md` of the project's own: the answer to the
+/// question `rotproof create` asks, which the tests that are about something else need to pass the check.
+fn point_at_the_guide(root: &Path) {
+    fs::write(root.join(POINTER_FILE), POINTER).unwrap();
+}
+
+/// Where [`point_at_the_guide`] writes, and what
+const POINTER_FILE: &str = "CLAUDE.md";
+const POINTER: &str = "The rules Rotproof keeps: @.rotproof/AGENTS.md\n";
 
 /// A `pyproject.toml` in each of the directories `roots` of `root` ("" is the root), and a `uv.lock` at the root.
 fn locked(root: &Path, roots: &[&str]) {
@@ -792,7 +803,7 @@ fn create_makes_each_stack_once_and_check_passes_on_it() {
 }
 
 /// The project's files at the root that `rotproof create` writes, outside hidden directories
-const PROJECT_FILES: [&str; 3] = ["AGENTS.md", "CLAUDE.md", "README.md"];
+const PROJECT_FILES: [&str; 1] = ["README.md"];
 
 #[test]
 fn create_writes_the_projects_files_once() {
@@ -820,39 +831,27 @@ fn create_writes_the_projects_files_once() {
         )
         .unwrap();
         let arg = root_arg(&root);
+        // Every file is written, and the question of the agent is asked, which stops it with 2
         let out = create(&["--root", &arg, "create", "--yes"]);
-        assert!(out.status.success(), "{stack}: {}", stdout(&out));
-        for path in [
-            "AGENTS.md",
-            "CLAUDE.md",
-            "README.md",
-            ".gitignore",
-            ".gitattributes",
-        ] {
+        assert_eq!(out.status.code(), Some(2), "{stack}: {}", stdout(&out));
+        assert!(stdout(&out).contains("ask the person"), "{stack}");
+        for path in ["README.md", ".gitignore", ".gitattributes"] {
             let text = fs::read_to_string(root.join(path))
                 .unwrap_or_else(|_| panic!("{stack}: {path} was not written"));
-            for placeholder in ["{name}", "{map}", "{development}", "{version}", "{stack}"] {
+            for placeholder in ["{name}", "{development}", "{version}", "{stack}"] {
                 assert!(!text.contains(placeholder), "{stack}: {path}: {text}");
             }
         }
-        let agents = fs::read_to_string(root.join("AGENTS.md")).unwrap();
-        assert!(agents.starts_with("# AGENTS.md (my-app)\n"), "{agents}");
+        // Nothing an agent reads by itself: what an agent is told is the project's
+        for path in ["AGENTS.md", "CLAUDE.md"] {
+            assert!(!root.join(path).exists(), "{stack}: {path}");
+        }
+        point_at_the_guide(&root);
         assert!(
             fs::read_to_string(root.join("README.md"))
                 .unwrap()
                 .starts_with("# my-app\n")
         );
-        assert_eq!(
-            fs::read_to_string(root.join("CLAUDE.md")).unwrap(),
-            "@AGENTS.md\n@.rotproof/AGENTS.md\n"
-        );
-        // The map has the layers present, and not the one declared absent
-        assert_eq!(
-            agents.contains("composition/` | The composition root"),
-            stack != "none",
-            "{stack}: {agents}"
-        );
-        assert!(!agents.contains("application/` |"), "{stack}: {agents}");
         let requirements = root.join("requirements-dev.txt");
         let workflow = root.join(".github/workflows/ci.yml");
         let readme = fs::read_to_string(root.join("README.md")).unwrap();
@@ -973,16 +972,20 @@ fn create_writes_the_projects_files_once() {
         assert!(run(&["--root", &arg, "check"]).status.success());
 
         // From then on the files are the project's: an edit stays, and only a missing file is written again
-        fs::write(root.join("AGENTS.md"), "mine\n").unwrap();
-        fs::remove_file(root.join("CLAUDE.md")).unwrap();
+        fs::write(root.join("README.md"), "mine\n").unwrap();
+        fs::remove_file(root.join(".gitattributes")).unwrap();
         let out = create(&["--root", &arg, "create"]);
         assert_eq!(
-            fs::read_to_string(root.join("AGENTS.md")).unwrap(),
+            fs::read_to_string(root.join("README.md")).unwrap(),
             "mine\n"
         );
-        assert!(stdout(&out).contains("wrote CLAUDE.md"), "{}", stdout(&out));
         assert!(
-            !stdout(&out).contains("wrote AGENTS.md"),
+            stdout(&out).contains("wrote .gitattributes"),
+            "{}",
+            stdout(&out)
+        );
+        assert!(
+            !stdout(&out).contains("wrote README.md"),
             "{}",
             stdout(&out)
         );
@@ -1101,13 +1104,10 @@ areas = [\"a\"]
     );
 }
 
-const SKILLS: [&str; 2] = [
-    ".claude/skills/rotproof/SKILL.md",
-    ".agents/skills/rotproof/SKILL.md",
-];
+const RUNNING: &str = ".rotproof/running.md";
 
 #[test]
-fn the_skill_is_written_twice_the_same_and_check_fails_for_a_copy_until_create_rewrites_it() {
+fn the_page_on_running_rotproof_is_written_and_check_fails_for_it_until_create_rewrites_it() {
     for stack in ["python", "typescript", "rust", "none"] {
         let root = declared(&format!(
             "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
@@ -1117,93 +1117,80 @@ fn the_skill_is_written_twice_the_same_and_check_fails_for_a_copy_until_create_r
         let arg = root_arg(r);
         let out = create(&["--root", &arg, "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
-        for path in SKILLS {
-            assert!(
-                stdout(&out).contains(&format!("wrote {path}")),
-                "{stack}: {}",
-                stdout(&out)
-            );
-        }
-        let written = fs::read_to_string(r.join(SKILLS[0])).unwrap();
-        assert_eq!(
-            fs::read_to_string(r.join(SKILLS[1])).unwrap(),
-            written,
-            "{stack}"
+        assert!(
+            stdout(&out).contains(&format!("wrote {RUNNING}")),
+            "{stack}: {}",
+            stdout(&out)
         );
+        // Nowhere an agent loads by itself
+        assert!(!r.join(".claude/skills").exists(), "{stack}");
+        assert!(!r.join(".agents").exists(), "{stack}");
+        let written = fs::read_to_string(r.join(RUNNING)).unwrap();
         // One text for every stack, and it carries no version, so an upgrade rewrites it only when it changed
-        assert!(written.starts_with("---\nname: rotproof\n"), "{stack}");
+        assert!(written.starts_with("<!-- Generated by"), "{stack}");
         assert!(!written.contains(env!("CARGO_PKG_VERSION")), "{stack}");
         assert!(run(&["--root", &arg, "check"]).status.success(), "{stack}");
         // The second run writes nothing of it
         let again = create(&["--root", &arg, "create"]);
-        assert!(!stdout(&again).contains("SKILL.md"), "{}", stdout(&again));
+        assert!(!stdout(&again).contains(RUNNING), "{}", stdout(&again));
         for (hurt, says) in [("edited by hand\n", "out of date"), ("", "missing")] {
-            for path in SKILLS {
-                if hurt.is_empty() {
-                    fs::remove_file(r.join(path)).unwrap();
-                } else {
-                    fs::write(r.join(path), hurt).unwrap();
-                }
-                let out = run(&["--root", &arg, "check"]);
-                assert_eq!(out.status.code(), Some(1), "{stack}: {}", stdout(&out));
-                assert!(
-                    stdout(&out).contains(&format!(
-                        "Rotproof's skill is up to date:\n  {says}, run `rotproof create`: {path}\n"
-                    )),
-                    "{stack}: {}",
-                    stdout(&out)
-                );
-                // The other copy is not named
-                let other = SKILLS.iter().find(|other| **other != path).unwrap();
-                assert!(!stdout(&out).contains(other), "{}", stdout(&out));
-                let out = create(&["--root", &arg, "create"]);
-                assert!(
-                    stdout(&out).contains(&format!("wrote {path}")),
-                    "{stack}: {}",
-                    stdout(&out)
-                );
-                assert_eq!(fs::read_to_string(r.join(path)).unwrap(), written);
-                assert!(run(&["--root", &arg, "check"]).status.success());
+            if hurt.is_empty() {
+                fs::remove_file(r.join(RUNNING)).unwrap();
+            } else {
+                fs::write(r.join(RUNNING), hurt).unwrap();
             }
+            let out = run(&["--root", &arg, "check"]);
+            assert_eq!(out.status.code(), Some(1), "{stack}: {}", stdout(&out));
+            assert!(
+                stdout(&out).contains(&format!(
+                    "Rotproof's page on running it is up to date:\n  {says}, run `rotproof create`: {RUNNING}\n"
+                )),
+                "{stack}: {}",
+                stdout(&out)
+            );
+            let out = create(&["--root", &arg, "create"]);
+            assert!(
+                stdout(&out).contains(&format!("wrote {RUNNING}")),
+                "{stack}: {}",
+                stdout(&out)
+            );
+            assert_eq!(fs::read_to_string(r.join(RUNNING)).unwrap(), written);
+            assert!(run(&["--root", &arg, "check"]).status.success());
         }
     }
 }
 
 #[test]
-fn a_project_made_before_the_skill_gets_it_from_init_and_is_told_so_by_check() {
+fn a_project_made_before_the_page_on_running_rotproof_gets_it_from_init_and_is_told_so_by_check() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\nfiles = \"1.0.0\"\n");
     let r = root.path();
     let arg = root_arg(r);
     let out = run(&["--root", &arg, "check"]);
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
-    for path in SKILLS {
-        assert!(
-            stdout(&out).contains(&format!("missing, run `rotproof init`: {path}")),
-            "{}",
-            stdout(&out)
-        );
-    }
+    assert!(
+        stdout(&out).contains(&format!("missing, run `rotproof init`: {RUNNING}")),
+        "{}",
+        stdout(&out)
+    );
     let out = run(&["--root", &arg, "init"]);
     assert!(out.status.success(), "{}", stdout(&out));
-    for path in SKILLS {
-        assert!(
-            stdout(&out).contains(&format!("wrote {path}")),
-            "{}",
-            stdout(&out)
-        );
-        assert!(r.join(path).is_file());
-    }
+    assert!(
+        stdout(&out).contains(&format!("wrote {RUNNING}")),
+        "{}",
+        stdout(&out)
+    );
+    assert!(r.join(RUNNING).is_file());
     assert!(run(&["--root", &arg, "check"]).status.success());
 }
 
 #[test]
-fn the_skill_names_only_commands_there_are() {
+fn the_page_on_running_rotproof_names_only_commands_there_are() {
     let root = declared("stack = \"none\"\nareas = [\"a\"]\n");
     let r = root.path();
     let arg = root_arg(r);
     assert!(create(&["--root", &arg, "create"]).status.success());
-    let skill = fs::read_to_string(r.join(SKILLS[0])).unwrap();
-    let mut named: Vec<&str> = skill
+    let page = fs::read_to_string(r.join(RUNNING)).unwrap();
+    let mut named: Vec<&str> = page
         .split("`rotproof ")
         .skip(1)
         .filter_map(|rest| rest.split(|c: char| !c.is_ascii_alphabetic()).next())
@@ -1216,14 +1203,14 @@ fn the_skill_names_only_commands_there_are() {
         let out = run(&[command, "--help"]);
         assert!(
             out.status.success(),
-            "the skill says `rotproof {command}`, which is no command: {}",
+            "{RUNNING} says `rotproof {command}`, which is no command: {}",
             String::from_utf8_lossy(&out.stderr)
         );
     }
 }
 
 #[test]
-fn the_guide_sends_to_the_skill_and_does_not_say_what_the_skill_says() {
+fn the_guide_sends_to_the_page_on_running_rotproof_and_does_not_say_what_it_says() {
     for stack in ["python", "none"] {
         let root = declared(&format!(
             "stack = \"{stack}\"\nareas = [\"a\"]\n{}",
@@ -1237,15 +1224,87 @@ fn the_guide_sends_to_the_skill_and_does_not_say_what_the_skill_says() {
                 .success()
         );
         let guide = fs::read_to_string(r.join(".rotproof/AGENTS.md")).unwrap();
-        assert!(
-            guide.contains("the skill `rotproof` (`.agents/skills/rotproof/SKILL.md`)"),
-            "{stack}"
-        );
-        assert!(r.join(".agents/skills/rotproof/SKILL.md").is_file());
-        // What moved to the skill is not said in the guide too
+        assert!(guide.contains(&format!("Read `{RUNNING}`")), "{stack}");
+        assert!(r.join(RUNNING).is_file());
+        // What the page says is not said in the guide too
         assert!(!guide.contains("commit of its own"), "{stack}: {guide}");
         assert!(!guide.contains("rotproof follows knowledge/"), "{stack}");
     }
+}
+
+#[test]
+fn an_upgrade_asks_whether_the_agent_reads_the_guide_until_the_project_answers_and_a_decline_is_kept()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::create_dir_all(r.join(".config")).unwrap();
+    let declaration = "stack = \"none\"\nareas = [\"a\"]\nfiles = \"1.0.0\"\n";
+    fs::write(r.join(".config/rotproof.toml"), declaration).unwrap();
+    fs::write(r.join("AGENTS.md"), "# Mine\n\nNo pointer here.\n").unwrap();
+    // init does the upgrade, sets files, and then asks, naming the file that is there; it exits 2
+    let out = run(&["--root", &arg, "init"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
+    let said = stdout(&out);
+    assert!(
+        said.contains("the project's files are up to")
+            && said.contains("ask the person: should this project's agent read")
+            && said.contains("(here: AGENTS.md)")
+            && !said.contains("next: run `rotproof check`"),
+        "{said}"
+    );
+    let written = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    assert!(
+        written.contains(&format!("files = \"{}\"", env!("CARGO_PKG_VERSION"))),
+        "{written}"
+    );
+    // The project's AGENTS.md is never written
+    assert_eq!(
+        fs::read_to_string(r.join("AGENTS.md")).unwrap(),
+        "# Mine\n\nNo pointer here.\n"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "the project answered whether its agent reads Rotproof's guide:\n  no AGENTS.md or CLAUDE.md names \
+             .rotproof/AGENTS.md, and declined in .config/rotproof.toml does not name \"guide-pointer\""
+        ),
+        "{}",
+        stdout(&out)
+    );
+    // The person says no: declined, and from then on nothing asks or fails for it
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        written.replace("declined = []", "declined = [\"guide-pointer\"]"),
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    for args in [["--root", &arg, "init"], ["--root", &arg, "create"]] {
+        let out = run(&args);
+        assert!(out.status.success(), "{:?}: {}", args, stdout(&out));
+        assert!(!stdout(&out).contains("ask the person"), "{}", stdout(&out));
+    }
+}
+
+#[test]
+fn a_project_whose_claude_md_already_imports_the_guide_is_not_asked() {
+    // As every project rotproof create made before it wrote no CLAUDE.md
+    let root = tempfile::tempdir().unwrap();
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::create_dir_all(r.join(".config")).unwrap();
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        "stack = \"none\"\nareas = [\"a\"]\nfiles = \"1.0.0\"\n",
+    )
+    .unwrap();
+    fs::write(r.join("CLAUDE.md"), "@AGENTS.md\n@.rotproof/AGENTS.md\n").unwrap();
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("ask the person"), "{}", stdout(&out));
+    assert!(run(&["--root", &arg, "check"]).status.success());
 }
 
 #[test]
@@ -5912,6 +5971,7 @@ fn only_the_projects_own_gitignore_hides_code() {
         &r,
         "stack = \"typescript\"\nareas = [\"a\"]\nui = \"none\"\n",
     );
+    point_at_the_guide(&r);
     assert!(
         create(&["--root", &root_arg(&r), "create", "--yes"])
             .status
@@ -5960,6 +6020,7 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         "list in absent",
         "rotproof create   ",
         "rotproof create --yes",
+        "answer what create asks",
         "rotproof check",
     ];
     let start = &help[help
@@ -6011,26 +6072,59 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         stderr(&out)
     );
     assert_eq!(tree(root.path()).len(), 1, "{:?}", tree(root.path()));
+    // With --yes it makes them, and asks the one question that is the person's: whether the agent reads the guide. It
+    // exits 2 until that is answered, and says so
     let out = create(&["--root", &arg, "create", "--yes"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
+    let asked = stdout(&out);
     assert!(
-        stdout(&out).contains("next: run `rotproof check`"),
+        asked.contains("ask the person: should this project's agent read the rules Rotproof keeps")
+            && asked
+                .contains("there is no AGENTS.md or CLAUDE.md: ask the person which file to make")
+            && asked.contains("no: add \"guide-pointer\" to declined in .config/rotproof.toml")
+            && !asked.contains("next: run `rotproof check`"),
+        "{asked}"
+    );
+    assert!(
+        stderr(&out).contains("`rotproof check` fails until it is answered"),
         "{}",
-        stdout(&out)
+        stderr(&out)
     );
     fs::write(
         root.path().join("docs/log.md"),
         "# Log\n\n## 2026-10-04\n\n* Started\n",
     )
     .unwrap();
+    // The check fails on it too, so that it cannot be skipped
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("the project answered whether its agent reads Rotproof's guide"),
+        "{}",
+        stdout(&out)
+    );
+    // The person says yes: the line the question gives, in the file they chose
+    let line = asked
+        .lines()
+        .skip_while(|line| !line.starts_with("  yes: "))
+        .nth(1)
+        .unwrap()
+        .trim();
+    fs::write(root.path().join("AGENTS.md"), format!("{line}\n")).unwrap();
     // Nothing is left for a person to write before the first check passes but the lock file, which a tool makes: no
     // area is needed until the first knowledge document
     let out = run(&["--root", &arg, "check"]);
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     assert!(
-        stdout(&out).contains("pyproject.toml has no lock file in the root or above it"),
+        stdout(&out).contains("pyproject.toml has no lock file in the root or above it")
+            && !stdout(&out).contains("whether its agent reads"),
         "{}",
         stdout(&out)
     );
+    // Answered, the question is not asked again
+    let out = create(&["--root", &arg, "create"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("ask the person"), "{}", stdout(&out));
     fs::write(root.path().join("uv.lock"), "").unwrap();
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
@@ -6128,6 +6222,7 @@ fn init_writes_a_declaration_that_create_reads() {
             "{stack}: {:?}",
             tree(root.path())
         );
+        point_at_the_guide(root.path());
         let out = create(&["--root", &arg, "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
         if stack == "python" {
@@ -6309,7 +6404,8 @@ fn a_repository_of_records_only_makes_and_checks_only_docs() {
     assert!(
         made.iter().all(|path| path.starts_with('.')
             || path.starts_with("docs/")
-            || PROJECT_FILES.contains(&path.as_str())),
+            || PROJECT_FILES.contains(&path.as_str())
+            || path == POINTER_FILE),
         "{made:?}"
     );
     // Code anywhere is not looked at, and the output says the layers were skipped
@@ -7794,7 +7890,7 @@ fn a_project_that_declares_units_gets_the_layers_of_each_and_is_checked_as_one()
 }
 
 #[test]
-fn the_map_in_agents_md_names_the_unit_of_each_row_and_check_and_init_tell_when_it_is_behind() {
+fn the_map_a_project_keeps_in_agents_md_is_told_when_it_is_behind_by_check_and_init() {
     let absent = "path = \"packages/billing/src/billing\"\n";
     let root =
         declared(&two_units("true").replace(absent, &format!("{absent}absent = [\"protocol\"]\n")));
@@ -7802,28 +7898,42 @@ fn the_map_in_agents_md_names_the_unit_of_each_row_and_check_and_init_tell_when_
     let arg = root_arg(r);
     let out = create(&["--root", &arg, "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
-    let agents = fs::read_to_string(r.join("AGENTS.md")).unwrap();
-    // A row for each layer of each unit, the unit named, and the whole first sentence of the role
-    assert!(
-        agents.contains(
-            "| `packages/core/src/core/domain/` | core: The concepts and rules of the business: types, \
-             calculations and decisions. |\n"
-        ),
-        "{agents}"
-    );
-    assert!(
-        agents.contains("| `packages/billing/src/billing/domain/` | billing: "),
-        "{agents}"
-    );
-    assert!(
-        !agents.contains("packages/billing/src/billing/protocol/"),
-        "{agents}"
-    );
+    // Rotproof writes no AGENTS.md: a project without one has no map to judge. The CLAUDE.md is the test's own
+    assert!(!r.join("AGENTS.md").exists());
+    assert_eq!(fs::read_to_string(r.join(POINTER_FILE)).unwrap(), POINTER);
     fs::write(
         r.join("docs/log.md"),
         "# Log\n\n## 2026-10-02\n\n* Something\n",
     )
     .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(
+        out.status.success() && !stdout(&out).contains("the map in AGENTS.md"),
+        "{}",
+        stdout(&out)
+    );
+
+    // The project keeps a map of its own, a row for each layer of each unit, in its own words
+    let row = |unit: &str, layer: &str| {
+        format!("| `packages/{unit}/src/{unit}/{layer}/` | {unit}: mine |\n")
+    };
+    let mut rows = String::new();
+    for layer in [
+        "composition",
+        "infrastructure",
+        "application",
+        "protocol",
+        "domain",
+    ] {
+        rows.push_str(&row("core", layer));
+        if layer != "protocol" {
+            rows.push_str(&row("billing", layer));
+        }
+    }
+    let agents = format!(
+        "# AGENTS.md\n\n## Map\n\n| Path | Content |\n|---|---|\n{rows}| `docs/` | Records |\n"
+    );
+    fs::write(r.join("AGENTS.md"), &agents).unwrap();
     let out = run(&["--root", &arg, "check"]);
     assert!(
         out.status.success() && !stdout(&out).contains("AGENTS.md has no row"),
@@ -7861,10 +7971,13 @@ fn the_map_in_agents_md_names_the_unit_of_each_row_and_check_and_init_tell_when_
     );
 
     // Add the row, and both are quiet; the file is the project's, and was never written over
-    let row = "| `packages/billing/src/billing/protocol/` | billing: Mine. |\n";
+    assert_eq!(fs::read_to_string(r.join("AGENTS.md")).unwrap(), agents);
     fs::write(
         r.join("AGENTS.md"),
-        agents.replace("| `docs/`", &format!("{row}| `docs/`")),
+        agents.replace(
+            "| `docs/`",
+            &format!("{}| `docs/`", row("billing", "protocol")),
+        ),
     )
     .unwrap();
     let said = stdout(&run(&["--root", &arg, "check"]));
@@ -8606,13 +8719,13 @@ fn a_rust_entry_file_with_no_place_for_its_package_fails_create_before_it_writes
         assert_eq!(out.status.code(), Some(2), "{entry}");
         let said_by = String::from_utf8_lossy(&out.stderr).into_owned();
         assert!(said_by.contains(said), "{entry}: {said_by}");
-        // Nothing was written: only the declaration is there
+        // Nothing was written: only the declaration and the test's answer are there
         assert_eq!(
             tree(r)
                 .iter()
                 .map(|(path, _)| path.as_str())
                 .collect::<Vec<_>>(),
-            [".config/rotproof.toml"],
+            [".config/rotproof.toml", POINTER_FILE],
             "{entry}"
         );
     }
