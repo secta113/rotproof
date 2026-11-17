@@ -245,7 +245,8 @@ writes it (a Python dotted name, a TypeScript specifier, a crate's dependency). 
 `from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them. The
 I/O of the inner layers (see "The inner layers do no I/O") is approved the same way, and the import is the entry of
 Rotproof's table that the finding names (`rotproof approve domain/report.py shutil --reason "..."`), which covers every
-use of that entry in the file, whatever names it uses under it.
+use of that entry in the file, whatever names it uses under it; a name judged by an allowlist (`os.getcwd`), a group
+(`clock`) and a method of the net (`read_text`) are entries of their own.
 `rotproof approve` shows the forbidden import, signs with git's `user.name`, and adds the entry (the file keeps a byte
 order mark and its line endings, CRLF on every line when one line had it, and so it does when `--prune` removes
 entries). It asks nothing, so an agent's shell can run it, but it takes no approval without `--reason` (an empty one
@@ -439,9 +440,10 @@ The code of `domain`, `protocol`, `application` and `presentation`, and of their
 `presentation.models`), reads and writes nothing outside the program: the files, the network, the processes and the
 terminal are `infrastructure`'s, behind a port in `protocol.outbound` that a use case is given. `rotproof check` fails an
 **import of an entry of a table of what does I/O wholly**, which Rotproof keeps for each stack and a project cannot
-change. This section is the first of the rule: it reads imports and, in Python and TypeScript, the names a file uses of
-a module it has imported; what a module does only in part (`os`, `pathlib`, `time`, `datetime`, `logging` itself) is
-judged by the attribute or the call it is used through, which a later rule reads, and is not in the table.
+change. The rule reads imports and, in Python and TypeScript, the names a file uses of a module it has imported; what a
+module does only in part (`os`, `pathlib`, `time`, `datetime`, `logging` itself) is not in the table, and is judged by
+the name it is used through: in Python by the lists of "Python: what is judged by the name", below; in TypeScript and
+Rust not yet.
 
 - **Where:** the code of the four layers and their levels. Not `infrastructure` (it does the I/O), not `composition` and
   `ui` (they wire and draw), not the entry file, and not a test: in Python a file in `tests/`; in TypeScript a file named
@@ -525,12 +527,99 @@ judges: Python's `io`, `logging` itself, `asyncio` as a whole (its tasks, queues
 `ExitCode`, `std::net::IpAddr` and the other plain values of `std::net`, `std::io::{Read, Write, BufRead, Cursor,
 Result, Error}`, `std::path` and `std::env::args`. What is pure when it holds bytes in memory: `zipfile`, `tarfile`,
 `gzip`, `bz2` and `lzma`, which read a file only when handed one, `mmap` and `ctypes`, which need a file or a library
-to be given, and `json` and `csv`. A global (`fetch`, `open`, `print`, `console.log`) is no import and is not seen here.
+to be given, and `json` and `csv`. A TypeScript global (`fetch`, `console.log`) is no import and is not seen yet.
 
-**Not seen:** an import built at run time (`importlib.import_module(name)`, `require(name)`, `eval`), a name bound in one
+**Not seen:** in TypeScript, an import built at run time (`require(name)`, `eval`); in every stack, a name bound in one
 file and used through another (in Rust, `pub use std::fs;` in a module and `reexport::fs::read` in the next: the `use`
 itself is found), a path a macro builds from pieces, a module of the project that is named as one of the table (a bare
-`import code` is the standard library's), and a type-only import, which counts as any.
+`import code` is the standard library's), and a type-only import, which counts as any. What Python does not see is in
+the section that follows.
+
+#### Python: what is judged by the name
+
+What a Python module does only in part is judged by the name that is used, after the table, on the names the file's
+scopes resolve (`import os as o` then `o.getcwd()` is `os.getcwd`; a parameter called `os` is nothing). **A reference
+counts as a call** (`default_factory=datetime.now`, `f = uuid.uuid4`), and a use in a type position is never judged
+(`x: sys.stdout`, `def f(a: os.PathLike)`), but a call inside an annotation is
+(`Annotated[str, Field(default_factory=uuid.uuid4)]`). The finding is a forbidden import as the table's are, approved by
+the file and the **entry**; a name of an allowlist-judged module is an entry of its own (`os.getcwd`, `sys.platform`,
+`logging.basicConfig`, `pathlib.Path`, and `read_text` for a method of the net), and **an act that more than one name
+does is one entry, a group**: `clock`, `random`, `terminal` and `argv`. The approval prints the names the file uses
+under the entry now (`; now used: datetime.datetime.now, time.time`). The environment check's names (`os.environ`,
+`os.getenv`, `os.putenv`, `os.unsetenv`, `os.environb`, `os.getenvb`, `os.path.expandvars`, `os.path.expanduser`,
+`pathlib.Path.home`, and the star imports of `os`, `os.path` and `pathlib`) are left to it, and are never reported twice;
+the environment check is not approved.
+
+- **Allowlists: what is pure is listed, everything else of the module is I/O.** They start narrow: a name added later
+  is a patch, a name taken away is a major change. The guide of a Python project prints each in full.
+  - `os` (and `posix` and `nt`): `fspath`, `fsencode`, `fsdecode`, `PathLike`, `error`, `strerror`, `curdir`, `pardir`,
+    `extsep`. The constants `sep`, `altsep`, `pathsep`, `name`, `linesep` and `devnull` are I/O for now. `os.urandom` and
+    `os.getrandom` are randomness.
+  - `os.path` (and `posixpath`, `ntpath` and `genericpath`): `join`, `split`, `splitext`, `basename`, `dirname`,
+    `normpath`, `normcase`, `isabs`, `commonpath`, `commonprefix`, `splitdrive`, `splitroot`. `exists`, `isfile`,
+    `getsize`, `realpath`, `abspath`, `relpath` and the rest are I/O.
+  - `sys`: `version_info`, `version`, `hexversion`, `maxsize`, `maxunicode`, `byteorder`, `float_info`, `int_info`,
+    `hash_info`, `implementation`, `getsizeof`, `intern`, `exc_info`, `exception`. `stdin`, `stdout`, `stderr` and the
+    `__std*__` are the terminal, `argv` and `orig_argv` the arguments, and `exit`, `path`, `modules`, `platform`,
+    `getrecursionlimit` and the rest are I/O.
+  - `time`: `struct_time`, `strptime`, and `sleep`, which is on this side on purpose (waiting reads nothing from outside;
+    the program that waits is the program that is given the clock); `gmtime`, `localtime`, `ctime` and `asctime` are pure
+    only with an argument that is not `None` (no argument, `None`, a `*args` or a reference is the clock), and `strftime`
+    only with two arguments. The clock is `time`, `time_ns`, `monotonic`, `perf_counter`, `process_time`, `thread_time`
+    and `clock_gettime`, each with `_ns` where it has one; `mktime` (the time zone), `tzset`, `timezone`, `tzname`,
+    `clock_settime` and the rest are I/O.
+  - `logging`: `getLogger`, `Logger`, `LoggerAdapter`, `Filter`, `Formatter`, `LogRecord`, `getLevelName`, `NOTSET`,
+    `DEBUG`, `INFO`, `WARNING`, `WARN`, `ERROR`, `CRITICAL`, `FATAL`. `basicConfig`, the functions of the root logger,
+    every handler class, `disable`, `shutdown`, `captureWarnings`, `config` and `handlers` are I/O. A method of a logger
+    (`logger.info`) is not seen, and is free.
+- **The clock** (`clock`): `datetime.datetime.now`, `utcnow` and `today`, `datetime.date.today` (also through `from
+  datetime import datetime`), and the clock of `time` above. Clocks of packages (`pendulum.now()`,
+  `django.utils.timezone.now`) are in no table, and are not seen.
+- **Randomness** (`random`): the functions of `random` (`random`, `randint`, `randrange`, `choice`, `choices`, `shuffle`,
+  `sample`, `uniform`, `gauss` and the other distributions, `getrandbits`, `randbytes`, `seed`, `getstate`, `setstate`),
+  `random.SystemRandom`, `random.Random()` with no seed or `None` (`random.Random(1)` is pure), all of `secrets` (found
+  at its import), `uuid.uuid1` and `uuid.uuid4`, `os.urandom`. `uuid.uuid3`, `uuid.uuid5` and `uuid.UUID(...)` are pure.
+- **The terminal and the files a builtin opens** (`terminal`): the builtins `print`, `input`, `open`, `breakpoint`,
+  `exit`, `quit` and `help` (a bare name no scope of the file binds, read as `builtins.<name>`: a parameter called
+  `input` is its own), `io.open`, `io.FileIO`, `io.open_code`, `codecs.open`, and the streams of `sys`. Archives
+  (`zipfile`, `tarfile`, `gzip.open`) are not I/O here.
+- **The command-line arguments** (`argv`): `sys.argv` and `sys.orig_argv`; the outer layers and the entry file read them.
+- **`pathlib.Path`, `pathlib.PosixPath` and `pathlib.WindowsPath` are I/O by name:** an import or a use of one fails (one
+  entry for each); `PurePath`, `PurePosixPath` and `PureWindowsPath` are the pure way.
+- **A method is judged by its name on any receiver, the net,** because the type of what it is called on cannot be read:
+  `read_text`, `write_text`, `read_bytes`, `write_bytes`, `iterdir`, `rglob`, `mkdir`, `unlink`, `rmdir`, `symlink_to`,
+  `hardlink_to`, `readlink`, `lstat`, `touch`, `chmod`, `lchmod`, `samefile`, `is_symlink`, `is_mount`, `is_junction`,
+  `copy_into`, `move_into` and `absolute` always; `exists`, `is_file`, `is_dir`, `stat`, `owner` and `resolve`
+  only called with no argument; `open` only called with a string literal first (the mode) or a keyword `mode`,
+  `encoding`, `newline` or `buffering`. `group` (`Path.group()`) is left out of the net on purpose, because
+  `re.Match.group()` shares the name, is pure and is common in domain code. A call whose callee is a name of a module
+  that is judged already
+  (`os.mkdir(p)`, `shutil.rmtree(p)`) is judged as that name and not again by the net. **A name is left out of the net
+  when the project defines a method of the same name and the same number of parameters** (a `def` in a class body,
+  anywhere in the project, a test and a file in `unchecked` included; not counting `self`, `cls` of a `@classmethod`,
+  and counting all of a `@staticmethod`; `*args` and `**kwargs` one each): a call of `mkdir` with one argument is left
+  out when the project has a `mkdir(self, name)`, and one with none is not. `rotproof check` prints every name left out
+  on every run, apart from the findings: `I/O net: left out, as the project defines a method of the same name and number
+  of parameters: exists(0), mkdir(1)`; nothing is printed when the project defines none.
+- **What cannot be read fails.** A module used as a value, other than through an attribute a rule judges: `sh = os`,
+  `getattr(os, "system")`, `vars(os)`, `check(os)` (the modules of every list above, and `datetime`, `random`, `secrets`,
+  `uuid`, `io`, `codecs`, `builtins` and `pathlib`; `from os import path` takes a module and is no value). `eval` and
+  `exec`, called or referenced, and `importlib.import_module` and `__import__` with a name that is no string literal
+  (`Source::unread`); their entries are `eval`, `exec`, `importlib.import_module` and `__import__`. A star import of a
+  module with a name that is I/O (`from time import *`, `datetime`, `random`, `sys`, `logging`, `uuid`, `io`, `codecs`,
+  `builtins`, `posix`, `nt`) fails, as the names it brings in cannot be read; the entry is the module.
+- **Each finding starts with what to do,** by layer: for the clock, randomness and the arguments, pass the time, the id
+  or the value in as an argument, or take it from a port in `protocol.outbound` that the use case is given (a port may be
+  a callable alias: `Clock = Callable[[], datetime]`); a screen's model, which imports only `protocol.inbound`, gets it
+  from its page or through a use case. The guide lists what is not a fix: approving it, renaming or respelling it,
+  moving the code to a layer that is not judged or to a path in `unchecked` or `moving`, and listing it as allowed.
+
+**What Python does not see:** a method on an object whose type the reader cannot know and whose name is not in the net
+(`logger.info`, `connection.execute`), a name an object holds (`self.clock.now()`), a name reached through a module held
+in a variable (`o = os` then `o.system`: the `os` of `o = os` is a module used as a value, and fails there), a string
+annotation, a name a star import of a module without an entry brings in, `compile`, the clocks and ids of packages, and a
+method of the net on a name an import brings in whose module is not one of the lists (`from app import repo`, then
+`repo.mkdir()`: judged by the net, and left out only by a definition in the project).
 
 ### Views that are templates
 
@@ -1331,7 +1420,11 @@ entry can be told, is one.
   file now uses under the entry, and one that matches nothing fails. Each finding says first what to do (move the I/O
   into `infrastructure.outbound`, behind a port in `protocol.outbound` the use case is given; a screen's model gets what
   it needs from its page or through a use case), and approving it, renaming it or moving the code to a path in
-  `unchecked` or `moving` is no fix.
+  `unchecked` or `moving` is no fix. In Python the rule also judges what a module does in part by the name used (the
+  allowlists of `os`, `os.path`, `sys`, `time` and `logging`, the clock, randomness, the terminal, the command-line
+  arguments, `pathlib.Path`, the net of method names, and what cannot be read), by entries of its own: a name
+  (`os.getcwd`), a group (`clock`, `random`, `terminal`, `argv`) or a method (`read_text`); it prints on every run the
+  methods of the project that the net leaves out.
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an

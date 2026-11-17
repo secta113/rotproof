@@ -173,6 +173,10 @@ pub struct Report {
     /// How many files were read as tests, said on every run apart from the findings and the warnings. `None` unless
     /// the stack tells a test by its name (TypeScript)
     pub tests: Option<TestFiles>,
+    /// The methods the net of method names leaves out because the project defines one of the same name and number of
+    /// parameters, as one line said on every run apart from the findings and the warnings, failing nothing. `None` when
+    /// the project defines none that the net judges
+    pub io_net: Option<String>,
     /// Every warning, in the order it is printed, each kind under its own heading: a knowledge document whose
     /// `stale_after` has come, with what to do, and a comment that may make the type checker check less
     /// (`# pyright: basic`), as `path:line` and the line under it

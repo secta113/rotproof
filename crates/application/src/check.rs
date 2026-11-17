@@ -97,6 +97,7 @@ fn code(
     // What the layer table forbids and the I/O of the inner layers are kept the same way: one approval for a file and
     // what it imports, or the entry of the table of I/O it uses
     let io = crate::inner_io::problems(tree, parsers, declared)?;
+    report.io_net = io.excluded.line();
     let forbidden: Vec<_> = direction
         .forbidden
         .iter()

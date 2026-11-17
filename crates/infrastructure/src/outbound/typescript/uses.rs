@@ -69,7 +69,7 @@ use oxc_ast::ast::{
 use oxc_ast_visit::{Visit, walk};
 use oxc_semantic::{ReferenceId, Scoping, SymbolId};
 
-use domain::code::{How, Use, typescript_name};
+use domain::code::{First, How, Use, typescript_name};
 use domain::text::line_of;
 
 use super::literal;
@@ -556,6 +556,7 @@ impl<'a> Visit<'a> for Reader<'_> {
             positional,
             keywords: Vec::new(),
             unpacked,
+            first: First::Other,
         };
         if let Some(resolved) = self.called(&callee, how) {
             self.unread_call(it.span.start, &resolved, &it.arguments);
@@ -592,6 +593,7 @@ impl<'a> Visit<'a> for Reader<'_> {
             positional: 1 + it.quasi.expressions.len(),
             keywords: Vec::new(),
             unpacked: false,
+            first: First::Other,
         };
         self.called(&tag, how);
         self.visit_template_literal(&it.quasi);
@@ -652,6 +654,7 @@ mod tests {
                         positional,
                         keywords,
                         unpacked,
+                        ..
                     } => {
                         assert!(keywords.is_empty());
                         format!("call {positional}{}", if *unpacked { " *" } else { "" })

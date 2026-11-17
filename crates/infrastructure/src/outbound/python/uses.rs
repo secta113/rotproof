@@ -25,7 +25,13 @@
 //!   the file then uses and no scope binds is no use (but a builtin is, as ever).
 //!
 //! The reader gives the calls that import a module (`importlib.import_module("m")`, `__import__("m")`) as imports of
-//! the module, and the ones whose module it cannot read as such.
+//! the module, and the ones whose module it cannot read as such, with `eval` and `exec`, called or taken as a value.
+//!
+//! It gives every call of an attribute, whatever it is the attribute of (`p.read_text()`, `Path("a").exists()`,
+//! `self.repo.mkdir(name)`), with the name, how many arguments, what the first is (`None`, a string literal) and what
+//! the callee resolves to when its chain starts at an import or a builtin: a rule that judges a method by its name
+//! alone, since the type of its receiver cannot be read, asks for them. And it gives every method a class defines,
+//! with how many parameters it takes without `self`, for what that rule leaves out.
 //!
 //! What it does not resolve: a name through an assignment (`o = os`, then `o.environ`), through `globals()`,
 //! `getattr` or `exec`, an attribute of an object (`Path("~").expanduser()`, `self.clock.now()`), a string annotation,
@@ -41,7 +47,7 @@ use ruff_python_ast::{
     StmtClassDef, StmtFunctionDef, TypeParam, TypeParams,
 };
 
-use domain::code::{How, Use};
+use domain::code::{Defined, First, How, Method, Use};
 use domain::python_builtins::is_builtin;
 use domain::text::line_of;
 
@@ -50,14 +56,22 @@ use super::base_of;
 /// The functions a call imports a module with, by the name it resolves to.
 const IMPORTS: [&str; 2] = ["importlib.import_module", "builtins.__import__"];
 
+/// The builtins that run code a reader cannot read: called or taken as a value, they are unread.
+const RUNS_CODE: [&str; 2] = ["builtins.eval", "builtins.exec"];
+
 /// What the reader gives of one file.
 pub struct Found {
     /// Every use, in the order of the lines
     pub uses: Vec<Use>,
     /// The calls that import a module by a string literal: the line of the arguments, and the module's parts
     pub dynamic: Vec<(usize, Vec<String>)>,
-    /// The calls that import a module by a name that is no such literal: the line, and the function called
+    /// The calls that import a module by a name that is no such literal (the line, and the function called), and
+    /// every `eval` and `exec`
     pub unread: Vec<(usize, String)>,
+    /// Every call of an attribute, in the order of the lines
+    pub methods: Vec<Method>,
+    /// Every method a class defines
+    pub defined: Vec<Defined>,
 }
 
 /// Read a file's body, whose relative imports start from `package`.
@@ -69,6 +83,8 @@ pub fn read(source: &str, body: &[Stmt], package: &[String]) -> Found {
         current: 0,
         in_type: false,
         entries: Vec::new(),
+        methods: Vec::new(),
+        defined: Vec::new(),
     };
     reader.visit_body(body);
     reader.finish()
@@ -124,6 +140,8 @@ struct Call {
     keywords: Vec<String>,
     unpacked: bool,
     first: Argument,
+    /// What the first positional argument is, for the rules that ask whether it is `None` or a string
+    lead: First,
     /// The line of its arguments, which is where an import by a call is said to be
     arguments_line: usize,
 }
@@ -142,6 +160,16 @@ enum Entry {
     Pending(Pending),
 }
 
+/// A call of an attribute whose callee is not yet resolved.
+struct PendingMethod {
+    scope: usize,
+    /// The chain of names the callee is, when it is one that starts at a name
+    chain: Option<Vec<String>>,
+    name: String,
+    line: usize,
+    call: Call,
+}
+
 /// What a name resolves to, from a scope.
 enum Resolved {
     Imports(Vec<String>),
@@ -157,6 +185,8 @@ struct Reader<'s> {
     current: usize,
     in_type: bool,
     entries: Vec<Entry>,
+    methods: Vec<PendingMethod>,
+    defined: Vec<Defined>,
 }
 
 impl Reader<'_> {
@@ -229,7 +259,13 @@ impl Reader<'_> {
             None if starred || kwargs => Argument::Other,
             None => Argument::Absent,
         };
+        let lead = match arguments.args.first() {
+            Some(Expr::NoneLiteral(_)) => First::Null,
+            Some(Expr::StringLiteral(_)) => First::Text,
+            _ => First::Other,
+        };
         Call {
+            lead,
             positional: arguments
                 .args
                 .iter()
@@ -281,6 +317,20 @@ impl Reader<'_> {
     }
 
     fn function(&mut self, def: &StmtFunctionDef) {
+        if self.scopes[self.current].kind == Kind::Class {
+            let is_static = def.decorator_list.iter().any(|decorator| {
+                matches!(&decorator.expression, Expr::Name(name) if name.id.as_str() == "staticmethod")
+            });
+            let all = def.parameters.iter().count();
+            self.defined.push(Defined {
+                name: def.name.to_string(),
+                parameters: if is_static {
+                    all
+                } else {
+                    all.saturating_sub(1)
+                },
+            });
+        }
         self.bind(def.name.as_str(), Binding::Local);
         for decorator in &def.decorator_list {
             self.visit_decorator(decorator);
@@ -466,6 +516,10 @@ impl Reader<'_> {
                 Resolved::Unbound | Resolved::Own => continue,
             };
             for name in names {
+                // Code that is run from what is no code a reader can read, whether it is called or handed on
+                if RUNS_CODE.contains(&name.as_str()) && !pending.in_type {
+                    unread.push((pending.line, name.clone()));
+                }
                 if let Some(call) = &pending.call
                     && IMPORTS.contains(&name.as_str())
                 {
@@ -488,6 +542,7 @@ impl Reader<'_> {
                         positional: call.positional,
                         keywords: call.keywords.clone(),
                         unpacked: call.unpacked,
+                        first: call.lead,
                     },
                     None => How::Value,
                 };
@@ -501,10 +556,54 @@ impl Reader<'_> {
         }
         // In the order of the lines, the order the file is read in among those of one line
         uses.sort_by_key(|used| used.line);
+        unread.sort_by_key(|(line, _)| *line);
+        let mut methods: Vec<Method> = self
+            .methods
+            .iter()
+            .map(|pending| Method {
+                line: pending.line,
+                name: pending.name.clone(),
+                resolved: self.callee(pending),
+                positional: pending.call.positional,
+                keywords: pending.call.keywords.clone(),
+                unpacked: pending.call.unpacked,
+                first: pending.call.lead,
+            })
+            .collect();
+        methods.sort_by_key(|method| method.line);
         Found {
             uses,
             dynamic,
             unread,
+            methods,
+            defined: self.defined,
+        }
+    }
+
+    /// What the callee of a call of an attribute resolves to, when its chain starts at an import or at a builtin.
+    fn callee(&self, pending: &PendingMethod) -> Vec<String> {
+        let Some((first, rest)) = pending.chain.as_ref().and_then(|chain| chain.split_first())
+        else {
+            return Vec::new();
+        };
+        match self.resolve(pending.scope, first) {
+            Resolved::Imports(targets) => targets
+                .into_iter()
+                .map(|target| {
+                    std::iter::once(target.as_str())
+                        .chain(rest.iter().map(String::as_str))
+                        .collect::<Vec<_>>()
+                        .join(".")
+                })
+                .collect(),
+            Resolved::Unbound if is_builtin(first) => {
+                let whole = std::iter::once(first.as_str())
+                    .chain(rest.iter().map(String::as_str))
+                    .collect::<Vec<_>>()
+                    .join(".");
+                vec![format!("builtins.{whole}")]
+            }
+            Resolved::Unbound | Resolved::Own => Vec::new(),
         }
     }
 }
@@ -586,6 +685,16 @@ impl<'a> Visitor<'a> for Reader<'_> {
             Expr::Call(call) => {
                 // A call runs when the annotation it is in is evaluated: it, its callee and its arguments are no type
                 let was = replace(&mut self.in_type, false);
+                if let Expr::Attribute(attribute) = call.func.as_ref() {
+                    let pending = PendingMethod {
+                        scope: self.current,
+                        chain: chain(&call.func).map(|(names, _)| names),
+                        name: attribute.attr.to_string(),
+                        line: self.line(attribute.attr.range.start().to_usize()),
+                        call: self.call(&call.arguments),
+                    };
+                    self.methods.push(pending);
+                }
                 match chain(&call.func) {
                     Some((names, at)) => {
                         let info = self.call(&call.arguments);
@@ -663,7 +772,7 @@ impl<'a> Visitor<'a> for Reader<'_> {
 
 #[cfg(test)]
 mod tests {
-    use domain::code::{How, Source, Use};
+    use domain::code::{First, How, Source, Use};
 
     use crate::outbound::python::read;
 
@@ -675,6 +784,7 @@ mod tests {
                 positional,
                 keywords,
                 unpacked,
+                ..
             } => {
                 let keywords = if keywords.is_empty() {
                     String::new()
@@ -1358,5 +1468,189 @@ __import__(\"billing.domain\")
         let read = all(source);
         assert!(read.unread.is_empty());
         assert!(read.imports.is_empty());
+    }
+
+    #[test]
+    fn eval_and_exec_are_unread_called_or_taken_as_a_value_unless_the_file_binds_them() {
+        let source = "\
+eval(\"1\")
+exec(code)
+f = eval
+import builtins
+builtins.exec(\"x\")
+def g(eval):
+    return eval(\"y\")
+class C:
+    def exec(self):
+        pass
+x: eval
+";
+        let read = all(source);
+        assert_eq!(
+            read.unread,
+            [
+                (1, "builtins.eval".to_string()),
+                (2, "builtins.exec".into()),
+                (3, "builtins.eval".into()),
+                (5, "builtins.exec".into()),
+            ]
+        );
+    }
+
+    /// A method as `line:name(resolved) positional keywords flags`.
+    fn called_attributes(source: &str) -> Vec<String> {
+        all(source)
+            .methods
+            .iter()
+            .map(|method| {
+                let keywords = if method.keywords.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", method.keywords.join(","))
+                };
+                let unpacked = if method.unpacked { " *" } else { "" };
+                let first = match method.first {
+                    First::Other => "",
+                    First::Null => " none",
+                    First::Text => " text",
+                };
+                format!(
+                    "{}:{}({}) {}{keywords}{unpacked}{first}",
+                    method.line,
+                    method.name,
+                    method.resolved.join("|"),
+                    method.positional
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_call_of_an_attribute_is_a_method_whatever_it_is_the_attribute_of() {
+        let source = "\
+import os
+from pathlib import Path
+def f(p, self):
+    p.read_text()
+    Path(\"a\").exists()
+    self.repo.mkdir(\"x\", parents=True)
+    os.path.exists(p)
+    (a or b).stat()
+    items[0].unlink()
+    f().touch()
+    open(\"a\").read()
+";
+        assert_eq!(
+            called_attributes(source),
+            [
+                "4:read_text() 0",
+                "5:exists() 0",
+                "6:mkdir() 1 parents text",
+                "7:exists(os.path.exists) 1",
+                "8:stat() 0",
+                "9:unlink() 0",
+                "10:touch() 0",
+                // The attribute of the result of a call resolves to nothing, whatever the call is
+                "11:read() 0",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_method_says_how_many_arguments_it_has_and_what_the_first_is() {
+        let source = "\
+p.open(\"w\")
+p.open('r', encoding=\"utf8\")
+p.open(mode=\"w\")
+p.gmtime(None)
+p.gmtime(x)
+p.gmtime(*a)
+p.gmtime(**kw)
+p.open(f\"{x}\")
+p.open(*a, \"w\")
+";
+        assert_eq!(
+            called_attributes(source),
+            [
+                "1:open() 1 text",
+                "2:open() 1 encoding text",
+                "3:open() 0 mode",
+                "4:gmtime() 1 none",
+                "5:gmtime() 1",
+                "6:gmtime() 0 *",
+                "7:gmtime() 0 *",
+                "8:open() 1",
+                "9:open() 1 *",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_method_takes_its_callee_from_the_scopes_of_the_file() {
+        let source = "\
+import time as t
+from datetime import datetime
+def f(t):
+    t.time()
+def g():
+    return datetime.now().isoformat(), t.time()
+";
+        // `t` of `f` is a parameter; in `g` it is `time`, and `datetime.now()` resolves to the clock
+        assert_eq!(
+            called_attributes(source),
+            [
+                "4:time() 0",
+                "6:isoformat() 0",
+                "6:now(datetime.datetime.now) 0",
+                "6:time(time.time) 0",
+            ]
+        );
+    }
+
+    /// The methods a class defines, as `name/parameters`.
+    fn defined(source: &str) -> Vec<String> {
+        all(source)
+            .defined
+            .iter()
+            .map(|method| format!("{}/{}", method.name, method.parameters))
+            .collect()
+    }
+
+    #[test]
+    fn a_method_a_class_defines_has_its_parameters_counted_without_self() {
+        let source = "\
+class A:
+    def exists(self): ...
+    def read_text(self, encoding=None, *, errors=None): ...
+    def many(self, *args, **kwargs): ...
+    async def fetch(self, key): ...
+    @staticmethod
+    def make(a, b): ...
+    @classmethod
+    def build(cls, a): ...
+    @property
+    def size(self): ...
+    def noself(): ...
+    class Inner:
+        def deep(self, a): ...
+    def outer(self):
+        def nested(a, b): ...
+def free(a, b): ...
+";
+        assert_eq!(
+            defined(source),
+            [
+                "exists/0",
+                "read_text/2",
+                "many/2",
+                "fetch/1",
+                "make/2",
+                "build/1",
+                "size/0",
+                "noself/0",
+                "deep/1",
+                "outer/0",
+            ]
+        );
     }
 }

@@ -82,8 +82,10 @@ infrastructure reads or writes the environment variables (os.environ and os.gete
 import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that the inner layers \
 (domain, protocol, application, presentation) do no I/O (an import of what Rotproof lists as doing I/O wholly: shutil, \
 subprocess and socket in Python, fs and child_process in Node, std::fs and std::process and the print macros in Rust; \
-not in infrastructure, composition, ui, the entry file or a test; approved as an import is, by its file and the entry \
-of the table), that no \
+not in infrastructure, composition, ui, the entry file or a test; in Python also the names of what is I/O in part: os, \
+os.path, sys, time and logging by an allowlist of what is pure, the clock, randomness, the terminal and the arguments, \
+pathlib.Path, and a method of a path judged by its name, which a method of the project of the same name and number of \
+parameters leaves out, said on every run; approved as an import is, by its file and the entry), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that .rotproof/AGENTS.md and the two copies of the skill rotproof (.claude/skills/rotproof/SKILL.md and .agents/skills/rotproof/SKILL.md) are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
@@ -635,6 +637,11 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
     // that were read as code
     if let Some(tests) = &report.tests {
         println!("{}", test_line(tests));
+    }
+    // The methods the net of method names leaves out, on every run: the project's own method of the same name is not
+    // the standard library's, and what is left out is not left out silently
+    if let Some(line) = &report.io_net {
+        println!("{line}");
     }
     // A warning: printed on every run, under the heading of its kind, and failing nothing
     for (heading, details) in warnings(&report.warnings) {

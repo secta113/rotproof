@@ -42,9 +42,17 @@ pub struct Source<I> {
     pub uses: Vec<Use>,
     /// What the reader met and could not read: the line (from 1), and what it is. In Python, the function a file calls
     /// to import a module whose name it does not write as a string (`importlib.import_module(name)`, a relative
-    /// `".x"`), which is built at run time; in TypeScript, `import` and `require` of what is no literal string
-    /// (`import()`, `require`), `eval` and `Function`
+    /// `".x"`), which is built at run time, and `eval` and `exec` (`builtins.eval`), whether called or taken as a
+    /// value; in TypeScript, `import` and `require` of what is no literal string (`import()`, `require`), `eval` and
+    /// `Function`
     pub unread: Vec<(usize, String)>,
+    /// Every call of an attribute, whatever it is the attribute of (`a.b()`, `f().g()`, `self.x.y()`), in the order of
+    /// the lines: what a rule judges by the method's name alone, when the type of the receiver cannot be known.
+    /// Python's reader gives them; TypeScript's does not
+    pub methods: Vec<Method>,
+    /// Every method a class defines, with how many parameters it takes: what a rule that judges a method by its name
+    /// leaves out when the project has one of its own. Python's reader gives them; TypeScript's does not
+    pub defined: Vec<Defined>,
     /// The first syntax error, if any: its line and what the parser says. The parser recovers, but what follows may be
     /// misread
     pub error: Option<(usize, String)>,
@@ -57,9 +65,54 @@ impl<I> Default for Source<I> {
             comments: Vec::new(),
             uses: Vec::new(),
             unread: Vec::new(),
+            methods: Vec::new(),
+            defined: Vec::new(),
             error: None,
         }
     }
+}
+
+/// What the first positional argument of a call is, when it is a literal a rule asks about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum First {
+    /// Anything else, and a call that has none
+    #[default]
+    Other,
+    /// The literal `None` (Python): `time.gmtime(None)` reads the clock as `time.gmtime()` does
+    Null,
+    /// A string literal (Python's `p.open("w")`), with any quotes; an f-string is not one
+    Text,
+}
+
+/// One call of an attribute in Python, whatever it is the attribute of: `p.read_text()`, `Path("a").exists()`,
+/// `self.repo.mkdir(name)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Method {
+    /// The line (from 1) of the attribute's name
+    pub line: usize,
+    /// The attribute called, without what it is the attribute of
+    pub name: String,
+    /// What the chain of names the call starts at resolves to, when its first name is an import or a builtin: the whole
+    /// callee, as a [`Use`] names it (`os.path.exists` for `os.path.exists(p)`); empty when it starts at anything else
+    /// (a variable, a parameter, a call, a subscript)
+    pub resolved: Vec<String>,
+    /// How many positional arguments, a `*args` not counted
+    pub positional: usize,
+    /// The names of the keyword arguments, in the order written
+    pub keywords: Vec<String>,
+    /// Whether the call has a `*args` or a `**kwargs`, which hides how many arguments there are
+    pub unpacked: bool,
+    /// What the first positional argument is
+    pub first: First,
+}
+
+/// One method a class defines (a `def` directly in a class body), with how many parameters it takes, not counting
+/// `self` (nor the `cls` of a `@classmethod`); a `@staticmethod` has no such parameter and counts them all. A `*args`
+/// and a `**kwargs` count one each.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Defined {
+    pub name: String,
+    pub parameters: usize,
 }
 
 /// One use of a name in a Python or TypeScript file that resolves to something outside the file's own code, as the
@@ -127,6 +180,9 @@ pub enum How {
         keywords: Vec<String>,
         /// Whether the call has a `*args` or a `**kwargs`, which hides how many arguments there are
         unpacked: bool,
+        /// What the first positional argument is: Python's reader tells `None` and a string literal, TypeScript's
+        /// leaves it [`First::Other`]
+        first: First,
     },
     /// The name is used as a value, and called by no one here: `default_factory=datetime.now`, `f = time.time`,
     /// `os.environ["A"]`, `getattr(os, "environ")` (the `os`), `o = os`, `@functools.cache`; in TypeScript

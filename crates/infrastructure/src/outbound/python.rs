@@ -61,6 +61,8 @@ pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
         comments,
         uses: read.uses,
         unread: read.unread,
+        methods: read.methods,
+        defined: read.defined,
         error,
     }
 }

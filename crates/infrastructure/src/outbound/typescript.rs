@@ -85,6 +85,7 @@ pub fn read(source: &str, path: &str) -> Source<Import> {
         uses: found.uses,
         unread: found.unread,
         error: first_error(source, &parsed),
+        ..Source::default()
     }
 }
 

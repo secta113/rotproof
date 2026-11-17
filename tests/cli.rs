@@ -2048,8 +2048,8 @@ fn a_python_name_is_read_as_python_scopes_read_it_by_the_environment_check() {
     put(
         r,
         "domain/allowed.py",
-        "import os\nfrom pathlib import Path\n\n\ndef a(os):\n    return os.environ\n\n\ndef b():\n    os = 1\n    \
-         return os.getenv('A')\n\n\ndef c():\n    return os.path.join('a', 'b'), Path.cwd(), Path('a').exists()\n",
+        "import os\nfrom pathlib import PurePath\n\n\ndef a(os):\n    return os.environ\n\n\ndef b():\n    os = 1\n    \
+         return os.getenv('A')\n\n\ndef c():\n    return os.path.join('a', 'b'), PurePath('a').name\n",
     );
     // `infrastructure` alone may read it
     put(
@@ -2162,8 +2162,8 @@ fn each_python_form_that_reads_the_environment_fails_alone_and_a_shadowed_name_d
         "import os\nclass C:\n    os = {}\n    x = os.environ\n",
         "import os\nx = [os.environ for os in range(3)]\n",
         "from os import path\nx = path.join('a', 'b')\n",
-        "from pathlib import Path\nx = Path.cwd()\n",
-        "import os\nx = os.getcwd()\n",
+        "from pathlib import PurePath\nx = PurePath('a')\n",
+        "import os\nx = os.fspath('a')\n",
     ];
     for source in allowed {
         put(r, "domain/x.py", source);
@@ -2511,6 +2511,403 @@ fn an_approved_use_of_io_prints_the_names_the_file_uses_now_and_a_stale_one_fail
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
     let (code, said) = checked(r);
     assert_eq!(code, Some(0), "{said}");
+}
+
+#[test]
+fn each_python_name_that_does_io_in_part_fails_alone_and_what_is_pure_passes() {
+    let root = clean_repo();
+    let r = root.path();
+    // (what the file holds, the line, what the finding says it found)
+    let forbidden = [
+        (
+            "import os\nx = os.getcwd()\n",
+            2,
+            "uses `os.getcwd`, which does I/O",
+        ),
+        (
+            "import os\nx = os.path.exists('a')\n",
+            2,
+            "uses `os.path.exists`, which does I/O",
+        ),
+        (
+            "import sys\nx = sys.platform\n",
+            2,
+            "uses `sys.platform`, which does I/O",
+        ),
+        (
+            "import logging\nlogging.basicConfig()\n",
+            2,
+            "uses `logging.basicConfig`, which does I/O",
+        ),
+        (
+            "import time\nx = time.mktime(t)\n",
+            2,
+            "uses `time.mktime`, which does I/O",
+        ),
+        (
+            "import time\nx = time.time()\n",
+            2,
+            "reads the clock (time.time), which does I/O (entry `clock`)",
+        ),
+        (
+            "from datetime import datetime\nx = datetime.now()\n",
+            2,
+            "reads the clock (datetime.datetime.now), which does I/O (entry `clock`)",
+        ),
+        (
+            "from dataclasses import field\nfrom datetime import datetime\nx = field(default_factory=datetime.now)\n",
+            3,
+            "reads the clock (datetime.datetime.now)",
+        ),
+        (
+            "import time\nx = time.gmtime()\n",
+            2,
+            "reads the clock (time.gmtime)",
+        ),
+        (
+            "import uuid\nfrom typing import Annotated\nfrom pydantic import Field\n\n\nclass M:\n    \
+             id: Annotated[str, Field(default_factory=uuid.uuid4)]\n",
+            7,
+            "draws on randomness (uuid.uuid4), which does I/O (entry `random`)",
+        ),
+        (
+            "import random\nx = random.Random()\n",
+            2,
+            "draws on randomness (random.Random)",
+        ),
+        (
+            "import random\nx = random.choice([1, 2])\n",
+            2,
+            "draws on randomness (random.choice)",
+        ),
+        ("import secrets\n", 1, "draws on randomness (secrets)"),
+        (
+            "import os\nx = os.urandom(8)\n",
+            2,
+            "draws on randomness (os.urandom)",
+        ),
+        (
+            "x = input()\n",
+            1,
+            "uses the terminal or opens a file (input), which does I/O (entry `terminal`)",
+        ),
+        (
+            "print('x')\n",
+            1,
+            "uses the terminal or opens a file (print)",
+        ),
+        (
+            "with open('f') as f:\n    pass\n",
+            1,
+            "uses the terminal or opens a file (open)",
+        ),
+        (
+            "import sys\nsys.stdout.write('x')\n",
+            2,
+            "uses the terminal or opens a file (sys.stdout)",
+        ),
+        (
+            "import io\nx = io.open('f')\n",
+            2,
+            "uses the terminal or opens a file (io.open)",
+        ),
+        (
+            "import sys\nx = sys.argv\n",
+            2,
+            "reads the command-line arguments (sys.argv), which does I/O (entry `argv`)",
+        ),
+        (
+            "from pathlib import Path\n",
+            1,
+            "uses `pathlib.Path`, which does I/O",
+        ),
+        (
+            "import pathlib\nx = pathlib.PosixPath('a')\n",
+            2,
+            "uses `pathlib.PosixPath`, which does I/O",
+        ),
+        (
+            "def f(p):\n    return p.read_text()\n",
+            2,
+            "calls `.read_text(...)`, a method of a path that does I/O",
+        ),
+        (
+            "def f(p):\n    return p.exists()\n",
+            2,
+            "calls `.exists(...)`",
+        ),
+        (
+            "def f(p):\n    return p.open('w')\n",
+            2,
+            "calls `.open(...)`",
+        ),
+        ("import os\nsh = os\n", 2, "uses the module `os` as a value"),
+        (
+            "import os\nx = getattr(os, 'system')\n",
+            2,
+            "uses the module `os` as a value",
+        ),
+        (
+            "import sys\nx = vars(sys)\n",
+            2,
+            "uses the module `sys` as a value",
+        ),
+        (
+            "from time import *\n",
+            1,
+            "a star import of `time`, which brings in names that do I/O",
+        ),
+        ("from datetime import *\n", 1, "a star import of `datetime`"),
+        (
+            "x = eval('1')\n",
+            1,
+            "uses `eval`: what it runs or imports cannot be read",
+        ),
+        ("exec('x = 1')\n", 1, "uses `exec`"),
+        (
+            "import importlib\nimportlib.import_module(name)\n",
+            2,
+            "uses `importlib.import_module`",
+        ),
+    ];
+    for (source, line, what) in forbidden {
+        put(r, "domain/x.py", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        assert!(
+            said.contains(&format!("  domain/x.py:{line}: ")) && said.contains(what),
+            "{source}\n{said}"
+        );
+    }
+    // What is pure, a name the file binds, a use in a type position, and what is judged by its arguments
+    let free = [
+        "import os\nimport sys\nimport time\nimport logging\nx = (os.fspath('a'), os.path.join('a', 'b'), \
+         sys.version_info, time.strptime('1', '%S'), logging.getLogger('x'), logging.INFO)\ntime.sleep(1)\n",
+        "import time\nx = time.gmtime(0)\ny = time.strftime('%Y', x)\n",
+        "import random\nx = random.Random(1)\n",
+        "import uuid\nx = uuid.uuid5(uuid.NAMESPACE_DNS, 'a')\n",
+        "from pathlib import PurePath\nx = PurePath('a').name\n",
+        "def f(input, print):\n    return input(print)\n",
+        "import sys\nx: sys.stdout = None\n",
+        "def f(p):\n    return p.exists(1), p.open(), p.get(), p.read(), re.match(a, b).group()\n",
+        "import os\ndef f(os):\n    return check(os)\n",
+        "from datetime import datetime\nx = datetime.fromtimestamp(0)\n",
+        "import zipfile, tarfile, gzip\n",
+    ];
+    for source in free {
+        put(r, "domain/x.py", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(0), "{source}\n{said}");
+    }
+    // The layers that do the I/O, wire and draw, and the entry file and the tests do all of it
+    fs::remove_file(r.join("domain/x.py")).unwrap();
+    let all = "import os, sys, time, random\nprint(os.getcwd(), sys.argv, time.time(), random.random())\n\
+               def f(p):\n    return p.read_text()\n";
+    for path in [
+        "infrastructure/outbound/x.py",
+        "infrastructure/inbound/x.py",
+        "composition/x.py",
+        "__main__.py",
+        "tests/test_x.py",
+    ] {
+        put(r, path, all);
+    }
+    let (code, said) = checked(r);
+    assert!(!said.contains("does I/O"), "{said}");
+    assert!(code == Some(0) || code == Some(1));
+}
+
+#[test]
+fn an_act_of_a_group_and_a_name_of_a_module_judged_by_its_names_are_approved_by_their_own_entries()
+{
+    let root = clean_repo();
+    let r = root.path();
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let approve = |entry: &str| {
+        let out = approve_with_git(
+            r,
+            named,
+            &["domain/model.py", entry, "--reason", "the port comes later"],
+        );
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{entry}: {}{}",
+            stdout(&out),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let source = |body: &str| {
+        format!("import os\nimport time\nfrom datetime import datetime\n\n\ndef f(p):\n{body}")
+    };
+    put(
+        r,
+        "domain/model.py",
+        &source(
+            "    a = datetime.now()\n    b = time.time()\n    c = os.getcwd()\n    return p.read_text()\n",
+        ),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    // The act of a group is one entry, whichever names the file reaches it by
+    approve("clock");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("uses `os.getcwd`") && said.contains("calls `.read_text(...)`"),
+        "{said}"
+    );
+    assert!(
+        !said.contains("reads the clock"),
+        "one approval covers both names\n{said}"
+    );
+    assert!(
+        said.contains("clock in domain/model.py: the port comes later (Someone Else, ")
+            && said.contains("; now used: datetime.datetime.now, time.time\n"),
+        "{said}"
+    );
+    // A name of a module judged by its names, and a method of the net, are entries of their own
+    approve("os.getcwd");
+    approve("read_text");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("approved in .config/rotproof-approved.toml (3):"),
+        "{said}"
+    );
+    assert!(
+        said.contains("  os.getcwd in domain/model.py: the port comes later")
+            && said.contains("  read_text in domain/model.py: the port comes later"),
+        "{said}"
+    );
+    // The names change, so the reason is read again; and what is no longer used is a stale entry
+    put(
+        r,
+        "domain/model.py",
+        &source("    a = time.monotonic\n    return p.read_text()\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("; now used: time.monotonic\n"), "{said}");
+    assert!(
+        said.contains("approved, but no such forbidden import: os.getcwd in domain/model.py"),
+        "{said}"
+    );
+    // Only an entry the check names is approved: `time` is a module, the entry is `clock`
+    let out = approve_with_git(r, named, &["domain/model.py", "time", "--reason", "no"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no forbidden import of time"));
+    let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // The name of a group that no file uses is stale as any other entry
+    put(r, "domain/model.py", "import os\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("approved, but no such forbidden import: clock in domain/model.py"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_method_the_project_defines_is_left_out_of_the_net_and_the_line_is_printed_on_every_run() {
+    let root = clean_repo();
+    let r = root.path();
+    put(
+        r,
+        "domain/a.py",
+        "def f(p, store):\n    return p.exists(), p.read_text(), store.mkdir('x'), p.mkdir()\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(!said.contains("I/O net:"), "{said}");
+    for method in ["exists", "read_text", "mkdir"] {
+        assert!(said.contains(&format!("calls `.{method}(...)`")), "{said}");
+    }
+    // The project defines a method of the same name and number of parameters, in any file of it
+    put(
+        r,
+        "tests/test_store.py",
+        "class Store:\n    def exists(self): ...\n    def mkdir(self, name): ...\n    def read_text(self, a, b): ...\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "I/O net: left out, as the project defines a method of the same name and number of parameters: \
+             exists(0), mkdir(1), read_text(2)\n"
+        ),
+        "{said}"
+    );
+    // `exists()` and `mkdir('x')` are left out; `read_text()` has another number of parameters, and so has `mkdir()`
+    assert!(
+        !said.contains("calls `.exists(...)`")
+            && said.contains("calls `.read_text(...)`")
+            && said.contains("domain/a.py:2: "),
+        "{said}"
+    );
+    assert_eq!(said.matches("calls `.mkdir(...)`").count(), 1, "{said}");
+    // It is printed when nothing fails too
+    put(r, "domain/a.py", "def f(p):\n    return p.get()\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(said.contains("I/O net: left out"), "{said}");
+}
+
+#[test]
+fn the_guide_of_a_python_project_lists_the_allowlists_in_full_and_the_way_out() {
+    let guide = stdout(&run(&["guide", "--stack", "python"]));
+    for name in [
+        // os, os.path, sys, time, logging: what is pure
+        "`fspath`",
+        "`extsep`",
+        "`splitroot`",
+        "`commonprefix`",
+        "`version_info`",
+        "`getsizeof`",
+        "`strptime`",
+        "`sleep`",
+        "`getLogger`",
+        "`LoggerAdapter`",
+        // the groups, `Path` and the net
+        "`datetime.datetime.now`",
+        "`default_factory=datetime.now`",
+        "`secrets`",
+        "`uuid4`",
+        "`pathlib.PosixPath`",
+        "`PurePath`",
+        "`read_text`",
+        "`is_junction`",
+        "`resolve`",
+        "`encoding`",
+        "`clock`",
+        "`terminal`",
+        "`argv`",
+        "`Clock = Callable[[], datetime]`",
+        "`eval`",
+    ] {
+        assert!(guide.contains(name), "{name}");
+    }
+    assert!(
+        guide.contains("`os.getcwd` or `sys.platform` for a name of a module judged by its names"),
+        "{guide}"
+    );
+    assert!(
+        guide.contains("Approving the import,\n  renaming or respelling it"),
+        "{guide}"
+    );
+    // The other stacks do not claim what is not checked for them yet
+    for stack in ["typescript", "rust"] {
+        let guide = stdout(&run(&["guide", "--stack", stack]));
+        assert!(
+            !guide.contains("`Clock = Callable[[], datetime]`"),
+            "{stack}"
+        );
+        assert!(!guide.contains("`fspath`"), "{stack}");
+    }
 }
 
 #[test]

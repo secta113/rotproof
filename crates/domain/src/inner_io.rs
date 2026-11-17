@@ -18,16 +18,25 @@
 //!   or through a use case. The finding is a [`Forbidden`] of its own [`Rule`], so that `rotproof approve` and the
 //!   approvals file treat it as any other.
 //!
+//! - **What is I/O in part is judged by the name,** in Python: the allowlists of `os`, `os.path`, `sys`, `time` and
+//!   `logging`, the clock, randomness, the terminal, the command-line arguments, `pathlib.Path`, the net of method
+//!   names and what cannot be read (`python`). A group of one act (the clock, randomness, the terminal, the arguments)
+//!   is one entry, whichever name it is reached by (`groups`).
+//!
 //! Python and TypeScript are read by their readers of imports and uses ([`in_python`], [`in_typescript`]); Rust by
 //! Rotproof's own scanner ([`in_rust`]).
 
+mod groups;
+mod python;
 mod table;
 
+pub use groups::{Excluded, Group};
+pub use python::excluded as python_excluded;
 pub use table::listing;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::code::{How, Import, Use, split_typescript_name};
+use crate::code::{How, Import, Method, Use, split_typescript_name};
 use crate::direction::{Forbidden, Rule};
 use crate::layers::{Language, Place};
 use crate::rust::{Item, Token, code, items, paths, tokens, without_tests};
@@ -67,9 +76,21 @@ pub fn guide(language: Language) -> String {
              crate's `src/`: `tests/`, `benches/`, `examples/` and `build.rs`)"
         }
     };
+    // What a stack says of the names it judges besides the table: Python's so far
+    let (names, passed, keys) = match language {
+        Language::Python => (
+            python::listing(),
+            groups::passed_in(language),
+            groups::KEYS.to_string(),
+        ),
+        Language::TypeScript | Language::Rust => (String::new(), String::new(), String::new()),
+    };
     GUIDE_TEXT
         .replace("{tests}", tests)
         .replace("{table}", &listing(language))
+        .replace("{names}", &names)
+        .replace("{passed}", &passed)
+        .replace("{keys}", &keys)
 }
 
 /// How a finding says what it found.
@@ -81,6 +102,16 @@ pub enum Cause {
     Glob(String),
     /// An import by a scheme that is not `node:`, as written: what it names cannot be judged
     Scheme(String),
+    /// The act of a group (the clock, randomness, the terminal, the arguments), by the names under the entry
+    Group(Group),
+    /// A module used as a value (`sh = os`, `getattr(os, "system")`): what is done through it cannot be read
+    Module,
+    /// A star import of this module, which has names that are I/O among those it brings in
+    Star(String),
+    /// What the reader cannot read (`eval`, an import by a name built at run time): what it runs is unknown
+    Unread(String),
+    /// A method called by a name that is a path's, on a receiver whose type cannot be read
+    Method,
 }
 
 /// One place a file does I/O by import: the line (from 1), the entry of the table, the name used under it, and how.
@@ -111,18 +142,59 @@ fn python_entry(dotted: &str) -> Option<(&'static str, Option<String>)> {
 /// Every use of an entry of the table in a Python file, from what it imports (the modules, as parts, each with its
 /// line: `from m import n` is `m.n`) and from the names it uses: `import asyncio` then `asyncio.open_connection(...)`
 /// is a use of the entry `asyncio.open_connection`, and `import urllib` then `urllib.request.urlopen(...)` one of
-/// `urllib.request`. A name in a type position counts, as an annotation still names it.
-pub fn in_python(imports: &[(usize, Vec<String>)], uses: &[Use]) -> Vec<Found> {
+/// `urllib.request`. A name in a type position counts for the table, as an annotation still names it, and is never
+/// judged for the rest.
+///
+/// What is I/O in part is judged by the name after the table ([`python`]): the allowlists, the groups, `pathlib.Path`,
+/// a module used as a value and a star import of one, and the calls of an attribute (`methods`) whose name is a path's,
+/// unless `excluded` (the methods the project defines) leaves it out.
+pub fn in_python(
+    imports: &[(usize, Vec<String>)],
+    uses: &[Use],
+    methods: &[Method],
+    excluded: &Excluded,
+) -> Vec<Found> {
     let mut found: Vec<Found> = imports
         .iter()
-        .filter_map(|(line, parts)| python_found(*line, &parts.join(".")))
+        .filter_map(|(line, parts)| {
+            python_found(*line, &parts.join(".")).or_else(|| python::judge_import(*line, parts))
+        })
         .collect();
-    // The module `from m import *` brings the names of is its import, which is already one
+    for used in uses {
+        // The module `from m import *` brings the names of is its import, which is already one when it is in the table
+        if used.how == How::Star {
+            found.extend(python::judge_star(used));
+            continue;
+        }
+        match python_found(used.line, &used.name) {
+            Some(one) => found.push(one),
+            None => found.extend(python::judge(used)),
+        }
+    }
     found.extend(
-        uses.iter()
-            .filter(|used| used.how != How::Star)
-            .filter_map(|used| python_found(used.line, &used.name)),
+        methods
+            .iter()
+            .filter_map(|method| python::net(method, excluded)),
     );
+    sorted(found)
+}
+
+/// What a reader could not read, as findings: the function a file calls to import a module by a name built at run time,
+/// `eval` and `exec`, `Function`. What they run is unknown, so it fails, and `eval` and `exec` are the entries (a
+/// `builtins.` in front of a name is taken away).
+pub fn unread(unread: &[(usize, String)]) -> Vec<Found> {
+    let found = unread
+        .iter()
+        .map(|(line, what)| {
+            let what = what.strip_prefix("builtins.").unwrap_or(what);
+            Found {
+                line: *line,
+                entry: what.to_string(),
+                name: None,
+                cause: Cause::Unread(what.to_string()),
+            }
+        })
+        .collect();
     sorted(found)
 }
 
@@ -369,10 +441,17 @@ fn remedy(layer: &str) -> &'static str {
     }
 }
 
-/// The findings for `found` in the file at `path`, whose text is `source` and whose layer is `layer`: one for each line
-/// and entry, with the names used on it, as a [`Forbidden`] of the entry. A line that uses an entry by a glob says that
-/// and not the names.
-pub fn findings(path: &str, source: &str, layer: &str, found: &[Found]) -> Vec<Forbidden> {
+/// The findings for `found` in the file at `path`, whose text is `source` and whose layer is `layer`, in a project of
+/// `language`: one for each line and entry, with the names used on it, as a [`Forbidden`] of the entry. A line that
+/// uses an entry by a glob says that and not the names, and one that does the act of a group says what to do about the
+/// act, with the example of the language.
+pub fn findings(
+    path: &str,
+    source: &str,
+    layer: &str,
+    language: Language,
+    found: &[Found],
+) -> Vec<Forbidden> {
     let mut lines: BTreeMap<(usize, &str), (BTreeSet<&str>, &Cause)> = BTreeMap::new();
     for one in found {
         let slot = lines
@@ -404,12 +483,34 @@ pub fn findings(path: &str, source: &str, layer: &str, found: &[Found]) -> Vec<F
                     "imports `{specifier}`: a scheme other than node: names what cannot be judged, so it fails in an \
                      inner layer"
                 ),
+                Cause::Group(group) => {
+                    format!("{}{used}, which does I/O (entry `{}`)", group.act(), group.key())
+                }
+                Cause::Module => format!(
+                    "uses the module `{entry}` as a value (an assignment, an argument, `getattr`): what is done through \
+                     it cannot be read, so use a name of it directly"
+                ),
+                Cause::Star(module) => format!(
+                    "a star import of `{module}`, which brings in names that do I/O: the names it brings in cannot be \
+                     read, so name them"
+                ),
+                Cause::Unread(what) => format!(
+                    "uses `{what}`: what it runs or imports cannot be read, so it fails in an inner layer"
+                ),
+                Cause::Method => format!(
+                    "calls `.{entry}(...)`, a method of a path that does I/O: a method is judged by its name on any \
+                     receiver, as the type of what it is called on cannot be read"
+                ),
+            };
+            let first = match cause {
+                Cause::Group(group) => group.remedy(layer, language),
+                _ => remedy(layer).to_string(),
             };
             let text = source.lines().nth(line - 1).unwrap_or("").trim();
             Forbidden {
                 file: path.to_string(),
                 import: entry.to_string(),
-                detail: format!("{path}:{line}: {}: {what}\n{text}", remedy(layer)),
+                detail: format!("{path}:{line}: {first}: {what}\n{text}"),
                 rule: Rule::InnerIo {
                     names: names.iter().map(|name| name.to_string()).collect(),
                 },
@@ -421,6 +522,7 @@ pub fn findings(path: &str, source: &str, layer: &str, found: &[Found]) -> Vec<F
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::code::First;
     use crate::layers::UnitTag;
 
     fn python(source_imports: &[(usize, &str)]) -> Vec<(usize, String, Option<String>)> {
@@ -428,7 +530,7 @@ mod tests {
             .iter()
             .map(|(line, name)| (*line, name.split('.').map(String::from).collect()))
             .collect();
-        in_python(&imports, &[])
+        in_python(&imports, &[], &[], &Excluded::default())
             .into_iter()
             .map(|f| (f.line, f.entry, f.name))
             .collect()
@@ -442,6 +544,7 @@ mod tests {
                 positional: 0,
                 keywords: Vec::new(),
                 unpacked: false,
+                first: First::Other,
             },
             in_type: false,
         }
@@ -565,6 +668,8 @@ mod tests {
                 called(4, "asyncio.sleep"),
                 called(5, "asyncio.start_unix_server"),
             ],
+            &[],
+            &Excluded::default(),
         );
         assert_eq!(
             found
@@ -593,6 +698,8 @@ mod tests {
                 typescript_use(7, "socket", How::Star),
                 typescript_use(8, "socket.socket", How::Value),
             ],
+            &[],
+            &Excluded::default(),
         );
         let said: Vec<(usize, &str, Option<&str>)> = found
             .iter()
@@ -979,7 +1086,7 @@ fn b() { std::fs::read(\"b\"); }
             found(3, "shutil", Some("rmtree"), Cause::Used),
             found(3, "shutil", Some("rmtree"), Cause::Used),
         ];
-        let findings = findings("domain/a.py", source, "domain", &found);
+        let findings = findings("domain/a.py", source, "domain", Language::Python, &found);
         assert_eq!(findings.len(), 3);
         assert_eq!(
             findings[1].detail,
@@ -994,7 +1101,13 @@ fn b() { std::fs::read(\"b\"); }
                 names: vec!["copyfile".into()]
             }
         );
-        let model = super::findings("ui/m.ts", source, "presentation", &found[..1]);
+        let model = super::findings(
+            "ui/m.ts",
+            source,
+            "presentation",
+            Language::TypeScript,
+            &found[..1],
+        );
         assert!(
             model[0].detail.starts_with(
                 "ui/m.ts:1: a screen's model does no I/O: it gets what it needs from its page"
@@ -1003,7 +1116,7 @@ fn b() { std::fs::read(\"b\"); }
             model[0].detail
         );
         for layer in ["protocol", "application"] {
-            let said = super::findings("x.py", source, layer, &found[..1]);
+            let said = super::findings("x.py", source, layer, Language::Python, &found[..1]);
             assert!(
                 said[0]
                     .detail
@@ -1020,6 +1133,7 @@ fn b() { std::fs::read(\"b\"); }
             "a.rs",
             source,
             "domain",
+            Language::Rust,
             &[
                 found(1, "std::fs", None, Cause::Glob("std::fs".into())),
                 found(2, "bun:", Some("x"), Cause::Scheme("bun:sqlite".into())),

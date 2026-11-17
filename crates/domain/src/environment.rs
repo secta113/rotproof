@@ -151,6 +151,18 @@ pub fn in_python(uses: &[Use]) -> Vec<(usize, String)> {
     found
 }
 
+/// Whether the environment check judges the Python name `name` (`os.getenv`, `os.path.expanduser`, `pathlib.Path.home`,
+/// and what goes on after them): the check of the I/O of the inner layers leaves it to it, so that no name is reported
+/// twice.
+pub fn owns_python(name: &str) -> bool {
+    counted(name).is_some()
+}
+
+/// Whether the environment check judges a star import of the Python module `module`.
+pub fn owns_python_star(module: &str) -> bool {
+    PYTHON_STAR_MODULES.contains(&module)
+}
+
 /// The part of a dotted name that reads the environment, when it starts with one: `os.environ` of `os.environ.get`.
 fn counted(name: &str) -> Option<String> {
     let parts: Vec<&str> = name.split('.').collect();
@@ -424,6 +436,7 @@ use std::env::{home_dir, temp_dir};
                 positional: 1,
                 keywords: Vec::new(),
                 unpacked: false,
+                first: crate::code::First::Other,
             },
         )
     }
