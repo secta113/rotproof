@@ -16,8 +16,10 @@ use super::templates::templates;
 use super::{Direction, entry_files, layer_files, misread, test_dirs};
 use crate::tree::{exactly, read_code, resolved};
 use domain::code::module_parts;
+use domain::declaration::Declared;
 use domain::direction::{Landing, Way, edge, imports_test, judged_landing, landing_of};
 use domain::layers::{Layout, Place, Table, table};
+use domain::outside::{asks, outside as outside_of};
 use domain::paths::{join, within};
 use domain::readers::read_of;
 use domain::units::Unit;
@@ -30,17 +32,19 @@ use protocol::outbound::Tree;
 pub(super) fn python<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
+    declared: &'a Declared,
     layout: &Layout,
     places: &[&'a Place],
     entries: &'a [Place],
-    units: &'a [Unit],
     moving: &mut Moving<'a>,
 ) -> io::Result<Direction> {
+    let units = &declared.units;
     let mut found = Vec::new();
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
     let mut reads = Vec::new();
     let mut links = Vec::new();
+    let mut outside = Vec::new();
     let package_files = package_files(tree, layout, &table(), units)?;
     let mut files = layer_files(tree, layout, places, |path| module_parts(path).join("/"))?;
     files.extend(entry_files(tree, entries));
@@ -76,6 +80,17 @@ pub(super) fn python<'a>(
                 ));
                 continue;
             }
+            // What an inner layer reads of the code that no check reads, which the direction check lets through
+            if asks(declared, from) {
+                outside.extend(outside_of(
+                    declared,
+                    from,
+                    &path,
+                    line,
+                    &dotted,
+                    &python_files(&at),
+                ));
+            }
             let Some(to) = landing_of(&at, places, units) else {
                 continue;
             };
@@ -105,6 +120,7 @@ pub(super) fn python<'a>(
         links,
         moving: None,
         templates,
+        outside,
     })
 }
 

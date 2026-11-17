@@ -15,6 +15,7 @@ use domain::direction::Rule;
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
 use domain::moving::Candidates;
+use domain::outside::Outside;
 use domain::project::MAP_HEADING;
 use domain::schema::Time;
 use domain::skill::{PATHS as SKILL_PATHS, SKILL};
@@ -88,6 +89,7 @@ fn code(
             .collect(),
         more: order.more,
     });
+    report.outside = direction.outside.iter().map(Outside::said).collect();
     report.templates = direction.templates.map(|premise| Templates {
         read_as: premise.read_as,
         not_judged: premise.not_judged,

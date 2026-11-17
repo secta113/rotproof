@@ -322,7 +322,8 @@ middle of a refactoring. It is no `unchecked`: `unchecked` is for code that is n
 files), and `moving` for code that is to go into the layers. It is written as `unchecked` is, from the root with `/`,
 and judged as it is: a path that holds or sits in a layer, that holds a unit, or that does not exist fails, and the code
 in it is judged by no check (not the direction, not the markers, not the structure). What `rotproof check` does with
-it is to count it and say which files to move first (see "The code that is moving"). `rotproof init` writes
+it is to count it and say which files to move first (see "The code that is moving"), and, as for `unchecked`, to list
+every import of it by the code of an inner layer (see "The inner layers do no I/O"). `rotproof init` writes
 `moving = []` into a declaration it makes, `rotproof create` adds it to none, and a Rotproof older than the one that
 brought it cannot read a declaration that holds it, as for `todo_link`. A repository with `stack = "none"` has no code
 to move, so `moving` must be empty there.
@@ -498,6 +499,25 @@ is judged by the name", after TypeScript's (`std::env`, the clocks, the methods 
   its page, through a hook in `ui.atoms`, or through a use case"). It names the line,
   the entry and the names used on it. Approving, renaming the import, or moving the code to a path in `unchecked` or
   `moving` is no fix, and the guide says so.
+- **What an inner layer reads of the code outside the layers is listed, and judged by no one.** The direction check
+  lets a layer import the code of its own unit that is in no layer (the paths of `unchecked` and `moving` are there),
+  and this check judges the file that imports it and not the file it imports, so the I/O of a helper moved to such a
+  path would be seen by none. `rotproof check` prints, on every run and apart from the findings, as it does the
+  approvals, every import by the code of `domain`, `protocol`, `application` or `presentation` (and their levels) of a
+  file in a path of `unchecked` or `moving`, in the order of the file and the line, and fails nothing for it:
+
+  ```text
+  inner layers read code outside the layers (not judged) (2):
+    domain/x.py:3 imports legacy.io_helper, in a path of moving
+    domain/x.py:4 imports scripts.tool, in a path of unchecked
+  ```
+
+  The import is named as the direction check names it (a dotted name in Python, a specifier in TypeScript, the
+  dependency in Rust, where the line is the line of the `Cargo.toml` that declares it), and the path is the one it lands
+  in as an import is resolved there. The list asks for nothing and approves nothing: it says where to look. Nothing is
+  printed when there is none, or when the declaration lists no path. An import of a path that holds or sits in a layer
+  (which switches nothing off), of a file that is in no listed path, and by `infrastructure`, `composition`, `ui`, the
+  entry file or a test, is not listed.
 - **Seen through every spelling the file binds an entry by.** In Python, an import is matched by its dotted name as a
   prefix of the entry: `urllib.request` is matched by `import urllib.request`, `import urllib.request as r`,
   `from urllib import request` and `from urllib.request import urlopen`, and not by `from urllib import parse`;
@@ -1623,7 +1643,8 @@ entry can be told, is one.
   and the layout's `react` for `presentation.models` in TypeScript): a package no list allows for the layer or level is
   a finding of its own under the same heading, approved by its file and the package, and a list that keeps a name no
   manifest lists or no file of its place imports fails (see "The inner layers do no I/O", "Packages"). In Rust the
-  `[dependencies]` of the crate of the layer is that list, and `allowed` fails.
+  `[dependencies]` of the crate of the layer is that list, and `allowed` fails. What these layers import of a path in
+  `unchecked` or `moving`, which no check judges, is listed on every run, apart from the findings, and fails nothing.
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
@@ -1787,8 +1808,21 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next (th
   when the project declares units (`domain of unit billing`). Only the places that are there are offered, and a file's
   imports of the other files that are moving are not counted: where those go is not known yet. Which of the layers
   that pass is the one is decided by what the code is for, and Rotproof never says it: that a file belongs to `domain`
-  or to `application` is for the person who moves it. Nor does it say that a file that does I/O belongs in
-  `infrastructure`: it names no module that does.
+  or to `application` is for the person who moves it.
+- **In Python and TypeScript, a place the check of the I/O of the inner layers judges is left out for a file that
+  would fail it there** (see "The inner layers do no I/O"): `domain`, `protocol`, `application` and `presentation`, and
+  their levels. The file is read by the same functions that read a file in those layers, as if it sat in the place:
+  an import of an entry of the table (`shutil`, `fs`), a name judged by its name (the allowlists of `os`, `sys`, `time`
+  and `logging`, the clock, randomness, the terminal, the arguments, `pathlib.Path`, a TypeScript global, a method of a
+  path unless the project defines a method of that name and number of parameters anywhere, a test and the code outside
+  the layers included), a star import and what cannot be read (`eval`, an import by a name built at run time) fail the
+  file in each of those places; a package that the `allowed` of the project and of the unit holding the file, and the
+  layout's, do not list for a place fails it in that place alone. The places that judge nothing (`infrastructure`,
+  `composition` and `ui`) are offered as before. A file left with no place, because a layer that may not import what
+  is left imports it, is told as none passing. Rotproof still never says that a file belongs in `infrastructure`, or in
+  `domain` or in `application`: it says where the check would pass it and, by what it sees of its I/O, where it would
+  not. What it does not see (a method on an object whose type cannot be known and whose name is no path's, a name an
+  object holds) narrows nothing, as in a layer.
 - **In Rust the files are counted and no order is given:** a layer is a crate, and what a crate imports is the
   dependencies of its manifest, which are no files' to order.
 

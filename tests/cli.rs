@@ -5531,6 +5531,154 @@ fn check_counts_the_rust_code_that_is_moving_and_names_none_to_move_first() {
 }
 
 #[test]
+fn check_leaves_out_of_the_layers_a_moving_file_could_go_in_those_the_io_check_would_fail_it_in() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let moving = |rest: &str| {
+        declare(
+            r,
+            &format!(
+                "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"legacy\"]\nfiles = \"{}\"\n{rest}",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+    };
+    let said = || {
+        stdout(&run(&["--root", &arg, "check"]))
+            .lines()
+            .filter(|line| line.starts_with("  legacy"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    write_file(r, "legacy/model.py", "import pydantic\n");
+    write_file(r, "legacy/store.py", "import shutil\n");
+    write_file(r, "legacy/pure.py", "import json\n");
+    moving("");
+    // The code that is moving is counted, and the check passes all the same
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // A file that imports a table entry, and one that imports a package no list allows, may not go in the four layers
+    // the check judges, and a file that does neither may go anywhere
+    let free = "infrastructure.outbound, infrastructure.inbound, composition";
+    assert_eq!(
+        said(),
+        format!(
+            "  legacy/model.py: {free}\n  legacy/pure.py: any layer\n  legacy/store.py: {free}"
+        )
+    );
+    // Allowed for `domain`, the package is no reason to leave it out of that layer
+    moving("[dependencies]\nallowed = { domain = [\"pydantic\"] }\n");
+    assert_eq!(
+        said(),
+        format!(
+            "  legacy/model.py: domain, {free}\n  legacy/pure.py: any layer\n  legacy/store.py: {free}"
+        )
+    );
+    // What reads it from a layer that may not import I/O leaves it no place at all, and the line says why
+    write_file(r, "domain/uses.py", "from legacy import store\n");
+    assert!(
+        said().contains(
+            "  legacy/store.py: no layer passes the direction check and the check of the I/O of the inner layers, \
+             for what it imports, what it does and what imports it"
+        ),
+        "{}",
+        said()
+    );
+}
+
+#[test]
+fn check_lists_what_the_inner_layers_import_of_code_outside_the_layers_and_fails_nothing() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    let declare_paths = |paths: &str| {
+        declare(
+            r,
+            &format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\n{paths}"),
+        )
+    };
+    let listed = || {
+        let out = run(&["--root", &arg, "check"]);
+        assert!(out.status.success(), "{}", stdout(&out));
+        stdout(&out)
+            .lines()
+            .skip_while(|line| !line.starts_with("inner layers read code outside the layers"))
+            .take_while(|line| line.starts_with("inner layers") || line.starts_with("  "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    write_file(r, "legacy/io_helper.py", "import shutil\n");
+    write_file(r, "scripts/tool.py", "");
+    write_file(
+        r,
+        "domain/x.py",
+        "import os\nfrom legacy import io_helper\nimport scripts.tool\n",
+    );
+    write_file(
+        r,
+        "infrastructure/outbound/y.py",
+        "import legacy.io_helper\n",
+    );
+    // Nothing is listed while no path is: the code outside the layers fails as code outside the layers does
+    declare_paths("");
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        !stdout(&out).contains("inner layers read code"),
+        "{}",
+        stdout(&out)
+    );
+    // Listed, the helper is not judged, and the import of it is named, apart from what fails
+    declare_paths("unchecked = [\"scripts\"]\nmoving = [\"legacy\"]\n");
+    assert_eq!(
+        listed(),
+        "inner layers read code outside the layers (not judged) (2):\n  \
+         domain/x.py:2 imports legacy.io_helper, in a path of moving\n  \
+         domain/x.py:3 imports scripts.tool, in a path of unchecked"
+    );
+    // Nothing is listed once no inner layer imports it
+    write_file(r, "domain/x.py", "import os\n");
+    assert_eq!(listed(), "");
+}
+
+#[test]
+fn check_lists_what_a_rust_inner_layer_depends_on_in_a_path_of_unchecked_or_moving() {
+    let root = declared("stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    write_file(
+        r,
+        "crates/legacy/Cargo.toml",
+        "[package]\nname = \"legacy\"\n",
+    );
+    write_file(r, "crates/legacy/src/lib.rs", "");
+    let manifest = fs::read_to_string(r.join("crates/domain/Cargo.toml")).unwrap();
+    fs::write(
+        r.join("crates/domain/Cargo.toml"),
+        format!("{manifest}\n[dependencies]\nlegacy = {{ path = \"../legacy\" }}\n"),
+    )
+    .unwrap();
+    declare(
+        r,
+        "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nmoving = [\"crates/legacy\"]\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains(
+            "inner layers read code outside the layers (not judged) (1):\n  \
+             crates/domain/Cargo.toml:"
+        ) && said.contains(" imports legacy, in a path of moving\n"),
+        "{said}"
+    );
+}
+
+#[test]
 fn only_the_projects_own_gitignore_hides_code() {
     // A .gitignore above the root belongs to another repository, or to no repository at all
     let outer = tempfile::tempdir().unwrap();

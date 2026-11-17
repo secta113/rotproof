@@ -27,6 +27,7 @@ pub mod markers;
 pub mod members;
 pub mod modules;
 pub mod moving;
+pub mod outside;
 pub mod paths;
 pub mod project;
 pub mod python_builtins;

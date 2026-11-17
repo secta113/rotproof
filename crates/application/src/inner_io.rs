@@ -18,6 +18,7 @@ use domain::inner_io::{
     python_excluded, rust_defined, rust_excluded, unread,
 };
 use domain::layers::{Language, Layout, Place};
+use domain::moving::Does;
 use domain::paths::{file_name, join, parent, within};
 use protocol::outbound::{Parsers, Tree};
 
@@ -194,6 +195,64 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
     judged.forbidden.sort_by(|a, b| a.file.cmp(&b.file));
     judged.problems.sort();
     Ok(judged)
+}
+
+/// What each of `files` does that this check fails in an inner layer, for the code that is moving into the layers: the
+/// same functions that judge a file of a layer, asked of a file that is in none, so that the layers it could go in are
+/// those that would pass it. Whether it does I/O is the one verdict of the three (the table, the names, what cannot be
+/// read) that no layer changes; the packages it imports are told apart, since a list allows them by place. Python and
+/// TypeScript only: a Rust file that is moving is counted and nothing is read of it. A file that cannot be read is left
+/// out, and so says nothing.
+pub(crate) fn of_files(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    declared: &Declared,
+    files: &[String],
+) -> io::Result<BTreeMap<String, Does>> {
+    let mut found = BTreeMap::new();
+    let Some(layout) = &declared.layout else {
+        return Ok(found);
+    };
+    if files.is_empty() || layout.language == Language::Rust {
+        return Ok(found);
+    }
+    // The methods the project defines are those of every file of it, the code that is moving included
+    let excluded = match layout.language {
+        Language::Python => python_excluded(&defined_in(tree, parsers, declared, layout, &[])?),
+        Language::TypeScript | Language::Rust => Excluded::default(),
+    };
+    let mut packages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for used in crate::dependencies::packages_of(tree, parsers, declared, files)? {
+        packages.entry(used.file).or_default().insert(used.package);
+    }
+    for path in files {
+        let Some(source) = read_code(tree, path, "I/O", &mut Vec::new())? else {
+            continue;
+        };
+        let does = match layout.language {
+            Language::Python => {
+                let read = parsers.python(&source, path);
+                let mut seen = in_python(&read.imports, &read.uses, &read.methods, &excluded);
+                seen.extend(unread(&read.unread));
+                !seen.is_empty()
+            }
+            Language::TypeScript => {
+                let read = parsers.typescript(&source, path);
+                let mut seen = in_typescript(&read.imports, &read.uses);
+                seen.extend(unread(&read.unread));
+                !seen.is_empty()
+            }
+            Language::Rust => continue,
+        };
+        found.insert(
+            path.clone(),
+            Does {
+                io: does,
+                packages: packages.remove(path).unwrap_or_default(),
+            },
+        );
+    }
+    Ok(found)
 }
 
 /// Every method a class of the project defines in a Python project, or an `impl` block or a trait in a Rust one: the

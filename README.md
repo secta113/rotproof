@@ -19,6 +19,11 @@ If LLM agents write the code of a repository, these are the things nobody has to
   are declared as units: every import between them is checked, so a part reaches another only through the layers that
   may be reached, and a shared part that collects what no one needs shows in a list that the diff displays (see
   "Units").
+- **The inner layers do no I/O.** `domain`, `protocol`, `application` and `presentation` import nothing that touches
+  files, the network, processes or the terminal, read no clock, randomness or command-line argument directly, and, in
+  Python and TypeScript, import only the packages the declaration allows them: the I/O is done in `infrastructure`,
+  behind a port (see
+  [The inner layers do no I/O](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-inner-layers-do-no-io)).
 - **A manifest lists what the code imports.** The `pyproject.toml` of a Python unit and the `package.json` of a
   TypeScript one are compared with its imports, without installing anything: a package imported and not listed
   fails, and so does a runtime dependency nothing imports, a crate's `[dependencies]` too in Rust, where Cargo
@@ -480,8 +485,8 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
 misses a tracked top-level path or a module of a crate in `crates/` (or names one that is gone), when
 `rust-toolchain.toml`, the `Dockerfile` and the CI workflow name different toolchain versions, and when
 `THIRD-PARTY-LICENSES.txt` does not list the crates the binary links (below), and when Rotproof's own crates break
-the rules of the Rust layout it keeps: a crate outside the layers, a dependency the table does not allow, or a marker
-in a comment of `crates/` or `xtask/`. On Windows the host needs Visual
+the rules of the Rust layout it keeps: a crate outside the layers, a dependency the table does not allow, I/O in
+`domain`, `protocol` or `application`, or a marker in a comment of `crates/` or `xtask/`. On Windows the host needs Visual
 Studio's C++ tools and the Windows SDK. Everything also runs in the container (`compose.yaml`), where the host needs
 only Docker: `docker compose run --rm dev cargo xtask ci`.
 

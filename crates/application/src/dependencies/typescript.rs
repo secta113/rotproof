@@ -27,7 +27,7 @@ use domain::code::{Aliases, Package, Reach, is_source};
 use domain::declaration::Declared;
 use domain::dependencies::typescript::{Specifier, specifier};
 use domain::dependencies::{Dep, Kind, Listing, judge};
-use domain::layers::{Language, Layout, Place};
+use domain::layers::{Language, Layout, Place, table};
 use domain::paths::{join, within};
 use domain::units::Unit;
 use protocol::outbound::{Parsers, Tree};
@@ -93,10 +93,11 @@ pub(super) fn typescript(
     declared: &Declared,
     layout: &Layout,
     places: &[&Place],
-    entries: &[Place],
+    moving: &[String],
     found: &mut Vec<String>,
 ) -> io::Result<Read> {
     let units = &declared.units;
+    let entries = declared.entries(&table());
     let directory_of = |unit: &Unit| {
         if unit.declared {
             unit.root.clone()
@@ -136,7 +137,7 @@ pub(super) fn typescript(
         .map(|(path, place)| (path, place.unit.name.clone()))
         .collect();
     files.extend(
-        entry_files(tree, entries)
+        entry_files(tree, &entries)
             .into_iter()
             .map(|(path, place)| (path, place.unit.name.clone())),
     );
@@ -199,9 +200,47 @@ pub(super) fn typescript(
             uses.entry(manifest.clone()).or_default().push(used);
         }
     }
+    // The files that are moving, for the packages they import alone: no manifest is compared with them, as none is with
+    // the code outside the layers
+    let mut moved: Vec<domain::dependencies::Use> = Vec::new();
+    for path in moving.iter().filter(|path| is_source(path)) {
+        let Some(unit) = units
+            .iter()
+            .filter(|unit| within(path, &unit.path))
+            .max_by_key(|unit| unit.path.len())
+            .or(units.first())
+        else {
+            continue;
+        };
+        let own = listings.get(&manifest_of(unit)).unwrap_or(&nothing);
+        let Some(source) = read_code(tree, path, "imports", &mut Vec::new())? else {
+            continue;
+        };
+        for (line, import) in parsers.typescript(&source, path).imports {
+            if let Needs::Package(package) = needs(
+                tree,
+                &aliases,
+                units,
+                own,
+                &directory_of(unit),
+                path,
+                &import.specifier,
+            ) {
+                moved.push(domain::dependencies::Use {
+                    file: path.clone(),
+                    line,
+                    shown: import.specifier,
+                    package,
+                    test: false,
+                    unit: None,
+                });
+            }
+        }
+    }
     let without = without_import(declared, Language::TypeScript);
     let mut read = Read {
         packages,
+        moving: moved,
         ..Read::default()
     };
     for (manifest, own) in &listings {

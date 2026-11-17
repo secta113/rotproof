@@ -7,8 +7,10 @@ use super::{Direction, entry_files, layer_files, misread};
 use crate::code::{is_test_module, lands, module_candidates};
 use crate::tree::{read_code, resolved};
 use domain::code::{Aliases, Reach, is_source, without_extension};
+use domain::declaration::Declared;
 use domain::direction::{Landing, Way, edge, imports_test, judged_landing, landing_of};
 use domain::layers::{Layout, Place};
+use domain::outside::{asks, outside as outside_of};
 use domain::paths::{join, parent, relative};
 use domain::readers::read_of;
 use domain::units::Unit;
@@ -24,16 +26,18 @@ use protocol::outbound::Tree;
 pub(super) fn typescript<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
+    declared: &'a Declared,
     layout: &Layout,
     places: &[&'a Place],
     entries: &'a [Place],
-    units: &'a [Unit],
     moving: &mut Moving<'a>,
 ) -> io::Result<Direction> {
+    let units = &declared.units;
     let mut forbidden = Vec::new();
     let mut edges = Vec::new();
     let mut reads = Vec::new();
     let mut links = Vec::new();
+    let mut outside = Vec::new();
     // The packages are the declared units': the implicit unit of a project that declares none is no package
     let roots: Vec<String> = units
         .iter()
@@ -104,6 +108,17 @@ pub(super) fn typescript<'a>(
                 ));
                 continue;
             }
+            // What an inner layer reads of the code that no check reads, which the direction check lets through
+            if asks(declared, from) {
+                outside.extend(outside_of(
+                    declared,
+                    from,
+                    &path,
+                    line,
+                    &specifier,
+                    &module_candidates(&target),
+                ));
+            }
             let Some(to) = landing_of(&target, places, units) else {
                 continue;
             };
@@ -137,6 +152,7 @@ pub(super) fn typescript<'a>(
         links,
         moving: None,
         templates: None,
+        outside,
     })
 }
 

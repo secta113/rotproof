@@ -1,6 +1,7 @@
 //! The code that is moving, read from the tree: the code files in the paths `moving` lists, and which of them import
-//! which. No finding comes of it: a file that cannot be read, or whose imports are misread, only leaves out what it
-//! would have said, since no check judges the code that is moving.
+//! which, and what each does that the check of the I/O of the inner layers fails. No finding comes of it: a file that
+//! cannot be read, or whose imports are misread, only leaves out what it would have said, since no check judges the
+//! code that is moving.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -9,8 +10,9 @@ use crate::tree::{code_files, exactly};
 use domain::code::is_source;
 use domain::declaration::Declared;
 use domain::direction::Landing;
+use domain::inner_io::Allowlist;
 use domain::layers::{Language, Layout, Place};
-use domain::moving::{File, Order, order};
+use domain::moving::{Does, File, Order, order};
 use domain::paths::{file_name, join, parent};
 use domain::rust::is_source as is_rust;
 use domain::units::Unit;
@@ -25,6 +27,8 @@ struct Read<'a> {
     /// The places of the files that import it that are in a layer, or are an entry file, by their unit and name: a
     /// place is named so, not held, as the file that is read is no longer than the loop that reads it
     readers: BTreeSet<(String, String)>,
+    /// What it does that the check of the I/O of the inner layers fails
+    does: Does,
 }
 
 /// The files of the paths `moving` lists, the imports among them, and what each imports of the layers and the layers
@@ -121,15 +125,26 @@ impl<'a> Moving<'a> {
         }
     }
 
+    /// Note what each file does, by its path: a file that is not here is read as one that does nothing.
+    pub(super) fn does(&mut self, found: BTreeMap<String, Does>) {
+        for (path, does) in found {
+            if let Some(read) = self.files.get_mut(&path) {
+                read.does = does;
+            }
+        }
+    }
+
     /// What to say of the files: `None` when the declaration lists no path. `read` is whether their imports were read:
     /// where they were not, they are counted and not put in an order. `places` and `entries` are what the readers of a
-    /// file are found among, and what it could be moved into.
+    /// file are found among, and what it could be moved into, and `allowed` is what the inner layers may import of the
+    /// packages.
     pub(super) fn order(
         &self,
         read: bool,
         places: &[&'a Place],
         entries: &'a [Place],
         units: &[Unit],
+        allowed: &Allowlist,
     ) -> Option<Order> {
         if !self.listed {
             return None;
@@ -155,9 +170,10 @@ impl<'a> Moving<'a> {
                             .find(|place| &place.unit.name == unit && &place.name == name)
                     })
                     .collect(),
+                does: read.does.clone(),
             })
             .collect();
-        Some(order(&files, places, units))
+        Some(order(&files, places, units, allowed))
     }
 }
 

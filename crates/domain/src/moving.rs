@@ -9,11 +9,12 @@
 //!   file in a layer or of a package outside the project is no wait.
 //! - **Files that import each other are one group.** Neither goes first: they are moved together, and shown together.
 //! - **Each file is given the layers it could go in,** those in which the direction check would pass it, from what it
-//!   imports of the layers and from what the layers import of it: the layers' rules decide it, never what the code is
-//!   about. Where a file may go among the layers that pass is for the person who moves it, as what a part means
-//!   (`domain` or `application`) is decided by reading it. Nothing here tells that a file that opens a socket is
-//!   `infrastructure`: that needs a table of the modules that do I/O, which is not built, and it would narrow the
-//!   layers given here (see `candidates`).
+//!   imports of the layers and from what the layers import of it, and, in Python and TypeScript, those in which the
+//!   check of the I/O of the inner layers would pass it ([`Does`]): the layers' rules decide it, never what the code is
+//!   about. A file that does I/O the check fails, or imports a package no list allows for a place, is not offered
+//!   `domain`, `protocol`, `application` or `presentation` there. Where a file may go among the layers that pass is for
+//!   the person who moves it, as what a part means (`domain` or `application`) is decided by reading it: Rotproof
+//!   narrows by the I/O it sees, and never says that a file belongs in one of the layers that pass (see `candidates`).
 //! - **No date is set,** and nothing fails: the count and the next files stay as long as the files do.
 //!
 //! The graph is built by `application`, which reads the code and resolves each import to a file or a place; the rules
@@ -22,12 +23,26 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::direction::{Landing, Verdict, Way, verdict};
+use crate::inner_io::{Allowlist, is_judged};
 use crate::layers::Place;
 use crate::paths::within;
 use crate::units::Unit;
 
 /// The most groups `rotproof check` names as next to move: the rest are counted
 pub const SHOWN: usize = 5;
+
+/// What the check of the I/O of the inner layers would find in a file, which no layer is judged by yet: whether it does
+/// I/O wherever it goes, and the packages it imports, which an inner layer may import only where `allowed` lists them.
+/// Python and TypeScript only: a Rust file that is moving is counted, and nothing is read of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Does {
+    /// An entry of the table, a name judged by its name (the lists of `os`, the clock, the terminal, `pathlib.Path`, a
+    /// global), a star import, or what cannot be read: what the check fails in the same file in any of the four layers
+    pub io: bool,
+    /// The packages it imports, as the language compares names (not another unit, the standard library, a builtin of
+    /// Node or a module of the project)
+    pub packages: BTreeSet<String>,
+}
 
 /// A file that is moving, what it imports, and who imports it.
 #[derive(Debug, Clone, Default)]
@@ -42,16 +57,18 @@ pub struct File<'a> {
     /// The places of the files in the layers (and the entry files) that import it: each one of them is judged when it
     /// is moved, as an import of the place it goes in
     pub readers: Vec<&'a Place>,
+    /// What it does that the check of the I/O of the inner layers fails
+    pub does: Does,
 }
 
 /// The layers a file could be moved into.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Candidates {
-    /// Every layer and level there is: what the file imports and what imports it say nothing against any
+    /// Every layer and level there is: what the file imports, what it does and what imports it say nothing against any
     Any,
     /// These alone, innermost first, as the findings name a place (`domain`, `infrastructure.outbound`, and `domain of
-    /// unit core` where the project declares units). None at all when empty: what it imports and what imports it
-    /// cannot both be satisfied by one place
+    /// unit core` where the project declares units). None at all when empty: what it imports, what it does and what
+    /// imports it cannot all be satisfied by one place
     Only(Vec<String>),
 }
 
@@ -88,8 +105,9 @@ impl Order {
 
 /// The files of `files` put in order: the groups that wait for no file still moving come first, and a file or group
 /// that waits for another comes only once that one is gone. Each file that is named has the layers it could go in,
-/// among `places` (those the project has, with the layers of every unit) and by the rules between `units`.
-pub fn order(files: &[File], places: &[&Place], units: &[Unit]) -> Order {
+/// among `places` (those the project has, with the layers of every unit), by the rules between `units` and by what
+/// `allowed` lists for the places of the inner layers.
+pub fn order(files: &[File], places: &[&Place], units: &[Unit], allowed: &Allowlist) -> Order {
     let groups = components(files);
     let needs: BTreeMap<&str, &BTreeSet<String>> = files
         .iter()
@@ -118,7 +136,7 @@ pub fn order(files: &[File], places: &[&Place], units: &[Unit]) -> Order {
                 .iter()
                 .map(|path| Next {
                     path: path.clone(),
-                    candidates: candidates(by_path[path.as_str()], places, units),
+                    candidates: candidates(by_path[path.as_str()], places, units, allowed),
                 })
                 .collect()
         })
@@ -137,10 +155,13 @@ pub fn order(files: &[File], places: &[&Place], units: &[Unit]) -> Order {
 /// from there, and every import of it by a file in a layer, as an import of there, passes the direction check. What
 /// the project's own rules say of an import between units applies as it does to any other.
 ///
-/// The one place for what a file's own imports say beyond the layers: a table of the modules that do I/O would remove
-/// here the layers that a file importing one cannot go in (`domain`, `protocol`, `application`), and nothing else here
-/// would change.
-fn candidates(file: &File, places: &[&Place], units: &[Unit]) -> Candidates {
+/// The one place for what a file does beyond what it imports of the layers: a file that does I/O the check of the
+/// inner layers fails (`does.io`) is not offered a place that check judges (`domain`, `protocol`, `application`,
+/// `presentation`, and their levels), nor is one that imports a package `allowed` does not list for that place and
+/// unit. That is the check's own verdict, asked of the file as if it were already in the place: nothing here reads
+/// what the code is about, and a file that opens a socket is not said to belong in `infrastructure`, only left out of
+/// the places that would fail it.
+fn candidates(file: &File, places: &[&Place], units: &[Unit], allowed: &Allowlist) -> Candidates {
     let home = units
         .iter()
         .filter(|unit| unit.path.is_empty() || within(&file.path, &unit.path))
@@ -150,7 +171,16 @@ fn candidates(file: &File, places: &[&Place], units: &[Unit]) -> Candidates {
         .filter(|place| home.is_none_or(|unit| place.unit.name == unit.name))
         .filter(|place| !places.iter().any(|other| other.is_level_of(place)))
         .collect();
-    let allowed = |place: &Place| {
+    let passes_io = |place: &Place| {
+        !is_judged(place)
+            || (!file.does.io
+                && file
+                    .does
+                    .packages
+                    .iter()
+                    .all(|package| allowed.allows(&place.unit.name, &place.name, package)))
+    };
+    let passes_direction = |place: &Place| {
         let imports = file
             .landings
             .iter()
@@ -164,7 +194,7 @@ fn candidates(file: &File, places: &[&Place], units: &[Unit]) -> Candidates {
     let passing: Vec<&&Place> = possible
         .iter()
         .copied()
-        .filter(|place| allowed(place))
+        .filter(|place| passes_direction(place) && passes_io(place))
         .collect();
     if !possible.is_empty() && passing.len() == possible.len() {
         return Candidates::Any;
@@ -275,7 +305,7 @@ mod tests {
 
     /// The order of files that import nothing of a layer, in a project with no layer to put them in.
     fn order_of(files: &[File]) -> Order {
-        order(files, &[], &[])
+        order(files, &[], &[], &Allowlist::default())
     }
 
     fn groups(order: &Order) -> Vec<Vec<&str>> {
@@ -391,7 +421,12 @@ mod tests {
             readers: readers.iter().map(|name| named(&places, name)).collect(),
             ..File::default()
         };
-        let order = order(&[file], &all, &[Unit::implicit(&layout, &[])]);
+        let order = order(
+            &[file],
+            &all,
+            &[Unit::implicit(&layout, &[])],
+            &Allowlist::default(),
+        );
         order.next[0][0].candidates.clone()
     }
 
@@ -460,7 +495,10 @@ mod tests {
             landings: vec![Landing::Place(named(&core, "domain"))],
             ..File::default()
         };
-        let only = |path: &str| match &order(&[file(path)], &all, &units).next[0][0].candidates {
+        let only = |path: &str| match &order(&[file(path)], &all, &units, &Allowlist::default())
+            .next[0][0]
+            .candidates
+        {
             Candidates::Only(names) => names.clone(),
             Candidates::Any => vec!["any".to_string()],
         };
@@ -479,5 +517,122 @@ mod tests {
         let nowhere = only("elsewhere/x.py");
         assert!(nowhere.contains(&"domain of unit billing".to_string()));
         assert!(nowhere.contains(&"domain of unit core".to_string()));
+    }
+
+    // What a file does
+
+    /// The places a file that imports nothing of a layer and is read by none, and `does` what it does, could go in, in
+    /// a Python project with no UI that declares `rest` after its first lines.
+    fn candidates_doing(does: Does, rest: &str) -> Candidates {
+        let declared = crate::declaration::Declared::new(
+            crate::declaration::parse_declaration(&format!(
+                "stack = \"python\"\nareas = []\nui = \"none\"\n{rest}"
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let layout = layout("python", "none").unwrap();
+        let places = layout.places(&table());
+        let all: Vec<&Place> = places.iter().collect();
+        let file = File {
+            path: "legacy/a.py".to_string(),
+            does,
+            ..File::default()
+        };
+        order(
+            &[file],
+            &all,
+            &[Unit::implicit(&layout, &[])],
+            &declared.allowed,
+        )
+        .next[0][0]
+            .candidates
+            .clone()
+    }
+
+    fn names(places: &[&str]) -> Candidates {
+        Candidates::Only(places.iter().map(|place| place.to_string()).collect())
+    }
+
+    #[test]
+    fn a_file_that_does_io_is_offered_no_layer_the_check_of_the_inner_layers_judges() {
+        let io = Does {
+            io: true,
+            ..Does::default()
+        };
+        // `infrastructure` does the I/O, `composition` wires: the check judges neither
+        assert_eq!(
+            candidates_doing(io, ""),
+            names(&[
+                "infrastructure.outbound",
+                "infrastructure.inbound",
+                "composition"
+            ])
+        );
+        assert_eq!(candidates_doing(Does::default(), ""), Candidates::Any);
+    }
+
+    #[test]
+    fn a_package_narrows_the_places_to_those_it_is_allowed_in_and_the_places_that_judge_nothing() {
+        let packages = |names: &[&str]| Does {
+            packages: names.iter().map(|name| name.to_string()).collect(),
+            ..Does::default()
+        };
+        // No list allows it anywhere, as in a project that declares none
+        assert_eq!(
+            candidates_doing(packages(&["requests"]), ""),
+            names(&[
+                "infrastructure.outbound",
+                "infrastructure.inbound",
+                "composition"
+            ])
+        );
+        // Allowed for `domain`: that place passes again, and `application` does not; a key of a layer covers its levels
+        let rest =
+            "[dependencies]\nallowed = { domain = [\"pydantic\"], protocol = [\"pydantic\"] }\n";
+        assert_eq!(
+            candidates_doing(packages(&["pydantic"]), rest),
+            names(&[
+                "domain",
+                "protocol.outbound",
+                "protocol.inbound",
+                "infrastructure.outbound",
+                "infrastructure.inbound",
+                "composition"
+            ])
+        );
+        // Every package it imports must be allowed in the place
+        assert_eq!(
+            candidates_doing(packages(&["pydantic", "requests"]), rest),
+            names(&[
+                "infrastructure.outbound",
+                "infrastructure.inbound",
+                "composition"
+            ])
+        );
+    }
+
+    #[test]
+    fn what_a_file_does_and_what_it_imports_of_the_layers_both_narrow_the_places() {
+        // It does I/O, and `domain` imports it: no place passes both
+        let layout = layout("python", "none").unwrap();
+        let places = layout.places(&table());
+        let all: Vec<&Place> = places.iter().collect();
+        let file = File {
+            path: "legacy/a.py".to_string(),
+            readers: vec![named(&places, "domain")],
+            does: Does {
+                io: true,
+                ..Does::default()
+            },
+            ..File::default()
+        };
+        let order = order(
+            &[file],
+            &all,
+            &[Unit::implicit(&layout, &[])],
+            &Allowlist::default(),
+        );
+        assert_eq!(order.next[0][0].candidates, names(&[]));
     }
 }

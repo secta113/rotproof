@@ -108,7 +108,12 @@ number or key of the issue that tracks the work, is not a finding: every one is 
 TODO`, as `path:line` and the reference, and fails nothing. Whether the issue exists or is open is not checked. With \
 paths in moving in the declaration (the project's code that is not in a layer yet, which no check reads), prints on \
 every run how many files are left and which to move next, those that import no other file still moving first, each \
-with the layers it could go in (where the direction check would pass it), and fails nothing for it. With ui = \
+with the layers it could go in (where the direction check would pass it, and, in Python and TypeScript, where the \
+check of the I/O of the inner layers would too: a file that does I/O it fails, or imports a package no list allows \
+there, is not offered domain, protocol, application or presentation), and fails nothing for it. With paths in \
+unchecked or moving, prints on every run, too, each import from the code of an inner layer into them, which no check \
+reads, so that the I/O hidden in a helper there is seen (inner layers read code outside the layers (not judged)), and \
+fails nothing for it. With ui = \
 rendered in Python, judges the references between templates ({% extends %}, {% include %}, {% import %} and {% from %} \
 with a literal name, a path from the directory ui of the unit) by the level each file is in, as imports are, and prints \
 on every run the template languages and versions it reads them as (templates:); where a unit's pyproject.toml asks for \
@@ -633,6 +638,11 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
             println!("{line}");
         }
     }
+    // What the inner layers read of the code no check reads, on every run: the I/O hidden in a helper there is seen by
+    // none, so the import of it is listed
+    for line in outside_lines(&report.outside) {
+        println!("{line}");
+    }
     // How the references between templates were read, on every run: what the check assumed is not for a reader to guess
     if let Some(templates) = &report.templates {
         for line in template_lines(templates) {
@@ -703,6 +713,20 @@ fn linked_lines(linked: &[LinkedTodo]) -> Vec<String> {
             .zip(linked)
             .map(|(place, todo)| format!("  {place:<width$}  {}", todo.reference)),
     );
+    lines
+}
+
+/// What `check` prints of the imports from an inner layer into a path of `unchecked` or `moving`: the heading with the
+/// count, then a line for each, indented by two spaces. Nothing when there are none. Nothing fails for them.
+fn outside_lines(outside: &[String]) -> Vec<String> {
+    if outside.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "inner layers read code outside the layers (not judged) ({}):",
+        outside.len()
+    )];
+    lines.extend(outside.iter().map(|line| format!("  {line}")));
     lines
 }
 
@@ -785,7 +809,8 @@ fn moving_file(file: &MovingFile) -> String {
     let layers = match &file.candidates {
         None => "any layer".to_string(),
         Some(places) if places.is_empty() => {
-            "no layer passes the direction check, for what it imports and what imports it"
+            "no layer passes the direction check and the check of the I/O of the inner layers, for what it imports, \
+             what it does and what imports it"
                 .to_string()
         }
         Some(places) => places.join(", "),

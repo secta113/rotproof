@@ -32,7 +32,7 @@ use domain::dependencies::python::{distribution_of, normalize};
 use domain::dependencies::{Kind, Listing, Problem, Use, judge};
 use domain::direction::{Landing, landing_of};
 use domain::layers::{Language, Layout, Place, table};
-use domain::paths::{join, parent};
+use domain::paths::{join, parent, within};
 use domain::python_stdlib::is_standard_library;
 use domain::units::Unit;
 use protocol::outbound::{Parsers, Tree};
@@ -135,10 +135,11 @@ pub(super) fn python(
     declared: &Declared,
     layout: &Layout,
     places: &[&Place],
-    entries: &[Place],
+    moving: &[String],
     found: &mut Vec<String>,
 ) -> io::Result<Read> {
     let units = &declared.units;
+    let entries = declared.entries(&table());
     let manifest_of = |unit: &Unit| {
         let dir = if unit.declared {
             unit.root.as_str()
@@ -189,7 +190,7 @@ pub(super) fn python(
     let mut files: Vec<File> = Vec::new();
     let package_files = package_files(tree, layout, &table(), units)?;
     let mut code = layer_files(tree, layout, places, |path| module_parts(path).join("/"))?;
-    code.extend(entry_files(tree, entries));
+    code.extend(entry_files(tree, &entries));
     code.extend(
         package_files
             .iter()
@@ -254,9 +255,38 @@ pub(super) fn python(
             uses.entry(manifest.clone()).or_default().push(used);
         }
     }
+    // The files that are moving, for the packages they import alone: no manifest is compared with them, as none is with
+    // the code outside the layers
+    let mut moved: Vec<Use> = Vec::new();
+    for path in moving {
+        let Some(unit) = units
+            .iter()
+            .filter(|unit| within(path, &unit.path))
+            .max_by_key(|unit| unit.path.len())
+            .or(units.first())
+        else {
+            continue;
+        };
+        let Some(source) = read_code(tree, path, "imports", &mut Vec::new())? else {
+            continue;
+        };
+        for (line, module) in parsers.python(&source, path).imports {
+            if let Needs::Package(package, _) = imports.needs(path, unit, &module) {
+                moved.push(Use {
+                    file: path.clone(),
+                    line,
+                    shown: module.join("."),
+                    package,
+                    test: false,
+                    unit: None,
+                });
+            }
+        }
+    }
     let without = without_import(declared, Language::Python);
     let mut read = Read {
         packages,
+        moving: moved,
         ..Read::default()
     };
     let mut venvs = Venvs::new(tree);

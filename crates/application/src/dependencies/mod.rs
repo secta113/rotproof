@@ -38,6 +38,9 @@ struct Read {
     /// check reads, tests included, whether or not the unit has a manifest: Python and TypeScript, and none in Rust,
     /// whose crates are not told from the paths that name them
     packages: Vec<Use>,
+    /// Every import of a package in the files that are moving, which the check reads for nothing else: they are no part
+    /// of what the manifests are compared with. Only for the files `read_all` was asked for
+    moving: Vec<Use>,
 }
 
 /// The packages the code of a project imports, and what its manifests list: what the allowlist of the inner layers
@@ -59,12 +62,25 @@ pub fn packages(
     parsers: &dyn Parsers,
     declared: &Declared,
 ) -> io::Result<Packages> {
-    let read = read_all(tree, parsers, declared, &mut Vec::new())?;
+    let read = read_all(tree, parsers, declared, &[], &mut Vec::new())?;
     Ok(Packages {
         manifests: read.any,
         listed: read.listed,
         uses: read.packages,
     })
+}
+
+/// Every import of a package, as the check reads one, in each of the code files `files` that are moving into the
+/// layers (`moving` in the declaration): the packages they need as the code of a layer would, by the unit whose
+/// directory holds each file. They are compared with no manifest, as the code of no layer is. Python and TypeScript
+/// only.
+pub fn packages_of(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    declared: &Declared,
+    files: &[String],
+) -> io::Result<Vec<Use>> {
+    Ok(read_all(tree, parsers, declared, files, &mut Vec::new())?.moving)
 }
 
 /// Every finding of the dependencies check of `declared`, in the order of the manifests. An error is a file that
@@ -79,7 +95,7 @@ pub fn problems(
         return Ok(Vec::new());
     };
     let mut found = Vec::new();
-    let read = read_all(tree, parsers, declared, &mut found)?;
+    let read = read_all(tree, parsers, declared, &[], &mut found)?;
     if read.any {
         for name in
             domain::dependencies::stale(&without_import(declared, layout.language), &read.runtime)
@@ -95,26 +111,27 @@ pub fn problems(
 }
 
 /// The manifests and the code of `declared` read by the reader of its language, the findings of the comparison into
-/// `found`.
+/// `found`, and the imports of a package in the `moving` files that are asked for.
 fn read_all(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     declared: &Declared,
+    moving: &[String],
     found: &mut Vec<String>,
 ) -> io::Result<Read> {
     let Some(layout) = &declared.layout else {
         return Ok(Read::default());
     };
     let places = present_places(tree, declared);
-    let entries = declared.entries(&table());
     match layout.language {
-        Language::Python => {
-            python::python(tree, parsers, declared, layout, &places, &entries, found)
-        }
+        Language::Python => python::python(tree, parsers, declared, layout, &places, moving, found),
         Language::TypeScript => {
-            typescript::typescript(tree, parsers, declared, layout, &places, &entries, found)
+            typescript::typescript(tree, parsers, declared, layout, &places, moving, found)
         }
-        Language::Rust => rust::rust(tree, parsers, declared, layout, &places, &entries, found),
+        Language::Rust => {
+            let entries = declared.entries(&table());
+            rust::rust(tree, parsers, declared, layout, &places, &entries, found)
+        }
     }
 }
 
