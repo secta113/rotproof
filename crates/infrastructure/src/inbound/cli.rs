@@ -156,8 +156,13 @@ enum Command {
     /// until it is moved. Crossing 1.0.0-rc.3, which splits the UI into the view (ui) and the state of the screens
     /// (presentation) and declares the UI, the refresh adds ui to the declaration ("atomic" when ui/ is there, "none"
     /// otherwise), and it says to make presentation, what moves out of ui, and to take ui out of absent once ui is
-    /// "none", and moves no code either. Exits 2 too for an unknown stack or UI, a stack or UI other than the declared
-    /// one, or a file that cannot be read or written.
+    /// "none", and moves no code either. Crossing 2.0.0-rc.2, from which a Python project is locked, it says what to
+    /// list in pyproject.toml, to lock and to change in CI, and edits none of those files. In a project that declares
+    /// units and has no knowledge document that follows them, it drafts docs/knowledge/units.md once, or says why it
+    /// cannot (no area to tag it with). When
+    /// the map under `## Map` in the project's own AGENTS.md lacks a layer that is there or names one declared absent,
+    /// it says so in a note and leaves the file as it is. Exits 2 too for an unknown stack or UI, a stack or UI other
+    /// than the declared one, or a file that cannot be read or written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
         #[arg(long)]
