@@ -2172,6 +2172,122 @@ fn each_python_form_that_reads_the_environment_fails_alone_and_a_shadowed_name_d
     }
 }
 
+#[test]
+fn each_typescript_form_that_reads_the_environment_fails_alone_and_a_shadowed_name_does_not() {
+    let root = typescript_with_vitest();
+    let r = root.path();
+    // (what the file holds, what the check names)
+    let forbidden = [
+        (
+            "export const x = process.env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "export const x = process['env'].A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "export const x = globalThis.process.env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "export const x = window.process.env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "export const x = (self as any).process.env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "const { env } = process;\nexport const x = env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "const { env: e } = globalThis.process;\nexport const x = e.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "import { env } from 'node:process';\nexport const x = env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "import proc from 'process';\nexport const x = proc.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "import * as proc from 'node:process';\nexport const x = proc.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "export const x = import.meta.env.VITE_A;\n",
+            "src/domain/x.ts:1: import.meta.env",
+        ),
+        (
+            "export const x = import.meta.env;\n",
+            "src/domain/x.ts:1: import.meta.env",
+        ),
+        (
+            "const { MODE, VITE_A } = import.meta.env;\nexport const x = VITE_A;\n",
+            "src/domain/x.ts:1: import.meta.env",
+        ),
+        // A name that a function binds does not hide the use outside it
+        (
+            "export const a = (process: any) => process.env;\nexport const x = process.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        // What `require` and `import()` with a literal bind is the module, as an import's
+        (
+            "const process = require('process');\nexport const x = process.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "const p = require('node:process');\nexport const x = p.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "const { env } = require('node:process');\nexport const x = env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+        (
+            "const p = await import('process');\nexport const x = p.env.A;\n",
+            "src/domain/x.ts:2: process.env",
+        ),
+        (
+            "const { env } = await import('node:process');\nexport const x = env.A;\n",
+            "src/domain/x.ts:1: process.env",
+        ),
+    ];
+    for (source, named) in forbidden {
+        put(r, "src/domain/x.ts", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{source}\n{said}");
+        assert!(said.contains(&format!("\n  {named}")), "{source}\n{said}");
+    }
+    // A name the file binds is not the global, and what reads nothing from the environment passes
+    let allowed = [
+        "const p = require('path');\nexport const x = p.join('a', 'b');\n",
+        "export function f(require: any) { const process = require('process'); return process.env.A; }\n",
+        "const p = require('path');\nexport const x = p.env.A;\n",
+        "export function f(process: any) { return process.env.A; }\n",
+        "export function f() { const process = { env: {} as any }; return process.env.A; }\n",
+        "export const f = (process: { env: string }) => process.env;\n",
+        "export function f() { try { return 1; } catch (process: any) { return process.env; } }\n",
+        "export const x = [1].map((process) => process.toString());\n",
+        "export type E = typeof process.env;\n",
+        "export const x = process.argv;\n",
+        "import { argv } from 'node:process';\nexport const x = argv;\n",
+        "export const x = import.meta.env.DEV && import.meta.env.MODE;\n",
+        "const { DEV, PROD } = import.meta.env;\nexport const x = DEV || PROD;\n",
+        "const config = { env: 'dev' };\nexport const x = config.env;\n",
+    ];
+    for source in allowed {
+        put(r, "src/domain/x.ts", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        assert!(out.status.success(), "{source}\n{}", stdout(&out));
+    }
+}
+
 /// The `package.json` of a TypeScript project that lists `vitest` for development and `react` to run.
 const VITEST_PACKAGE: &str = "{\n  \"name\": \"shop\",\n  \"dependencies\": { \"react\": \"^18\" },\n  \
                               \"devDependencies\": { \"vitest\": \"^2\", \"@types/node\": \"^22\" }\n}\n";

@@ -5,7 +5,7 @@ use std::io;
 
 use crate::tree::{code_files, is_file, read_code};
 use domain::declaration::Declared;
-use domain::environment::{BUILD_SCRIPT, finding, in_python, in_rust, is_judged};
+use domain::environment::{BUILD_SCRIPT, finding, in_python, in_rust, in_typescript, is_judged};
 use domain::layers::{Language, table};
 use domain::paths::join;
 use protocol::outbound::Parsers;
@@ -53,7 +53,7 @@ pub fn problems(
         };
         let reads = match layout.language {
             Language::Python => in_python(&parsers.python(&source, &path).uses),
-            Language::TypeScript => parsers.typescript(&source, &path).environment,
+            Language::TypeScript => in_typescript(&parsers.typescript(&source, &path).uses),
             Language::Rust => in_rust(&source),
         };
         found.extend(
@@ -75,7 +75,7 @@ mod tests {
     }
 
     fn typescript(source: &str) -> Vec<(usize, String)> {
-        Readers.typescript(source, "src/domain/a.ts").environment
+        in_typescript(&Readers.typescript(source, "src/domain/a.ts").uses)
     }
 
     #[test]
@@ -304,6 +304,102 @@ const f = process['env'];
                 (8, "process.env".into()),
             ]
         );
+    }
+
+    #[test]
+    fn typescript_reads_through_the_global_object_and_a_cast_are_found() {
+        let source = "\
+const a = window.process.env.A;
+const b = self['process']['env'].B;
+const c = (globalThis as any).process.env.C;
+const d = (<any>global).process?.env!.D;
+const { env: { E } } = process;
+import * as p from 'node:process';
+const f = p.env.F;
+import { env as g } from 'process';
+const h = g.H;
+";
+        assert_eq!(
+            typescript(source),
+            [
+                (1, "process.env".to_string()),
+                (2, "process.env".into()),
+                (3, "process.env".into()),
+                (4, "process.env".into()),
+                (5, "process.env".into()),
+                (7, "process.env".into()),
+                (8, "process.env".into()),
+                (9, "process.env".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn typescript_reads_through_a_name_require_or_a_dynamic_import_binds() {
+        let source = "\
+const process = require('process');
+const a = process.env.A;
+const { env } = require('node:process');
+const b = env.B;
+const m = await import('node:process');
+const c = m.env.C;
+const d = (await import('process')).default.env.D; // not a declaration: not followed
+function f() { const p = require('node:process'); return p.env.E; }
+const x = require('path');
+const g = x.env.G;
+";
+        assert_eq!(
+            typescript(source),
+            [
+                (2, "process.env".to_string()),
+                (3, "process.env".into()),
+                (4, "process.env".into()),
+                (6, "process.env".into()),
+                (8, "process.env".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_name_the_file_binds_is_not_the_global_and_a_use_outside_its_scope_is() {
+        let source = "\
+function a(process) { return process.env.A; }
+function b() { const process = { env: {} }; return process.env.B; }
+const c = (process) => process.env.C;
+try { a(); } catch (process) { process.env.D; }
+{ const process = { env: {} }; process.env.E; }
+const f = process.env.F;
+class G { m(process) { return process.env.G; } }
+type T = typeof process.env;
+";
+        // Only the use in the module's own scope is the global
+        assert_eq!(typescript(source), [(6, "process.env".to_string())]);
+    }
+
+    #[test]
+    fn a_process_the_module_binds_hides_the_global_everywhere_in_the_module() {
+        let source = "\
+function a() { return process.env.A; }
+const process = { env: {} };
+";
+        assert!(typescript(source).is_empty());
+        let source = "\
+import process from 'node:process';
+function a(process) { return process.env.A; }
+function b() { return process.env.B; }
+";
+        assert_eq!(typescript(source), [(3, "process.env".to_string())]);
+    }
+
+    #[test]
+    fn what_a_file_computes_is_not_seen() {
+        let source = "\
+const a = globalThis['pro' + 'cess'].env.A;
+const b = eval('process.env.B');
+const key = 'env';
+const c = process[key];
+";
+        assert!(typescript(source).is_empty());
     }
 
     #[test]

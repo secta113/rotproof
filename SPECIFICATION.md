@@ -1175,8 +1175,9 @@ entry can be told, is one.
   `home_dir` and `temp_dir` in Rust. Each is found through an alias the file binds too (`import os as o`,
   `from os import getenv as g`, `import os.path as p` then `p.expanduser`, `from pathlib import Path` then
   `Path.home()`, `import { env } from "node:process"`, `const { env } = process`, `use std::env;` then `env::var`,
-  `use std::env as e;` then `e::var`, `use std as s;` then `s::env::var`, `::std::env::var`), and in Python at the
-  import (`from os import getenv`) and at each line that then uses the name. A star import of a module whose names
+  `use std::env as e;` then `e::var`, `use std as s;` then `s::env::var`, `::std::env::var`), and in Python and
+  TypeScript at the import (`from os import getenv`, `import { env } from "node:process"`) and at each line that then
+  uses the name. A star import of a module whose names
   count fails too, as the names it brings in cannot be read, so name them: in Python `from os import *`,
   `from os.path import *` (also `posixpath`, `ntpath`, `genericpath`) and `from pathlib import *`, in Rust a glob of
   `std::env` or of `std` (`use std::env::*;`, `use std::*;`, then `use std::env::var;`). Python's names are read as
@@ -1184,14 +1185,37 @@ entry can be told, is one.
   is bound in at all, by assignment, parameter, `def`, `class`, `import`, `for`, `with`, `except ... as`, `match`,
   `:=`, `del`, `global` and `nonlocal`): a parameter or a variable that is called `os` is not the module, and
   `os.getenv` through it passes, as an `import os` in one function does not bind `os` in another; an import under
-  `if TYPE_CHECKING:` is an import as any. Not judged: the command line (`sys.argv`, `std::env::args`), `env!`,
-  `option_env!` and a crate's `build.rs` (read when Rust compiles), the values of `import.meta.env` Vite sets itself
-  (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time (`getattr(os, "environ")`), in Python a name
-  bound through an assignment (`o = os`, then `o.environ`), a method of an object (`Path("~").expanduser()`, which
-  needs the type of what it is called on), a name a star import of another module brings in and a name in a string
-  annotation, in Rust a name bound in one file and used through another (`pub use std::env;` in one module,
-  `reexport::env::var` in the next) and a path a macro builds from pieces, and the code outside the layers (`tests/` in
-  Python) and the tests (in TypeScript, the files named `*.test.*` or `*.spec.*`, or in `__tests__/`: see "Tests").
+  `if TYPE_CHECKING:` is an import as any. TypeScript's names are read as the language's scopes read them (a
+  parameter, a `var` hoisted to its function, a `let` or `const` of its block, a `catch` binding, a function or class
+  name, an import, and a name the file `declare`s): a `process` that a function, a block or the module binds is not the
+  global, and `process.env` through it passes, while the `process.env` outside that scope is read. What the global
+  object holds is the global, so `window.process.env`, `globalThis.process.env`, `self.process.env` and
+  `global.process.env` read as `process.env`, also through parentheses, a cast (`(globalThis as any).process.env`),
+  `!`, optional chaining and a literal in brackets (`process["env"]`, `window["process"].env`). `process` imported from
+  `process` or `node:process`, by default or as a namespace, is the global, and so is `env` imported from them, which
+  is also read at the import. What `require` and `import()` with a literal string bind is read as an import binds it,
+  wherever the declaration is: a `const`, `let` or `var` whose initializer is exactly the call, optionally awaited (in
+  parentheses or not), cast and followed by `.default`, binds the namespace (`const process = require("process")`,
+  `const p = await import("node:process")`, then `p.env`), and a destructuring binds the names it takes, each read at
+  its key as a named import is (`const { env } = require("process")`), only when `require` is the global one; a
+  `require` or `import()` of what is no literal is not seen. `const { env } = process`, `const { env: e } = globalThis.process` and `const { env: { A }
+  } = process` take it apart; `import.meta.env` is read whole (`const all = import.meta.env`), by a member
+  (`import.meta.env.VITE_URL`) and by a destructuring that takes a name Vite does not set itself or a rest element. A
+  type position (`type T = typeof process.env`) is not a read, and neither is `import type`. Not judged: the command
+  line (`sys.argv`, `std::env::args`), `env!`, `option_env!` and a crate's `build.rs` (read when Rust compiles), the
+  values of `import.meta.env` Vite sets itself (`DEV`, `PROD`, `MODE`, `BASE_URL`, `SSR`), what is built at run time
+  (`getattr(os, "environ")`, `process[key]`, `globalThis["pro" + "cess"]`, `eval`), in Python and TypeScript a name
+  bound through an assignment (`o = os`, then `o.environ`; `const p = process`, then `p.env`; `const { process } =
+  globalThis`, then `process.env`) and, in TypeScript, a `require` or `import()` that is no declarator's whole
+  initializer (`wrap(require("process"))`, `require("process").env.A`, `(await import("process")).env.A`) and a name
+  assigned after it is bound (`let p = require("path"); p = process`, which stays the module), a destructuring that is
+  an assignment (`({ env } = process)`) or a parameter's
+  default (`function f({ env } = process)`), and `export { env } from "node:process"`; a method of an object
+  (`Path("~").expanduser()`, which needs the type of what it is called on), a name a star import of another module
+  brings in and a name in a string annotation, in Rust a name bound in one file and used through another (`pub use
+  std::env;` in one module, `reexport::env::var` in the next) and a path a macro builds from pieces, and the code
+  outside the layers (`tests/` in Python) and the tests (in TypeScript, the files named `*.test.*` or `*.spec.*`, or in
+  `__tests__/`: see "Tests").
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an

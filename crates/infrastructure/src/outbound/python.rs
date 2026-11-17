@@ -62,7 +62,6 @@ pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
         uses: read.uses,
         unread: read.unread,
         error,
-        ..Source::default()
     }
 }
 

@@ -17,17 +17,18 @@
 //!   `use std::env;` then `env::var`, `use std::env as e;` then `e::var`, `use std as s;` then `s::env::var`, or
 //!   from `::std::env::var`). A glob of `std::env` or of `std` (`use std::env::*;`) brings in names the scanner cannot
 //!   tell, so it fails as a read does; so does a star import in Python of a module whose names count (`from os import
-//!   *`). In Python the name is the one the lexical scopes of the file give it ([`crate::code::Use`]): a parameter or
-//!   a variable called `os` is not the module. What is built at run time is not seen (`getattr(os, "environ")`), as
-//!   the direction check does not see an import built at run time.
+//!   *`). In Python and in TypeScript the name is the one the scopes of the file give it ([`crate::code::Use`]): a
+//!   parameter or a variable called `os` or `process` is not the module or the global. What is built at run time is
+//!   not seen (`getattr(os, "environ")`, `globalThis["pro" + "cess"]`), as the direction check does not see an import
+//!   built at run time.
 //! - **Where:** the code of every layer but `infrastructure`, and the entry file; not `tests/` or another path that is
 //!   no layer, and not a test beside the code, which a TypeScript layout tells by its name (`*.test.*`, `__tests__/`):
 //!   a test is no code of a layer.
 //!
-//! TypeScript is read by its reader, which finds the forms above in the syntax tree (`Source::environment`); Python
-//! by its reader of uses ([`in_python`] judges them); Rust by Rotproof's own scanner, here.
+//! Python and TypeScript are read by their readers of uses ([`in_python`] and [`in_typescript`] judge them); Rust by
+//! Rotproof's own scanner, here.
 
-use crate::code::{How, Use};
+use crate::code::{How, Use, split_typescript_name};
 use crate::layers::{Language, Place};
 use crate::rust::{Item, code, items};
 use crate::text::line_of;
@@ -79,6 +80,9 @@ const PYTHON_STAR_MODULES: [&str; 6] = [
     "genericpath",
     "pathlib",
 ];
+
+/// The modules whose default export or namespace is Node's `process`, and whose `env` is its `env`.
+const TYPESCRIPT_PROCESS: [&str; 2] = ["process", "node:process"];
 
 /// The file Cargo runs before it compiles a crate, from the crate's root.
 pub const BUILD_SCRIPT: &str = "build.rs";
@@ -170,6 +174,42 @@ fn counted(name: &str) -> Option<String> {
         return Some(parts[..3].join("."));
     }
     None
+}
+
+/// Every read or write of the environment in a TypeScript or JavaScript file, from its uses: the line, and
+/// `process.env` or `import.meta.env`, whichever the name starts with, however it is reached: `process.env.X` (the
+/// global, through `window`, `globalThis`, `self` and `global` too), `process` imported from `process` or
+/// `node:process` by default or as a namespace, `env` imported from them (at the import and at each use of the name),
+/// `const { env } = process`, and `import.meta.env` but for the values Vite sets itself ([`VITE_OWN`]). A name the file
+/// binds is not the global. Two findings of one line that say the same are one (`const { A, B } = process.env`).
+pub fn in_typescript(uses: &[Use]) -> Vec<(usize, String)> {
+    let mut found: Vec<(usize, String)> = uses
+        .iter()
+        .filter_map(|used| Some((used.line, counted_in_typescript(&used.name)?)))
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// The part of a TypeScript use's name that reads the environment, when it starts with one.
+fn counted_in_typescript(name: &str) -> Option<String> {
+    let (module, parts) = split_typescript_name(name);
+    let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+    match module.as_deref() {
+        // The default export of `process` is the object, as its namespace is
+        Some(module) if TYPESCRIPT_PROCESS.contains(&module) => {
+            let parts = parts.strip_prefix(&["default"]).unwrap_or(&parts);
+            (parts.first() == Some(&"env")).then(|| "process.env".to_string())
+        }
+        Some(_) => None,
+        None => match parts.as_slice() {
+            ["process", "env", ..] => Some("process.env".to_string()),
+            ["import", "meta", "env", own, ..] if VITE_OWN.contains(own) => None,
+            ["import", "meta", "env", ..] => Some("import.meta.env".to_string()),
+            _ => None,
+        },
+    }
 }
 
 /// Every read or write of the environment in a Rust source: the line, and the path it names (`std::env::var`), or the
@@ -463,6 +503,68 @@ use std::env::{home_dir, temp_dir};
         assert!(found[0].1.starts_with("os.*"));
         assert!(found[1].1.starts_with("os.path.*"));
         assert!(found[0].1.contains("cannot be read") && found[0].1.contains("name them"));
+    }
+
+    #[test]
+    fn a_typescript_use_counts_by_the_name_it_starts_with() {
+        let uses = [
+            called(1, "process.env.get"),
+            used(2, "process.env", How::Value),
+            used(3, "\"node:process\".env", How::Imported),
+            used(4, "\"process\".default.env.A", How::Value),
+            used(5, "\"process\".env", How::Value),
+            used(6, "import.meta.env.VITE_A", How::Value),
+            used(7, "import.meta.env", How::Value),
+            used(8, "import.meta.env.DEV", How::TypeOf),
+            used(9, "process.env", How::TypeOf),
+        ];
+        assert_eq!(
+            in_typescript(&uses),
+            [
+                (1, "process.env".to_string()),
+                (2, "process.env".into()),
+                (3, "process.env".into()),
+                (4, "process.env".into()),
+                (5, "process.env".into()),
+                (6, "import.meta.env".into()),
+                (7, "import.meta.env".into()),
+                (9, "process.env".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn what_is_no_environment_variable_passes_in_typescript() {
+        let uses = [
+            used(1, "process.argv", How::Value),
+            used(2, "process", How::Value),
+            used(3, "\"node:process\".argv", How::Imported),
+            used(4, "\"node:process\".default", How::Imported),
+            used(5, "\"fs\".env", How::Value),
+            used(6, "\"other\".process.env", How::Value),
+            used(7, "import.meta.env.DEV", How::Value),
+            used(8, "import.meta.env.BASE_URL", How::Value),
+            used(9, "import.meta.url", How::Value),
+            used(10, "config.env", How::Value),
+            used(11, "[\"env\"]", How::Value),
+        ];
+        assert!(in_typescript(&uses).is_empty());
+    }
+
+    #[test]
+    fn two_findings_of_one_line_that_say_the_same_are_one() {
+        let uses = [
+            used(1, "process.env.A", How::Value),
+            used(1, "process.env.B", How::Value),
+            used(1, "import.meta.env.C", How::Value),
+        ];
+        assert_eq!(
+            in_typescript(&uses),
+            [
+                (1, "import.meta.env".to_string()),
+                (1, "process.env".into())
+            ]
+        );
     }
 
     #[test]

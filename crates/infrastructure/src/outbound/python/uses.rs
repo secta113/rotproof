@@ -685,6 +685,9 @@ mod tests {
                 format!("call {positional}{keywords}{unpacked}")
             }
             How::Value => "value".into(),
+            How::Constructed { .. } | How::TypeOf => {
+                unreachable!("only TypeScript's reader gives these")
+            }
         };
         let place = if used.in_type { " type" } else { "" };
         format!("{}:{}:{how}{place}", used.line, used.name)
