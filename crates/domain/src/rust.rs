@@ -459,6 +459,97 @@ pub fn attributes(code: &str, name: &str) -> Vec<usize> {
     out
 }
 
+/// The end of the item that starts at `start` in the code alone ([`code`]): past the `}` that closes its first `{`, or
+/// past the `;` that ends it before any `{`, a `;` inside parentheses or brackets (`[u8; 4]`) not counted. An item left
+/// open runs to the end.
+pub fn item_end(code: &str, start: usize) -> usize {
+    let b = code.as_bytes();
+    let (mut depth, mut nested) = (0usize, 0usize);
+    for (i, &c) in b.iter().enumerate().skip(start) {
+        match c {
+            b'(' | b'[' => nested += 1,
+            b')' | b']' => nested = nested.saturating_sub(1),
+            b';' if depth == 0 && nested == 0 => return i + 1,
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    b.len()
+}
+
+/// The text a test item is marked with: the one form `rustfmt` writes. `cfg(all(test, ...))` and `cfg(any(test, ...))`
+/// are not read as tests.
+const CFG_TEST: &str = "#[cfg(test)]";
+
+/// The code alone ([`code`]) with every item under `#[cfg(test)]` blanked with spaces, its line breaks kept (`mod
+/// tests { ... }`, a function, a `use`, a `mod tests;`), and the whole of it for a file that starts with
+/// `#![cfg(test)]`: what a test compiles and the program does not. The same offsets and lines as `code`.
+pub fn without_tests(code: &str) -> String {
+    if code.contains("#![cfg(test)]") {
+        return blanked(code, &[(0, code.len())]);
+    }
+    let skipped: Vec<(usize, usize)> = code
+        .match_indices(CFG_TEST)
+        .map(|(at, _)| (at, item_end(code, at)))
+        .collect();
+    blanked(code, &skipped)
+}
+
+/// The names of the modules a file declares without a body under `#[cfg(test)]` (`#[cfg(test)] mod tests;`), whose
+/// files are tests.
+pub fn test_modules(code: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for (at, _) in code.match_indices(CFG_TEST) {
+        let end = item_end(code, at);
+        let tokens = tokens(&code[at + CFG_TEST.len()..end]);
+        // The depth of each token: a module inside one that has a body is that body's, not this file's
+        let mut depth = 0usize;
+        let depths: Vec<usize> = tokens
+            .iter()
+            .map(|(_, token)| {
+                match token {
+                    Token::Punct('{') => depth += 1,
+                    Token::Punct('}') => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                depth
+            })
+            .collect();
+        for (i, window) in tokens.windows(3).enumerate() {
+            if let [
+                (_, Token::Word(keyword)),
+                (_, Token::Word(name)),
+                (_, Token::Punct(';')),
+            ] = window
+                && keyword == "mod"
+                && depths[i] == 0
+            {
+                found.push(name.clone());
+            }
+        }
+    }
+    found
+}
+
+/// `code` with each byte range of `ranges` blanked with spaces, its line breaks kept.
+fn blanked(code: &str, ranges: &[(usize, usize)]) -> String {
+    let mut bytes = code.as_bytes().to_vec();
+    for &(start, end) in ranges {
+        for byte in &mut bytes[start..end] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+    }
+    String::from_utf8(bytes).expect("only whole characters are blanked, each byte with a space")
+}
+
 /// What the scanner sets apart from the code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -946,6 +1037,65 @@ let k = '/'; let l = 'é'; let m = '\u{2F}'; // four
             attributes(&code(source), "path"),
             [0, source.find("#![").unwrap()]
         );
+    }
+
+    #[test]
+    fn an_item_ends_at_its_closing_brace_or_its_semicolon_but_not_one_inside_brackets() {
+        let source = "#[cfg(test)] fn f(a: [u8; 2]) -> [u8; 4] { [0; 4] } fn g() {}";
+        let end = item_end(source, 0);
+        assert_eq!(
+            &source[..end],
+            "#[cfg(test)] fn f(a: [u8; 2]) -> [u8; 4] { [0; 4] }"
+        );
+        let source = "#[cfg(test)] use std::fs; fn g() {}";
+        assert_eq!(&source[..item_end(source, 0)], "#[cfg(test)] use std::fs;");
+        let source = "#[cfg(test)] struct S { a: [u8; 2] }\nstruct T;";
+        assert_eq!(
+            &source[..item_end(source, 0)],
+            "#[cfg(test)] struct S { a: [u8; 2] }"
+        );
+        // One left open runs to the end
+        assert_eq!(item_end("fn f() {", 0), 8);
+    }
+
+    #[test]
+    fn the_items_under_cfg_test_are_blanked_with_the_lines_kept() {
+        let source = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n#[cfg(test)]\nuse x::y;\nfn b() {}\n";
+        let blanked = without_tests(&code(source));
+        assert_eq!(blanked.len(), source.len());
+        assert_eq!(blanked.lines().count(), source.lines().count());
+        assert!(blanked.contains("fn a() {}") && blanked.contains("fn b() {}"));
+        assert!(
+            !blanked.contains("tests") && !blanked.contains("x::y") && !blanked.contains("cfg")
+        );
+        // A file that is a test as a whole, and a `cfg` that is not the one form
+        assert!(
+            without_tests(&code("#![cfg(test)]\nfn a() {}\n"))
+                .trim()
+                .is_empty()
+        );
+        let other = "#[cfg(not(test))]\nfn a() {}\n#[cfg(any(test, unix))]\nfn b() {}\n";
+        assert_eq!(without_tests(&code(other)), other);
+        // In a string or a comment it is nothing
+        let text = "// #[cfg(test)]\nfn a() { let _ = \"#[cfg(test)]\"; }\n";
+        assert_eq!(without_tests(&code(text)), code(text));
+    }
+
+    #[test]
+    fn the_modules_declared_under_cfg_test_without_a_body_are_named() {
+        let source = "\
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+pub(crate) mod more_tests;
+#[cfg(test)]
+mod inline { mod inner; }
+mod real;
+#[cfg(test)]
+use x::y;
+";
+        // An inline one has no file of its own, and a module that is not under `cfg(test)` is code
+        assert_eq!(test_modules(&code(source)), ["tests", "more_tests"]);
     }
 
     #[test]

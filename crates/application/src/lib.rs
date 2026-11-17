@@ -17,6 +17,7 @@ pub mod finding;
 pub mod follows;
 pub mod index;
 pub mod init;
+pub mod inner_io;
 pub mod layers;
 pub mod links;
 pub mod locked;

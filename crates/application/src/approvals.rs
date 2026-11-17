@@ -64,8 +64,8 @@ pub fn read(tree: &dyn Tree) -> io::Result<Approvals> {
     })
 }
 
-/// Every import the table forbids in the project, approved or not: `None` for a repository of records only, which
-/// has no layers. `Err` when the declaration cannot be read.
+/// Every import the table forbids in the project, and every entry of the table of I/O the inner layers use, approved or
+/// not: `None` for a repository of records only, which has no layers. `Err` when the declaration cannot be read.
 fn forbidden(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Option<Vec<Forbidden>>, String> {
     let structure = crate::structure::problems(tree).map_err(|e| e.to_string())?;
     let Some(declared) = structure.declared else {
@@ -78,11 +78,16 @@ fn forbidden(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Option<Vec<Forbid
     if declared.layout.is_none() {
         return Ok(None);
     }
-    Ok(Some(
-        crate::direction::problems(tree, parsers, &declared)
+    let mut found = crate::direction::problems(tree, parsers, &declared)
+        .map_err(|e| e.to_string())?
+        .forbidden;
+    // The I/O of the inner layers is approved as an import is, by its file and the entry of the table it uses
+    found.extend(
+        crate::inner_io::problems(tree, parsers, &declared)
             .map_err(|e| e.to_string())?
             .forbidden,
-    ))
+    );
+    Ok(Some(found))
 }
 
 /// The forbidden imports of `import` by `file` that no entry approves yet, for the person to see before approving.

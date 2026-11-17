@@ -19,6 +19,7 @@
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
+use domain::rust::item_end;
 use regex::Regex;
 
 /// The ports Rotproof has: each has to be found as a trait, so the check cannot pass with the traits moved away
@@ -185,12 +186,10 @@ struct Read {
 }
 
 fn read(source: &str) -> Read {
-    let code = domain::rust::code(source);
+    // The items under `#[cfg(test)]` are blanked by the reading `rotproof check` uses for the inner layers' I/O
+    let code = domain::rust::without_tests(&domain::rust::code(source));
     let mut skipped: Vec<(usize, usize)> = Vec::new();
     let mut traits = BTreeSet::new();
-    for (at, _) in code.match_indices("#[cfg(test)]") {
-        skipped.push((at, item_end(&code, at)));
-    }
     for found in TRAIT.captures_iter(&code) {
         let whole = found.get(0).expect("a match");
         traits.insert(found[1].to_string());
@@ -270,26 +269,6 @@ fn in_file(path: &str, source: &str, read: &Read, ports: &[Form]) -> Vec<String>
         }
     }
     problems
-}
-
-/// The end of the item that starts at `start`: past the `}` that closes its first `{`, or past a `;` before any `{`.
-fn item_end(code: &str, start: usize) -> usize {
-    let b = code.as_bytes();
-    let mut depth = 0;
-    for (i, &c) in b.iter().enumerate().skip(start) {
-        match c {
-            b';' if depth == 0 => return i + 1,
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return i + 1;
-                }
-            }
-            _ => {}
-        }
-    }
-    b.len()
 }
 
 /// The end of the signature of the function that starts at `start`: its body's `{`, or the `;` of a declaration.

@@ -82,6 +82,7 @@ fn layers_section(layout: &Layout) -> String {
         Language::Rust => DIRECTION_CARGO,
     };
     let rules = [
+        crate::inner_io::guide(layout.language),
         crate::environment::guide(layout.language),
         crate::suppressions::guide(layout.language).to_string(),
         crate::dependencies::guide(layout.language).to_string(),

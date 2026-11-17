@@ -128,6 +128,15 @@ pub fn problems(root: &Path) -> Result<Vec<String>, String> {
             .into_iter()
             .map(|why| format!("environment: {}", why.replace('\n', "\n    "))),
     );
+    // Rotproof keeps no approvals: the I/O of `domain`, `protocol` and `application` fails, as in `rotproof check`
+    let io =
+        application::inner_io::problems(&tree, &Readers, &declared).map_err(|e| e.to_string())?;
+    found.extend(
+        io.problems
+            .into_iter()
+            .chain(io.forbidden.into_iter().map(|f| f.detail))
+            .map(|why| format!("inner I/O: {}", why.replace('\n', "\n    "))),
+    );
     // Rust has no comment that switches the type checker off, so the markers alone are read here
     let mut markers = application::markers::problems(&tree, &Readers, &declared)
         .map_err(|e| e.to_string())?

@@ -2267,7 +2267,6 @@ fn each_typescript_form_that_reads_the_environment_fails_alone_and_a_shadowed_na
     // A name the file binds is not the global, and what reads nothing from the environment passes
     let allowed = [
         "const p = require('path');\nexport const x = p.join('a', 'b');\n",
-        "export function f(require: any) { const process = require('process'); return process.env.A; }\n",
         "const p = require('path');\nexport const x = p.env.A;\n",
         "export function f(process: any) { return process.env.A; }\n",
         "export function f() { const process = { env: {} as any }; return process.env.A; }\n",
@@ -2276,7 +2275,6 @@ fn each_typescript_form_that_reads_the_environment_fails_alone_and_a_shadowed_na
         "export const x = [1].map((process) => process.toString());\n",
         "export type E = typeof process.env;\n",
         "export const x = process.argv;\n",
-        "import { argv } from 'node:process';\nexport const x = argv;\n",
         "export const x = import.meta.env.DEV && import.meta.env.MODE;\n",
         "const { DEV, PROD } = import.meta.env;\nexport const x = DEV || PROD;\n",
         "const config = { env: 'dev' };\nexport const x = config.env;\n",
@@ -2285,6 +2283,496 @@ fn each_typescript_form_that_reads_the_environment_fails_alone_and_a_shadowed_na
         put(r, "src/domain/x.ts", source);
         let out = run(&["--root", &root_arg(r), "check"]);
         assert!(out.status.success(), "{source}\n{}", stdout(&out));
+    }
+    // What reads nothing from the environment but imports `process` is no read, and is I/O of the inner layers by its
+    // import (a `require` that a parameter hides is an import to the reader of imports, as to the direction check)
+    for source in [
+        "export function f(require: any) { const process = require('process'); return process.env.A; }\n",
+        "import { argv } from 'node:process';\nexport const x = argv;\n",
+    ] {
+        put(r, "src/domain/x.ts", source);
+        let out = run(&["--root", &root_arg(r), "check"]);
+        let said = stdout(&out);
+        assert_eq!(out.status.code(), Some(1), "{source}\n{said}");
+        assert!(
+            said.contains("uses `process`") && !said.contains("only infrastructure reads"),
+            "{source}\n{said}"
+        );
+    }
+}
+
+/// `rotproof check` in `root`: its exit code and what it printed.
+fn checked(root: &Path) -> (Option<i32>, String) {
+    let out = run(&["--root", &root_arg(root), "check"]);
+    (out.status.code(), stdout(&out))
+}
+
+const IO_HEADING: &str =
+    "the inner layers do no I/O (domain, protocol, application and presentation import nothing";
+const IO_FIX: &str = "move the I/O into infrastructure.outbound, behind a port in protocol.outbound that the use case is given";
+
+/// Plant each source at `path`, check, and expect the check to fail under the heading of the I/O of the inner layers
+/// with `line` and what it uses of `entry`; then expect each of `free` to pass.
+fn plant_io(r: &Path, path: &str, forbidden: &[(&str, usize, &str)], free: &[&str], reset: &str) {
+    for (source, line, uses) in forbidden {
+        put(r, path, source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(said.contains(IO_HEADING), "{source}\n{said}");
+        // What a finding says of what it found: a use, or a scheme or a glob in its own words
+        let what = if uses.starts_with("imports ") || uses.starts_with("a glob") {
+            uses.to_string()
+        } else {
+            format!("uses {uses}, which does I/O")
+        };
+        assert!(
+            said.contains(&format!("  {path}:{line}: {IO_FIX}: {what}")),
+            "{source}\n{said}"
+        );
+    }
+    for source in free {
+        put(r, path, source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(0), "{source}\n{said}");
+    }
+    put(r, path, reset);
+}
+
+#[test]
+fn the_inner_layers_do_no_io_in_python_and_each_form_planted_fails() {
+    let root = clean_repo();
+    let r = root.path();
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    plant_io(
+        r,
+        "domain/x.py",
+        &[
+            ("import shutil\n", 1, "`shutil`"),
+            ("import urllib.request\n", 1, "`urllib.request`"),
+            ("import urllib.request as r\n", 1, "`urllib.request`"),
+            ("from urllib import request\n", 1, "`urllib.request`"),
+            (
+                "from urllib.request import urlopen\n",
+                1,
+                "`urllib.request` (urlopen)",
+            ),
+            (
+                "import urllib\nurllib.request.urlopen('x')\n",
+                2,
+                "`urllib.request` (urlopen)",
+            ),
+            ("import _socket\n", 1, "`_socket`"),
+            ("from subprocess import *\n", 1, "`subprocess`"),
+            (
+                "import importlib\nimportlib.import_module('sqlite3')\n",
+                2,
+                "`sqlite3`",
+            ),
+            (
+                "from asyncio import create_subprocess_exec as c\n",
+                1,
+                "`asyncio.create_subprocess_exec`",
+            ),
+            (
+                "import asyncio\n\n\nasync def f():\n    return await asyncio.open_connection('h', 1)\n",
+                5,
+                "`asyncio.open_connection`",
+            ),
+            ("import argparse\nimport shutil\n", 1, "`argparse`"),
+            ("from logging import handlers\n", 1, "`logging.handlers`"),
+            (
+                "import tempfile\n\nx = tempfile.mkdtemp()\n",
+                1,
+                "`tempfile`",
+            ),
+        ],
+        &[
+            "import os\nimport os.path\nimport pathlib\nimport json\nimport io\nimport logging\nimport asyncio\n",
+            "from urllib import parse\nimport urllib.error\nimport zipfile\nimport tarfile\nimport gzip\n",
+            "import sys\nimport time\nimport datetime\nimport csv\nimport mmap\nimport ctypes\nimport bz2, lzma\n",
+            "import http\nfrom http import HTTPStatus\nimport multiprocessing\nimport importlib\n",
+        ],
+        "",
+    );
+    // The files and layers that are not judged: the I/O layer, what wires and draws, the entry file, and the tests
+    let io = "import shutil\nshutil.rmtree('x')\n";
+    for path in [
+        "infrastructure/outbound/x.py",
+        "infrastructure/inbound/x.py",
+        "composition/x.py",
+        "__main__.py",
+        "tests/test_x.py",
+    ] {
+        put(r, path, io);
+    }
+    let (code, said) = checked(r);
+    // Only the marker and structure rules may say anything of them, never the I/O of the inner layers
+    assert!(!said.contains(IO_HEADING), "{said}");
+    assert!(!said.contains("does I/O"), "{said}");
+    assert!(code == Some(0) || code == Some(1));
+    // The heading and the way out are the guide's too: the whole table, and what is no fix
+    let guide = stdout(&run(&["guide", "--stack", "python"]));
+    for name in [
+        "`shutil`",
+        "`urllib.request`",
+        "`_socket`",
+        "`asyncio.open_connection`",
+        "`argparse`",
+    ] {
+        assert!(guide.contains(name), "{name}");
+    }
+    assert!(guide.contains("The inner layers do no I/O."));
+    assert!(
+        guide.contains("moving the code to a path in `unchecked` or `moving` is not a fix"),
+        "{guide}"
+    );
+}
+
+#[test]
+fn an_approved_use_of_io_prints_the_names_the_file_uses_now_and_a_stale_one_fails() {
+    let root = clean_repo();
+    let r = root.path();
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let source = |names: &str| format!("import shutil\n\n\ndef f(a, b):\n{names}");
+    put(
+        r,
+        "domain/model.py",
+        &source("    shutil.copyfile(a, b)\n    shutil.rmtree(b)\n    shutil.rmtree(a)\n"),
+    );
+    // One approval for the file and the entry covers every use of it, whatever the names
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("domain/model.py:5: ") && said.contains("domain/model.py:7: "),
+        "{said}"
+    );
+    let out = approve_with_git(
+        r,
+        named,
+        &[
+            "domain/model.py",
+            "shutil",
+            "--reason",
+            "the report is written here until the port is made",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains(
+            "approved in .config/rotproof-approved.toml (1):\n  shutil in domain/model.py: the report is written here \
+             until the port is made (Someone Else, "
+        ),
+        "{said}"
+    );
+    assert!(said.contains("; now used: copyfile, rmtree\n"), "{said}");
+    // The names change, so the reason is read again
+    put(r, "domain/model.py", &source("    shutil.move(a, b)\n"));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains("; now used: move\n") && !said.contains("copyfile"),
+        "{said}"
+    );
+    // Another entry of the file is not covered
+    put(
+        r,
+        "domain/model.py",
+        &format!("import tempfile\n{}", source("    shutil.move(a, b)\n")),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("domain/model.py:1: ") && said.contains("uses `tempfile`"),
+        "{said}"
+    );
+    assert!(!said.contains("uses `shutil`"), "{said}");
+    // Only what the check finds is approved
+    let out = approve_with_git(r, named, &["domain/model.py", "socket", "--reason", "no"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no forbidden import of socket"));
+    // An approval that matches nothing fails, and `--prune` takes it away
+    put(r, "domain/model.py", "import os\n");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("approved, but no such forbidden import: shutil in domain/model.py"),
+        "{said}"
+    );
+    let out = run(&["--root", &root_arg(r), "approve", "--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+}
+
+#[test]
+fn the_inner_layers_do_no_io_in_typescript_and_the_table_comes_before_the_manifest() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    plant_io(
+        r,
+        "src/domain/x.ts",
+        &[
+            ("import fs from 'fs';\n", 1, "`fs`"),
+            (
+                "import { readFile } from 'node:fs/promises';\n",
+                1,
+                "`fs` (readFile)",
+            ),
+            (
+                "import * as cp from \"child_process\";\ncp.exec('x');\n",
+                1,
+                "`child_process`",
+            ),
+            ("const net = require('node:net');\n", 1, "`net`"),
+            ("export * from 'node:tty';\n", 1, "`tty`"),
+            ("import sqlite from 'node:sqlite';\n", 1, "`sqlite`"),
+            ("import type { Stats } from 'fs';\n", 1, "`fs` (Stats)"),
+            ("export const a = import('node:http');\n", 1, "`http`"),
+            (
+                "import { Database } from 'bun:sqlite';\n",
+                1,
+                "imports `bun:sqlite`: a scheme other than node: names what cannot be judged",
+            ),
+            (
+                "import x from 'npm:left-pad';\n",
+                1,
+                "imports `npm:left-pad`: a scheme other than node:",
+            ),
+            (
+                "import x from 'https://esm.sh/x';\n",
+                1,
+                "imports `https://esm.sh/x`: a scheme other than node:",
+            ),
+            (
+                "import dns from 'node:dns/promises';\nimport rl from 'readline';\n",
+                1,
+                "`dns`",
+            ),
+        ],
+        &[
+            "import os from 'node:os';\nimport { join } from 'path';\nimport crypto from 'crypto';\n",
+            "import { Readable } from 'node:stream';\nimport { URL } from 'node:url';\nimport util from 'util';\n",
+            "import { EventEmitter } from 'events';\nimport { Buffer } from 'buffer';\nimport zlib from 'node:zlib';\n",
+            "import { Worker } from 'worker_threads';\nimport { setTimeout } from 'timers';\nimport t from 'node:test';\n",
+            "import { performance } from 'perf_hooks';\nimport { join } from './other';\nexport const x = join;\n",
+        ],
+        "",
+    );
+    // A bare name is Node's even when the manifest lists a package of that name
+    put(
+        r,
+        "package.json",
+        "{\n  \"name\": \"shop\",\n  \"dependencies\": { \"fs\": \"^1\" }\n}\n",
+    );
+    put(
+        r,
+        "src/domain/x.ts",
+        "import fs from 'fs';\nexport const x = fs;\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(&format!(
+            "  src/domain/x.ts:1: {IO_FIX}: uses `fs`, which does I/O\n"
+        )),
+        "{said}"
+    );
+    put(r, "package.json", "{\n  \"name\": \"shop\"\n}\n");
+    // The files and layers that are not judged
+    let io = "import fs from 'node:fs';\nexport const x = fs;\n";
+    for path in [
+        "src/infrastructure/outbound/x.ts",
+        "src/composition/x.ts",
+        "src/main.tsx",
+        "src/domain/x.test.ts",
+        "src/domain/x.spec.tsx",
+        "src/domain/__tests__/x.ts",
+        "src/ui/atoms/x.ts",
+    ] {
+        put(r, path, io);
+    }
+    put(r, "src/domain/x.ts", "");
+    let (_, said) = checked(r);
+    assert!(!said.contains(IO_HEADING), "{said}");
+    let guide = stdout(&run(&["guide", "--stack", "typescript"]));
+    for name in [
+        "`fs`",
+        "`child_process`",
+        "`sqlite`",
+        "`_tls_wrap`",
+        "`bun:`",
+    ] {
+        assert!(guide.contains(name), "{name}");
+    }
+}
+
+#[test]
+fn a_screens_model_is_told_to_get_what_it_needs_from_its_page() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    put(
+        r,
+        "src/presentation/models/x.ts",
+        "import fs from 'node:fs';\nexport const x = fs;\n",
+    );
+    put(
+        r,
+        "src/application/y.ts",
+        "import fs from 'node:fs';\nexport const y = fs;\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "  src/presentation/models/x.ts:1: a screen's model does no I/O: it gets what it needs from its page, or \
+             through a use case of protocol.inbound it is given: uses `fs`, which does I/O\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!(
+            "  src/application/y.ts:1: {IO_FIX}: uses `fs`, which does I/O\n"
+        )),
+        "{said}"
+    );
+}
+
+#[test]
+fn the_inner_crates_do_no_io_in_rust_and_a_test_is_free() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    let lib = std::fs::read_to_string(r.join("crates/domain/src/lib.rs")).unwrap();
+    plant_io(
+        r,
+        "crates/domain/src/lib.rs",
+        &[
+            (
+                "pub fn a() { let _ = std::fs::read(\"x\"); }\n",
+                1,
+                "`std::fs` (read)",
+            ),
+            (
+                "use std::process::Command;\n",
+                1,
+                "`std::process` (Command)",
+            ),
+            (
+                "use std::os::unix::fs::PermissionsExt;\n",
+                1,
+                "`std::os::fs` (PermissionsExt)",
+            ),
+            (
+                "pub fn a() { println!(\"x\"); }\n",
+                1,
+                "`std::io` (println!)",
+            ),
+            ("pub fn a() { std::dbg!(1); }\n", 1, "`std::io` (dbg!)"),
+            ("use std::io::stdin;\n", 1, "`std::io` (stdin)"),
+            ("use std::net::TcpStream;\n", 1, "`std::net` (TcpStream)"),
+            (
+                "use std::env::current_dir;\n",
+                1,
+                "`std::env` (current_dir)",
+            ),
+            (
+                "use std::fs as f;\npub fn a() { f::write(\"a\", \"b\").ok(); }\n",
+                2,
+                "`std::fs` (write)",
+            ),
+            (
+                "use std as s;\npub fn a() { s::process::exit(0); s::io::stdout(); }\n",
+                2,
+                "`std::io` (stdout)",
+            ),
+        ],
+        &[
+            "use std::io::Write;\nuse std::path::PathBuf;\nuse std::process::{ExitCode, exit};\n",
+            "use std::env::args;\nuse std::net::{IpAddr, SocketAddr};\npub fn a() { let _ = format!(\"x\"); }\n",
+            "#[cfg(test)]\nmod tests {\n    use std::fs;\n    #[test]\n    fn t() { fs::read(\"x\").ok(); println!(\"x\"); }\n}\n",
+            "#[cfg(test)]\nuse std::process::Command;\n",
+            "#![cfg(test)]\nuse std::fs;\n",
+        ],
+        &lib,
+    );
+    // A glob names nothing: a glob of the module, and one above it, fail
+    for (source, said_of) in [
+        ("use std::fs::*;\n", "a glob of `std::fs`"),
+        ("use std::*;\n", "a glob of `std`"),
+    ] {
+        put(r, "crates/domain/src/lib.rs", source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{source}\n{said}");
+        assert!(
+            said.contains(said_of) && said.contains("cannot be read"),
+            "{source}\n{said}"
+        );
+    }
+    put(r, "crates/domain/src/lib.rs", &lib);
+    // What is outside the crate's `src/`, in a test module's file, in the I/O crate and in the entry file is not judged
+    put(
+        r,
+        "crates/domain/tests/it.rs",
+        "use std::fs;\n#[test]\nfn t() { std::fs::read(\"x\").ok(); }\n",
+    );
+    put(
+        r,
+        "crates/domain/benches/b.rs",
+        "use std::process::Command;\n",
+    );
+    put(
+        r,
+        "crates/domain/build.rs",
+        "fn main() { std::fs::write(\"a\", \"b\").ok(); }\n",
+    );
+    put(
+        r,
+        "crates/infrastructure/src/outbound/mod.rs",
+        "pub fn f() { std::fs::read(\"x\").ok(); }\n",
+    );
+    put(r, "src/main.rs", "fn main() { println!(\"x\"); }\n");
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}#[cfg(test)]\nmod checks;\n"),
+    );
+    put(
+        r,
+        "crates/domain/src/checks.rs",
+        "use std::fs;\nuse std::process::Command;\n",
+    );
+    let (_, said) = checked(r);
+    assert!(!said.contains(IO_HEADING), "{said}");
+    // The same file is code once it is no module under `#[cfg(test)]`
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        &format!("{lib}mod checks;\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("  crates/domain/src/checks.rs:1: "), "{said}");
+    let guide = stdout(&run(&["guide", "--stack", "rust"]));
+    for name in [
+        "`std::fs`",
+        "`Command`",
+        "`println!`",
+        "`std::os::fs`",
+        "`current_exe`",
+    ] {
+        assert!(guide.contains(name), "{name}");
     }
 }
 
@@ -7297,7 +7785,7 @@ fn a_typescript_manifest_is_compared_with_what_the_code_imports_either_way() {
     write_file(
         r,
         "src/application/pay.ts",
-        "import React from \"react\";\nimport z from \"zod\";\nimport { readFile } from \"node:fs\";\n",
+        "import React from \"react\";\nimport z from \"zod\";\nimport { join } from \"node:path\";\n",
     );
     let out = run(&["--root", &arg, "check"]);
     let said = stdout(&out);

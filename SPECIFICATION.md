@@ -10,7 +10,7 @@ writes changes this file in the same commit.
 Rotproof makes the layer directories, checks that they are where the project declares them, and checks their
 direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
 the levels inside a crate, from the paths its code names. From the same reading of the code it checks that only
-`infrastructure` reads the environment variables, that no comment switches the type checker off, and that the manifest
+`infrastructure` reads the environment variables, that the inner layers do no I/O, that no comment switches the type checker off, and that the manifest
 of each package lists the dependencies its code imports, no more and no fewer (see "What `rotproof check` checks"). A project made of several parts that each hold the layers declares them as units, and all
 of this holds in each unit, with the imports between units judged too (see "Units").
 
@@ -242,7 +242,10 @@ rotproof approve domain/model.py infrastructure.db --reason "the ORM's session f
 
 The file and the import are named as `rotproof check` names them: the file from the root, and the import as the check
 writes it (a Python dotted name, a TypeScript specifier, a crate's dependency). In Python, each name of
-`from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them.
+`from m import n` is its own import, `m.n`, whether `n` is a module or not: approving `m` approves none of them. The
+I/O of the inner layers (see "The inner layers do no I/O") is approved the same way, and the import is the entry of
+Rotproof's table that the finding names (`rotproof approve domain/report.py shutil --reason "..."`), which covers every
+use of that entry in the file, whatever names it uses under it.
 `rotproof approve` shows the forbidden import, signs with git's `user.name`, and adds the entry (the file keeps a byte
 order mark and its line endings, CRLF on every line when one line had it, and so it does when `--prune` removes
 entries). It asks nothing, so an agent's shell can run it, but it takes no approval without `--reason` (an empty one
@@ -409,11 +412,13 @@ What a test is in each rule that follows, the same in Python and TypeScript:
 | The code of a layer imports no development dependency | only a test may |
 | A runtime dependency only tests import fails | the imports of tests are the ones that count |
 | Only `infrastructure` reads the environment | it is not judged |
+| The inner layers do no I/O | it is not judged (see "The inner layers do no I/O") |
 | No marker (`TODO` and the like) in a comment, and no comment that switches the type checker off | its comments are read, as the code's |
 
 In Rust no name tells a test: `[dev-dependencies]` are never judged, a crate's `tests/` are read by the dependencies
 check with its `src/`, the environment check reads a crate's `tests/` as the rest of the crate (they sit in its
-directory), and the marker check reads them.
+directory), the check of the I/O of the inner layers does not read them (a crate's `tests/`, `benches/`, `examples/` and
+`build.rs`, and the items under `#[cfg(test)]`, are free), and the marker check reads them.
 
 A path in `unchecked` or `moving` is not read by any check, tests included. `rotproof check` prints, on every run and
 only for the TypeScript stack, how many source files it read as tests and by which names, apart from the findings and
@@ -427,6 +432,105 @@ It is printed with a count of 0 too (`tests: 0 files read as tests (...)`), so t
 otherwise (`song.tests.ts`, a directory `test/`), and which Rotproof therefore reads as code, sees it on every run. The
 count is of source files outside `unchecked` and `moving`, each once (a non-source file in `__tests__/`, a snapshot or a
 fixture, is a test and is not counted).
+
+### The inner layers do no I/O
+
+The code of `domain`, `protocol`, `application` and `presentation`, and of their levels (`protocol.outbound`,
+`presentation.models`), reads and writes nothing outside the program: the files, the network, the processes and the
+terminal are `infrastructure`'s, behind a port in `protocol.outbound` that a use case is given. `rotproof check` fails an
+**import of an entry of a table of what does I/O wholly**, which Rotproof keeps for each stack and a project cannot
+change. This section is the first of the rule: it reads imports and, in Python and TypeScript, the names a file uses of
+a module it has imported; what a module does only in part (`os`, `pathlib`, `time`, `datetime`, `logging` itself) is
+judged by the attribute or the call it is used through, which a later rule reads, and is not in the table.
+
+- **Where:** the code of the four layers and their levels. Not `infrastructure` (it does the I/O), not `composition` and
+  `ui` (they wire and draw), not the entry file, and not a test: in Python a file in `tests/`; in TypeScript a file named
+  as a test (see "Tests"); in Rust the items under `#[cfg(test)]` (and a file that starts with `#![cfg(test)]`), the file
+  of a module declared `#[cfg(test)] mod x;` (`x.rs` or `x/mod.rs` beside the file that declares it, in the directory of
+  the file for `lib.rs`, `main.rs` and `mod.rs` and in the directory named as the file otherwise, and what is under it),
+  and everything outside a crate's `src/` (`tests/`, `benches/`, `examples/`, `build.rs`). A `cfg` other than the plain
+  `#[cfg(test)]` (`cfg(any(test, ...))`) is not read as a test, and a `#[cfg(test)] mod x;` inside a module with a body
+  is not followed to its file.
+- **The finding is a forbidden import,** kept as the layer table's are (see "Approving a forbidden import"): `rotproof
+  approve <file> <entry> --reason "<why>"` approves it, the file and the **entry of the table** are what the approval is
+  made for, and **one approval covers every use of that entry in that file**, whatever names it uses under it. The
+  entry is the module (`shutil`, `urllib.request`, `asyncio.open_connection`), Node's module by its bare name (`fs` for
+  `fs`, `node:fs` and `fs/promises`), a scheme by the scheme (`bun:`), and in Rust a row of the table: `std::fs`,
+  `std::net`, `std::process`, `std::env`, `std::io` (the terminal items and the print macros together),
+  `std::os::fs`, `std::os::net` and `std::os::process` (the module of every platform of `std::os`: `std::os::unix::fs`
+  and `std::os::windows::fs` are one entry), and a glob above them as `std::*` or `std::os::unix::*`. Each approval is
+  printed on every run, as any is, **with the names the file now uses under the entry** (`; now used: copyfile,
+  rmtree`), so that a reason that no longer fits the code is seen; an approval that matches nothing fails.
+- **A finding starts with what to do,** by layer, then says what it found: "move the I/O into
+  `infrastructure.outbound`, behind a port in `protocol.outbound` that the use case is given" for `domain`, `protocol` and
+  `application`, and "a screen's model does no I/O: it gets what it needs from its page, or through a use case of
+  `protocol.inbound` it is given" for `presentation` (whose models import only `protocol.inbound`). It names the line,
+  the entry and the names used on it. Approving, renaming the import, or moving the code to a path in `unchecked` or
+  `moving` is no fix, and the guide says so.
+- **Seen through every spelling the file binds an entry by.** In Python, an import is matched by its dotted name as a
+  prefix of the entry: `urllib.request` is matched by `import urllib.request`, `import urllib.request as r`,
+  `from urllib import request` and `from urllib.request import urlopen`, and not by `from urllib import parse`;
+  `from m import *` is the import of `m`; an import under `if TYPE_CHECKING:` and a call of `importlib.import_module` with
+  a literal are imports; and the names the file uses are read as Python's scopes read them, so `import urllib` then
+  `urllib.request.urlopen(...)`, and `import asyncio` then `asyncio.open_connection(...)`, are uses of the entries
+  `urllib.request` and `asyncio.open_connection`. In TypeScript, a specifier is matched with `node:` or without it, a
+  specifier of `import`, `export ... from`, `import()` and `require` with a literal included, `import type` too; a name
+  taken from it is said (`"node:fs".readFile`). In Rust, an item is found as the scanner finds the items of a module
+  (see the environment check, in "What `rotproof check` checks"): by its whole path, through a `use` of the module or of one above it, through a rename of
+  either (`use std::fs as f;`, `use std as s;`), from `::std`, and a module that does I/O whatever is used of it is also
+  found where it is imported (`use std::fs;`, `pub use std::os::unix::{fs, net};`). A glob of an entry, or of a module
+  above one (`use std::fs::*;`, `use std::*;`), fails, as its names cannot be read.
+- **The table is matched before the manifest.** A bare `fs` is Node's `fs` even when `package.json` lists a package of
+  that name: the table decides, and the dependencies check is a rule of its own. **A scheme other than `node:`**
+  (`bun:`, `npm:`, `jsr:`, `https:`, `data:`, `virtual:`, any URL) **fails in an inner layer**, as what it names cannot
+  be judged; it is approved by the scheme (`bun:`).
+
+**The table, by stack.** An entry is the module or the item; a module is matched with what is under it.
+
+- **Python:** the network (`socket`, `socketserver`, `ssl`, `select`, `selectors`, `http.client`, `http.server`,
+  `urllib.request`, `ftplib`, `smtplib`, `imaplib`, `poplib`, `xmlrpc.client`, `xmlrpc.server`, `wsgiref.simple_server`,
+  `nntplib`, `telnetlib`, `asyncore`, `asynchat`, `smtpd`); storage and the file system (`sqlite3`, `dbm`, `shelve`,
+  `mailbox`, `shutil`, `tempfile`, `filecmp`, `fileinput`, `glob`, `netrc`, `zipapp`, `py_compile`, `compileall`,
+  `linecache`, `importlib.resources`, `importlib.metadata`, `logging.handlers`, `logging.config`); processes and what
+  the processes of a program share (`subprocess`, `multiprocessing.connection`, `multiprocessing.shared_memory`,
+  `asyncio.streams`, `asyncio.subprocess`, and the functions of `asyncio` that start a process or a connection when
+  taken by name: `asyncio.create_subprocess_exec`, `asyncio.create_subprocess_shell`, `asyncio.open_connection`,
+  `asyncio.start_server`, `asyncio.open_unix_connection`, `asyncio.start_unix_server`); the terminal, the console and the
+  system around the program (`pty`, `tty`, `termios`, `fcntl`, `curses`, `readline`, `msvcrt`, `winreg`, `winsound`,
+  `syslog`, `getpass`, `webbrowser`, `tkinter`, `turtle`, `pwd`, `grp`, `resource`, `pdb`, `code`, `pydoc`, `mailcap`,
+  `nis`, `spwd`, `ossaudiodev`, `msilib`, `antigravity`, `argparse`, `optparse`, `platform`, `locale`); and the private
+  twins the standard library holds, which are the C modules the public ones are made of (`_socket`, `_ssl`, `_sqlite3`,
+  `_posixsubprocess`, `_winapi`, `_multiprocessing`, `_posixshmem`, `_curses`, `_curses_panel`, `_tkinter`, `_dbm`,
+  `_gdbm`, `_locale`, `_msi`) and five private modules of the same kind that have no public name to be a twin of
+  (`_overlapped`, the C half of asyncio's Windows event loop; `_bootsubprocess`; `_wmi`; `_scproxy`; `_pyrepl`). The
+  names are those of `sys.stdlib_module_names` of Python 3.10 to 3.14, and a test keeps each entry among them.
+- **TypeScript:** Node's `fs` (and `fs/promises`), `net`, `dgram`, `dns` (and `dns/promises`), `tls`, `http`, `https`,
+  `http2`, `child_process`, `cluster`, `readline` (and `readline/promises`), `repl`, `tty`, `wasi`, `process`, the
+  internal aliases `_http_agent`, `_http_client`, `_http_common`, `_http_incoming`, `_http_outgoing`, `_http_server`,
+  `_tls_common` and `_tls_wrap`, each with or without `node:`; `sqlite` with `node:` alone (a bare `sqlite` is a package
+  of npm); and any other scheme.
+- **Rust:** `std::fs` whole; `std::os::<platform>::fs`, `std::os::<platform>::net` and `std::os::<platform>::process`
+  whole, for every platform `std::os` has; of `std::net`, `TcpListener`, `TcpStream`, `UdpSocket`, `ToSocketAddrs` and
+  `Incoming`; of `std::process`, `Command`, `Child`, `ChildStdin`, `ChildStdout`, `ChildStderr` and `Stdio`; of `std::io`,
+  `stdin`, `stdout`, `stderr`, `Stdin`, `Stdout`, `Stderr`, `StdinLock`, `StdoutLock`, `StderrLock` and `IsTerminal`,
+  and the macros `print!`, `println!`, `eprint!`, `eprintln!` and `dbg!` (also written `std::println!`), which count
+  under `std::io`; of `std::env`, `current_dir`, `set_current_dir` and `current_exe`. The macros are found as words
+  followed by `!`, not as a path of another crate (`log::println!`); a macro renamed with `use std::println as p;` is
+  found at the `use` and not at `p!`. The functions of `std::env` that read the variables are the environment check's.
+
+**What is out of the table, on purpose.** What is I/O only through some of its names or calls, which a later rule
+judges: Python's `io`, `logging` itself, `asyncio` as a whole (its tasks, queues and locks are pure), `os`, `os.path`,
+`pathlib`, `sys`, `time` and `datetime`; TypeScript's `os`, `crypto`, `stream`, `path`, `url`, `util`, `events`,
+`buffer`, `zlib`, `worker_threads`, `timers`, `perf_hooks`, `console` and `test`; Rust's `std::process::exit`,
+`ExitCode`, `std::net::IpAddr` and the other plain values of `std::net`, `std::io::{Read, Write, BufRead, Cursor,
+Result, Error}`, `std::path` and `std::env::args`. What is pure when it holds bytes in memory: `zipfile`, `tarfile`,
+`gzip`, `bz2` and `lzma`, which read a file only when handed one, `mmap` and `ctypes`, which need a file or a library
+to be given, and `json` and `csv`. A global (`fetch`, `open`, `print`, `console.log`) is no import and is not seen here.
+
+**Not seen:** an import built at run time (`importlib.import_module(name)`, `require(name)`, `eval`), a name bound in one
+file and used through another (in Rust, `pub use std::fs;` in a module and `reexport::fs::read` in the next: the `use`
+itself is found), a path a macro builds from pieces, a module of the project that is named as one of the table (a bare
+`import code` is the standard library's), and a type-only import, which counts as any.
 
 ### Views that are templates
 
@@ -1216,6 +1320,18 @@ entry can be told, is one.
   std::env;` in one module, `reexport::env::var` in the next) and a path a macro builds from pieces, and the code
   outside the layers (`tests/` in Python) and the tests (in TypeScript, the files named `*.test.*` or `*.spec.*`, or in
   `__tests__/`: see "Tests").
+- **The inner layers do no I/O** (see "The inner layers do no I/O"): the code of `domain`, `protocol`, `application` and
+  `presentation`, and of their levels, imports nothing of the table Rotproof keeps of what does I/O wholly (in Python
+  `shutil`, `subprocess`, `socket`, `urllib.request`, `tempfile` and the like; in TypeScript Node's `fs`, `net`,
+  `child_process`, `http` and the like, with or without `node:`, and any other scheme; in Rust `std::fs`,
+  `std::process::Command`, `std::net::TcpStream`, the terminal items of `std::io` and the print macros). The table is
+  Rotproof's, and a project cannot change it. `infrastructure`, `composition`, `ui`, the entry file and the tests are
+  not judged. It is a forbidden import as the layer table's are: it is approved by its file and the entry of the table
+  (`rotproof approve domain/report.py shutil --reason "..."`), the approval is printed on every run with the names the
+  file now uses under the entry, and one that matches nothing fails. Each finding says first what to do (move the I/O
+  into `infrastructure.outbound`, behind a port in `protocol.outbound` the use case is given; a screen's model gets what
+  it needs from its page or through a use case), and approving it, renaming it or moving the code to a path in
+  `unchecked` or `moving` is no fix.
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an
@@ -1328,7 +1444,7 @@ entry can be told, is one.
   shared units"). It fails as ``out of date, run `rotproof index`: .rotproof/readers.md``, for a list that is missing,
   edited, or no longer what the code says, with the names that changed under it (see "Who reads the shared units").
 
-What a check finds file by file (the layers' imports, the markers, `NOTE`, the environment variables and the
+What a check finds file by file (the layers' imports, the markers, `NOTE`, the environment variables, the I/O of the inner layers and the
 type-checker suppressions; the dependencies by manifest, each in the order of the files that need it) is listed in the byte order of the whole path, written with `/` from the root and compared
 as bytes compare: `Beta.py`, `_under.py`, `alpha.py`, and `mid2.py` before `mid2/x.py`, since `.` comes before `/`. It
 is the same on every operating system, whatever order its file system lists files in, so two machines that run the

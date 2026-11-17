@@ -1,0 +1,14 @@
+- **The inner layers do no I/O.** The code of `domain`, `protocol`, `application` and `presentation`, and of their
+  levels, imports nothing that reads or writes outside the program (files, the network, processes, the terminal, the
+  system around it), and `rotproof check` fails on an import of one of these, through every spelling the file binds it
+  by (an alias, a name taken from it, a rename). The table is Rotproof's, and a project cannot change it. `infrastructure`,
+  `composition`, `ui`, the entry file and {tests} are not judged.
+{table}  What fails is the entry of the table, whatever name is used under it, and the finding says each name it found.
+  **The I/O goes in `infrastructure.outbound`, behind a port in `protocol.outbound` that the use case is given:** the
+  use case passes the values on to `domain`, and a screen's model (`presentation.models`, which imports only
+  `protocol.inbound`) gets what it needs from its page, or through a use case it is given. Approving the import,
+  renaming it, or moving the code to a path in `unchecked` or `moving` is not a fix. A finding that cannot be fixed
+  now is approved as any forbidden import is, with `rotproof approve <file> <entry> --reason "<why>"` (the user asks
+  for it): the entry is the one the finding names (`shutil`, `urllib.request`, `std::fs`, `std::os::fs`, `std::io`,
+  `fs`, `bun:`), and one approval covers every use of it in that file; `rotproof check` prints each approval with the
+  names the file now uses under the entry.

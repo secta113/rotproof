@@ -79,7 +79,11 @@ message), that a Python project is locked (a pyproject.toml at the root of each 
 above it: uv.lock, poetry.lock, pdm.lock or pylock.toml, committed; and no virtual environment but a .venv beside a lock \
 file that the .gitignore excludes: a directory that holds a pyvenv.cfg is found even where the .gitignore hides it), that only \
 infrastructure reads or writes the environment variables (os.environ and os.getenv in Python, process.env and \
-import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that no \
+import.meta.env in TypeScript, std::env::var in Rust; not in another layer or the entry file), that the inner layers \
+(domain, protocol, application, presentation) do no I/O (an import of what Rotproof lists as doing I/O wholly: shutil, \
+subprocess and socket in Python, fs and child_process in Node, std::fs and std::process and the print macros in Rust; \
+not in infrastructure, composition, ui, the entry file or a test; approved as an import is, by its file and the entry \
+of the table), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that .rotproof/AGENTS.md and the two copies of the skill rotproof (.claude/skills/rotproof/SKILL.md and .agents/skills/rotproof/SKILL.md) are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
@@ -205,8 +209,10 @@ enum Command {
     /// `rotproof approve <file> <import> --reason "<why>"` keeps an import the layer table forbids, as `rotproof check`
     /// names it: the file from the root, and the import as the check writes it (a Python dotted name, `m.n` for each
     /// name of `from m import n`; a TypeScript specifier; a crate's dependency; the name of a template as written in a
-    /// reference). It shows the forbidden import, signs with git's user.name, and adds the entry, with the reason, to
-    /// .config/rotproof-approved.toml, which keeps a byte
+    /// reference; for the I/O of the inner layers, the entry of Rotproof's table that the finding names: `shutil`,
+    /// `urllib.request`, `fs`, `bun:`, `std::fs`, `std::os::fs`, `std::io`, one approval for a file and an entry,
+    /// whatever names it uses). It shows the forbidden import, signs with git's user.name, and adds the entry, with the
+    /// reason, to .config/rotproof-approved.toml, which keeps a byte
     /// order mark and its line endings (CRLF on every line when one line had it), as does --prune. It asks nothing and
     /// needs no terminal, but it takes no approval without a reason, and `rotproof check` prints every approval on
     /// every run. Run it only when the user asked for the exception, and say that you ran it.

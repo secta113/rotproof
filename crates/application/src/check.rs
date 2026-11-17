@@ -9,8 +9,9 @@ use std::io;
 
 use crate::finding::{under, warn};
 use crate::tree::{exactly, read_text};
-use domain::approvals::{over_limit, shown, sort, stale};
+use domain::approvals::{over_limit, shown_all, sort, stale};
 use domain::declaration::Declared;
+use domain::direction::Rule;
 use domain::guide::GUIDE;
 use domain::markers::KNOWLEDGE_HEADING;
 use domain::moving::Candidates;
@@ -93,13 +94,31 @@ fn code(
     });
     let listed = crate::readers::problems(tree, declared, &direction.reads);
     let approvals = crate::approvals::read(tree)?;
-    let sorted = sort(&direction.forbidden, &approvals.entries);
+    // What the layer table forbids and the I/O of the inner layers are kept the same way: one approval for a file and
+    // what it imports, or the entry of the table of I/O it uses
+    let io = crate::inner_io::problems(tree, parsers, declared)?;
+    let forbidden: Vec<_> = direction
+        .forbidden
+        .iter()
+        .chain(&io.forbidden)
+        .cloned()
+        .collect();
+    let sorted = sort(&forbidden, &approvals.entries);
+    let of_rule = |direction: bool| {
+        sorted
+            .forbidden
+            .iter()
+            .filter(move |f| (f.rule == Rule::Direction) == direction)
+            .map(|f| f.detail.clone())
+            .collect::<Vec<_>>()
+    };
     report.findings.extend(under(
         "the layers import only what the layer table in .rotproof/AGENTS.md allows",
-        direction
-            .problems
-            .into_iter()
-            .chain(sorted.forbidden.iter().map(|f| f.detail.clone())),
+        direction.problems.into_iter().chain(of_rule(true)),
+    ));
+    report.findings.extend(under(
+        domain::inner_io::HEADING,
+        io.problems.into_iter().chain(of_rule(false)),
     ));
     report.findings.extend(under(
         crate::dependencies::HEADING,
@@ -123,11 +142,7 @@ fn code(
     report
         .findings
         .extend(under(domain::readers::HEADING, listed));
-    report.approved = sorted
-        .approved
-        .iter()
-        .map(|(_, entry)| shown(entry))
-        .collect();
+    report.approved = shown_all(&sorted);
     report.approved.sort();
     report.approved.dedup();
     let comments = crate::markers::problems(tree, parsers, declared)?;

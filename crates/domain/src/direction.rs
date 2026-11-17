@@ -224,12 +224,25 @@ pub struct Edge {
 
 /// An import the table forbids: the file that imports, what it imports as the check names it (a Python dotted name,
 /// `m.n` for `from m import n`; a TypeScript specifier; a crate's dependency), and the finding. The file and the
-/// import are what an approval is keyed by (`approvals.rs`).
+/// import are what an approval is keyed by (`approvals.rs`). An entry of the table of I/O the inner layers do none of
+/// ([`crate::inner_io`]) is kept the same way, as the `import`: `shutil`, `std::fs`, `fs`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Forbidden {
     pub file: String,
     pub import: String,
     pub detail: String,
+    /// The rule that found it, which says where the finding is printed
+    pub rule: Rule,
+}
+
+/// The rule that forbids an import.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rule {
+    /// The layer table: the import lands where the layer may not import
+    Direction,
+    /// The inner layers do no I/O: the import is of a table entry, and these are the names the file uses under it,
+    /// which an approval prints on every run
+    InnerIo { names: Vec<String> },
 }
 
 /// The import of `import` by `file`, on `line`, that lands in `to`, when the table forbids it from `from`. `what`
@@ -257,6 +270,7 @@ pub fn imports_test(file: &str, line: usize, import: &str, what: &str, test: &st
             "{file}:{line}: {what}, {test}; code that is not a test imports no test: move what it needs out of the \
              test into a layer"
         ),
+        rule: Rule::Direction,
     }
 }
 
@@ -292,6 +306,7 @@ pub fn judged_landing<'a>(
         file: file.to_string(),
         import: import.to_string(),
         detail: format!("{file}:{line}: {what}, {described}; {reason}{hint}"),
+        rule: Rule::Direction,
     })
 }
 

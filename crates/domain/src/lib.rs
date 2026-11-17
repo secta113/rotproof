@@ -17,6 +17,7 @@ pub mod follows;
 pub mod frontmatter;
 pub mod guide;
 pub mod hook;
+pub mod inner_io;
 pub mod layers;
 pub mod links;
 pub mod locked;
