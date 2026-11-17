@@ -1,12 +1,12 @@
 //! What `rotproof init` tells a project that an upgrade crosses a table that changed what the layers are
 //! (`domain::crossing` names the versions and the words): where the code of each retired layer goes, and what the
-//! screens move out of `ui`; and, for a Python project, what locking it asks. It reads the tree to say which of it
-//! applies, and moves nothing.
+//! screens move out of `ui`; for a project that has a `docs/work/`, what that directory is now; and, for a Python
+//! project, what locking it asks. It reads the tree to say which of it applies, and moves nothing.
 
 use crate::create::ui_in_tree;
 use domain::crossing::{
     LOCKED, LOCKED_MOVES, LOCKED_REQUIREMENTS, ONION, PORTS_MOVED, PRESENTATION,
-    PRESENTATION_ADDED, UI_NONE, UI_SPLIT, crosses, old_paths, retired,
+    PRESENTATION_ADDED, UI_NONE, UI_SPLIT, WORK_LEFT, WORK_STOPPED, crosses, old_paths, retired,
 };
 use domain::declaration::Fields;
 use domain::layers::{NO_UI, layout};
@@ -18,6 +18,9 @@ pub(super) fn moves(tree: &dyn Tree, declared: &Fields, from: &str, running: &st
     let mut moves = Vec::new();
     if crosses(ONION, from, running) {
         moves = onion_moves(tree, declared.stack.as_deref());
+    }
+    if crosses(WORK_STOPPED, from, running) && tree.found("docs/work") == Some(true) {
+        moves.push(format!("docs/work/: {WORK_LEFT}"));
     }
     if crosses(PRESENTATION, from, running) {
         moves.extend(presentation_moves(tree, declared));
@@ -198,6 +201,46 @@ mod tests {
         let none = moves(&[]);
         assert_eq!(none.len(), 1, "{none:#?}");
         assert!(none[0].contains("protocol.outbound"));
+    }
+
+    #[test]
+    fn crossing_the_end_of_work_records_says_what_docs_work_is_now_and_moves_nothing() {
+        let upgrade = |files: &str, running: &str, planted: &[&str]| {
+            let tree = Fake::default();
+            tree.write(
+                DECLARATION,
+                &format!("stack = \"none\"\nfiles = \"{files}\"\n"),
+            )
+            .unwrap();
+            for path in planted {
+                tree.write(path, "kept\n").unwrap();
+            }
+            let Ok(Initialized::Upgraded(upgraded)) = init(&tree, &tree, None, None, "x", running)
+            else {
+                panic!("upgraded");
+            };
+            assert!(upgraded.by_hand.is_empty());
+            // Nothing in docs/work/ is moved, rewritten or taken out
+            for path in planted {
+                assert_eq!(tree.text(path).as_deref(), Some("kept\n"), "{path}");
+            }
+            upgraded.moves
+        };
+        let planted = [
+            "docs/work/index.md",
+            "docs/work/a.md",
+            "docs/work/closed.md",
+        ];
+        // A project of before 1.0 with docs/work/ is told what it is now, in one line
+        let said = upgrade("0.4.0", WORK_STOPPED, &planted);
+        assert_eq!(said, [format!("docs/work/: {WORK_LEFT}")]);
+        for word in ["index.md, closed.md or rules.md", "docs/index.md", "issues"] {
+            assert!(WORK_LEFT.contains(word), "{word}");
+        }
+        // One without it has nothing to be told, and one already at the version was told then
+        assert!(upgrade("0.4.0", WORK_STOPPED, &["docs/log.md"]).is_empty());
+        assert!(upgrade(WORK_STOPPED, "1.0.0-rc.3", &planted).is_empty());
+        assert!(upgrade(WORK_STOPPED, WORK_STOPPED, &planted).is_empty());
     }
 
     #[test]

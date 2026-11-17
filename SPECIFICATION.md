@@ -151,7 +151,12 @@ that has a declaration:
   ports move from `domain` to `protocol.outbound`, as "move by hand" lines, and, when a directory of a layer that is
   gone is there, one line more that names the directories it found and says to search the files Rotproof does not read
   (documents, scripts, configuration, comments) for those paths once the code has moved, since no check reads them;
-  it moves no code, and keeps nothing behind: `rotproof check` names what is not moved yet. Crossing 1.0.0-rc.3, which splits the UI into the view (`ui`) and the
+  it moves no code, and keeps nothing behind: `rotproof check` names what is not moved yet. Crossing 1.0.0-rc.1, the first version that reads no record of work, it says, for a
+  project whose `docs/work/` is there, as one more "move by hand" line, that Rotproof reads none of that directory and
+  writes no `index.md`, `closed.md` or `rules.md` in it, so those stay as they were, that `docs/index.md` no longer
+  links to it, and that its open items need a home the person chooses (the project's issues, or kept as frozen
+  history); it moves and deletes nothing there, and says nothing for a project without the directory. Crossing
+  1.0.0-rc.3, which splits the UI into the view (`ui`) and the
   state of the screens (`presentation`) and declares the UI, the refresh adds `ui` to the declaration: `"atomic"` when
   `ui/` is there, `"none"` otherwise. With `"atomic"`, it says, as the same lines, that `presentation` is to be made
   (`rotproof create --yes`), and that the state of a page and its calls of the use cases move to

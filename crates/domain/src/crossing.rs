@@ -31,6 +31,17 @@ pub const RETIRED: [(&str, &str); 2] = [
 pub const PORTS_MOVED: &str = "the ports (the interfaces to the outside) move from domain to protocol.outbound, and \
                                the use cases the entry points call get interfaces in protocol.inbound, with plain data";
 
+/// The first version that reads no record of work. Crossing it, a project that has a `docs/work/` is told what that
+/// directory is now, and nothing in it moves: whether its open items become issues or stay as history is the project's.
+pub const WORK_STOPPED: &str = "1.0.0-rc.1";
+
+/// What crossing [`WORK_STOPPED`] means for a project whose `docs/work/` is there.
+pub const WORK_LEFT: &str = "Rotproof kept open work in docs/work/ before 1.0 and reads none of it now: it checks \
+                             nothing there and writes no index.md, closed.md or rules.md, so those stay as they \
+                             were, and docs/index.md no longer links to it. Open work is kept in issues: its open \
+                             items need a home you choose (the project's issues, or kept as frozen history where \
+                             they are). Nothing there is moved or deleted";
+
 /// The version whose table splits the UI into the view (`ui`) and the Presentation Model (`presentation`), and whose
 /// declaration says which UI a project has (`ui`). Crossing it, `rotproof init` says what moves, and moves nothing:
 /// which part of a page is the state of the screen and which is its view, no machine can tell.
