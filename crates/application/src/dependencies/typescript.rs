@@ -158,14 +158,16 @@ pub(super) fn typescript(
         }
     }
     let mut uses: BTreeMap<String, Vec<domain::dependencies::Use>> = BTreeMap::new();
+    // Every import of a package, whether or not the unit has a manifest to compare it with: a unit without one lists
+    // nothing, so a name Node also has as a builtin (`fs`) is Node's
+    let mut packages: Vec<domain::dependencies::Use> = Vec::new();
+    let nothing = Listing::default();
     for (path, unit_name) in files.iter().filter(|(path, _)| is_source(path)) {
         let Some(unit) = units.iter().find(|unit| unit.name == *unit_name) else {
             continue;
         };
         let manifest = manifest_of(unit);
-        let Some(own) = listings.get(&manifest) else {
-            continue;
-        };
+        let own = listings.get(&manifest).unwrap_or(&nothing);
         let Some(source) = read_code(tree, path, "imports", &mut Vec::new())? else {
             continue;
         };
@@ -183,20 +185,25 @@ pub(super) fn typescript(
                 Needs::Unit(package, name) => (package, Some(name)),
                 Needs::Package(package) => (package, None),
             };
-            uses.entry(manifest.clone())
-                .or_default()
-                .push(domain::dependencies::Use {
-                    file: path.clone(),
-                    line,
-                    shown: import.specifier,
-                    package,
-                    test: layout.is_test_file(path),
-                    unit: named,
-                });
+            let used = domain::dependencies::Use {
+                file: path.clone(),
+                line,
+                shown: import.specifier,
+                package,
+                test: layout.is_test_file(path),
+                unit: named,
+            };
+            if used.unit.is_none() {
+                packages.push(used.clone());
+            }
+            uses.entry(manifest.clone()).or_default().push(used);
         }
     }
     let without = without_import(declared, Language::TypeScript);
-    let mut read = Read::default();
+    let mut read = Read {
+        packages,
+        ..Read::default()
+    };
     for (manifest, own) in &listings {
         read.any = true;
         read.runtime.extend(
@@ -205,6 +212,8 @@ pub(super) fn typescript(
                 .filter(|dep| dep.kind == Kind::Runtime)
                 .map(|dep| dep.name.clone()),
         );
+        read.listed
+            .extend(own.deps.iter().map(|dep| dep.name.clone()));
         let mut judged = own.clone();
         if let Some(root) = root.as_ref().filter(|_| *manifest != root_manifest) {
             let own = judged.clone();
@@ -224,6 +233,11 @@ pub(super) fn typescript(
         for problem in judge(Language::TypeScript, &judged, used, &without) {
             found.push(problem.said(Language::TypeScript, manifest, None));
         }
+    }
+    // What the project's own manifest lists is usable in every package of a workspace, hoisted
+    if let Some(root) = &root {
+        read.listed
+            .extend(root.deps.iter().map(|dep| dep.name.clone()));
     }
     Ok(read)
 }

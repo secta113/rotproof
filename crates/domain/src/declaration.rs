@@ -9,9 +9,12 @@
 //! - **An upgrade reads less.** [`fields`] reads only what an upgrade needs, from a declaration written by an older
 //!   Rotproof that may lack a field the running one requires.
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
+use crate::inner_io::Allowlist;
 use crate::layers::{Layout, Place, RECORDS_ONLY, Table, known_stacks, layout, table, uis};
 use crate::markers::TodoLink;
 use crate::paths::within;
@@ -133,6 +136,24 @@ pub struct DependenciesDeclaration {
     /// loads (`openpyxl` for `pandas`), a driver chosen by name, a `-sys` crate. They are never unused
     #[serde(default)]
     pub without_import: Vec<String>,
+    /// The packages the inner layers may import, by the layer or level that may (`domain`, `presentation.models`), as
+    /// the manifest lists them: a person's decision, which no command writes (`inner_io/allowed.rs`). Python and
+    /// TypeScript only
+    #[serde(default)]
+    pub allowed: BTreeMap<String, Allowed>,
+}
+
+/// What a key of `allowed` holds. It is a list of names; the other two shapes are read only so that the declaration
+/// is refused with how to write it, as an `entry` that is a string is.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum Allowed {
+    Names(Vec<String>),
+    /// What TOML makes of `presentation.models = [...]` written without quotes: the table `models` in the table
+    /// `presentation`
+    Table(BTreeMap<String, Allowed>),
+    /// Anything else (a string, a number, a list of numbers)
+    Other(toml::Value),
 }
 
 /// One `[[unit]]` of the declaration: a part of the code that holds the layers.
@@ -155,6 +176,10 @@ pub struct UnitDeclaration {
     /// The layers and levels the unit does not have, as the top-level `absent` names them for a project of one unit
     #[serde(default)]
     pub absent: Vec<String>,
+    /// The packages the unit's inner layers may import besides those the project allows (`[dependencies]`): added to
+    /// them for this unit's code
+    #[serde(default)]
+    pub allowed: BTreeMap<String, Allowed>,
 }
 
 /// The `entry` of a unit: an array of paths, which is the one way to write it. A string reads as `One` only so that the
@@ -480,6 +505,8 @@ pub struct Declared {
     pub left_out: Vec<(String, String)>,
     /// How a comment that keeps the first marker names its issue, from `todo_link`: `None` when it is not declared
     pub todo_link: Option<TodoLink>,
+    /// The packages the inner layers may import: what the layout allows, the project's `allowed` and each unit's
+    pub allowed: Allowlist,
 }
 
 impl Declared {
@@ -513,7 +540,10 @@ impl Declared {
                 ));
             }
             let dependencies = &declaration.dependencies;
-            if !dependencies.imports.is_empty() || !dependencies.without_import.is_empty() {
+            if !dependencies.imports.is_empty()
+                || !dependencies.without_import.is_empty()
+                || !dependencies.allowed.is_empty()
+            {
                 found.push(format!(
                     "{DECLARATION}: stack = \"none\" has no code, so it has no dependencies to judge: take out \
                      [dependencies]"
@@ -529,6 +559,7 @@ impl Declared {
                 places: Vec::new(),
                 left_out: Vec::new(),
                 todo_link: None,
+                allowed: Allowlist::default(),
             });
         }
         let Some(offered) = uis(&declaration.stack) else {
@@ -594,6 +625,8 @@ impl Declared {
         }
         found.extend(levels_without_their_layer(&units, &places));
         found.extend(dependency_problems(&declaration));
+        let (allowed, problems) = Allowlist::read(&declaration, &layout, &units, &places);
+        found.extend(problems);
         let todo_link = declaration.todo_link.as_deref().and_then(|value| {
             let link = TodoLink::parse(value);
             if link.is_none() {
@@ -614,6 +647,7 @@ impl Declared {
             places,
             left_out,
             todo_link,
+            allowed,
         })
     }
 
@@ -970,6 +1004,57 @@ mod tests {
         // The declaration init writes does not hold it: it is documented in the specification alone
         for stack in known_stacks() {
             assert!(!declaration_text(stack, "none").contains("approved_max"));
+        }
+    }
+
+    #[test]
+    fn allowed_is_a_table_of_lists_that_nothing_writes() {
+        let python = "stack = \"python\"\nareas = []\nui = \"atomic\"\n";
+        let allowed = |text: &str| parse_declaration(text).map(|d| d.dependencies.allowed);
+        assert_eq!(allowed(python), Ok(BTreeMap::new()));
+        let read = allowed(&format!(
+            "{python}[dependencies]\nallowed = {{ domain = [\"pydantic\"], \"presentation.models\" = [\"zustand\"] }}\n"
+        ))
+        .unwrap();
+        assert_eq!(
+            read.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["domain", "presentation.models"]
+        );
+        assert_eq!(read["domain"], Allowed::Names(vec!["pydantic".into()]));
+        // A unit has its own
+        let unit = parse_declaration(&format!(
+            "{python}[[unit]]\nname = \"a\"\npath = \"a\"\nallowed = {{ domain = [\"attrs\"] }}\n"
+        ))
+        .unwrap();
+        assert_eq!(
+            unit.units[0].allowed["domain"],
+            Allowed::Names(vec!["attrs".into()])
+        );
+        // An unquoted dotted key is a table in a table, and any other shape is read to be refused with its words
+        let nested = allowed(&format!(
+            "{python}[dependencies]\nallowed = {{ presentation.models = [\"zustand\"] }}\n"
+        ))
+        .unwrap();
+        assert!(
+            matches!(&nested["presentation"], Allowed::Table(inner) if inner.contains_key("models"))
+        );
+        assert!(matches!(
+            allowed(&format!(
+                "{python}[dependencies]\nallowed = {{ domain = 1 }}\n"
+            ))
+            .unwrap()["domain"],
+            Allowed::Other(_)
+        ));
+        // Not a table of keys: the declaration cannot be read
+        assert!(allowed(&format!("{python}[dependencies]\nallowed = [\"domain\"]\n")).is_err());
+        // The declaration init writes does not hold it: a person decides it, and nothing drafts it
+        for stack in known_stacks() {
+            for ui in uis(stack).unwrap_or_else(|| vec![String::new()]) {
+                assert!(
+                    !declaration_text(stack, &ui).contains("allowed"),
+                    "{stack} {ui}"
+                );
+            }
         }
     }
 

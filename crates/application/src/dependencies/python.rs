@@ -217,6 +217,8 @@ pub(super) fn python(
         }
     }
     let mut uses: BTreeMap<String, Vec<Use>> = BTreeMap::new();
+    // Every import of a package, whether or not the unit has a manifest to compare it with
+    let mut packages: Vec<Use> = Vec::new();
     // The first part of the import of each package that is taken to be of the distribution named like it
     let mut guesses: BTreeMap<(String, String), String> = BTreeMap::new();
     for file in &files {
@@ -224,9 +226,6 @@ pub(super) fn python(
             continue;
         };
         let manifest = manifest_of(unit);
-        if !listings.contains_key(&manifest) {
-            continue;
-        }
         let Some(source) = read_code(tree, &file.path, "imports", &mut Vec::new())? else {
             continue;
         };
@@ -241,18 +240,25 @@ pub(super) fn python(
                     .entry((manifest.clone(), package.clone()))
                     .or_insert(guess);
             }
-            uses.entry(manifest.clone()).or_default().push(Use {
+            let used = Use {
                 file: file.path.clone(),
                 line,
                 shown: module.join("."),
                 package,
                 test: file.test,
                 unit: named,
-            });
+            };
+            if used.unit.is_none() {
+                packages.push(used.clone());
+            }
+            uses.entry(manifest.clone()).or_default().push(used);
         }
     }
     let without = without_import(declared, Language::Python);
-    let mut read = Read::default();
+    let mut read = Read {
+        packages,
+        ..Read::default()
+    };
     let mut venvs = Venvs::new(tree);
     for (manifest, listing) in &listings {
         read.any = true;
@@ -263,6 +269,8 @@ pub(super) fn python(
                 .filter(|dep| dep.kind == Kind::Runtime)
                 .map(|dep| dep.name.clone()),
         );
+        read.listed
+            .extend(listing.deps.iter().map(|dep| dep.name.clone()));
         let used = uses.get(manifest).map_or(&[][..], Vec::as_slice);
         for problem in judge(Language::Python, listing, used, &without) {
             let hint = match &problem {

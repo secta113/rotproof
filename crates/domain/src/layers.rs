@@ -269,6 +269,11 @@ pub struct Layout {
     /// keeps its tests in a place of their own (`not_layers`) or in a file the language marks
     #[serde(default)]
     pub tests: Option<Tests>,
+    /// The packages an inner layer may import in every project of this stack, by the layer or level of the table
+    /// (`presentation.models`): what the stack's own framework needs there, which a project does not write. Empty
+    /// while this stack has none (Python's; Rust's lists a layer's packages in the crate's own manifest)
+    #[serde(default)]
+    pub allowed: BTreeMap<String, Vec<String>>,
     /// The template files of the UI the layout is for, when its views are templates: code like the code of the layout
     /// where the structure is judged, and read for the references between them. `None` for every other UI, which
     /// [`layout`] sets
@@ -1331,6 +1336,37 @@ mod tests {
         }
         assert!(layout("typescript", "atomic").unwrap().templates.is_none());
         assert!(layout("typescript", "rendered").is_none());
+    }
+
+    #[test]
+    fn the_packages_a_layout_allows_are_for_the_places_of_the_layers_the_rule_judges() {
+        let table = table();
+        for (stack, _) in STACKS {
+            let layout = layout(stack, "atomic").or_else(|| super::layout(stack, NO_UI));
+            let layout = layout.unwrap();
+            for (key, names) in &layout.allowed {
+                let place = layout
+                    .places(&table)
+                    .into_iter()
+                    .find(|place| &place.name == key)
+                    .unwrap_or_else(|| panic!("{stack}: {key} is no place"));
+                assert!(
+                    crate::inner_io::is_judged(&place),
+                    "{stack}: {key} is not a layer the rule judges"
+                );
+                assert!(!names.is_empty() && names.iter().all(|name| name == name.trim()));
+            }
+        }
+        // React's hooks keep the state of a screen's model; nothing draws there, so `react-dom` is no name of it
+        let typescript = layout("typescript", "atomic").unwrap();
+        assert_eq!(
+            typescript.allowed,
+            BTreeMap::from([("presentation.models".to_string(), vec!["react".to_string()])])
+        );
+        for stack in ["python", "rust"] {
+            let ui = if stack == "rust" { NO_UI } else { "atomic" };
+            assert!(layout(stack, ui).unwrap().allowed.is_empty(), "{stack}");
+        }
     }
 
     #[test]

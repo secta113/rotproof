@@ -4423,15 +4423,19 @@ fn only_a_test_imports_a_development_dependency_of_a_typescript_project() {
     );
     put(
         r,
-        "src/domain/song.ts",
+        "src/infrastructure/outbound/song.ts",
         "import type { Buffer } from '@types/node';\n",
     );
     let out = run(&["--root", &root_arg(r), "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
-    // The code of a layer, the entry file and a file outside the layers that is no test
+    // The code of a layer (one that may import a package: the allowlist of the inner layers is another rule), the
+    // entry file and a file outside the layers that is no test
     for (path, expected) in [
-        ("src/domain/song.ts", "src/domain/song.ts:1"),
+        (
+            "src/infrastructure/outbound/song.ts",
+            "src/infrastructure/outbound/song.ts:1",
+        ),
         ("src/main.tsx", "src/main.tsx:1"),
     ] {
         let original = fs::read_to_string(r.join(path)).unwrap_or_default();
@@ -5012,7 +5016,7 @@ fn every_form_of_typescript_import_is_judged() {
     );
     write(
         "src/domain/song.ts",
-        "import React from 'react';\nimport type { Play } from '../application/play';\nexport * from '@/infrastructure/db';\n\
+        "import path from 'node:path';\nimport type { Play } from '../application/play';\nexport * from '@/infrastructure/db';\n\
          export const load = () => import('../composition/main');\nconst x = require(`../vendor/x`);\n\
          const where = import.meta.resolve('../composition/worker');\n",
     );
@@ -5020,6 +5024,11 @@ fn every_form_of_typescript_import_is_judged() {
         "src/ui/molecules/Row.tsx",
         "import { Button } from '../atoms/Button';\nimport { List } from '../organisms/List';\nimport '../index.css';\n\
          import logo from '../../domain/logo.svg?url';\nexport const Row = () => <p>{/* ../pages */}</p>;\n",
+    );
+    // A package is no layer: it is the dependencies check's, and the allowlist's where the layer may not import it
+    write(
+        "src/infrastructure/outbound/view.ts",
+        "import React from 'react';\n",
     );
     // Not a source file, ignored by git, or hidden: not read
     write("src/domain/notes.md", "import '../composition'\n");
@@ -5218,7 +5227,7 @@ fn every_form_of_import_is_judged() {
     };
     write(
         "domain/model.py",
-        "import os\nimport requests\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    \
+        "import os\nimport json\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    \
          from application import play\ndef f():\n    import infrastructure.db\n",
     );
     write(
@@ -5228,7 +5237,7 @@ fn every_form_of_import_is_judged() {
     // The entry file, outside the layers, is read too
     write(
         "__main__.py",
-        "import composition\nfrom application import play\n",
+        "import composition\nfrom application import play\nimport requests\n",
     );
     // Not a layer, ignored by git, or hidden: not read
     write("tests/test_x.py", "import composition\n");
@@ -5262,6 +5271,13 @@ fn what_cannot_be_read_fails_and_what_is_not_there_is_not_judged() {
     )
     .unwrap();
     fs::write(r.join("domain/model.py"), "import infrastructure.db\n").unwrap();
+    // It is a package all the same, which the domain may import once it is allowed there
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        format!("{declaration}\n[dependencies]\nallowed = {{ domain = [\"infrastructure\"] }}\n"),
+    )
+    .unwrap();
     let out = run(&["--root", &root_arg(r), "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
 
@@ -9079,7 +9095,7 @@ fn a_python_manifest_is_compared_with_what_the_code_imports_either_way() {
     );
     write_file(
         r,
-        "application/pay.py",
+        "infrastructure/outbound/pay.py",
         "import os\nimport requests\nfrom dotenv import load_dotenv\n",
     );
     // `dotenv` is taken for the distribution named like it, and `python-dotenv` is imported by nothing
@@ -9092,7 +9108,7 @@ fn a_python_manifest_is_compared_with_what_the_code_imports_either_way() {
     );
     assert!(
         said.contains(
-            "application/pay.py:3: imports dotenv.load_dotenv, which needs the package dotenv, and pyproject.toml \
+            "infrastructure/outbound/pay.py:3: imports dotenv.load_dotenv, which needs the package dotenv, and pyproject.toml \
              does not list it: add it to dependencies in [project]"
         ),
         "{said}"
@@ -9144,7 +9160,7 @@ fn a_typescript_manifest_is_compared_with_what_the_code_imports_either_way() {
     );
     write_file(
         r,
-        "src/application/pay.ts",
+        "src/infrastructure/outbound/pay.ts",
         "import React from \"react\";\nimport z from \"zod\";\nimport { join } from \"node:path\";\n",
     );
     let out = run(&["--root", &arg, "check"]);
@@ -9152,7 +9168,7 @@ fn a_typescript_manifest_is_compared_with_what_the_code_imports_either_way() {
     assert_eq!(out.status.code(), Some(1), "{said}");
     assert!(
         said.contains(
-            "src/application/pay.ts:2: imports zod, which needs the package zod, and package.json does not list it: \
+            "src/infrastructure/outbound/pay.ts:2: imports zod, which needs the package zod, and package.json does not list it: \
              add it to dependencies"
         ),
         "{said}"
@@ -9485,4 +9501,487 @@ fn a_project_with_atomic_ui_reads_no_template() {
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(!stdout(&out).contains("templates:"), "{}", stdout(&out));
+}
+
+/// What a finding of a package an inner layer may not import starts with: the way out, up to the place.
+const PACKAGE_FIX: &str = "move the code that needs the package to infrastructure, behind a port the use case is \
+                           given, or, when the package does no I/O, ask the person whether to allow it for";
+
+#[test]
+fn a_package_is_imported_in_an_inner_layer_only_where_it_is_allowed_and_each_form_planted_fails() {
+    let root = repo_with_ui("python", "");
+    let r = root.path();
+    put(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\", \"pydantic\"]\n",
+    );
+    // What is not an inner layer is free: the layer that does the I/O, what wires and draws, the entry file and a test
+    for path in [
+        "infrastructure/outbound/o.py",
+        "infrastructure/inbound/i.py",
+        "composition/c.py",
+        "ui/pages/p.py",
+        "__main__.py",
+        "tests/test_o.py",
+    ] {
+        put(r, path, "import requests\nimport pydantic\nimport os\n");
+    }
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // Every inner layer and level fails on a package that no list allows it
+    for path in [
+        "domain/x.py",
+        "protocol/inbound/x.py",
+        "protocol/outbound/x.py",
+        "application/x.py",
+        "presentation/models/x.py",
+        "presentation/display/x.py",
+    ] {
+        put(r, path, "import os\nimport requests\n");
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{path}\n{said}");
+        assert!(said.contains(IO_HEADING), "{path}\n{said}");
+        let place = path.rsplit_once('/').unwrap().0.replace('/', ".");
+        assert!(
+            said.contains(&format!("  {path}:2: {PACKAGE_FIX} {place} (allowed under [dependencies] in .config/rotproof.toml; an agent never adds it to pass the check): imports requests, of the package requests, which {place} may not import\n    import requests")),
+            "{path}\n{said}"
+        );
+        fs::remove_file(r.join(path)).unwrap();
+    }
+
+    // A list allows it, by layer or by level, and the declaration is the person's: it is written, never made
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    assert!(!declaration.contains("allowed"), "{declaration}");
+    let declare = |text: &str| {
+        put(
+            r,
+            ".config/rotproof.toml",
+            &format!("{declaration}\n{text}\n"),
+        )
+    };
+    put(r, "domain/x.py", "import requests\n");
+    put(r, "presentation/models/x.py", "import pydantic\n");
+    put(r, "presentation/display/x.py", "import os\n");
+    declare("[dependencies]\nallowed = { domain = [\"Requests\"], presentation = [\"pydantic\"] }");
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // A level's key adds to that level alone
+    put(r, "presentation/display/x.py", "import pydantic\n");
+    declare(
+        "[dependencies]\nallowed = { domain = [\"requests\"], \"presentation.models\" = [\"pydantic\"] }",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("presentation/display/x.py:1: ")
+            && !said.contains("presentation/models/x.py:1: "),
+        "{said}"
+    );
+    put(r, "presentation/display/x.py", "import os\n");
+    // The table form of the same list, with its keys in quotes
+    declare(
+        "[dependencies.allowed]\ndomain = [\"requests\"]\n\"presentation.models\" = [\"pydantic\"]",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+
+    // Each form of a list that cannot be kept fails, said with what to do, and the declaration put back passes
+    for (table, said_so) in [
+        (
+            "allowed = { domain = [\"requests\"], domane = [\"x\"] }",
+            "allowed under [dependencies] has the key \"domane\", which is no layer or level of the table: write one of presentation, presentation.models",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], infrastructure = [\"x\"] }",
+            "has the key \"infrastructure\", a layer that is free to import any package",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], composition = [\"x\"] }",
+            "has the key \"composition\", a layer that is free to import any package",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], ui = [\"x\"] }",
+            "has the key \"ui\", a layer that is free to import any package",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], presentation.models = [\"pydantic\"] }",
+            "has the table presentation.models: TOML reads presentation.models = [...] written without quotes as the key models inside the table presentation, not as the key presentation.models. Write the key in quotes: \"presentation.models\" = [...]",
+        ),
+        (
+            "allowed = { domain = \"requests\" }",
+            "has domain = \"requests\", which is no list of names",
+        ),
+        (
+            "allowed = { domain = [\"requests\", \"Requests\"] }",
+            "lists requests twice for domain (as \"requests\" and \"Requests\"): allow it once",
+        ),
+        (
+            "allowed = { domain = [\"requests\"], \"presentation.models\" = [\"pydantic\"], presentation = [\"pydantic\"] }",
+            "pydantic is allowed twice for the same code, by allowed under [dependencies] (presentation) and by allowed under [dependencies] (presentation.models)",
+        ),
+        (
+            "allowed = { domain = [\"requests\", \"pydantic\"], \"presentation.models\" = [\"pydantic\"] }",
+            "lists pydantic for domain, which no file of domain imports: take it out, so that the list does not keep what is gone",
+        ),
+        (
+            "allowed = { domain = [\"requests\", \"ghost\"], \"presentation.models\" = [\"pydantic\"] }",
+            "lists ghost for domain, which no manifest of the project lists as a dependency: take it out",
+        ),
+    ] {
+        declare(&format!("[dependencies]\n{table}"));
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{table}\n{said}");
+        assert!(said.contains(said_so), "{table}\n{said}");
+    }
+    // A layer the project lacks: left out by the UI, or declared absent
+    let root = clean_repo();
+    let r = root.path();
+    put(r, "domain/x.py", "import os\n");
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    put(
+        r,
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nallowed = {{ presentation = [\"pydantic\"] }}\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("has the key \"presentation\", and no unit of the project has it (declared absent, or left out by the ui): take it out"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_unit_adds_its_own_packages_to_the_projects_and_a_key_for_a_layer_it_lacks_fails() {
+    let unit = |name: &str, extra: &str| {
+        format!("\n[[unit]]\nname = \"{name}\"\npath = \"{name}\"\n{extra}")
+    };
+    let declaration = format!(
+        "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nfiles = \"{}\"\n\n[dependencies]\nallowed = {{ domain = [\"requests\"] }}\n{}{}",
+        env!("CARGO_PKG_VERSION"),
+        unit("a", "allowed = { domain = [\"pydantic\"] }\n"),
+        unit("b", ""),
+    );
+    let root = declared(&declaration);
+    let r = root.path();
+    let arg = root_arg(r);
+    let out = create(&["--root", &arg, "create", "--yes"]);
+    assert!(
+        out.status.success(),
+        "{}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    put(r, "docs/log.md", "# Log\n\n## 2026-10-02\n\n* Something\n");
+    for dir in ["a", "b"] {
+        put(
+            r,
+            &format!("{dir}/pyproject.toml"),
+            "[project]\nname = \"x\"\ndependencies = [\"requests\", \"pydantic\"]\n",
+        );
+    }
+    put(r, "a/domain/x.py", "import requests\nimport pydantic\n");
+    put(r, "b/domain/x.py", "import requests\nimport pydantic\n");
+    let (code, said) = checked(r);
+    // The project's list is for both units, a unit's own for its code alone
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("  b/domain/x.py:2: ") && !said.contains("a/domain/x.py:"),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "imports pydantic, of the package pydantic, which domain of unit b may not import"
+        ),
+        "{said}"
+    );
+    // The unit that lacks a layer has no list for it, and says so, with the unit named
+    let lacking = declaration.replace(
+        "name = \"b\"\npath = \"b\"\n",
+        "name = \"b\"\npath = \"b\"\nabsent = [\"application\"]\nallowed = { application = [\"requests\"] }\n",
+    );
+    put(r, ".config/rotproof.toml", &up_to_date(&lacking));
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains(
+            "allowed of unit \"b\" has the key \"application\", and the unit \"b\" lacks it"
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_rust_project_has_no_list_and_its_crate_lists_what_its_layer_may_use() {
+    let root = repo_with_ui("rust", "");
+    let r = root.path();
+    put(
+        r,
+        "crates/domain/Cargo.toml",
+        "[package]\nname = \"domain\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nserde = \"1\"\n",
+    );
+    put(
+        r,
+        "crates/domain/src/lib.rs",
+        "//! Doc\n\nuse serde::Serialize;\n",
+    );
+    // A dependency of an inner layer's crate is that crate's own list, and passes
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // An `allowed` there fails, with why, in the project's table and in a unit's
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    for table in [
+        "[dependencies]\nallowed = { domain = [\"serde\"] }\n",
+        "[[unit]]\nname = \"core\"\npath = \"crates\"\nallowed = { domain = [\"serde\"] }\n",
+    ] {
+        put(
+            r,
+            ".config/rotproof.toml",
+            &format!("{declaration}\n{table}"),
+        );
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{table}\n{said}");
+        assert!(
+            said.contains("is set, and a Rust project has no such list: a crate's own Cargo.toml [dependencies] is the list of packages its layer may import")
+                && said.contains("is a decision of the person: take allowed out"),
+            "{table}\n{said}"
+        );
+    }
+    // A repository of records has no code to list
+    let root = repo();
+    let declaration = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
+    put(
+        root.path(),
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nallowed = {{ domain = [\"x\"] }}\n"),
+    );
+    let (code, said) = checked(root.path());
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("stack = \"none\" has no code, so it has no dependencies to judge: take out [dependencies]"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_typescript_layout_allows_react_in_the_models_and_nothing_else_and_the_list_is_the_persons() {
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    put(
+        r,
+        "package.json",
+        "{\n  \"name\": \"shop\",\n  \"dependencies\": { \"react\": \"^18\", \"react-dom\": \"^18\", \"zustand\": \"^5\" }\n}\n",
+    );
+    put(
+        r,
+        "src/main.tsx",
+        "import { createRoot } from 'react-dom/client';\nimport create from 'zustand';\n",
+    );
+    put(
+        r,
+        "src/presentation/models/m.ts",
+        "import { useState } from 'react';\nimport { useRef } from 'react/jsx-runtime';\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // `react` is for the models alone, and `react-dom` for no inner layer: the layout lists the one, no more
+    for (path, source, package, place) in [
+        (
+            "src/domain/x.ts",
+            "import { useState } from 'react';\n",
+            "react",
+            "domain",
+        ),
+        (
+            "src/presentation/display/x.ts",
+            "import { useState } from 'react';\n",
+            "react",
+            "presentation.display",
+        ),
+        (
+            "src/presentation/models/x.ts",
+            "import { createRoot } from 'react-dom/client';\n",
+            "react-dom",
+            "presentation.models",
+        ),
+        (
+            "src/application/x.ts",
+            "import create from 'zustand';\n",
+            "zustand",
+            "application",
+        ),
+    ] {
+        put(r, path, source);
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{path}\n{said}");
+        assert!(
+            said.contains(&format!("  {path}:1: {PACKAGE_FIX} {place} (allowed under [dependencies] in .config/rotproof.toml; an agent never adds it to pass the check): imports")),
+            "{path}\n{said}"
+        );
+        assert!(
+            said.contains(&format!(
+                "of the package {package}, which {place} may not import"
+            )),
+            "{path}\n{said}"
+        );
+        fs::remove_file(r.join(path)).unwrap();
+    }
+    // A test is free, and a list written by the person allows the rest: the name as `package.json` writes it
+    put(r, "src/domain/x.test.ts", "import create from 'zustand';\n");
+    put(r, "src/application/x.ts", "import create from 'zustand';\n");
+    let declaration = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    put(
+        r,
+        ".config/rotproof.toml",
+        &format!("{declaration}\n[dependencies]\nallowed = {{ application = [\"zustand\"] }}\n"),
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    // What the layout allows is not written again, and a name npm writes in another case is another name
+    for (table, said_so) in [
+        (
+            "allowed = { application = [\"zustand\"], \"presentation.models\" = [\"react\"] }",
+            "lists react for presentation.models, which the typescript layout allows for presentation.models already: take it out",
+        ),
+        (
+            "allowed = { application = [\"Zustand\"] }",
+            "lists Zustand for application, which no manifest of the project lists as a dependency",
+        ),
+    ] {
+        put(
+            r,
+            ".config/rotproof.toml",
+            &format!("{declaration}\n[dependencies]\n{table}\n"),
+        );
+        let (code, said) = checked(r);
+        assert_eq!(code, Some(1), "{table}\n{said}");
+        assert!(said.contains(said_so), "{table}\n{said}");
+    }
+}
+
+#[test]
+fn an_approved_package_prints_the_imports_the_file_makes_of_it_and_a_stale_approval_fails() {
+    let root = repo_with_ui("python", "");
+    let r = root.path();
+    put(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\"]\n",
+    );
+    put(
+        r,
+        "domain/x.py",
+        "from requests import get, post\nimport requests\n\n\ndef f():\n    return requests.get\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("domain/x.py:1: ") && said.contains("domain/x.py:2: "),
+        "{said}"
+    );
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let out = approve_with_git(
+        r,
+        named,
+        &[
+            "domain/x.py",
+            "requests",
+            "--reason",
+            "the report is fetched here until the port is made",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // One approval for the file and the package covers every import of it
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(0), "{said}");
+    assert!(
+        said.contains(
+            "approved in .config/rotproof-approved.toml (1):\n  requests in domain/x.py: the report is fetched here until the port is made (Someone Else, "
+        ) && said.contains("; now used: requests, requests.get, requests.post\n"),
+        "{said}"
+    );
+    // Another package of the file is not covered
+    put(r, "domain/x.py", "import requests\nimport pydantic\n");
+    put(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\", \"pydantic\"]\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("domain/x.py:2: ")
+            && said.contains("of the package pydantic")
+            && !said.contains("domain/x.py:1: "),
+        "{said}"
+    );
+    // The import goes, and the approval that matches nothing fails
+    put(r, "domain/x.py", "import os\n");
+    put(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = []\n",
+    );
+    let (code, said) = checked(r);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("approved, but no such forbidden import: requests in domain/x.py"),
+        "{said}"
+    );
+}
+
+#[test]
+fn the_guide_says_what_is_allowed_in_an_inner_layer_and_that_the_list_is_the_persons() {
+    for stack in ["python", "typescript"] {
+        // The guide is wrapped: its words are read as one line
+        let guide = stdout(&run(&["guide", "--stack", stack]))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        for said in [
+            "**The inner layers import only the packages they are allowed.**",
+            "`allowed = { domain = [\"pydantic\"], protocol = [\"pydantic\"], \"presentation.models\" = [\"zustand\"] }`",
+            "**Write a dotted key in quotes:**",
+            "**Allowing a package is a decision of the person.** Never add, change or take out a name of `allowed` to pass the check, as with `todo_link` and `approved_max`",
+            "`rotproof init` and `rotproof create` never write it",
+        ] {
+            assert!(guide.contains(said), "{stack}: {said}");
+        }
+        assert_eq!(
+            guide.contains("The layout allows `react` in `presentation.models`"),
+            stack == "typescript"
+        );
+    }
+    let guide = stdout(&run(&["guide", "--stack", "rust"]))
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        guide.contains("**A crate's own `Cargo.toml` is the list of the packages its layer may use, and adding one is a decision of the person.**"),
+        "{guide}"
+    );
+    // Neither command writes it into a declaration
+    for stack in ["python", "typescript", "rust"] {
+        let ui = if stack == "rust" { "none" } else { "atomic" };
+        let root = tempfile::tempdir().unwrap();
+        let out = run(&[
+            "--root",
+            &root_arg(root.path()),
+            "init",
+            "--stack",
+            stack,
+            "--ui",
+            ui,
+        ]);
+        assert!(out.status.success(), "{}", stdout(&out));
+        let text = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
+        assert!(!text.contains("allowed"), "{stack}: {text}");
+    }
 }

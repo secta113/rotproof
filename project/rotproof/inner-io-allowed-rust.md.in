@@ -1,0 +1,7 @@
+- **A crate's own `Cargo.toml` is the list of the packages its layer may use, and adding one is a decision of the
+  person.** Cargo stops the crate of `domain`, `protocol`, `application` or `presentation` from naming a crate its
+  `[dependencies]` do not list, and `rotproof check` fails a dependency that nothing names, so the two are one list and
+  Rotproof keeps no second one: `allowed` under `[dependencies]` of `.config/rotproof.toml` is for Python and
+  TypeScript, and fails in a Rust project, in the project's table and in a `[[unit]]` table. Never add a dependency to
+  the crate of an inner layer to pass a check: what the crate needs that does I/O goes in `infrastructure.outbound`
+  behind a port, and a package that does none is added when the person has decided to.

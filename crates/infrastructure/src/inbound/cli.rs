@@ -85,7 +85,12 @@ subprocess and socket in Python, fs and child_process in Node, std::fs and std::
 not in infrastructure, composition, ui, the entry file or a test; in Python also the names of what is I/O in part: os, \
 os.path, sys, time and logging by an allowlist of what is pure, the clock, randomness, the terminal and the arguments, \
 pathlib.Path, and a method of a path judged by its name, which a method of the project of the same name and number of \
-parameters leaves out, said on every run; approved as an import is, by its file and the entry), that no \
+parameters leaves out, said on every run; approved as an import is, by its file and the entry), that in Python and \
+TypeScript they import only the packages allowed for the layer or level (allowed under [dependencies] of the \
+declaration, the person's decision, to which a unit adds in its own table; the layout allows react in \
+presentation.models in TypeScript; a name no manifest lists or no file of its place imports fails; in Rust the \
+[dependencies] of the layer's crate are that list, and allowed fails; a package no list allows is approved by its \
+file and the package), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
 updates them), that .rotproof/AGENTS.md and the two copies of the skill rotproof (.claude/skills/rotproof/SKILL.md and .agents/skills/rotproof/SKILL.md) are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
@@ -213,8 +218,9 @@ enum Command {
     /// name of `from m import n`; a TypeScript specifier; a crate's dependency; the name of a template as written in a
     /// reference; for the I/O of the inner layers, the entry of Rotproof's table that the finding names: `shutil`,
     /// `urllib.request`, `fs`, `bun:`, `std::fs`, `std::os::fs`, `std::io`, one approval for a file and an entry,
-    /// whatever names it uses). It shows the forbidden import, signs with git's user.name, and adds the entry, with the
-    /// reason, to .config/rotproof-approved.toml, which keeps a byte
+    /// whatever names it uses; for a package no list allows in an inner layer, the package the finding names). It shows
+    /// the forbidden import, signs with git's user.name, and adds the entry, with the reason, to
+    /// .config/rotproof-approved.toml, which keeps a byte
     /// order mark and its line endings (CRLF on every line when one line had it), as does --prune. It asks nothing and
     /// needs no terminal, but it takes no approval without a reason, and `rotproof check` prints every approval on
     /// every run. Run it only when the user asked for the exception, and say that you ran it.

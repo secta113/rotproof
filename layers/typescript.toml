@@ -19,6 +19,10 @@ uis = ["atomic"]
 # holds it, its imports and its reads of the environment are not judged, it may import what the code of a layer may
 # not (a development dependency), and no code that is not a test imports it
 tests = { names = ["*.test.*", "*.spec.*"], directories = ["__tests__"] }
+# The packages an inner layer (`domain`, `protocol`, `application`, `presentation`) may import in every project, by the
+# layer or level of the table: a screen's model keeps its state with React's hooks, so `react` (not `react-dom`, which
+# draws) is allowed there. A project adds to it with `allowed` under `[dependencies]` of its declaration
+allowed = { "presentation.models" = ["react"] }
 # A view is JSX, and a file with JSX is `.tsx` (or `.jsx`): `presentation` holds none, whatever the file is called,
 # unless it is a test (a test of a hook that needs a wrapper written in JSX). The extension is all Rotproof goes by: it
 # reads the imports of a file, not what it draws, so a view written with `createElement` in a `.ts` file is not caught

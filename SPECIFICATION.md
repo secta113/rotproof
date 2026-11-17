@@ -10,7 +10,7 @@ writes changes this file in the same commit.
 Rotproof makes the layer directories, checks that they are where the project declares them, and checks their
 direction: from the imports in Python and TypeScript, and in Rust from the dependencies each crate declares and, for
 the levels inside a crate, from the paths its code names. From the same reading of the code it checks that only
-`infrastructure` reads the environment variables, that the inner layers do no I/O, that no comment switches the type checker off, and that the manifest
+`infrastructure` reads the environment variables, that the inner layers do no I/O and import only the packages they are allowed, that no comment switches the type checker off, and that the manifest
 of each package lists the dependencies its code imports, no more and no fewer (see "What `rotproof check` checks"). A project made of several parts that each hold the layers declares them as units, and all
 of this holds in each unit, with the imports between units judged too (see "Units").
 
@@ -246,7 +246,9 @@ writes it (a Python dotted name, a TypeScript specifier, a crate's dependency). 
 I/O of the inner layers (see "The inner layers do no I/O") is approved the same way, and the import is the entry of
 Rotproof's table that the finding names (`rotproof approve domain/report.py shutil --reason "..."`), which covers every
 use of that entry in the file, whatever names it uses under it; a name judged by an allowlist (`os.getcwd`), a group
-(`clock`) and a method of the net (`read_text`) are entries of their own.
+(`clock`) and a method of the net (`read_text`) are entries of their own. A package no list allows in an inner layer
+is approved by the package as the finding names it (a Python distribution as PEP 503 writes it: lowercase, each run of
+`-`, `_` and `.` one `-`): `rotproof approve domain/report.py requests --reason "..."`.
 `rotproof approve` shows the forbidden import, signs with git's `user.name`, and adds the entry (the file keeps a byte
 order mark and its line endings, CRLF on every line when one line had it, and so it does when `--prune` removes
 entries). It asks nothing, so an agent's shell can run it, but it takes no approval without `--reason` (an empty one
@@ -302,16 +304,18 @@ approved_max = 3         # optional, a count: the most approvals the project hol
 [dependencies]           # optional: what the manifests and the tree cannot say (see "What `rotproof check` checks")
 imports = { dotenv = "python-dotenv" }  # Python only: the distribution an import is of
 without_import = ["openpyxl"]           # dependencies the code uses without importing them
+allowed = { domain = ["pydantic"], "presentation.models" = ["zustand"] }  # Python and TypeScript: the packages an inner layer may import
 ```
 
-`todo_link` and `approved_max` are the two keys of the declaration that `rotproof init` and `rotproof create` never
-write: a project that wants one adds it by hand, and everything else is as without it. Without `todo_link` the marker
+`todo_link`, `approved_max` and `allowed` (under `[dependencies]`, below) are the keys of the declaration that
+`rotproof init` and `rotproof create` never write: a project that wants one adds it by hand, and everything else is as
+without it. Without `todo_link` the marker
 check below fails on every `TODO`; without `approved_max` the number of approvals has no limit. `todo_link` is
 `"number"` for `TODO(#123): what is left`, or `"key"` for `TODO(ABC-123): what is left`; any other value fails, naming
 the two, and so does the key with `stack = "none"`, which has no code to read. The declaration is read strictly, with
 a field Rotproof does not know failing it, so a Rotproof older than the one that brought `todo_link` cannot read a
 declaration that holds it: a project pins an exact version of Rotproof, and moves it before it adds the key. Whether a
-project declares either is a person's decision, which an agent never makes to pass the check, and the guide says so.
+project declares any of them is a person's decision, which an agent never makes to pass the check, and the guide says so.
 
 `moving` lists the paths of the project's own code that is not in a layer yet, in a project that adopts Rotproof in the
 middle of a refactoring. It is no `unchecked`: `unchecked` is for code that is never moved (generated or vendored
@@ -328,11 +332,33 @@ manifests and the tree cannot: `imports` maps the name of an import to the distr
 writes the name (`dotenv`), and a dotted name covers the modules below it (`google.cloud.storage`), the longest entry
 winning; and `without_import` lists the dependencies the code uses without importing them, as the manifest lists them
 (`openpyxl`, which `pandas` loads). `imports` is Python's: an import and a dependency are one name in the other stacks,
-so it fails there, and so does either with `stack = "none"`, which has no code. A name that `without_import` lists and no
-manifest of the project lists as a runtime dependency fails, so the table does not keep what is gone. `rotproof init` and
-`rotproof create` write neither, a project adds the table by hand, and a Rotproof older than the one that brought it
-cannot read a declaration that holds it, as for `todo_link`. The verdict is decided from this table and the tree alone:
-nothing is installed, so it is the same on every machine and in CI.
+so it fails there, and so does any key of the table with `stack = "none"`, which has no code. A name that
+`without_import` lists and no manifest of the project lists as a runtime dependency fails, so the table does not keep
+what is gone. `rotproof init` and `rotproof create` write none of it, a project adds the table by hand, and a Rotproof
+older than the one that brought it cannot read a declaration that holds it, as for `todo_link`. The verdict is decided
+from this table and the tree alone: nothing is installed, so it is the same on every machine and in CI.
+
+`allowed` lists the packages the inner layers may import, in Python and TypeScript (see "The inner layers do no I/O",
+"Packages"): a table whose keys are a layer (`domain`, `protocol`, `application`, `presentation`) or a level of one
+(`protocol.inbound`, `presentation.models`) and whose values are lists of package names, as the manifest lists them (a
+Python distribution, compared as PEP 503 compares names; an npm package as written, `@scope/name` included). A layer's
+key covers its levels, and a level's key adds to that level. A `[[unit]]` table has an `allowed` of its own, **added**
+to the project's for the code of that unit. A key written with a dot is written in quotes
+(`"presentation.models" = ["zustand"]`): without them TOML reads `presentation.models = [...]` as the table `models`
+inside the table `presentation`, which the declaration refuses, naming the key to quote. The declaration fails on: a key
+that is no layer or level of the table; a key for `infrastructure`, `composition` or `ui` (and their levels), which
+import any package; a key for a layer or level the project lacks, which is a project-level key that no unit has, or a
+unit's own key for a place that unit lacks (declared absent, or left out by the UI, as `presentation` is with `ui =
+"none"`); a value that is no list of names, or a name that is empty; a name allowed twice for the same code (in one
+list, in a layer's key and the key of its level, in the project's list and a unit's, or one the layout allows already);
+`allowed` in a Rust project, in the project's table or a unit's, and with `stack = "none"`, as for `imports`. A name that
+no manifest of the project lists as a dependency of any kind fails, and so does one that no file of the layer or level
+(of the unit, for a unit's own list) it is allowed for imports, so that the list does not keep what is gone; these two
+are said under the heading of the check of the inner layers, and the first is not judged while no manifest of the
+project was read. What the layout of the stack allows (TypeScript: `react` in `presentation.models`, and not
+`react-dom`; Python: nothing) is in `layers/<stack>.toml`, is no name of the declaration, and is never judged gone.
+Allowing a package is a person's decision: no command writes `allowed`, nothing drafts it from the code, and the guide
+tells an agent never to add, change or take out a name to pass the check.
 
 What the layers are is written once, in `layers/table.toml`, on the onion architecture:
 
@@ -745,6 +771,47 @@ a name a glob brings in (a glob of `std::time` fails, but the names it brought i
 approved), a function of the standard library held in a variable and called through it (`let f = std::path::absolute;
 f(x)` is seen at `absolute`, but `let g = f; g(x)` only where `f` is), and the clocks of crates. A name a `use` renames
 away (`UNIX_EPOCH` in `use std::time::UNIX_EPOCH as E;`) is read as still bound, which is the side that fails.
+
+#### Packages: what is allowed in an inner layer
+
+What a package of PyPI or npm does is unknown to Rotproof, so the same four layers import **no package unless it is
+allowed for the layer or level**, in Python and TypeScript. An import of a package is what the check of the
+dependencies calls one (see "What `rotproof check` checks"): not another unit, not the standard library or a builtin
+of Node, and not a module of the project, whether the unit has a manifest or not, and `import type` and an import under
+`if TYPE_CHECKING:` count as any. The package is the distribution the import is of (Python, through `imports` under
+`[dependencies]`) or the name before the subpath (`zod/v4` is `zod`, `@shop/kernel/utils` is `@shop/kernel`).
+
+- **Where it is allowed** is the list of `allowed` under `[dependencies]` of the declaration and of the unit (see "The
+  layers", where the keys and what makes the declaration fail are written), added to what the layout of the stack
+  allows: TypeScript allows `react` in `presentation.models` (a model keeps its state with React's hooks) and not
+  `react-dom`, which draws; Python's layout allows nothing. A layer's key covers its levels, and a level's key adds to
+  that level, so `presentation = ["zod"]` allows it in `presentation.display` too. The code of the same four layers and
+  levels is judged as for I/O: not `infrastructure`, `composition` or `ui`, not the entry file, and not a test.
+- **The finding** is a forbidden import of its own, kept as the I/O of the layers is, under the same heading, one for
+  each line and package, listed after the I/O findings of the same file: `domain/model.py:3: move the code that needs the
+  package to infrastructure, behind a port the use case is given, or, when the package does no I/O, ask the person
+  whether to allow it for domain (allowed under [dependencies] in .config/rotproof.toml; an agent never adds it to pass
+  the check): imports requests.get, of the package requests, which domain may not import`. It is approved by its file
+  and the package (`rotproof approve domain/model.py requests --reason "..."`), and one approval covers every import of
+  that package in the file; the names it prints on every run (`; now used: requests.get`) are the imports the file
+  makes of it. A package named as one of Node's modules (`fs` listed in `package.json`) is two findings under one
+  key, the table's and this one, and one approval covers both.
+- **Allowing is a person's decision.** The guide says, as for `todo_link` and `approved_max`, that an agent never adds,
+  changes or takes out a name to pass the check; `rotproof init` and `rotproof create` never write `allowed`, and
+  nothing drafts it from the code. A finding is fixed by moving the code that needs the package to `infrastructure`,
+  behind a port, or, when the package does no I/O, by asking the person whether to allow it for the layer.
+- **The list keeps nothing that is gone:** a name that no manifest of the project lists, or that no file of the layer or
+  level it is allowed for imports, fails, and so do the other forms of the declaration that cannot be kept (see "The
+  layers"). A `@types/*` package is no exception: a package the code names is a package.
+- **Rust has no list.** Cargo stops a crate that names a crate its `Cargo.toml` does not list, and the dependencies
+  check fails a dependency that nothing names, so the `[dependencies]` of the crate of an inner layer is that layer's
+  list, and a second one would hold one fact twice. `allowed` in a Rust project fails, in the project's table and in a
+  unit's, and says so; the guide says that adding a dependency to the crate of an inner layer is a person's decision.
+
+**What the rule does not see:** a package that is loaded by a name built at run time (the reader of Python and of
+TypeScript fails it already, as what cannot be read), one a file takes through another file of the same layer that
+re-exports it (the file that imports it is judged, in its own layer), and the packages a Python file reaches through the
+module of the project it imports, as that module is judged for itself.
 
 ### Views that are templates
 
@@ -1551,7 +1618,12 @@ entry can be told, is one.
   (`os.getcwd`), a group (`clock`, `random`, `terminal`, `argv`) or a method (`read_text`); it prints on every run the
   methods of the project that the net leaves out. In TypeScript it judges the globals by the name used (an allowlist of
   the pure ones, `process`, the clock, randomness, `console`, the arguments and what cannot be read), by entries of its
-  own: a global (`fetch`, `localStorage`, `process.cwd`) or a group (`clock`, `random`, `terminal`, `argv`).
+  own: a global (`fetch`, `localStorage`, `process.cwd`) or a group (`clock`, `random`, `terminal`, `argv`). In Python
+  and TypeScript the same four layers import **only the packages they are allowed** (`allowed` under `[dependencies]`,
+  and the layout's `react` for `presentation.models` in TypeScript): a package no list allows for the layer or level is
+  a finding of its own under the same heading, approved by its file and the package, and a list that keeps a name no
+  manifest lists or no file of its place imports fails (see "The inner layers do no I/O", "Packages"). In Rust the
+  `[dependencies]` of the crate of the layer is that list, and `allowed` fails.
 - **Every approval matches a forbidden import** (see "Approving a forbidden import"): a forbidden import with an entry
   in `.config/rotproof-approved.toml` for its file and import passes, and is printed on every run; an entry that
   matches none fails, and so does a file that is not TOML, an entry with a field missing, empty or unknown, an

@@ -6,7 +6,7 @@
 //! In Python and in Rust the net of method names leaves out the methods the project defines itself, which are read from
 //! every file of the project (a test, a file in `unchecked` too), not from the inner layers alone.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 use crate::tree::{code_files, read_code};
@@ -14,11 +14,11 @@ use domain::code::{Defined, Import, Source};
 use domain::declaration::Declared;
 use domain::direction::Forbidden;
 use domain::inner_io::{
-    Excluded, findings, in_python, in_rust, in_typescript, is_judged, python_excluded,
-    rust_defined, rust_excluded, unread,
+    Excluded, Imported, Placed, findings, in_python, in_rust, in_typescript, is_judged,
+    python_excluded, rust_defined, rust_excluded, unread,
 };
 use domain::layers::{Language, Layout, Place};
-use domain::paths::{file_name, join, parent};
+use domain::paths::{file_name, join, parent, within};
 use protocol::outbound::{Parsers, Tree};
 
 /// What the check found: the I/O of the inner layers, and every file that could not be read.
@@ -36,7 +36,23 @@ struct Read {
     path: String,
     source: String,
     layer: String,
+    /// The unit the layer is of: "" for the implicit one
+    unit: String,
+    /// The level the file is in, or the layer when it is in no level: what a key of `allowed` covers
+    place: String,
     parsed: Parsed,
+}
+
+/// The level of `layer` that the file at `path` is in, or the layer when it is in none (a layer holds only its levels,
+/// but a file that sits beside them is still judged as the layer's).
+fn place_of(declared: &Declared, layer: &Place, path: &str) -> String {
+    declared
+        .places
+        .iter()
+        .find(|place| {
+            place.is_level_of(layer) && !declared.is_absent(place) && within(path, &place.path)
+        })
+        .map_or_else(|| layer.name.clone(), |level| level.name.clone())
 }
 
 /// What the reader of the language gave of a file.
@@ -77,9 +93,11 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
                 Language::Rust => Parsed::Rust,
             };
             files.push(Read {
+                place: place_of(declared, layer, &path),
                 path,
                 source,
                 layer: layer.name.clone(),
+                unit: layer.unit.name.clone(),
                 parsed,
             });
         }
@@ -93,6 +111,29 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
             judged.excluded = rust_excluded(&defined_in(tree, parsers, declared, layout, &files)?);
         }
         Language::TypeScript => {}
+    }
+    // The packages the files import, by file: what the allowlist of each layer and level is judged by. A Rust crate
+    // lists its own, which Cargo and the dependencies check hold to what its code names
+    let mut imported: BTreeMap<&str, Vec<Imported>> = BTreeMap::new();
+    let packages = match layout.language {
+        Language::Python | Language::TypeScript => {
+            Some(crate::dependencies::packages(tree, parsers, declared)?)
+        }
+        Language::Rust => None,
+    };
+    if let Some(packages) = &packages {
+        let judged_files: BTreeSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        for used in packages
+            .uses
+            .iter()
+            .filter(|used| judged_files.contains(used.file.as_str()))
+        {
+            imported.entry(&used.file).or_default().push(Imported {
+                line: used.line,
+                shown: used.shown.clone(),
+                package: used.package.clone(),
+            });
+        }
     }
     for file in &files {
         let found = match &file.parsed {
@@ -116,6 +157,38 @@ pub fn problems(tree: &dyn Tree, parsers: &dyn Parsers, declared: &Declared) -> 
             layout.language,
             &found,
         ));
+        // A package no list allows for the place the file is in follows the I/O the file does
+        if let Some(imports) = imported.get(file.path.as_str()) {
+            judged.forbidden.extend(declared.allowed.findings(
+                &file.path,
+                &file.source,
+                &file.unit,
+                &file.place,
+                imports,
+            ));
+        }
+    }
+    if let Some(packages) = &packages {
+        // What the declaration allows that is gone: no manifest lists it, or no file of its place imports it
+        let placed: Vec<Placed> = files
+            .iter()
+            .flat_map(|file| {
+                imported
+                    .get(file.path.as_str())
+                    .into_iter()
+                    .flatten()
+                    .map(|used| Placed {
+                        unit: &file.unit,
+                        place: &file.place,
+                        package: &used.package,
+                    })
+            })
+            .collect();
+        judged.problems.extend(
+            declared
+                .allowed
+                .stale(&placed, packages.manifests.then_some(&packages.listed)),
+        );
     }
     // In the byte order of the path, as every check lists what it finds file by file (a file's lines keep their order)
     judged.forbidden.sort_by(|a, b| a.file.cmp(&b.file));
@@ -342,8 +415,16 @@ mod tests {
             ("src/domain/a.ts", "import fs from 'fs';\n"),
         ]);
         let found = problems(&tree, &Readers, &declared("typescript", "none")).unwrap();
-        assert_eq!(found.forbidden.len(), 1);
-        assert_eq!(found.forbidden[0].import, "fs");
+        // The table decides for Node's `fs`, and the package the manifest lists is a package no list allows: two
+        // findings, kept under the one key `fs`, the I/O first
+        assert_eq!(found.forbidden.len(), 2);
+        assert!(found.forbidden.iter().all(|f| f.import == "fs"));
+        assert!(
+            found.forbidden[0]
+                .detail
+                .contains("uses `fs`, which does I/O")
+        );
+        assert!(found.forbidden[1].detail.contains("of the package fs"));
     }
 
     #[test]
@@ -557,7 +638,7 @@ import datetime as dt
 from datetime import datetime, date
 from dataclasses import field
 from typing import Annotated
-from pydantic import Field
+from domain.fields import Field
 class M:
     id: Annotated[str, Field(default_factory=uuid.uuid4)]
     at: datetime = field(default_factory=datetime.now)
@@ -628,7 +709,7 @@ def b():
 class C:
     def open(self):
         pass
-from app import open as app_open
+from domain.app import open as app_open
 app_open()
 ";
         assert_eq!(says(shadowed), nothing());
@@ -935,6 +1016,277 @@ from time import *
                 "I/O net: left out, as the project defines a method of the same name and number of parameters: \
                  exists(0), read_dir(1)"
             )
+        );
+    }
+
+    /// The findings and the problems of a project of `stack` with the UI `ui` and `declaration` after its `ui`,
+    /// over `files`: each finding as `file:line package (the imports of it the line holds)`.
+    fn allowing(
+        stack: &str,
+        ui: &str,
+        declaration: &str,
+        files: &[(&str, &str)],
+    ) -> (Vec<String>, Vec<String>) {
+        let text = format!("stack = \"{stack}\"\nareas = []\nui = \"{ui}\"\n{declaration}");
+        let declared = Declared::new(domain::declaration::parse_declaration(&text).unwrap())
+            .unwrap_or_else(|e| panic!("{e:#?}"));
+        let found = problems(&Fake::new(files), &Readers, &declared).unwrap();
+        let said = found
+            .forbidden
+            .iter()
+            .map(|f| {
+                let names = match &f.rule {
+                    Rule::InnerIo { names } => names.join(", "),
+                    Rule::Direction => String::new(),
+                };
+                format!(
+                    "{}:{} {} ({names})",
+                    f.file,
+                    f.detail.split(':').nth(1).unwrap_or_default(),
+                    f.import
+                )
+            })
+            .collect();
+        (said, found.problems)
+    }
+
+    const PYPROJECT: &str = "[project]\nname = \"shop\"\ndependencies = [\"pydantic\", \"attrs\", \"requests\", \
+                             \"python-dotenv\"]\n";
+
+    #[test]
+    fn a_python_package_is_judged_by_the_layer_or_level_that_may_import_it() {
+        let (found, problems) = allowing(
+            "python",
+            "atomic",
+            "[dependencies]\nimports = { dotenv = \"python-dotenv\" }\nallowed = { domain = [\"Pydantic\"], \
+             application = [\"attrs\"], presentation = [\"python_dotenv\"], \"presentation.models\" = [\"requests\"] }\n",
+            &[
+                ("pyproject.toml", PYPROJECT),
+                (
+                    "domain/a.py",
+                    "import pydantic\nimport attrs\nimport requests\nimport os\n",
+                ),
+                (
+                    "application/b.py",
+                    "from attrs import define\nimport pydantic\nfrom domain import a\n",
+                ),
+                (
+                    "presentation/models/m.py",
+                    "import requests\nfrom dotenv import load_dotenv\nimport attrs\n",
+                ),
+                (
+                    "presentation/display/d.py",
+                    "import requests\nfrom dotenv import load_dotenv\n",
+                ),
+                // Not judged: the layers that do the I/O, wire and draw, the entry file and a test
+                ("infrastructure/outbound/o.py", "import requests\n"),
+                ("composition/c.py", "import requests\n"),
+                ("ui/pages/p.py", "import requests\n"),
+                ("__main__.py", "import requests\n"),
+                ("tests/test_a.py", "import requests\n"),
+            ],
+        );
+        // The name is PEP 503's, an import name is of the distribution `imports` maps it to, a layer's key covers its
+        // levels, and a level's key adds to that level alone
+        assert_eq!(
+            found,
+            [
+                "application/b.py:2 pydantic (pydantic)",
+                "domain/a.py:2 attrs (attrs)",
+                "domain/a.py:3 requests (requests)",
+                "presentation/display/d.py:1 requests (requests)",
+                "presentation/models/m.py:3 attrs (attrs)",
+            ]
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+    }
+
+    #[test]
+    fn a_unit_adds_its_packages_to_the_projects_for_its_own_code() {
+        let two = "[project]\nname = \"x\"\ndependencies = [\"pydantic\", \"attrs\"]\n";
+        let (found, problems) = allowing(
+            "python",
+            "none",
+            "[dependencies]\nallowed = { domain = [\"pydantic\"] }\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n\
+             allowed = { domain = [\"attrs\"] }\n\n[[unit]]\nname = \"b\"\npath = \"b\"\n",
+            &[
+                ("a/pyproject.toml", two),
+                ("b/pyproject.toml", two),
+                ("a/domain/x.py", "import pydantic\nimport attrs\n"),
+                ("b/domain/x.py", "import pydantic\nimport attrs\n"),
+            ],
+        );
+        assert_eq!(found, ["b/domain/x.py:2 attrs (attrs)"]);
+        assert!(problems.is_empty(), "{problems:?}");
+        let message = problems_of(
+            "[[unit]]\nname = \"a\"\npath = \"a\"\nallowed = { domain = [\"attrs\"] }\n",
+            &[
+                ("a/pyproject.toml", two),
+                ("a/domain/x.py", "import pydantic\n"),
+            ],
+        );
+        assert_eq!(
+            message,
+            [
+                ".config/rotproof.toml: allowed of unit \"a\" lists attrs for domain, which no file of domain of unit \
+              \"a\" imports: take it out, so that the list does not keep what is gone"
+            ]
+        );
+    }
+
+    /// The problems of a Python project without a UI.
+    fn problems_of(declaration: &str, files: &[(&str, &str)]) -> Vec<String> {
+        allowing("python", "none", declaration, files).1
+    }
+
+    #[test]
+    fn what_is_allowed_that_no_manifest_lists_or_no_file_imports_is_gone() {
+        let (found, problems) = allowing(
+            "python",
+            "atomic",
+            "[dependencies]\nallowed = { domain = [\"pydantic\", \"attrs\", \"ghost\"], \"presentation.models\" = \
+             [\"requests\"] }\n",
+            &[
+                ("pyproject.toml", PYPROJECT),
+                ("domain/a.py", "import pydantic\n"),
+                ("presentation/display/d.py", "import requests\n"),
+            ],
+        );
+        assert_eq!(found, ["presentation/display/d.py:1 requests (requests)"]);
+        let lead = ".config/rotproof.toml: allowed under [dependencies] lists";
+        assert_eq!(
+            problems,
+            [
+                format!(
+                    "{lead} attrs for domain, which no file of domain imports: take it out, so that the list does not keep what is gone"
+                ),
+                format!(
+                    "{lead} ghost for domain, which no manifest of the project lists as a dependency: take it out"
+                ),
+                format!(
+                    "{lead} requests for presentation.models, which no file of presentation.models imports: take it out, so that the list does not keep what is gone"
+                ),
+            ]
+        );
+        // No manifest read: what is listed is not known, and only what no file imports is gone
+        let (found, problems) = allowing(
+            "python",
+            "none",
+            "[dependencies]\nallowed = { domain = [\"pydantic\", \"attrs\"] }\n",
+            &[("domain/a.py", "import pydantic\nimport requests\n")],
+        );
+        assert_eq!(found, ["domain/a.py:2 requests (requests)"]);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("lists attrs for domain, which no file of domain imports"));
+    }
+
+    #[test]
+    fn the_typescript_layout_allows_react_in_the_models_and_a_package_is_its_name_whatever_its_subpath()
+     {
+        let (found, problems) = allowing(
+            "typescript",
+            "atomic",
+            "[dependencies]\nallowed = { domain = [\"zod\"], \"presentation.models\" = [\"zustand\"] }\n",
+            &[
+                (
+                    "package.json",
+                    "{\"name\":\"shop\",\"dependencies\":{\"react\":\"1\",\"react-dom\":\"1\",\"zod\":\"1\",\"zustand\":\"1\",\
+                     \"lodash\":\"1\"}}",
+                ),
+                (
+                    "src/domain/a.ts",
+                    "import { z } from 'zod/v4';\nimport _ from 'lodash';\nimport React from 'react';\nimport path from 'node:path';\n",
+                ),
+                (
+                    "src/presentation/models/m.ts",
+                    "import { useState } from 'react';\nimport create from 'zustand';\nimport { createRoot } from \
+                     'react-dom/client';\nimport { z } from 'zod';\nimport { useRef } from 'react/jsx-runtime';\n",
+                ),
+                (
+                    "src/presentation/display/d.ts",
+                    "import { useState } from 'react';\n",
+                ),
+                // A test, a layer that does the I/O, the view and the entry file are not judged
+                ("src/domain/a.test.ts", "import _ from 'lodash';\n"),
+                (
+                    "src/infrastructure/outbound/o.ts",
+                    "import _ from 'lodash';\n",
+                ),
+                (
+                    "src/ui/pages/p.tsx",
+                    "import { createRoot } from 'react-dom/client';\n",
+                ),
+                (
+                    "src/main.tsx",
+                    "import { createRoot } from 'react-dom/client';\n",
+                ),
+            ],
+        );
+        assert_eq!(
+            found,
+            [
+                "src/domain/a.ts:2 lodash (lodash)",
+                "src/domain/a.ts:3 react (react)",
+                "src/presentation/display/d.ts:1 react (react)",
+                "src/presentation/models/m.ts:3 react-dom (react-dom/client)",
+                "src/presentation/models/m.ts:4 zod (zod)",
+            ]
+        );
+        // `react` is the layout's and is no name of the declaration, so it is never gone
+        assert!(problems.is_empty(), "{problems:?}");
+    }
+
+    #[test]
+    fn a_finding_for_a_package_says_what_to_do_and_names_the_place() {
+        let tree = Fake::new(&[
+            ("pyproject.toml", PYPROJECT),
+            ("domain/a.py", "import os\nfrom requests import get, post\n"),
+        ]);
+        let found = problems(&tree, &Readers, &declared("python", "none")).unwrap();
+        let [one] = &found.forbidden[..] else {
+            panic!("{:?}", found.forbidden);
+        };
+        assert_eq!(
+            one.detail,
+            "domain/a.py:2: move the code that needs the package to infrastructure, behind a port the use case is \
+             given, or, when the package does no I/O, ask the person whether to allow it for domain (allowed under \
+             [dependencies] in .config/rotproof.toml; an agent never adds it to pass the check): imports \
+             requests.get, requests.post, of the package requests, which domain may not import\n\
+             from requests import get, post"
+        );
+        // Approved by the file and the package, with the imports it holds said
+        assert_eq!(
+            (one.file.as_str(), one.import.as_str()),
+            ("domain/a.py", "requests")
+        );
+        assert_eq!(
+            one.rule,
+            Rule::InnerIo {
+                names: vec!["requests.get".into(), "requests.post".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn a_rust_crate_is_judged_by_its_own_manifest_and_names_no_package_of_a_list() {
+        let (found, problems) = allowing(
+            "rust",
+            "none",
+            "",
+            &[
+                (
+                    "crates/domain/Cargo.toml",
+                    "[package]\nname = \"domain\"\n\n[dependencies]\nserde = \"1\"\n",
+                ),
+                (
+                    "crates/domain/src/lib.rs",
+                    "use serde::Serialize;\npub struct A;\n",
+                ),
+            ],
+        );
+        assert!(
+            found.is_empty() && problems.is_empty(),
+            "{found:?} {problems:?}"
         );
     }
 }

@@ -17,6 +17,10 @@
 //!   behind a port in `protocol.outbound` the use case is given, and a screen's model gets what it needs from its page
 //!   or through a use case. The finding is a [`Forbidden`] of its own [`Rule`], so that `rotproof approve` and the
 //!   approvals file treat it as any other.
+//! - **A package is imported only where it is allowed** (Python and TypeScript, `allowed`): the code of the four layers
+//!   imports no package of PyPI or npm unless the declaration, or the layout of the stack, lists it for the layer or
+//!   level, since what a package does is unknown. The finding is a [`Forbidden`] too, approved by the file and the
+//!   package, and what is wrong with the list is in `allowed`.
 //!
 //! - **What is I/O in part is judged by the name,** in Python: the allowlists of `os`, `os.path`, `sys`, `time` and
 //!   `logging`, the clock, randomness, the terminal, the command-line arguments, `pathlib.Path`, the net of method
@@ -29,12 +33,14 @@
 //! Python and TypeScript are read by their readers of imports and uses ([`in_python`], [`in_typescript`]); Rust by
 //! Rotproof's own scanner ([`in_rust`]).
 
+mod allowed;
 mod groups;
 mod python;
 mod rust;
 mod table;
 mod typescript;
 
+pub use allowed::{Allowlist, Imported, Placed};
 pub use groups::{Excluded, Group};
 pub use python::excluded as python_excluded;
 pub use rust::{defined as rust_defined, excluded as rust_excluded};
@@ -56,7 +62,8 @@ use table::{
 pub const HEADING: &str = "the inner layers do no I/O (domain, protocol, application and presentation import \
                            nothing that touches files, the network, processes or the terminal: the I/O is done in \
                            infrastructure.outbound behind a port the use case is given, and approving it, renaming \
-                           it or moving the code to a path in `unchecked` or `moving` is no fix)";
+                           it or moving the code to a path in `unchecked` or `moving` is no fix; and a package is \
+                           imported only where `allowed` in the declaration lists it, which is the person's decision)";
 
 /// The layers judged, with their levels.
 pub const LAYERS: [&str; 4] = ["domain", "protocol", "application", "presentation"];
@@ -68,6 +75,10 @@ pub fn is_judged(place: &Place) -> bool {
 }
 
 const GUIDE_TEXT: &str = include_str!("../../../project/rotproof/inner-io.md.in");
+/// The part of it on the packages of Python and TypeScript, and the one of Rust (`allowed.rs` fills them in)
+const GUIDE_ALLOWED: &str = include_str!("../../../project/rotproof/inner-io-allowed.md.in");
+const GUIDE_ALLOWED_RUST: &str =
+    include_str!("../../../project/rotproof/inner-io-allowed-rust.md.in");
 
 /// What the guide says of this rule in the section on the layers, for a project of `language`: the whole table, since
 /// an agent reads the guide and not the specification.
@@ -111,6 +122,7 @@ pub fn guide(language: Language) -> String {
         .replace("{names}", &names)
         .replace("{passed}", &passed)
         .replace("{keys}", &keys)
+        .replace("{allowed}", &allowed::guide(language))
 }
 
 /// How a finding says what it found.
@@ -1333,7 +1345,14 @@ fn b() { std::fs::read(\"b\"); }
             }
             assert!(text.contains("rotproof approve"));
             // Every placeholder is filled
-            assert!(!text.contains('{'), "{language:?}");
+            for placeholder in [
+                "tests", "hook", "table", "names", "passed", "keys", "allowed", "what", "default",
+            ] {
+                assert!(
+                    !text.contains(&format!("{{{placeholder}}}")),
+                    "{language:?}: {placeholder}"
+                );
+            }
             // The hook is a TypeScript screen's way to the browser
             assert_eq!(
                 text.contains("gets what it needs from its page, through a hook in `ui.atoms`, or through a use case"),
