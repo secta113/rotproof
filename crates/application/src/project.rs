@@ -1,11 +1,14 @@
-//! `rotproof guide`: the guide for a stack, named or declared; and whether the map in the project's own `AGENTS.md`
-//! still lists the layers the declaration has, which `rotproof check` and `rotproof init` say.
+//! `rotproof guide`: the guide for a stack, named or declared; whether the map in the project's own `AGENTS.md` still
+//! lists the layers the declaration has, which `rotproof check` and `rotproof init` say; and whether the project has
+//! answered if its agent reads the guide, which `rotproof create` and `rotproof init` ask and `rotproof check` fails
+//! on.
 
 use crate::layers::declaration;
 use crate::tree::{exactly, read_text};
 use domain::declaration::{DECLARATION, Declared, unreadable};
 use domain::guide::guide_named;
 use domain::layers::known_stacks;
+use domain::pointer;
 use domain::project::stale_map;
 use protocol::outbound::Tree;
 
@@ -54,4 +57,20 @@ pub fn map_problems(tree: &dyn Tree, declared: &Declared) -> Vec<String> {
         return Vec::new();
     };
     stale_map(declared, &text)
+}
+
+/// Whether the project has not yet answered if its agent reads Rotproof's guide (`domain::pointer`): `None` when it
+/// has, else the files of `pointer::FILES` that are at the root, for the question to name. A file that cannot be read
+/// is taken as there and naming nothing.
+pub fn unanswered(tree: &dyn Tree, declared: &Declared) -> Option<Vec<&'static str>> {
+    let mut present = Vec::new();
+    let mut texts = Vec::new();
+    for file in pointer::FILES {
+        if let Ok((path, _)) = exactly(tree, file) {
+            present.push(file);
+            texts.push(read_text(tree, &path).unwrap_or_default());
+        }
+    }
+    let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+    (!pointer::answered(&texts, &declared.declaration.declined)).then_some(present)
 }

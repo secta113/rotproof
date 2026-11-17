@@ -47,9 +47,10 @@ If LLM agents write the code of a repository, these are the things nobody has to
   `TODO` that names the issue tracking it, which every run lists. No comment switches the type checker off, and only
   `infrastructure` reads the environment variables.
 - **An agent that has only the binary finds its way.** `rotproof --help` gives the order to start in, and the rules
-  are written for the project's stack in `.rotproof/AGENTS.md`, which the project points its agent at from the file
-  the agent reads first. How to upgrade Rotproof and when to run each command is in `.rotproof/running.md`, which the
-  guide names.
+  are written for the project's stack in `.rotproof/AGENTS.md`. Whether the agent reads them is yours to decide:
+  `rotproof create` asks, gives the one line to add to the file the agent reads first, and `rotproof check` fails until
+  you add it or decline it. How to upgrade Rotproof and when to run each command is in `.rotproof/running.md`, which
+  the guide names.
 - **The rules are the ones you pinned.** A project pins one exact version of Rotproof, so the rules change only in a
   commit of the project's own (see "Compatibility").
 
@@ -123,12 +124,25 @@ wrote docs/log.md
 wrote .rotproof/AGENTS.md
 ...
 wrote docs/knowledge/index.md
-next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md
+not written: the lock file (uv.lock, poetry.lock, pdm.lock or pylock.toml), which a tool makes from pyproject.toml (`uv lock`): until one is committed, `rotproof check` fails
+ask the person: should this project's agent read the rules Rotproof keeps, in .rotproof/AGENTS.md? The person decides; an agent asks before it adds the line or declines
+  yes: add this line to the file the agent reads first (there is no AGENTS.md or CLAUDE.md: ask the person which file to make):
+    The rules Rotproof keeps: @.rotproof/AGENTS.md
+  no: add "guide-pointer" to declined in .config/rotproof.toml
 ```
 
 Each layer is a directory whose `__init__.py` says its role. `docs/` holds the records, `.rotproof/AGENTS.md` the rules
-written for the stack, and the rest is a CI workflow that runs `rotproof check`. Rotproof writes no `AGENTS.md` or
-`CLAUDE.md`: what an agent is told is the project's to decide. A Python project is locked: its dependencies are in `pyproject.toml`, which
+written for the stack, and the rest is a CI workflow that runs `rotproof check`.
+
+Rotproof writes no `AGENTS.md` or `CLAUDE.md`: what your agent is told is yours to decide. So `create` ends with a
+question, and exits 2 until it is answered. To have your agent follow the rules, put the line in the file it reads
+first (`CLAUDE.md` for Claude Code, `AGENTS.md` for most others):
+
+```sh
+echo "The rules Rotproof keeps: @.rotproof/AGENTS.md" > AGENTS.md
+```
+
+A Python project is locked: its dependencies are in `pyproject.toml`, which
 `create` wrote with Rotproof pinned in the `dev` group of its `[dependency-groups]`, and a lock file is committed, which
 only a tool can make. Until then `rotproof check` fails:
 

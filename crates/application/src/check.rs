@@ -177,7 +177,8 @@ fn code(
 }
 
 /// Every broken rule of the files Rotproof writes into the project of `declared`: they are up to this version
-/// (`files` in the declaration), and the guide and the page on running Rotproof are the ones this version writes.
+/// (`files` in the declaration), the guide and the page on running Rotproof are the ones this version writes, and the
+/// project has answered whether its agent reads the guide.
 fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
     let mut found: Vec<Finding> = under(
         "the project's files are up to this version of Rotproof",
@@ -197,6 +198,11 @@ fn rotproof_files(tree: &dyn Tree, declared: &Declared) -> Vec<Finding> {
     found.extend(under(
         "Rotproof's page on running it is up to date",
         generated(tree, RUNNING_PATH, RUNNING, files),
+    ));
+    // The same judgement as the question `rotproof create` and `rotproof init` ask, so that it cannot be skipped
+    found.extend(under(
+        domain::pointer::HEADING,
+        crate::project::unanswered(tree, declared).map(|_| domain::pointer::unanswered()),
     ));
     found
 }

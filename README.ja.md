@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 7f60c2fe. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at d7cb07e4. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -50,8 +50,9 @@ Rotproof は、LLM と人がコードを変えていくあいだにプロジェ�
   では、追っている Issue を名指す `TODO` は残せて、毎回の検査がそれを一覧に出します。型検査を止めるコメントも
   通りません。環境変数を読めるのは `infrastructure` だけです。
 - **バイナリしか持たないエージェントも、迷いません。** `rotproof --help` が始める順番を示します。規則はプロジェクトの
-  スタックに合わせて `.rotproof/AGENTS.md` に書かれ、プロジェクトはエージェントが最初に読むファイルからそこを指します。
-  Rotproof の上げ方と、コマンドをいつ走らせるかは `.rotproof/running.md` にあり、
+  スタックに合わせて `.rotproof/AGENTS.md` に書かれます。エージェントにそれを読ませるかは、あなたが決めます。
+  `rotproof create` が問いを出し、エージェントが最初に読むファイルに足す 1 行を示します。足すか断るまで
+  `rotproof check` は失敗します。Rotproof の上げ方と、コマンドをいつ走らせるかは `.rotproof/running.md` にあり、
   ガイドがそれを名指します。
 - **規則は、固定した版のものです。** プロジェクトは Rotproof の版を 1 つ、厳密に固定します。規則が変わるのは、
   プロジェクト自身のコミットの中だけです（「互換性」を参照）。
@@ -127,12 +128,25 @@ wrote docs/log.md
 wrote .rotproof/AGENTS.md
 ...
 wrote docs/knowledge/index.md
-next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md
+not written: the lock file (uv.lock, poetry.lock, pdm.lock or pylock.toml), which a tool makes from pyproject.toml (`uv lock`): until one is committed, `rotproof check` fails
+ask the person: should this project's agent read the rules Rotproof keeps, in .rotproof/AGENTS.md? The person decides; an agent asks before it adds the line or declines
+  yes: add this line to the file the agent reads first (there is no AGENTS.md or CLAUDE.md: ask the person which file to make):
+    The rules Rotproof keeps: @.rotproof/AGENTS.md
+  no: add "guide-pointer" to declined in .config/rotproof.toml
 ```
 
 層はそれぞれディレクトリで、`__init__.py` にその役割が書いてあります。`docs/` には記録が、`.rotproof/AGENTS.md` には
-スタックに合わせて書かれた規則が入ります。残りは `rotproof check` を実行する CI のワークフローです。Rotproof は
-`AGENTS.md` も `CLAUDE.md` も書きません。エージェントに何を伝えるかは、プロジェクトが決めることです。Python のプロジェクトはロックされます。依存は `pyproject.toml` に書き
+スタックに合わせて書かれた規則が入ります。残りは `rotproof check` を実行する CI のワークフローです。
+
+Rotproof は `AGENTS.md` も `CLAUDE.md` も書きません。エージェントに何を伝えるかは、あなたが決めることです。そのため
+`create` は最後に問いを出し、答えるまで終了コード 2 で終わります。エージェントに規則を守らせるなら、エージェントが最初に
+読むファイル（Claude Code なら `CLAUDE.md`、ほかの多くは `AGENTS.md`）に、その 1 行を書きます。
+
+```sh
+echo "The rules Rotproof keeps: @.rotproof/AGENTS.md" > AGENTS.md
+```
+
+Python のプロジェクトはロックされます。依存は `pyproject.toml` に書き
 （`create` は、`[dependency-groups]` の `dev` に Rotproof を固定して書きました）、ロックファイルをコミットします。
 ロックファイルは道具にしか作れないので、それまで `rotproof check` は失敗します。
 

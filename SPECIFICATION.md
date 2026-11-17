@@ -67,7 +67,8 @@ project lacks. Run on a project that has a declaration, `rotproof init` upgrades
 `rotproof create` makes layers only with `--yes`. Without it, a run that would make one lists the layers, writes
 nothing and exits 2: run straight after `rotproof init`, it would otherwise make every layer the declaration names
 before anyone read the list, and it never deletes them again. A run that makes no layer, as after an upgrade, needs no
-`--yes`.
+`--yes`. A run that writes ends by asking whether the project's agent reads the guide, and exits 2, while the project
+has not answered it (see the guide under "Upgrading Rotproof").
 
 A TypeScript project with React starts from Vite: run `npm create vite@latest <name> -- --template react-ts` first,
 pin Rotproof in it (`npm install -D -E rotproof@2.0.0-rc.1`), then run `rotproof init --stack typescript --ui atomic`
@@ -80,7 +81,8 @@ Run `rotproof create` when a project starts, and again after you change `.config
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
 (below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, `.rotproof/running.md`,
 `.rotproof/readers.md` when a unit
-is shared, and the index files and the knowledge rules in `docs/`), so a new project passes its first check with nothing for a person to write. It never
+is shared, and the index files and the knowledge rules in `docs/`), so a new project passes its first check with
+nothing for a person to write but one answer: whether its agent reads the guide (below). It never
 overwrites a file it does not generate, apart from adding the fields the declaration lacks (below) and, in a Rust
 project, adding the crates it makes to the workspace's `members` when none names them (see "Units"), and never moves
 or deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
@@ -204,13 +206,28 @@ rewrites it only when its text changed; when `files` is behind, `rotproof check`
 the guide.
 
 The guide only helps if your agent reads it. Rotproof writes no `AGENTS.md` or `CLAUDE.md`, nor anything else an agent
-reads by itself: what an agent is told is the project's to decide. A project points its agent at the guide from its
-`AGENTS.md` (or whatever file its agent reads first), and imports it in `CLAUDE.md` for Claude Code:
+reads by itself: what an agent is told belongs to the person, and a line Rotproof wrote there would change what the
+agent obeys whenever Rotproof is upgraded. So it asks instead. When neither the root's `AGENTS.md` nor its `CLAUDE.md`
+names `.rotproof/AGENTS.md`, in any words, and `declined` does not name `guide-pointer`, `rotproof create` and
+`rotproof init` end by asking whether the project's agent should read the guide, and exit 2 (after doing all they do
+otherwise: `rotproof init` sets `files`):
 
-```markdown
-@AGENTS.md
-@.rotproof/AGENTS.md
+```text
+ask the person: should this project's agent read the rules Rotproof keeps, in .rotproof/AGENTS.md? The person decides; an agent asks before it adds the line or declines
+  yes: add this line to the file the agent reads first (here: AGENTS.md):
+    The rules Rotproof keeps: @.rotproof/AGENTS.md
+  no: add "guide-pointer" to declined in .config/rotproof.toml
 ```
+
+The question names the files of the two that are there, or, with neither, says to ask the person which file to make.
+The line is a sentence with the path bare, not in backticks: an agent that brings files in by `@path` (Claude Code,
+from `CLAUDE.md`) brings the guide in, and one that does not reads the path as where to look. Which file the agent reads
+first, and whether one file brings in another, is not looked at: that is the agent's own, and changes with its version.
+`rotproof check` fails on the same judgement until the question is answered (see "What `rotproof check` checks"), so it
+cannot be skipped; answered either way, nothing asks it again. A project that declines it is checked as any other, but
+its agent knows only the rules `rotproof check` enforces, not those it cannot (reading the knowledge index before work,
+asking a person before writing knowledge, keeping open work in an issue). A project that kept the `CLAUDE.md`
+`rotproof create` wrote before 2.0 imports the guide already, and is not asked.
 
 ## The hooks Rotproof no longer writes
 
@@ -1691,13 +1708,16 @@ entry can be told, is one.
   within it**: more entries than it lets fails, as one finding that names both files.
 - **The project's files are up to this version of Rotproof** (see "Upgrading Rotproof"): `files` in the declaration
   (0.1.0 when it is missing) is a version as `major.minor.patch`, neither older nor newer than the running Rotproof,
-  and every name in `declined` is an update.
+  and every name in `declined` is an update or `guide-pointer`.
 - **`.rotproof/AGENTS.md` is up to date:** it equals what `rotproof create` writes for the stack with this version of
   Rotproof (see "Upgrading Rotproof"), so it fails after an upgrade until `rotproof init` has run, and when edited by
   hand. The finding names the command that applies: `rotproof create` when `files` names the running version (the
   guide changed under it, as in a development build, or by hand), `rotproof init` otherwise.
 - **`.rotproof/running.md` is up to date:** it equals what `rotproof create` writes, and fails when missing or edited,
   with the command that applies as for the guide.
+- **The project answered whether its agent reads the guide:** the root's `AGENTS.md` or `CLAUDE.md` names
+  `.rotproof/AGENTS.md`, or `declined` names `guide-pointer` (see "Upgrading Rotproof", at the guide). It reads only
+  whether the path is in those files, never what else they say.
 - **No comment holds `TODO`, `FIXME`, `XXX`, `HACK` or `NOTE`**: in upper case, as whole words, in any code file
   outside `unchecked` and `moving` (a path there that holds or sits in a layer skips nothing), `tests/` included; in TypeScript, the `//` and `/* */` comments of the source files in `src/`, the tests among them,
   JSX text not counted; in Rust, the `//` and `/* */` comments (doc comments too) of every `.rs` file in `crates/`,

@@ -70,8 +70,19 @@ fn unlocked(declaration: &str) -> tempfile::TempDir {
         up_to_date(declaration),
     )
     .unwrap();
+    point_at_the_guide(root.path());
     root
 }
+
+/// The line that points the project's agent at the guide, in a `CLAUDE.md` of the project's own: the answer to the
+/// question `rotproof create` asks, which the tests that are about something else need to pass the check.
+fn point_at_the_guide(root: &Path) {
+    fs::write(root.join(POINTER_FILE), POINTER).unwrap();
+}
+
+/// Where [`point_at_the_guide`] writes, and what
+const POINTER_FILE: &str = "CLAUDE.md";
+const POINTER: &str = "The rules Rotproof keeps: @.rotproof/AGENTS.md\n";
 
 /// A `pyproject.toml` in each of the directories `roots` of `root` ("" is the root), and a `uv.lock` at the root.
 fn locked(root: &Path, roots: &[&str]) {
@@ -820,8 +831,10 @@ fn create_writes_the_projects_files_once() {
         )
         .unwrap();
         let arg = root_arg(&root);
+        // Every file is written, and the question of the agent is asked, which stops it with 2
         let out = create(&["--root", &arg, "create", "--yes"]);
-        assert!(out.status.success(), "{stack}: {}", stdout(&out));
+        assert_eq!(out.status.code(), Some(2), "{stack}: {}", stdout(&out));
+        assert!(stdout(&out).contains("ask the person"), "{stack}");
         for path in ["README.md", ".gitignore", ".gitattributes"] {
             let text = fs::read_to_string(root.join(path))
                 .unwrap_or_else(|_| panic!("{stack}: {path} was not written"));
@@ -833,6 +846,7 @@ fn create_writes_the_projects_files_once() {
         for path in ["AGENTS.md", "CLAUDE.md"] {
             assert!(!root.join(path).exists(), "{stack}: {path}");
         }
+        point_at_the_guide(&root);
         assert!(
             fs::read_to_string(root.join("README.md"))
                 .unwrap()
@@ -1216,6 +1230,81 @@ fn the_guide_sends_to_the_page_on_running_rotproof_and_does_not_say_what_it_says
         assert!(!guide.contains("commit of its own"), "{stack}: {guide}");
         assert!(!guide.contains("rotproof follows knowledge/"), "{stack}");
     }
+}
+
+#[test]
+fn an_upgrade_asks_whether_the_agent_reads_the_guide_until_the_project_answers_and_a_decline_is_kept()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::create_dir_all(r.join(".config")).unwrap();
+    let declaration = "stack = \"none\"\nareas = [\"a\"]\nfiles = \"1.0.0\"\n";
+    fs::write(r.join(".config/rotproof.toml"), declaration).unwrap();
+    fs::write(r.join("AGENTS.md"), "# Mine\n\nNo pointer here.\n").unwrap();
+    // init does the upgrade, sets files, and then asks, naming the file that is there; it exits 2
+    let out = run(&["--root", &arg, "init"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
+    let said = stdout(&out);
+    assert!(
+        said.contains("the project's files are up to")
+            && said.contains("ask the person: should this project's agent read")
+            && said.contains("(here: AGENTS.md)")
+            && !said.contains("next: run `rotproof check`"),
+        "{said}"
+    );
+    let written = fs::read_to_string(r.join(".config/rotproof.toml")).unwrap();
+    assert!(
+        written.contains(&format!("files = \"{}\"", env!("CARGO_PKG_VERSION"))),
+        "{written}"
+    );
+    // The project's AGENTS.md is never written
+    assert_eq!(
+        fs::read_to_string(r.join("AGENTS.md")).unwrap(),
+        "# Mine\n\nNo pointer here.\n"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains(
+            "the project answered whether its agent reads Rotproof's guide:\n  no AGENTS.md or CLAUDE.md names \
+             .rotproof/AGENTS.md, and declined in .config/rotproof.toml does not name \"guide-pointer\""
+        ),
+        "{}",
+        stdout(&out)
+    );
+    // The person says no: declined, and from then on nothing asks or fails for it
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        written.replace("declined = []", "declined = [\"guide-pointer\"]"),
+    )
+    .unwrap();
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    for args in [["--root", &arg, "init"], ["--root", &arg, "create"]] {
+        let out = run(&args);
+        assert!(out.status.success(), "{:?}: {}", args, stdout(&out));
+        assert!(!stdout(&out).contains("ask the person"), "{}", stdout(&out));
+    }
+}
+
+#[test]
+fn a_project_whose_claude_md_already_imports_the_guide_is_not_asked() {
+    // As every project rotproof create made before it wrote no CLAUDE.md
+    let root = tempfile::tempdir().unwrap();
+    let r = root.path();
+    let arg = root_arg(r);
+    fs::create_dir_all(r.join(".config")).unwrap();
+    fs::write(
+        r.join(".config/rotproof.toml"),
+        "stack = \"none\"\nareas = [\"a\"]\nfiles = \"1.0.0\"\n",
+    )
+    .unwrap();
+    fs::write(r.join("CLAUDE.md"), "@AGENTS.md\n@.rotproof/AGENTS.md\n").unwrap();
+    let out = run(&["--root", &arg, "init"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("ask the person"), "{}", stdout(&out));
+    assert!(run(&["--root", &arg, "check"]).status.success());
 }
 
 #[test]
@@ -5882,6 +5971,7 @@ fn only_the_projects_own_gitignore_hides_code() {
         &r,
         "stack = \"typescript\"\nareas = [\"a\"]\nui = \"none\"\n",
     );
+    point_at_the_guide(&r);
     assert!(
         create(&["--root", &root_arg(&r), "create", "--yes"])
             .status
@@ -5930,6 +6020,7 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         "list in absent",
         "rotproof create   ",
         "rotproof create --yes",
+        "answer what create asks",
         "rotproof check",
     ];
     let start = &help[help
@@ -5981,26 +6072,59 @@ fn an_agent_with_only_the_binary_finds_its_way_to_a_checked_project() {
         stderr(&out)
     );
     assert_eq!(tree(root.path()).len(), 1, "{:?}", tree(root.path()));
+    // With --yes it makes them, and asks the one question that is the person's: whether the agent reads the guide. It
+    // exits 2 until that is answered, and says so
     let out = create(&["--root", &arg, "create", "--yes"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
+    let asked = stdout(&out);
     assert!(
-        stdout(&out).contains("next: run `rotproof check`"),
+        asked.contains("ask the person: should this project's agent read the rules Rotproof keeps")
+            && asked
+                .contains("there is no AGENTS.md or CLAUDE.md: ask the person which file to make")
+            && asked.contains("no: add \"guide-pointer\" to declined in .config/rotproof.toml")
+            && !asked.contains("next: run `rotproof check`"),
+        "{asked}"
+    );
+    assert!(
+        stderr(&out).contains("`rotproof check` fails until it is answered"),
         "{}",
-        stdout(&out)
+        stderr(&out)
     );
     fs::write(
         root.path().join("docs/log.md"),
         "# Log\n\n## 2026-10-04\n\n* Started\n",
     )
     .unwrap();
+    // The check fails on it too, so that it cannot be skipped
+    let out = run(&["--root", &arg, "check"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
+    assert!(
+        stdout(&out).contains("the project answered whether its agent reads Rotproof's guide"),
+        "{}",
+        stdout(&out)
+    );
+    // The person says yes: the line the question gives, in the file they chose
+    let line = asked
+        .lines()
+        .skip_while(|line| !line.starts_with("  yes: "))
+        .nth(1)
+        .unwrap()
+        .trim();
+    fs::write(root.path().join("AGENTS.md"), format!("{line}\n")).unwrap();
     // Nothing is left for a person to write before the first check passes but the lock file, which a tool makes: no
     // area is needed until the first knowledge document
     let out = run(&["--root", &arg, "check"]);
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     assert!(
-        stdout(&out).contains("pyproject.toml has no lock file in the root or above it"),
+        stdout(&out).contains("pyproject.toml has no lock file in the root or above it")
+            && !stdout(&out).contains("whether its agent reads"),
         "{}",
         stdout(&out)
     );
+    // Answered, the question is not asked again
+    let out = create(&["--root", &arg, "create"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("ask the person"), "{}", stdout(&out));
     fs::write(root.path().join("uv.lock"), "").unwrap();
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
@@ -6098,6 +6222,7 @@ fn init_writes_a_declaration_that_create_reads() {
             "{stack}: {:?}",
             tree(root.path())
         );
+        point_at_the_guide(root.path());
         let out = create(&["--root", &arg, "create", "--yes"]);
         assert!(out.status.success(), "{stack}: {}", stdout(&out));
         if stack == "python" {
@@ -6279,7 +6404,8 @@ fn a_repository_of_records_only_makes_and_checks_only_docs() {
     assert!(
         made.iter().all(|path| path.starts_with('.')
             || path.starts_with("docs/")
-            || PROJECT_FILES.contains(&path.as_str())),
+            || PROJECT_FILES.contains(&path.as_str())
+            || path == POINTER_FILE),
         "{made:?}"
     );
     // Code anywhere is not looked at, and the output says the layers were skipped
@@ -7772,9 +7898,9 @@ fn the_map_a_project_keeps_in_agents_md_is_told_when_it_is_behind_by_check_and_i
     let arg = root_arg(r);
     let out = create(&["--root", &arg, "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
-    // Rotproof writes no AGENTS.md: a project without one has no map to judge
+    // Rotproof writes no AGENTS.md: a project without one has no map to judge. The CLAUDE.md is the test's own
     assert!(!r.join("AGENTS.md").exists());
-    assert!(!r.join("CLAUDE.md").exists());
+    assert_eq!(fs::read_to_string(r.join(POINTER_FILE)).unwrap(), POINTER);
     fs::write(
         r.join("docs/log.md"),
         "# Log\n\n## 2026-10-02\n\n* Something\n",
@@ -8593,13 +8719,13 @@ fn a_rust_entry_file_with_no_place_for_its_package_fails_create_before_it_writes
         assert_eq!(out.status.code(), Some(2), "{entry}");
         let said_by = String::from_utf8_lossy(&out.stderr).into_owned();
         assert!(said_by.contains(said), "{entry}: {said_by}");
-        // Nothing was written: only the declaration is there
+        // Nothing was written: only the declaration and the test's answer are there
         assert_eq!(
             tree(r)
                 .iter()
                 .map(|(path, _)| path.as_str())
                 .collect::<Vec<_>>(),
-            [".config/rotproof.toml"],
+            [".config/rotproof.toml", POINTER_FILE],
             "{entry}"
         );
     }

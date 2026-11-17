@@ -96,6 +96,10 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
     };
     write_members(tree, out, &declared, &crates, &mut made)?;
     write_indexes(tree, out, &declared, &mut made)?;
+    // Asked by the command that wrote the guide, as it is there now for the agent to be pointed at
+    if let Some(present) = crate::project::unanswered(tree, &declared) {
+        made.question = domain::pointer::question(&present);
+    }
     Ok(made)
 }
 

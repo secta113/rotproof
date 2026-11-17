@@ -26,7 +26,9 @@ Start a project:
                                      the project's files: go on to 5)
   4. rotproof create --yes           once absent lists every layer the project lacks: make the layers, docs/ and the
                                      project's files
-  5. rotproof check                  check them; this is the project's CI
+  5. answer what create asks         the person decides whether the agent reads .rotproof/AGENTS.md: a line in the
+                                     file the agent reads first, or a name in declined
+  6. rotproof check                  check them; this is the project's CI
 
 Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files), then
 `rotproof check`.
@@ -37,7 +39,8 @@ prints them before. `rotproof <command> --help` says what a command reads, write
 Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotproof check` finds a rule broken; 2 when there is no
 .config/rotproof.toml to work from, a file cannot be read or written, the command line of another command is wrong or
 its --root is not a directory, `rotproof create` would make layers
-without --yes, `rotproof init` leaves an update of the project's files to a person,
+without --yes, `rotproof create` or `rotproof init` asks a question the project has not answered (whether its agent
+reads .rotproof/AGENTS.md), `rotproof init` leaves an update of the project's files to a person,
 or `rotproof approve` is given no reason, or an import that is not forbidden.";
 
 /// What `rotproof new` asks, for a document of knowledge: what the code cannot tell, which only a person or the task
@@ -550,6 +553,7 @@ fn init(
     for stale in &upgraded.stale_map {
         println!("note: {stale}");
     }
+    ask(&upgraded.made);
     if !upgraded.by_hand.is_empty() {
         for why in &upgraded.by_hand {
             println!("needs a person: {why}");
@@ -568,8 +572,21 @@ fn init(
     } else {
         println!("the project's files are up to {version} already");
     }
+    if !upgraded.made.question.is_empty() {
+        return Err(UNANSWERED.to_string());
+    }
     println!("next: run `rotproof check`");
     Ok(())
+}
+
+/// What `rotproof create` and `rotproof init` say, on stderr, as they exit 2 on the question they asked.
+const UNANSWERED: &str = "the question above is the person's to answer: `rotproof check` fails until it is answered, either way";
+
+/// Ask the question the project has not answered, if any, on standard output, where an agent reads what to do next.
+fn ask(made: &Made) {
+    for line in &made.question {
+        println!("{line}");
+    }
 }
 
 /// Say what `rotproof create`, or an upgrade (its refresh, and `files` set), wrote and added.
@@ -605,6 +622,10 @@ fn create(commands: &dyn Commands, names: &Names, root: &Path, yes: bool) -> Res
             "nothing to make: the tree has what {} declares",
             names.declaration
         );
+    }
+    if !made.question.is_empty() {
+        ask(&made);
+        return Err(UNANSWERED.to_string());
     }
     if wrote {
         println!("next: run `rotproof check`; the rules it keeps are in .rotproof/AGENTS.md");

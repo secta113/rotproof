@@ -301,8 +301,9 @@ const FILES_COMMENT: &str = "# The version of Rotproof the project's files are u
                              # Rotproof, run it again, and it updates them\n";
 
 /// What `declined` is, as the declaration says it above the field.
-const DECLINED_COMMENT: &str = "# Updates of the project's files this project declines, by name, such as \"claude-remove-deny-approvals\".\n\
-                                # `rotproof init` says when one cannot be applied without a person\n";
+const DECLINED_COMMENT: &str = "# What Rotproof offers that this project declines, by name: an update of the project's files, such as\n\
+                                # \"claude-remove-deny-approvals\", or \"guide-pointer\", the line that points the agent at the guide.\n\
+                                # `rotproof init` and `rotproof create` say when one needs a person\n";
 
 /// What `[[unit]]` is, as the declaration says it, commented out. It is the last thing in the file, so that a project
 /// that uncomments it leaves `files` and `declined` above, in no unit's table. `{path}`, `{root}`, `{cli}` and
