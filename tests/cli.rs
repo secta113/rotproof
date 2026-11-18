@@ -9964,9 +9964,9 @@ fn a_project_that_is_not_python_is_not_asked_for_a_lock_file_or_judged_by_its_en
 }
 
 #[test]
-fn a_project_whose_views_are_templates_is_checked_for_them() {
+fn a_python_project_with_screens_checks_its_templates_and_says_so_only_when_it_has_one() {
     let root = declared(
-        "stack = \"python\"\nareas = [\"a\"]\nui_design = \"rendered\"\nabsent = [\"presentation\"]\n",
+        "stack = \"python\"\nareas = [\"a\"]\nui_design = \"atomic\"\nabsent = [\"presentation\"]\n",
     );
     let arg = root_arg(root.path());
     let out = create(&["--root", &arg, "create", "--yes"]);
@@ -9978,15 +9978,20 @@ fn a_project_whose_views_are_templates_is_checked_for_them() {
     .unwrap();
     assert!(root.path().join("ui/pages/__init__.py").is_file());
     assert!(!root.path().join("presentation").exists());
-    // Said on every run, with nothing to judge yet
+    // Nothing is said while the views are code alone
     let said = "templates: references are read as the template languages Jinja2 3 and Django 5/6\n";
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("templates:"), "{}", stdout(&out));
+    // Once a view is a template, it is said on every run
+    let write = |path: &str, text: &str| fs::write(root.path().join(path), text).unwrap();
+    write("ui/atoms/link.html", "");
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(stdout(&out).starts_with(said), "{}", stdout(&out));
 
     // A template in a level may refer to the levels below its own, and one that does not is a finding, as is a
     // template outside the levels
-    let write = |path: &str, text: &str| fs::write(root.path().join(path), text).unwrap();
     write(
         "ui/pages/home.html",
         "{% extends \"templates/base.html\" %}\n",
@@ -9999,7 +10004,6 @@ fn a_project_whose_views_are_templates_is_checked_for_them() {
         "ui/organisms/nav.html",
         "{% include \"atoms/link.html\" %}\n{% include \"templates/base.html\" %}\n",
     );
-    write("ui/atoms/link.html", "");
     let out = run(&["--root", &arg, "check"]);
     assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
     assert!(
@@ -10036,8 +10040,8 @@ fn a_project_whose_views_are_templates_is_checked_for_them() {
 }
 
 #[test]
-fn a_project_with_atomic_ui_reads_no_template() {
-    let root = declared("stack = \"python\"\nareas = [\"a\"]\nui_design = \"atomic\"\n");
+fn a_python_project_with_no_screens_reads_no_template() {
+    let root = declared("stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\n");
     let arg = root_arg(root.path());
     let out = create(&["--root", &arg, "create", "--yes"]);
     assert!(out.status.success(), "{}", stdout(&out));
@@ -10047,11 +10051,10 @@ fn a_project_with_atomic_ui_reads_no_template() {
     )
     .unwrap();
     fs::write(
-        root.path().join("ui/atoms/a.html"),
+        root.path().join("stray.html"),
         "{% include \"pages/x.html\" %}",
     )
     .unwrap();
-    fs::write(root.path().join("stray.html"), "").unwrap();
     let out = run(&["--root", &arg, "check"]);
     assert!(out.status.success(), "{}", stdout(&out));
     assert!(!stdout(&out).contains("templates:"), "{}", stdout(&out));

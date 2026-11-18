@@ -41,7 +41,7 @@ pub struct Direction {
     pub links: Vec<Link>,
     /// What to say of the code that is moving into the layers: `None` when the declaration lists no path of it
     pub moving: Option<Order>,
-    /// How the references between templates were read, for a layout whose views are templates: said on every run
+    /// How the references between templates were read, in a project whose `ui` holds a template: said on every run
     pub templates: Option<Premise>,
     /// Every import from the code of an inner layer into a path of `unchecked` or `moving`, which no check judges: said
     /// on every run, in the order of the file and the line, and failing nothing

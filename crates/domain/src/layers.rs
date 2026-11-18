@@ -274,9 +274,9 @@ pub struct Layout {
     /// while this stack has none (Python's; Rust's lists a layer's packages in the crate's own manifest)
     #[serde(default)]
     pub allowed: BTreeMap<String, Vec<String>>,
-    /// The template files of the UI the layout is for, when its views are templates: code like the code of the layout
-    /// where the structure is judged, and read for the references between them. `None` for every other UI, which
-    /// [`layout`] sets
+    /// The template files of the UI the layout is for, when a view may be a template: code like the code of the layout
+    /// where the structure is judged, and read for the references between them. `None` for every other UI (`none`),
+    /// which [`layout`] sets
     #[serde(default)]
     pub templates: Option<Templates>,
     /// The language Rotproof reads the code as
@@ -1335,24 +1335,20 @@ mod tests {
     }
 
     #[test]
-    fn a_template_is_code_in_the_layout_for_the_ui_whose_views_they_are_and_nowhere_else() {
-        let rendered = layout("python", "rendered").unwrap();
-        assert!(rendered.uis.contains(&"rendered".to_string()));
-        assert!(rendered.is_template("home.html") && rendered.is_template("Home.J2"));
-        assert!(!rendered.is_template("a.py") && !rendered.is_template("html"));
+    fn a_template_is_code_in_a_python_layout_with_screens_and_nowhere_else() {
+        let screens = layout("python", "atomic").unwrap();
+        assert_eq!(screens.uis, ["atomic"]);
+        assert!(screens.is_template("home.html") && screens.is_template("Home.J2"));
+        assert!(!screens.is_template("a.py") && !screens.is_template("html"));
         // Code for the structure, which lists what sits outside the layers, and none for the readers of Python
-        assert!(rendered.is_code_in("", "home.html") && rendered.is_code_in("ui", "a.py"));
-        assert!(!rendered.is_code("home.html") && !rendered.has_comments("home.html"));
-        // The layers of the screens are the atomic ones: a rendered project has `presentation` as well, which it may
-        // declare absent
-        assert!(!rendered.leaves_out("ui") && !rendered.leaves_out("presentation.models"));
-        for ui in ["atomic", NO_UI] {
-            let other = layout("python", ui).unwrap();
-            assert!(other.templates.is_none() && !other.is_template("home.html"));
-            assert!(!other.is_code_in("", "home.html"), "{ui}");
-        }
+        assert!(screens.is_code_in("", "home.html") && screens.is_code_in("ui", "a.py"));
+        assert!(!screens.is_code("home.html") && !screens.has_comments("home.html"));
+        // A project with no screens has no views, so its templates are nothing Rotproof reads
+        let none = layout("python", NO_UI).unwrap();
+        assert!(none.templates.is_none() && !none.is_template("home.html"));
+        assert!(!none.is_code_in("", "home.html"));
         assert!(layout("typescript", "atomic").unwrap().templates.is_none());
-        assert!(layout("typescript", "rendered").is_none());
+        assert!(layout("python", "rendered").is_none());
     }
 
     #[test]

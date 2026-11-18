@@ -19,8 +19,8 @@ use protocol::inbound::{
 const START: &str = "\
 Start a project:
   1. rotproof init --stack <stack>   write .config/rotproof.toml (python, typescript, rust, or none for records only),
-     --ui-design <ui>                with python and typescript: atomic for screens, none for no screens (python
-                                     also: rendered, for views that are templates the server renders)
+     --ui-design <ui>                with python and typescript: atomic for screens, none for no screens (in python,
+                                     a view may be a template the server renders)
   2. edit it: list in absent the layers the project does not have
   3. rotproof create                 list the layers it would make, writing nothing (with none, it makes docs/ and
                                      the project's files: go on to 5)
@@ -70,7 +70,7 @@ const CHECK_HELP: &str = "\
 Check the layers and the records, and exit non-zero when one breaks the rules
 
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
-layers, with ui = rendered in Python no template (.html, .htm, .jinja, .jinja2, .j2) outside the levels of ui, and in TypeScript no .tsx or .jsx file in presentation, which holds no view; in each unit, when the \
+layers, in Python with screens no template (.html, .htm, .jinja, .jinja2, .j2) outside the levels of ui, and in TypeScript no .tsx or .jsx file in presentation, which holds no view; in each unit, when the \
 declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
 what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that the manifest of each package \
 (the pyproject.toml of a Python unit, the package.json of a TypeScript one, the Cargo.toml of a crate, whose [dependencies] no path of its code names) lists the dependencies its code imports (a package imported and not \
@@ -116,10 +116,10 @@ check of the I/O of the inner layers would too: a file that does I/O it fails, o
 there, is not offered domain, protocol, application or presentation), and fails nothing for it. With paths in \
 unchecked or moving, prints on every run, too, each import from the code of an inner layer into them, which no check \
 reads, so that the I/O hidden in a helper there is seen (inner layers read code outside the layers (not judged)), and \
-fails nothing for it. With ui = \
-rendered in Python, judges the references between templates ({% extends %}, {% include %}, {% import %} and {% from %} \
+fails nothing for it. In Python \
+with screens, judges the references between templates ({% extends %}, {% include %}, {% import %} and {% from %} \
 with a literal name, a path from the directory ui of the unit) by the level each file is in, as imports are, and prints \
-on every run the template languages and versions it reads them as (templates:); where a unit's pyproject.toml asks for \
+on every run that reads a template the template languages and versions it reads them as (templates:); where a unit's pyproject.toml asks for \
 another version of the package of a language, the references are not read as it, or not judged at all, and it says so. \
 A test is no code of a layer: its imports and its reads of the environment are not judged, and no code that is not a \
 test imports one (in Python a module of tests/, in TypeScript a file named *.test.* or *.spec.* or in __tests__/); in \
@@ -169,8 +169,8 @@ enum Command {
         #[arg(long)]
         stack: Option<String>,
         /// The UI, which picks the layers of the screens: atomic (the view in ui, by atomic design, and the state of
-        /// the screens in presentation), rendered (python only: the views are template files in ui, which a route
-        /// renders, and presentation starts absent) or none (no screens). Needed with python and typescript when
+        /// the screens in presentation; in python a view may also be a template file in ui, which a route renders) or
+        /// none (no screens). Needed with python and typescript when
         /// there is no declaration yet; rust offers only none. The field is ui_design; --ui is the same flag
         #[arg(long = "ui-design", alias = "ui", value_name = "UI")]
         ui: Option<String>,
@@ -212,15 +212,15 @@ enum Command {
     /// Prints the guide of the stack and the UI the project declares, or of the stack named with --stack, which needs
     /// no project: the layers of the stack with where each lives and what it may import, the rules of the records and
     /// where the page on running Rotproof is. The same text `rotproof create` writes to .rotproof/AGENTS.md. With
-    /// --stack, --ui-design picks the UI, as for `rotproof init` (with python, atomic, rendered or none; with
+    /// --stack, --ui-design picks the UI, as for `rotproof init` (with python and
     /// typescript, atomic or none; the layers of the fullest UI the stack offers without it). Exits 2 for an unknown
     /// stack or UI, or when no stack is named and the declaration cannot be read.
     Guide {
         /// python, typescript, rust, or none (records only). Without it, the stack in .config/rotproof.toml
         #[arg(long)]
         stack: Option<String>,
-        /// The UI of the layers to show, as for `rotproof init`: atomic or none with python and typescript, and
-        /// rendered with python. Needs --stack; --ui is the same
+        /// The UI of the layers to show, as for `rotproof init`: atomic or none with python and typescript. Needs
+        /// --stack; --ui is the same
         #[arg(
             long = "ui-design",
             alias = "ui",

@@ -40,7 +40,7 @@ a clock) is built here and passed to each."""
 # `domain`, and the table is closed under chaining, so naming a layer would let `ui` import `domain`
 [[layer]]
 name = "ui"
-ui = ["atomic", "rendered"]
+ui = ["atomic"]
 imports = ["presentation.models", "presentation.display", "protocol.inbound"]
 role = """
 The view: what the user sees and touches, written with the UI framework (components, widgets) or as templates the
@@ -108,7 +108,7 @@ If a part cannot be named without referring to where it is used, it is not an at
 # the closure; its levels import less
 [[layer]]
 name = "presentation"
-ui = ["atomic", "rendered"]
+ui = ["atomic"]
 imports = ["protocol", "domain"]
 role = """
 The state and behaviour of the screens, apart from the views that draw them: what a screen holds and decides, so

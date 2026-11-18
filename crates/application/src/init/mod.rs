@@ -226,24 +226,19 @@ mod tests {
         };
         // A project with screens and one without start from the same command: no default makes the layers of either
         let why = new("python", None).unwrap_err();
-        assert!(
-            why.contains("--ui-design (atomic, rendered, none)"),
-            "{why}"
-        );
+        assert!(why.contains("--ui-design (atomic, none)"), "{why}");
         assert!(
             new("typescript", Some("none"))
                 .unwrap()
                 .contains("\nui_design = \"none\"\n")
         );
-        assert!(new("python", Some("fsd")).unwrap_err().starts_with(
-            "unknown UI \"fsd\" for the python stack (known: atomic, rendered, none)"
-        ));
-        // Only Python offers the UI whose views are templates
         assert!(
-            new("python", Some("rendered"))
-                .unwrap()
-                .contains("\nui_design = \"rendered\"\n")
+            new("python", Some("fsd"))
+                .unwrap_err()
+                .starts_with("unknown UI \"fsd\" for the python stack (known: atomic, none)")
         );
+        // The UI whose views were templates is no UI of its own: a Python project with screens reads them
+        assert!(new("python", Some("rendered")).is_err());
         assert!(new("typescript", Some("rendered")).is_err());
         // Rust offers none alone, so it needs no --ui and takes no other
         assert!(

@@ -137,7 +137,7 @@ pub struct Moving {
     pub more: usize,
 }
 
-/// How `rotproof check` read the references between templates, in a project whose views are templates. It is no
+/// How `rotproof check` read the references between templates, in a project whose `ui` holds one. It is no
 /// finding: it is said on every run, so that a reader knows what the check assumed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Templates {
@@ -180,7 +180,7 @@ pub struct Report {
     /// failing nothing. Empty when there are none
     pub outside: Vec<String>,
     /// How the references between templates were read, said on every run apart from the findings and the warnings.
-    /// `None` unless the project declares a UI whose views are templates
+    /// `None` unless the project's `ui` holds a template, in a layout that reads them
     pub templates: Option<Templates>,
     /// How many files were read as tests, said on every run apart from the findings and the warnings. `None` unless
     /// the stack tells a test by its name (TypeScript)

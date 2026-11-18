@@ -20,8 +20,8 @@ const GUIDE_TEXT: &str = include_str!("../../../project/rotproof/AGENTS.md.in");
 const LAYERS_TEXT: &str = include_str!("../../../project/rotproof/layers.md.in");
 const UNITS_TEXT: &str = include_str!("../../../project/rotproof/units.md.in");
 const UI_TEXT: &str = include_str!("../../../project/rotproof/ui.md.in");
-/// The screens of a project whose views are templates, in place of [`UI_TEXT`]
-const UI_RENDERED_TEXT: &str = include_str!("../../../project/rotproof/ui-rendered.md.in");
+/// The views that are templates, after [`UI_TEXT`] in a layout that reads templates
+const UI_TEMPLATES_TEXT: &str = include_str!("../../../project/rotproof/ui-templates.md.in");
 /// How the direction is read: the imports of a source file, or the dependencies of a crate
 const DIRECTION_IMPORTS: &str = include_str!("../../../project/rotproof/direction-imports.md.in");
 const DIRECTION_CARGO: &str = include_str!("../../../project/rotproof/direction-cargo.md.in");
@@ -227,18 +227,25 @@ fn ui(layout: &Layout) -> String {
     let has = |name: &String| !layout.leaves_out(name);
     let mut ui = if layout.leaves_out("ui") {
         String::new()
-    } else if let Some(templates) = &layout.templates {
+    } else {
+        UI_TEXT.to_string()
+    };
+    if let Some(templates) = layout
+        .templates
+        .as_ref()
+        .filter(|_| !layout.leaves_out("ui"))
+    {
         let extensions: Vec<String> = templates
             .extensions
             .iter()
             .map(|e| format!("`.{e}`"))
             .collect();
-        UI_RENDERED_TEXT
-            .replace("{extensions}", &extensions.join(", "))
-            .replace("{read_as}", &crate::templates::read_as(templates))
-    } else {
-        UI_TEXT.to_string()
-    };
+        ui.push_str(
+            &UI_TEMPLATES_TEXT
+                .replace("{extensions}", &extensions.join(", "))
+                .replace("{read_as}", &crate::templates::read_as(templates)),
+        );
+    }
     let no_view = layout.no_view.as_ref().filter(|n| n.layers.iter().any(has));
     if let Some(no_view) = no_view {
         let names: Vec<String> = no_view.layers.iter().filter(|n| has(n)).cloned().collect();
