@@ -165,7 +165,7 @@ impl Commands for Rotproof<'_> {
 
     fn start(&self, root: &Path, document: &NewDocument) -> Result<Started, String> {
         let files = self.machine.files(root);
-        crate::scaffold::start(&*files, &*files, self.machine.parsers(), document)
+        crate::scaffold::start(&*files, &*files, document)
     }
 
     fn log(&self, root: &Path, entry: &LogEntry) -> Result<Logged, String> {

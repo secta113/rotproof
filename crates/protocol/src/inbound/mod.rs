@@ -235,8 +235,6 @@ pub struct NewDocument {
     pub slug: String,
     /// The area it is tagged with. `None`: the only area the declaration lists
     pub area: Option<String>,
-    /// What it follows, each key as `rotproof follows` takes it, pinned at its hash now
-    pub follows: Vec<String>,
     /// Whether it is an alarm, which gets `# When` and `# Do`
     pub alarm: bool,
     /// The strings of an alarm's `match`
@@ -250,8 +248,6 @@ pub struct Started {
     pub path: String,
     /// The area it is tagged with
     pub area: String,
-    /// Each key it follows, with the hash it was pinned at
-    pub follows: Vec<(String, String)>,
 }
 
 /// One entry of the log, as `rotproof log` is given it.
@@ -323,8 +319,8 @@ pub trait Commands {
     /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
     /// Write a new knowledge document with its frontmatter and nothing else but an alarm's two headings, the
-    /// `description` empty so that the check fails until it is written, and each key it follows pinned. `Err`, writing
-    /// nothing, when the slug is not one, the file is there already, the area is not one, or a key is not there.
+    /// `description` empty so that the check fails until it is written, and no `follows`. `Err`, writing nothing, when
+    /// the slug is not one, the file is there already, or the area is not one.
     fn start(&self, root: &Path, document: &NewDocument) -> Result<Started, String>;
     /// Add `entry` to `docs/log.md`, at the top under the heading of today, the day the clock gives, made when it is
     /// not there. `Err`, writing nothing, when a field is empty or not in the form the log has it, the log is not

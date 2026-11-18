@@ -9293,9 +9293,11 @@ fn new_starts_a_document_that_fails_the_check_until_it_is_written() {
 }
 
 #[test]
-fn new_pins_what_the_document_follows_as_follows_does() {
+fn new_pins_nothing_and_follows_pins_the_document_once_its_body_is_written() {
     let root = repo_with_code();
     let arg = root_arg(root.path());
+    // A pin says the document was reviewed against the code, so a document with no body has none: --follows is gone
+    let before = tree(root.path());
     let out = run(&[
         "--root",
         &arg,
@@ -9303,35 +9305,22 @@ fn new_pins_what_the_document_follows_as_follows_does() {
         "model",
         "--follows",
         "domain/model.py::play",
-        "--follows",
-        "domain/",
     ]);
+    assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
+    assert!(error_of(&out).contains("--follows"), "{}", error_of(&out));
+    assert_eq!(tree(root.path()), before);
+    let out = run(&["--root", &arg, "new", "model"]);
     assert!(out.status.success(), "{}", error_of(&out));
-    let said = stdout(&out);
-    assert!(said.contains("  follows domain/model.py::play: "), "{said}");
-    assert!(said.contains("  follows domain/: "), "{said}");
+    assert!(!stdout(&out).contains("follows"), "{}", stdout(&out));
     let text = started_text(root.path(), "model");
-    assert!(
-        text.contains("follows:\n  domain/model.py::play: \""),
-        "{text}"
-    );
-    // Pinned, and still not done: the description is what the check waits for
-    let out = run(&["--root", &arg, "check"]);
-    assert_eq!(out.status.code(), Some(1), "{}", stdout(&out));
-    assert!(
-        stdout(&out).contains("model.md: description: empty"),
-        "{}",
-        stdout(&out)
-    );
+    assert!(!text.contains("follows"), "{text}");
+    // The body is written, then the keys it describes are pinned
     fs::write(
         root.path().join("docs/knowledge/model.md"),
-        text.replace("description: \"\"", "description: How a song plays."),
+        text.replace("description: \"\"", "description: How a song plays.")
+            + "\n# Why\n\nA song plays once.\n",
     )
     .unwrap();
-    assert!(run(&["--root", &arg, "index"]).status.success());
-    let out = run(&["--root", &arg, "check"]);
-    assert!(out.status.success(), "{}", stdout(&out));
-    // The pin is the one `rotproof follows` writes: pinning again changes nothing
     let out = run(&[
         "--root",
         &arg,
@@ -9341,7 +9330,14 @@ fn new_pins_what_the_document_follows_as_follows_does() {
         "domain/",
     ]);
     assert!(out.status.success(), "{}", error_of(&out));
-    assert!(stdout(&out).contains("nothing written"), "{}", stdout(&out));
+    assert!(
+        started_text(root.path(), "model").contains("follows:\n  domain/model.py::play: \""),
+        "{}",
+        started_text(root.path(), "model")
+    );
+    assert!(run(&["--root", &arg, "index"]).status.success());
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
     // And it is a pin: the code changes, the check says so
     write_file(
         root.path(),
@@ -9438,21 +9434,6 @@ fn new_refuses_what_it_cannot_write_correctly_and_writes_nothing() {
         (vec!["new", "a.md", "--area", "ops"], "without .md"),
         (vec!["new", "index", "--area", "ops"], "keeps for a file"),
         (vec!["new", "rules", "--area", "ops"], "keeps for a file"),
-        (
-            vec!["new", "a", "--area", "ops", "--follows", "domain/gone.py"],
-            "domain/gone.py: not there",
-        ),
-        (
-            vec![
-                "new",
-                "a",
-                "--area",
-                "ops",
-                "--follows",
-                "domain/model.py::",
-            ],
-            "domain/model.py::",
-        ),
         (
             vec!["new", "a", "--area", "ops", "--alarm", "--match", "a\nb"],
             "control character",
