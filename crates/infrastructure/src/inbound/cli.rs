@@ -187,7 +187,9 @@ enum Command {
     /// none), and for rust the workspace's Cargo.toml and the entry file src/main.rs), each when it does not exist.
     /// A Python project's lock file is the one thing it does not write: a tool makes it, and `rotproof check` fails
     /// until one is committed.
-    /// Makes, too, each entry file that a [[unit]] declares and the tree lacks.
+    /// Makes, too, each entry file that a [[unit]] declares and the tree lacks, and in python and typescript the
+    /// manifest at each unit's root that is not there (a pyproject.toml or a package.json named for the unit, with no
+    /// dependencies), never over one that is.
     /// Rewrites the files Rotproof generates: .rotproof/AGENTS.md (the rules it keeps), .rotproof/running.md (how to
     /// upgrade Rotproof and when to run each command), .rotproof/readers.md (who reads
     /// each shared unit, when a unit is shared), and docs/index.md and the

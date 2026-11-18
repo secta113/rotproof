@@ -8,7 +8,7 @@
 
 use crate::declaration::{Entries, UnitDeclaration, unreadable};
 use crate::layers::{Language, Layout, Place, Table, UnitTag};
-use crate::paths::{Miswritten, file_name, inside, miswritten, parent, within};
+use crate::paths::{Miswritten, file_name, inside, join, miswritten, parent, within};
 use crate::python_stdlib::is_standard_library;
 
 /// One unit: where its layers sit, and what it is to the others.
@@ -79,6 +79,17 @@ impl Unit {
             self.name
         );
         place
+    }
+
+    /// The manifest `rotproof create` writes at this unit's root when it has none, as its path and text: the layout's
+    /// [`Layout::unit_manifest`], the unit's name as the package's. `None` for the implicit unit, whose manifest is the
+    /// project's, and in a stack whose units have no manifest of their own.
+    pub fn manifest(&self, layout: &Layout) -> Option<(String, String)> {
+        let text = layout.unit_manifest.as_ref().filter(|_| self.declared)?;
+        Some((
+            join(&self.root, &layout.manifest),
+            text.trim_start().replace("{package}", &self.name),
+        ))
     }
 
     /// The entry files of this unit, each as a place of its own.

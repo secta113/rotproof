@@ -24,6 +24,15 @@ entry_text = '''
 '''
 # The one manifest of a package, which a project that declares units keeps to the root of a unit
 manifest = "pyproject.toml"
+# What `rotproof create` writes at the root of a unit that has no manifest, `{package}` the unit's name: the check of a
+# locked project fails a unit without one, and a manifest that is there is the project's and never written over
+unit_manifest = '''
+[project]
+name = "{package}"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = []
+'''
 # What a unit's own directory holds besides its layers and nests: its package's `__init__.py`, which imports no layer
 unit_files = ["__init__.py"]
 

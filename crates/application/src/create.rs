@@ -80,6 +80,7 @@ fn make(tree: &dyn Tree, out: &dyn Writer, name: &str, mode: Layers) -> Result<M
     write_layers(out, &layers, &mut made)?;
     if mode != Layers::Leave {
         write_entries(tree, out, &declared, &mut made)?;
+        write_unit_manifests(tree, out, &declared, &mut made)?;
     }
     let new_packages = write_packages(tree, out, &packages, &mut made)?;
     write_records(tree, out, &mut made)?;
@@ -183,6 +184,33 @@ fn write_entries(
         .flat_map(|unit| &unit.entries);
     for entry in entries.filter(|entry| tree.found(entry).is_none()) {
         write(out, entry, text, made)?;
+    }
+    Ok(())
+}
+
+/// The manifest at the root of each declared unit that has none, in a stack whose units have one of their own, as the
+/// layout writes it with the unit's name: never over one that is there, and once for a root two units share (named
+/// for the first). An upgrade, which makes no layer, writes none either.
+fn write_unit_manifests(
+    tree: &dyn Tree,
+    out: &dyn Writer,
+    declared: &Declared,
+    made: &mut Made,
+) -> Result<(), String> {
+    let Some(layout) = &declared.layout else {
+        return Ok(());
+    };
+    let mut written: Vec<String> = Vec::new();
+    for (path, text) in declared
+        .units
+        .iter()
+        .filter_map(|unit| unit.manifest(layout))
+    {
+        if written.contains(&path) || tree.found(&path).is_some() {
+            continue;
+        }
+        write(out, &path, &text, made)?;
+        written.push(path);
     }
     Ok(())
 }
@@ -529,6 +557,50 @@ mod tests {
             create(&tree, &tree, "project", true).unwrap();
             assert_eq!(tree.text(path).as_deref(), Some("mine\n"), "{stack}");
         }
+    }
+
+    #[test]
+    fn each_declared_unit_gets_a_manifest_at_its_root_once_and_never_over_one_that_is_there() {
+        // core and billing share no root; shop sits in billing's root, so that root is written once, for billing
+        let units = "\n[[unit]]\nname = \"core\"\npath = \"packages/core/src/core\"\nroot = \"packages/core\"\n\
+                     shared = true\n\n[[unit]]\nname = \"billing\"\npath = \"packages/billing/src/billing\"\n\
+                     root = \"packages/billing\"\n\n[[unit]]\nname = \"shop\"\npath = \"packages/billing/src/shop\"\n\
+                     root = \"packages/billing\"\n";
+        for (stack, manifest, name) in [
+            ("python", "pyproject.toml", "name = \"core\"\n"),
+            ("typescript", "package.json", "\"name\": \"core\",\n"),
+        ] {
+            let declaration =
+                format!("stack = \"{stack}\"\nareas = [\"a\"]\nui_design = \"none\"\n{units}");
+            let core = format!("packages/core/{manifest}");
+            let billing = format!("packages/billing/{manifest}");
+            // An upgrade writes none, as it makes no layer
+            let tree = Fake::new(&[(DECLARATION, &declaration)]);
+            refresh(&tree, &tree, "project").unwrap();
+            assert!(tree.text(&core).is_none(), "{stack}");
+            let made = create(&tree, &tree, "project", true).unwrap();
+            assert!(tree.text(&core).unwrap().contains(name), "{stack}");
+            assert!(tree.text(&billing).unwrap().contains("billing"), "{stack}");
+            assert_eq!(
+                made.written.iter().filter(|w| **w == billing).count(),
+                1,
+                "{stack}"
+            );
+            let tree = Fake::new(&[(DECLARATION, &declaration), (&core, "mine\n")]);
+            create(&tree, &tree, "project", true).unwrap();
+            assert_eq!(tree.text(&core).as_deref(), Some("mine\n"), "{stack}");
+        }
+        // A Rust unit's layers are crates, and the unit has no manifest of its own
+        let tree = Fake::new(&[(DECLARATION, UNITS)]);
+        let made = create(&tree, &tree, "project", true).unwrap();
+        assert!(
+            !made
+                .written
+                .iter()
+                .any(|w| w == "crates/billing/Cargo.toml"),
+            "{:?}",
+            made.written
+        );
     }
 
     const UNITS: &str = "stack = \"rust\"\nareas = [\"a\"]\nui_design = \"none\"\n\n[[unit]]\nname = \"billing\"\n\

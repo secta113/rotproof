@@ -89,7 +89,8 @@ project, adding the crates it makes to the workspace's `members` when none names
 or deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
 A project that declares units (see "Units") also gets each entry file its units declare that is missing, made from
 one text for the stack (the entry file's docstring or doc comment, and in Rust `fn main() {}`), whatever the file is
-named, and in Rust the package that holds it (`Cargo.toml` beside its `src/`); the entry file of a project of one unit
+named, and in Rust the package that holds it (`Cargo.toml` beside its `src/`), and, in Python and TypeScript, the
+manifest at each unit's `root` that is missing (see "Units"); the entry file of a project of one unit
 stays the project's to write, but in Rust, where it is the root package's `src/main.rs`.
 
 The project's files are written once, as a starting point, and are the project's from then on:
@@ -977,8 +978,13 @@ that reason: a key written after one belongs to it. Once the project declares un
 and must be empty: each unit says what it lacks in its own `absent`, which names the same layers and levels, and an
 app, which holds only `composition` and `infrastructure`, lacks the rest. `unchecked` is the project's, and so is
 every other field above the tables; `stack = "none"` has no layers and so no units. A unit `rotproof create` makes is
-made as the one unit is, in the directory of its `path`, and it makes the layers alone: a Python or TypeScript unit
-gets no `pyproject.toml` or `package.json`, which are the project's. A Rust unit's layers are crates, each named for its
+made as the one unit is, in the directory of its `path`. A Python or TypeScript unit also gets its manifest at its
+`root` when there is none there (from 2.0.0-rc.2): a `pyproject.toml` (`[project]` with the unit's name, `0.1.0`,
+`requires-python = ">=3.10"` and no dependencies) or a `package.json` (the unit's name, `0.1.0`, `"private": true`),
+written once for a root two units share, named for the first. The check of a locked project fails a Python unit
+without one, and the dependencies check does not compare a TypeScript unit's imports with any manifest until it has
+one, so a new unit would otherwise fail its first check, or have its imports go unchecked; a manifest that is there is
+the project's and never written over, and an upgrade, which makes no layer, writes none. A Rust unit's layers are crates, each named for its
 unit (`billing_domain` for the layer `domain` of the unit `billing`, against `domain` in a project with no unit), since
 Cargo refuses two crates of one name; the unit's directory holds the crates and has no manifest of its own. The root
 `Cargo.toml` it writes then is a workspace with no package, naming each crate in `members` (a glob such as

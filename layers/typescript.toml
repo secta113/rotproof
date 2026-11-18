@@ -40,6 +40,16 @@ export {};
 '''
 # The one manifest of a package, which a project that declares units keeps to the root of a unit
 manifest = "package.json"
+# What `rotproof create` writes at the root of a unit that has no manifest, `{package}` the unit's name: without one,
+# the dependencies check does not compare the unit's imports with a manifest, and one that is there is the project's
+# and never written over
+unit_manifest = '''
+{
+  "name": "{package}",
+  "version": "0.1.0",
+  "private": true
+}
+'''
 # The rest of the starter moves: said in the finding for code outside the layers
 where_code_goes = "a screen (Vite's App.tsx) goes in src/ui/pages; a style (index.css, App.css) or an image the UI shows (assets/) in src/ui/atoms"
 

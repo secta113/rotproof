@@ -360,8 +360,8 @@ const DECLINED_COMMENT: &str = "# What Rotproof offers that this project decline
                                 # `rotproof init` and `rotproof create` say when one needs a person\n";
 
 /// What `[[unit]]` is, as the declaration says it, commented out. It is the last thing in the file, so that a project
-/// that uncomments it leaves `files` and `declined` above, in no unit's table. `{path}`, `{root}`, `{cli}` and
-/// `{entry}` are where a unit sits in the stack ([`units_comment`]).
+/// that uncomments it leaves `files` and `declined` above, in no unit's table. `{path}`, `{root}`, `{cli}`,
+/// `{cli_root}` and `{entry}` are where a unit sits in the stack ([`units_comment`]).
 const UNITS_COMMENT: &str = "\n\
 # Units: parts of the code that each hold the layers (a package of a monorepo, a module of a modular monolith).\n\
 # Without [[unit]], the whole project is one unit. With units, absent above must stay empty: each unit says what it\n\
@@ -375,6 +375,7 @@ const UNITS_COMMENT: &str = "\n\
 # [[unit]]\n\
 # name = \"cli\"\n\
 # path = \"{cli}\"\n\
+# root = \"{cli_root}\"\n\
 # entry = [\"{entry}\"]   # an app: its composition wires the units\n";
 
 /// [`UNITS_COMMENT`] for `stack`: where a unit's layers and manifest sit, and its entry, depend on it.
@@ -399,10 +400,12 @@ fn units_comment(stack: &str) -> String {
             "apps/cli/__main__.py",
         ),
     };
+    // The app's manifest sits above its layers too, beside its entry file in Python
     UNITS_COMMENT
         .replace("{path}", billing)
         .replace("{root}", root)
         .replace("{cli}", cli)
+        .replace("{cli_root}", "apps/cli")
         .replace("{entry}", entry)
 }
 
