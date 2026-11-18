@@ -73,9 +73,9 @@ fn onion_moves(tree: &dyn Tree, stack: Option<&str>) -> Vec<String> {
 }
 
 /// What a project does on the table that splits the UI, by the UI it declares, or the one the refresh is about to add
-/// from the tree: with `ui = "atomic"`, make the new layer `presentation` and move what a page holds and decides out
-/// of `ui`; with `ui = "none"`, take `ui` out of absent, where it says nothing any more. Nothing for a repository of
-/// records only.
+/// from the tree: with `ui_design = "atomic"`, make the new layer `presentation` and move what a page holds and decides
+/// out of `ui`; with `ui_design = "none"`, take `ui` out of absent, where it says nothing any more. Nothing for a
+/// repository of records only.
 fn presentation_moves(tree: &dyn Tree, declared: &Fields) -> Vec<String> {
     let Some(stack) = declared.stack.as_deref() else {
         return Vec::new();
@@ -180,7 +180,7 @@ mod tests {
             let tree = Fake::default();
             tree.write(
                 DECLARATION,
-                "stack = \"rust\"\nareas = []\nui = \"none\"\nfiles = \"0.3.0\"\n",
+                "stack = \"rust\"\nareas = []\nui_design = \"none\"\nfiles = \"0.3.0\"\n",
             )
             .unwrap();
             for path in planted {
@@ -293,7 +293,7 @@ mod tests {
         // presentation declared absent already is not asked for
         let (python, _) = moves("python", "\"presentation\"", &["ui/pages/__init__.py"]);
         assert_eq!(python.len(), 1, "{python:#?}");
-        // One that declared ui absent has no screens: ui = "none" says so, and the entry in absent is to go
+        // One that declared ui absent has no screens: ui_design = "none" says so, and the entry in absent is to go
         assert_eq!(
             moves("python", "\"ui\"", &[]),
             (vec![UI_NONE.to_string()], none.clone())
@@ -311,7 +311,7 @@ mod tests {
             let areas = if stack == "none" {
                 ""
             } else {
-                "areas = []\nui = \"none\"\n"
+                "areas = []\nui_design = \"none\"\n"
             };
             tree.write(
                 DECLARATION,

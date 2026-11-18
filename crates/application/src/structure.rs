@@ -122,7 +122,7 @@ mod tests {
         ];
         let absent = "absent = [\"composition\", \"application\", \"protocol\"]\n";
         let declaration = format!(
-            "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n{absent}"
+            "stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n{absent}"
         );
         let mut files: Vec<(String, &str)> = layers
             .iter()
@@ -144,7 +144,7 @@ mod tests {
             ]
         );
         // The same stray manifest in a project of one unit is no finding
-        let one = format!("stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\n{absent}");
+        let one = format!("stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\n{absent}");
         let mut files: Vec<(String, &str)> =
             layers.iter().map(|layer| (layer.to_string(), "")).collect();
         files.extend([
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn a_test_beside_the_code_is_no_code_outside_the_layers_and_no_view_and_is_counted_once() {
-        let declaration = "stack = \"typescript\"\nareas = [\"a\"]\nui = \"atomic\"\nunchecked = [\"src/legacy\"]\n";
+        let declaration = "stack = \"typescript\"\nareas = [\"a\"]\nui_design = \"atomic\"\nunchecked = [\"src/legacy\"]\n";
         let layers = [
             "composition",
             "domain",
@@ -227,7 +227,7 @@ mod tests {
         let tree = Fake::new(&[
             (
                 ".config/rotproof.toml",
-                "stack = \"python\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"composition\", \"application\", \
+                "stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\nabsent = [\"composition\", \"application\", \
                  \"protocol\"]\n",
             ),
             ("domain/__init__.py", ""),

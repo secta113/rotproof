@@ -1,5 +1,5 @@
-//! Server-side templates, the views of a project that declares `ui = "rendered"`: the references between template
-//! files, and the template languages they are read as.
+//! Server-side templates, the views of a Python project with screens that the server renders: the references between
+//! template files, and the template languages they are read as.
 //!
 //! - **A reference is a tag of a template that names another template by a string**: `{% extends %}`,
 //!   `{% include %}`, `{% import %}` and `{% from %}`. Only a tag the language has is read, and only when it names the
@@ -619,7 +619,7 @@ mod tests {
     }
 
     fn languages() -> Templates {
-        layout("python", "rendered").unwrap().templates.unwrap()
+        layout("python", "atomic").unwrap().templates.unwrap()
     }
 
     #[test]

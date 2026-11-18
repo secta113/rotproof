@@ -56,6 +56,9 @@ pub struct Upgraded {
     pub from: String,
     /// Each update applied, with the file it changed
     pub applied: Vec<(&'static str, &'static str)>,
+    /// Each field of the declaration renamed, as `old to new`: a declaration written before a field had its name keeps
+    /// its value under the new one
+    pub renamed: Vec<String>,
     /// What each update that could not be applied leaves to a person
     pub by_hand: Vec<String>,
     /// How to move the project's code where the new version's layers want it, which no machine can do: said once,
@@ -134,7 +137,7 @@ pub struct Moving {
     pub more: usize,
 }
 
-/// How `rotproof check` read the references between templates, in a project whose views are templates. It is no
+/// How `rotproof check` read the references between templates, in a project whose `ui` holds one. It is no
 /// finding: it is said on every run, so that a reader knows what the check assumed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Templates {
@@ -177,7 +180,7 @@ pub struct Report {
     /// failing nothing. Empty when there are none
     pub outside: Vec<String>,
     /// How the references between templates were read, said on every run apart from the findings and the warnings.
-    /// `None` unless the project declares a UI whose views are templates
+    /// `None` unless the project's `ui` holds a template, in a layout that reads them
     pub templates: Option<Templates>,
     /// How many files were read as tests, said on every run apart from the findings and the warnings. `None` unless
     /// the stack tells a test by its name (TypeScript)

@@ -252,7 +252,7 @@ h = os.listdir('.')
         ]);
         let declared = Declared::new(
             domain::declaration::parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"none\"\n",
+                "stack = \"python\"\nareas = []\nui_design = \"none\"\n",
             )
             .unwrap(),
         )
@@ -452,8 +452,10 @@ const all = import.meta.env;
             ),
         ]);
         let declared = Declared::new(
-            domain::declaration::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
-                .unwrap(),
+            domain::declaration::parse_declaration(
+                "stack = \"rust\"\nareas = []\nui_design = \"none\"\n",
+            )
+            .unwrap(),
         )
         .unwrap();
         let found = problems(&tree, &Readers, &declared).unwrap();
@@ -489,7 +491,7 @@ const all = import.meta.env;
         ]);
         let declared = Declared::new(
             domain::declaration::parse_declaration(
-                "stack = \"typescript\"\nareas = []\nui = \"none\"\n",
+                "stack = \"typescript\"\nareas = []\nui_design = \"none\"\n",
             )
             .unwrap(),
         )
@@ -532,8 +534,10 @@ const all = import.meta.env;
             ("crates/composition/src/plain.rs", read),
         ]);
         let declared = Declared::new(
-            domain::declaration::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
-                .unwrap(),
+            domain::declaration::parse_declaration(
+                "stack = \"rust\"\nareas = []\nui_design = \"none\"\n",
+            )
+            .unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -559,8 +563,10 @@ const all = import.meta.env;
             ),
         ]);
         let declared = Declared::new(
-            domain::declaration::parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n")
-                .unwrap(),
+            domain::declaration::parse_declaration(
+                "stack = \"rust\"\nareas = []\nui_design = \"none\"\n",
+            )
+            .unwrap(),
         )
         .unwrap();
         assert_eq!(

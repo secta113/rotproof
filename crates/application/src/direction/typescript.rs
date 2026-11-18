@@ -231,7 +231,7 @@ mod tests {
 
     /// An npm workspaces monorepo: `billing` (a package with no `exports`), `db` (shared, with `exports`) and `web`
     /// (an app), each package in `packages/` or `apps/` with its layers in its `src/`.
-    const DECLARATION: &str = "stack = \"typescript\"\nareas = []\nui = \"none\"\n\
+    const DECLARATION: &str = "stack = \"typescript\"\nareas = []\nui_design = \"none\"\n\
         [[unit]]\nname = \"billing\"\npath = \"packages/billing/src\"\nroot = \"packages/billing\"\n\
         [[unit]]\nname = \"db\"\npath = \"packages/db/src\"\nroot = \"packages/db\"\nshared = true\n\
         [[unit]]\nname = \"web\"\npath = \"apps/web/src\"\nroot = \"apps/web\"\nentry = [\"apps/web/src/main.ts\"]\n";
@@ -640,7 +640,8 @@ mod tests {
     #[test]
     fn a_project_that_declares_no_unit_reads_no_package_json() {
         let declared = Declared::new(
-            parse_declaration("stack = \"typescript\"\nareas = []\nui = \"none\"\n").unwrap(),
+            parse_declaration("stack = \"typescript\"\nareas = []\nui_design = \"none\"\n")
+                .unwrap(),
         )
         .unwrap();
         let tree = Fake::new(&[
@@ -665,7 +666,8 @@ mod tests {
     #[test]
     fn a_test_is_no_layers_code_so_what_it_imports_is_not_judged_and_what_imports_it_is() {
         let declared = Declared::new(
-            parse_declaration("stack = \"typescript\"\nareas = []\nui = \"none\"\n").unwrap(),
+            parse_declaration("stack = \"typescript\"\nareas = []\nui_design = \"none\"\n")
+                .unwrap(),
         )
         .unwrap();
         let tree = Fake::new(&[

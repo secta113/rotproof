@@ -11,8 +11,8 @@
 # with levels holds nothing beside them.
 #
 # A layer with `ui` (a list of the UIs it belongs to, each named for the shape of its views) is there only in a project
-# that declares one of them (`ui = "atomic"` in `.config/rotproof.toml`), and in a stack whose layout offers it; one
-# that declares `ui = "none"` has none of them. The others are in every project of a stack with layers. The table is
+# that declares one of them (`ui_design = "atomic"` in `.config/rotproof.toml`), and in a stack whose layout offers it; one
+# that declares `ui_design = "none"` has none of them. The others are in every project of a stack with layers. The table is
 # the same for every UI: what differs is how a layout reads the views (`[templates]` in `python.toml`).
 #
 # Order matters: `rotproof create` makes the layers in this order, and the documentation lists the imports in it.
@@ -40,7 +40,7 @@ a clock) is built here and passed to each."""
 # `domain`, and the table is closed under chaining, so naming a layer would let `ui` import `domain`
 [[layer]]
 name = "ui"
-ui = ["atomic", "rendered"]
+ui = ["atomic"]
 imports = ["presentation.models", "presentation.display", "protocol.inbound"]
 role = """
 The view: what the user sees and touches, written with the UI framework (components, widgets) or as templates the
@@ -108,7 +108,7 @@ If a part cannot be named without referring to where it is used, it is not an at
 # the closure; its levels import less
 [[layer]]
 name = "presentation"
-ui = ["atomic", "rendered"]
+ui = ["atomic"]
 imports = ["protocol", "domain"]
 role = """
 The state and behaviour of the screens, apart from the views that draw them: what a screen holds and decides, so

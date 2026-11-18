@@ -41,7 +41,7 @@ pub struct Direction {
     pub links: Vec<Link>,
     /// What to say of the code that is moving into the layers: `None` when the declaration lists no path of it
     pub moving: Option<Order>,
-    /// How the references between templates were read, for a layout whose views are templates: said on every run
+    /// How the references between templates were read, in a project whose `ui` holds a template: said on every run
     pub templates: Option<Premise>,
     /// Every import from the code of an inner layer into a path of `unchecked` or `moving`, which no check judges: said
     /// on every run, in the order of the file and the line, and failing nothing
@@ -183,7 +183,7 @@ mod tests {
     /// of the same names.
     fn project(files: &[(&str, &str)], shared: &[&str]) -> (Fake, Declared) {
         let mut declared = Declared::new(
-            parse_declaration("stack = \"python\"\nareas = []\nui = \"none\"\n").unwrap(),
+            parse_declaration("stack = \"python\"\nareas = []\nui_design = \"none\"\n").unwrap(),
         )
         .unwrap();
         let layout = declared.layout.clone().unwrap();
@@ -319,7 +319,7 @@ import os
     #[test]
     fn a_project_of_one_unit_has_no_edge() {
         let declared = Declared::new(
-            parse_declaration("stack = \"python\"\nareas = []\nui = \"none\"\n").unwrap(),
+            parse_declaration("stack = \"python\"\nareas = []\nui_design = \"none\"\n").unwrap(),
         )
         .unwrap();
         let tree = Fake::new(&[
@@ -349,7 +349,7 @@ import os
     }
 
     const PYTHON_MOVING: &str =
-        "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\", \"old.py\"]\n";
+        "stack = \"python\"\nareas = []\nui_design = \"none\"\nmoving = [\"legacy\", \"old.py\"]\n";
 
     #[test]
     fn python_files_that_are_moving_are_ordered_by_what_they_import_of_each_other() {
@@ -413,7 +413,7 @@ import os
     #[test]
     fn a_file_with_a_syntax_error_is_counted_and_says_nothing() {
         let (order, problems) = moving(
-            "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\"]\n",
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\nmoving = [\"legacy\"]\n",
             &[("legacy/a.py", "def broken(:\n"), ("legacy/b.py", "")],
         );
         assert!(problems.is_empty(), "{problems:?}");
@@ -425,7 +425,7 @@ import os
     #[test]
     fn typescript_files_that_are_moving_are_ordered_by_what_they_import_of_each_other() {
         let (order, problems) = moving(
-            "stack = \"typescript\"\nareas = []\nui = \"none\"\nmoving = [\"src/legacy\"]\n",
+            "stack = \"typescript\"\nareas = []\nui_design = \"none\"\nmoving = [\"src/legacy\"]\n",
             &[
                 ("src/domain/index.ts", ""),
                 (
@@ -459,7 +459,7 @@ import os
     #[test]
     fn rust_files_that_are_moving_are_counted_and_put_in_no_order() {
         let (order, problems) = moving(
-            "stack = \"rust\"\nareas = []\nui = \"none\"\nmoving = [\"crates/legacy\"]\n",
+            "stack = \"rust\"\nareas = []\nui_design = \"none\"\nmoving = [\"crates/legacy\"]\n",
             &[
                 ("crates/legacy/Cargo.toml", "[package]\nname = \"legacy\"\n"),
                 ("crates/legacy/src/lib.rs", "pub mod a;\n"),
@@ -473,7 +473,7 @@ import os
     #[test]
     fn nothing_is_said_of_a_project_that_lists_no_path_as_moving() {
         let (order, _) = moving(
-            "stack = \"python\"\nareas = []\nui = \"none\"\n",
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\n",
             &[("legacy/a.py", "")],
         );
         assert_eq!(order, None);
@@ -507,7 +507,7 @@ import os
         all.extend_from_slice(files);
         let (order, _) = moving(
             &format!(
-                "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\"]\n{rest}"
+                "stack = \"python\"\nareas = []\nui_design = \"none\"\nmoving = [\"legacy\"]\n{rest}"
             ),
             &all,
         );
@@ -596,7 +596,7 @@ import os
     #[test]
     fn a_file_in_a_unit_could_go_in_a_layer_of_its_unit_by_the_rules_between_units() {
         let (order, problems) = moving(
-            "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"billing/legacy\"]\n\
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\nmoving = [\"billing/legacy\"]\n\
              [[unit]]\nname = \"core\"\npath = \"core\"\nshared = true\n\
              [[unit]]\nname = \"billing\"\npath = \"billing\"\n",
             &[
@@ -767,7 +767,7 @@ import os
     #[test]
     fn what_a_unit_allows_applies_to_the_files_that_are_moving_in_its_directory_only() {
         let (order, problems) = moving(
-            "stack = \"python\"\nareas = []\nui = \"none\"\nmoving = [\"billing/legacy\", \"shipping/legacy\"]\n\
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\nmoving = [\"billing/legacy\", \"shipping/legacy\"]\n\
              [[unit]]\nname = \"billing\"\npath = \"billing\"\nallowed = { domain = [\"pydantic\"] }\n\
              [[unit]]\nname = \"shipping\"\npath = \"shipping\"\n",
             &[
@@ -813,7 +813,7 @@ import os
         ];
         let (order, problems) = moving(
             &format!(
-                "stack = \"typescript\"\nareas = []\nui = \"none\"\nmoving = [\"src/legacy\"]\n{rest}"
+                "stack = \"typescript\"\nareas = []\nui_design = \"none\"\nmoving = [\"src/legacy\"]\n{rest}"
             ),
             &[&layers[..], files].concat(),
         );
@@ -915,7 +915,7 @@ import os
         outside_in(declaration.unwrap_or(PYTHON_OUTSIDE), &all)
     }
 
-    const PYTHON_OUTSIDE: &str = "stack = \"python\"\nareas = []\nui = \"none\"\nunchecked = [\"scripts\"]\nmoving = [\"legacy\"]\n";
+    const PYTHON_OUTSIDE: &str = "stack = \"python\"\nareas = []\nui_design = \"none\"\nunchecked = [\"scripts\"]\nmoving = [\"legacy\"]\n";
 
     #[test]
     fn what_an_inner_layer_imports_of_a_path_in_unchecked_or_moving_is_listed_and_fails_nothing() {
@@ -962,7 +962,7 @@ import os
         );
         assert_eq!(
             outside_of(
-                Some("stack = \"python\"\nareas = []\nui = \"none\"\n"),
+                Some("stack = \"python\"\nareas = []\nui_design = \"none\"\n"),
                 &[("domain/a.py", "from legacy import io_helper\n")]
             ),
             Vec::<String>::new()
@@ -972,7 +972,7 @@ import os
     #[test]
     fn a_typescript_inner_layer_importing_a_path_in_unchecked_or_moving_is_listed() {
         let found = outside_in(
-            "stack = \"typescript\"\nareas = []\nui = \"none\"\nunchecked = [\"src/scripts\"]\nmoving = [\"src/legacy\"]\n",
+            "stack = \"typescript\"\nareas = []\nui_design = \"none\"\nunchecked = [\"src/scripts\"]\nmoving = [\"src/legacy\"]\n",
             &[
                 ("src/domain/index.ts", ""),
                 (
@@ -1000,7 +1000,7 @@ import os
     #[test]
     fn typescript_files_are_given_the_layers_by_what_they_import_and_by_who_imports_them() {
         let (order, problems) = moving(
-            "stack = \"typescript\"\nareas = []\nui = \"none\"\nmoving = [\"src/legacy\"]\n",
+            "stack = \"typescript\"\nareas = []\nui_design = \"none\"\nmoving = [\"src/legacy\"]\n",
             &[
                 ("src/composition/index.ts", ""),
                 ("src/infrastructure/index.ts", ""),

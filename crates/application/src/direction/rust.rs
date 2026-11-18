@@ -468,7 +468,7 @@ mod tests {
     /// A Rust project of `units`, with `files`.
     fn project(units: Units, files: &[(&str, &str)]) -> (Fake, Declared) {
         let mut declared = Declared::new(
-            parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n").unwrap(),
+            parse_declaration("stack = \"rust\"\nareas = []\nui_design = \"none\"\n").unwrap(),
         )
         .unwrap();
         let layout = declared.layout.clone().unwrap();
@@ -873,7 +873,7 @@ mod tests {
         assert!(forbidden.is_empty());
         // The implicit unit names no unit
         let declared = Declared::new(
-            parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\n").unwrap(),
+            parse_declaration("stack = \"rust\"\nareas = []\nui_design = \"none\"\n").unwrap(),
         )
         .unwrap();
         let domain = package("domain", &[]);

@@ -1,5 +1,5 @@
-//! The direction check of the templates of a Python project that declares `ui = "rendered"`: every reference one
-//! template makes to another, judged by the levels of `ui` the two sit in as an import is.
+//! The direction check of the templates of a Python project with screens: every reference one template makes to
+//! another, judged by the levels of `ui` the two sit in as an import is.
 //!
 //! A reference is a path in the directory of the unit's `ui`, where the loader of the template language looks. It
 //! lands in the level that holds the file it names. A reference that names no file there (a template of a package, a
@@ -18,7 +18,8 @@ use domain::units::Unit;
 use protocol::outbound::Tree;
 
 /// The references between the templates of every unit that has a `ui`, judged into `forbidden`, and what the check
-/// says of how they were read. `None` for a layout whose views are not templates.
+/// says of how they were read. `None` for a layout that reads no templates, and for a project whose `ui` holds none,
+/// so that a project whose views are code hears nothing of them.
 pub(super) fn templates(
     tree: &dyn Tree,
     layout: &Layout,
@@ -34,6 +35,7 @@ pub(super) fn templates(
         read_as: read_as(config),
         not_judged: Vec::new(),
     };
+    let mut any = false;
     for unit in units {
         let Some(ui) = places
             .iter()
@@ -47,13 +49,18 @@ pub(super) fn templates(
         } else {
             None
         };
+        let files = code_files(tree, &ui.path, |name| layout.is_template(name))?;
+        if files.is_empty() {
+            continue;
+        }
+        any = true;
         let read = reading(config, &manifest, text.as_deref());
         premise.not_judged.extend(read.not_judged(&unit.name));
         let tags = read.tags();
         if tags.is_empty() {
             continue;
         }
-        for path in code_files(tree, &ui.path, |name| layout.is_template(name))? {
+        for path in files {
             let Some(from) = place_of(&path, places) else {
                 continue;
             };
@@ -83,7 +90,7 @@ pub(super) fn templates(
             }
         }
     }
-    Ok(Some(premise))
+    Ok(any.then_some(premise))
 }
 
 #[cfg(test)]
@@ -93,8 +100,8 @@ mod tests {
     use domain::declaration::{Declared, parse_declaration};
     use infrastructure::outbound::readers::Readers;
 
-    /// A project that renders on the server and keeps no `presentation`.
-    const DECLARATION: &str = "stack = \"python\"\nareas = []\nui = \"rendered\"\nabsent = [\"presentation\"]\nfiles = \"2.0.0\"\n";
+    /// A project with screens that renders on the server and keeps no `presentation`.
+    const DECLARATION: &str = "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nabsent = [\"presentation\"]\nfiles = \"2.0.0\"\n";
 
     fn run(declaration: &str, files: &[(&str, &str)]) -> Direction {
         let declared = Declared::new(parse_declaration(declaration).unwrap())
@@ -177,13 +184,13 @@ mod tests {
         let premise = direction.templates.unwrap();
         assert_eq!(premise.read_as, "Jinja2 3 and Django 5/6");
         assert!(premise.not_judged.is_empty());
-        // A project that is not rendered says nothing of templates, and reads none
+        // A project whose views are code says nothing of templates
+        let direction = run(DECLARATION, &[("ui/atoms/a.py", "")]);
+        assert!(direction.templates.is_none() && direction.forbidden.is_empty());
+        // Nor does one with no screens, whose .html files are no views
         let direction = run(
-            "stack = \"python\"\nareas = []\nui = \"atomic\"\nfiles = \"2.0.0\"\n",
-            &[
-                ("ui/atoms/a.html", "{% include \"pages/x.html\" %}"),
-                ("ui/pages/x.html", ""),
-            ],
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\nunchecked = [\"site\"]\nfiles = \"2.0.0\"\n",
+            &[("site/a.html", "{% include \"pages/x.html\" %}")],
         );
         assert!(direction.templates.is_none() && direction.forbidden.is_empty());
     }

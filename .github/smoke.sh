@@ -7,7 +7,7 @@ set -euo pipefail
 
 rotproof --version
 project=$(mktemp -d)
-rotproof --root "$project" init --stack python --ui atomic
+rotproof --root "$project" init --stack python --ui-design atomic
 
 # create makes the project and asks whether its agent reads the guide, which only a person answers: it exits 2 until
 # then. The answer here is the line it gives, in an AGENTS.md

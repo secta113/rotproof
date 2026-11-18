@@ -293,7 +293,7 @@ mod tests {
     fn declared(stack: &str, ui: &str) -> Declared {
         Declared::new(
             domain::declaration::parse_declaration(&format!(
-                "stack = \"{stack}\"\nareas = []\nui = \"{ui}\"\n"
+                "stack = \"{stack}\"\nareas = []\nui_design = \"{ui}\"\n"
             ))
             .unwrap(),
         )
@@ -506,7 +506,7 @@ mod tests {
         let tree = Fake::new(&[("domain/a.py", "import shutil\n")]);
         let declared = Declared::new(
             domain::declaration::parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"domain\"]\n",
+                "stack = \"python\"\nareas = []\nui_design = \"none\"\nabsent = [\"domain\"]\n",
             )
             .unwrap(),
         )
@@ -1220,7 +1220,7 @@ from time import *
         declaration: &str,
         files: &[(&str, &str)],
     ) -> (Vec<String>, Vec<String>) {
-        let text = format!("stack = \"{stack}\"\nareas = []\nui = \"{ui}\"\n{declaration}");
+        let text = format!("stack = \"{stack}\"\nareas = []\nui_design = \"{ui}\"\n{declaration}");
         let declared = Declared::new(domain::declaration::parse_declaration(&text).unwrap())
             .unwrap_or_else(|e| panic!("{e:#?}"));
         let found = problems(&Fake::new(files), &Readers, &declared).unwrap();
@@ -1277,7 +1277,7 @@ from time import *
         ]);
         let declared = Declared::new(
             domain::declaration::parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"none\"\n",
+                "stack = \"python\"\nareas = []\nui_design = \"none\"\n",
             )
             .unwrap(),
         )

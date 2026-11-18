@@ -99,7 +99,7 @@ marked `...`.
 ```sh
 mkdir shop
 cd shop
-rotproof init --stack python --ui none
+rotproof init --stack python --ui-design none
 ```
 
 ```text
@@ -108,7 +108,7 @@ next: declare in absent the layers this project does not have, then run `rotproo
 ```
 
 `init` writes only the declaration, `.config/rotproof.toml`, which is the structure this project declares: the stack,
-and `--ui none` for a project with no screens (a command-line tool, a library, a server). Its `absent` lists the layers
+and `--ui-design none` for a project with no screens (a command-line tool, a library, a server). Its `absent` lists the layers
 the project does not have; this one has all five, so leave it as it is. `rotproof create` alone lists the layers it
 would make and writes nothing, so that the list is read first; with `--yes` it makes them:
 
@@ -363,10 +363,10 @@ It keeps two structures:
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
   of dependencies stays what it was meant to be. A project made of several parts that each hold the layers declares
-  them as units (see "Units"). A Python project whose views are server-side templates (Jinja, Django templates)
-  declares `--ui rendered`: the templates sit in the levels of `ui`, a route in `infrastructure.inbound` renders them,
-  and the references between them (`{% extends %}`, `{% include %}`, `{% import %}`, `{% from %}`) are judged like
-  imports, with the template languages and versions it reads them as printed on every run, and not judged where the
+  them as units (see "Units"). In a Python project with screens, a view may be a server-side template (Jinja, Django
+  templates): the templates sit in the levels of `ui`, a route in `infrastructure.inbound` renders them, and the
+  references between them (`{% extends %}`, `{% include %}`, `{% import %}`, `{% from %}`) are judged like
+  imports, with the template languages and versions it reads them as printed on every run that reads one, and not judged where the
   project's `pyproject.toml` asks for another version (see
   [Views that are templates](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#views-that-are-templates)).
 - **The records:** how things are now, and why, as far as the code cannot tell it, in knowledge documents that

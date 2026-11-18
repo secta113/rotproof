@@ -526,7 +526,7 @@ mod tests {
     fn candidates_doing(does: Does, rest: &str) -> Candidates {
         let declared = crate::declaration::Declared::new(
             crate::declaration::parse_declaration(&format!(
-                "stack = \"python\"\nareas = []\nui = \"none\"\n{rest}"
+                "stack = \"python\"\nareas = []\nui_design = \"none\"\n{rest}"
             ))
             .unwrap(),
         )

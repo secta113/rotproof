@@ -47,15 +47,15 @@ pub const WORK_LEFT: &str = "Rotproof kept open work in docs/work/ before 1.0 an
 /// which part of a page is the state of the screen and which is its view, no machine can tell.
 pub const PRESENTATION: &str = "1.0.0-rc.3";
 
-/// What crossing [`PRESENTATION`] asks of a project whose `ui` is there, which the upgrade declares `ui = "atomic"`:
-/// the new layer is missing until it is made, and `rotproof check` fails until then.
-pub const PRESENTATION_ADDED: &str = "the layer presentation is new, and comes with ui = \"atomic\": what a screen \
+/// What crossing [`PRESENTATION`] asks of a project whose `ui` is there, which the upgrade declares `ui_design =
+/// "atomic"`: the new layer is missing until it is made, and `rotproof check` fails until then.
+pub const PRESENTATION_ADDED: &str = "the layer presentation is new, and comes with ui_design = \"atomic\": what a screen \
                                       holds and decides goes in presentation.models, and the plain data it hands the \
                                       view in presentation.display. Run `rotproof create --yes` to make it";
 
 /// What crossing [`PRESENTATION`] asks of a project that declared `ui` absent, which the upgrade declares
-/// `ui = "none"`: the entry in absent names a layer the declaration no longer has.
-pub const UI_NONE: &str = "ui = \"none\" now says that this project has no screens, so neither ui nor presentation \
+/// `ui_design = "none"`: the entry in absent names a layer the declaration no longer has.
+pub const UI_NONE: &str = "ui_design = \"none\" now says that this project has no screens, so neither ui nor presentation \
                            is made or checked: take ui out of absent in .config/rotproof.toml";
 
 /// What moved at [`PRESENTATION`] inside `ui`, said to a project that has it.

@@ -532,11 +532,11 @@ mod tests {
     use super::*;
     use crate::declaration::{Declared, parse_declaration};
 
-    /// The reasons a declaration of `stack` with `ui = "atomic"` and `rest` after it is refused.
+    /// The reasons a declaration of `stack` with `ui_design = "atomic"` and `rest` after it is refused.
     fn refused(stack: &str, rest: &str) -> Vec<String> {
         Declared::new(
             parse_declaration(&format!(
-                "stack = \"{stack}\"\nareas = []\nui = \"atomic\"\n{rest}"
+                "stack = \"{stack}\"\nareas = []\nui_design = \"atomic\"\n{rest}"
             ))
             .unwrap(),
         )
@@ -546,7 +546,7 @@ mod tests {
     fn read(stack: &str, rest: &str) -> Declared {
         Declared::new(
             parse_declaration(&format!(
-                "stack = \"{stack}\"\nareas = []\nui = \"atomic\"\n{rest}"
+                "stack = \"{stack}\"\nareas = []\nui_design = \"atomic\"\n{rest}"
             ))
             .unwrap(),
         )
@@ -686,7 +686,7 @@ mod tests {
     fn refused_with_ui(stack: &str, ui: &str, rest: &str) -> Vec<String> {
         Declared::new(
             parse_declaration(&format!(
-                "stack = \"{stack}\"\nareas = []\nui = \"{ui}\"\n{rest}"
+                "stack = \"{stack}\"\nareas = []\nui_design = \"{ui}\"\n{rest}"
             ))
             .unwrap(),
         )
@@ -806,14 +806,14 @@ mod tests {
         // Two units' own lists are kept apart, and so are two levels
         assert!(Declared::new(
             parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\n[[unit]]\nname = \"a\"\npath = \"a\"\nallowed = { domain = [\"zod\"] }\n[[unit]]\nname = \"b\"\npath = \"b\"\nallowed = { domain = [\"zod\"] }\n"
+                "stack = \"python\"\nareas = []\nui_design = \"atomic\"\n[[unit]]\nname = \"a\"\npath = \"a\"\nallowed = { domain = [\"zod\"] }\n[[unit]]\nname = \"b\"\npath = \"b\"\nallowed = { domain = [\"zod\"] }\n"
             )
             .unwrap()
         )
         .is_ok());
         assert!(Declared::new(
             parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\n[dependencies]\nallowed = { \"protocol.inbound\" = [\"zod\"], \"protocol.outbound\" = [\"zod\"] }\n"
+                "stack = \"python\"\nareas = []\nui_design = \"atomic\"\n[dependencies]\nallowed = { \"protocol.inbound\" = [\"zod\"], \"protocol.outbound\" = [\"zod\"] }\n"
             )
             .unwrap()
         )
@@ -838,7 +838,7 @@ mod tests {
         ] {
             let found = Declared::new(
                 parse_declaration(&format!(
-                    "stack = \"rust\"\nareas = []\nui = \"none\"\n{rest}"
+                    "stack = \"rust\"\nareas = []\nui_design = \"none\"\n{rest}"
                 ))
                 .unwrap(),
             )

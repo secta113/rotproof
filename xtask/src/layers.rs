@@ -19,7 +19,7 @@ use protocol::outbound::Tree;
 
 /// Rotproof's declaration: the Rust layout with no UI, every layer present. The records are kept outside, so it names
 /// no area
-pub const DECLARATION_TEXT: &str = "stack = \"rust\"\nareas = []\nui = \"none\"\n";
+pub const DECLARATION_TEXT: &str = "stack = \"rust\"\nareas = []\nui_design = \"none\"\n";
 
 /// Where xtask sits, outside the layers: its comments are read for markers too
 const XTASK: &str = "xtask";

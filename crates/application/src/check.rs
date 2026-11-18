@@ -288,7 +288,7 @@ mod tests {
     /// readers that remember what they read or that do not.
     fn asked(stack: &str, files: &[(&str, &str)], remember: bool) -> BTreeMap<String, usize> {
         let declaration = format!(
-            "stack = \"{stack}\"\nareas = []\nui = \"none\"\nmoving = [\"legacy\"]\nfiles = \"2.0.0\"\n"
+            "stack = \"{stack}\"\nareas = []\nui_design = \"none\"\nmoving = [\"legacy\"]\nfiles = \"2.0.0\"\n"
         );
         let mut all = vec![(".config/rotproof.toml", declaration.as_str())];
         all.extend_from_slice(files);

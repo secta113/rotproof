@@ -87,7 +87,7 @@ mod tests {
     /// `billing` and `steps`.
     fn declaration(shared: bool) -> String {
         format!(
-            "stack = \"python\"\nareas = []\nui = \"none\"\n\
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\n\
              [[unit]]\nname = \"core\"\npath = \"core\"\nshared = {shared}\n\
              [[unit]]\nname = \"billing\"\npath = \"billing\"\n\
              [[unit]]\nname = \"steps\"\npath = \"steps\"\n"

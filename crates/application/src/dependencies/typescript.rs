@@ -298,7 +298,7 @@ mod tests {
     /// over `files`.
     fn check(declaration: &str, files: &[(&str, &str)]) -> Vec<String> {
         let text = format!(
-            "stack = \"typescript\"\nareas = []\nui = \"none\"\nfiles = \"2.0.0\"\n{declaration}"
+            "stack = \"typescript\"\nareas = []\nui_design = \"none\"\nfiles = \"2.0.0\"\n{declaration}"
         );
         let declared =
             Declared::new(parse_declaration(&text).unwrap()).unwrap_or_else(|e| panic!("{e:#?}"));

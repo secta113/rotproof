@@ -411,7 +411,7 @@ fn complete(tree: &dyn Tree, raw: &str) -> Result<Option<Completed>, String> {
     for name in lacking {
         let value = match name {
             "areas" => First::List(record_tags(tree)?),
-            "ui" => {
+            "ui_design" => {
                 let stack = fields(&text)?.stack.unwrap_or_default();
                 First::Name(ui_in_tree(tree, &stack))
             }
@@ -507,7 +507,7 @@ mod tests {
             ("rust", "apps/cli/src/main.rs", "crates/app"),
         ] {
             let declaration = format!(
-                "stack = \"{stack}\"\nareas = [\"a\"]\nui = \"none\"\n\n[[unit]]\nname = \"app\"\npath = \"{unit_path}\"\n\
+                "stack = \"{stack}\"\nareas = [\"a\"]\nui_design = \"none\"\n\n[[unit]]\nname = \"app\"\npath = \"{unit_path}\"\n\
                  entry = [\"{path}\"]\nabsent = [\"application\", \"protocol\", \"domain\"]\n\n[[unit]]\nname = \"lib\"\n\
                  path = \"{}\"\n",
                 unit_path.replace("app", "lib")
@@ -531,7 +531,7 @@ mod tests {
         }
     }
 
-    const UNITS: &str = "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
+    const UNITS: &str = "stack = \"rust\"\nareas = [\"a\"]\nui_design = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
                          path = \"crates/billing\"\nabsent = [\"application\", \"infrastructure\", \"protocol\"]\n";
 
     #[test]
@@ -567,13 +567,13 @@ mod tests {
         let with =
             |declaration: &str| Fake::new(&[(DECLARATION, declaration), ("Cargo.toml", older)]);
         // No unit: the glob matches what is made
-        let tree = with("stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n");
+        let tree = with("stack = \"rust\"\nareas = [\"a\"]\nui_design = \"none\"\n");
         let made = create(&tree, &tree, "project", true).unwrap();
         assert!(made.changed.is_empty() && tree.text("Cargo.toml").as_deref() == Some(older));
         // No unit, and the workspace Rotproof writes now, which names its crates: a layer made later is added to it
         let tree = Fake::new(&[(
             DECLARATION,
-            "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\nabsent = [\"application\"]\n",
+            "stack = \"rust\"\nareas = [\"a\"]\nui_design = \"none\"\nabsent = [\"application\"]\n",
         )]);
         create(&tree, &tree, "project", true).unwrap();
         assert!(
@@ -582,7 +582,7 @@ mod tests {
                 .unwrap()
                 .contains("\"crates/application\"")
         );
-        let declaration = "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n";
+        let declaration = "stack = \"rust\"\nareas = [\"a\"]\nui_design = \"none\"\n";
         tree.write(DECLARATION, declaration).unwrap();
         let made = create(&tree, &tree, "project", true).unwrap();
         assert_eq!(
@@ -621,7 +621,7 @@ mod tests {
     /// A shared unit, and an app whose entry file is `entry`, in a package at `apps/cli`
     fn with_app(entry: &str) -> String {
         format!(
-            "stack = \"rust\"\nareas = [\"a\"]\nui = \"none\"\n\n[[unit]]\nname = \"core\"\npath = \"crates/core\"\n\
+            "stack = \"rust\"\nareas = [\"a\"]\nui_design = \"none\"\n\n[[unit]]\nname = \"core\"\npath = \"crates/core\"\n\
              shared = true\n\n[[unit]]\nname = \"cli\"\npath = \"apps/cli/crates\"\nroot = \"apps/cli\"\n\
              entry = [\"{entry}\"]\nabsent = [\"application\", \"protocol\", \"domain\"]\n"
         )
