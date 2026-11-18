@@ -463,7 +463,8 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   layer table changes (0.4.0, 1.0.0-rc.3), `rotproof init` says where each layer's code goes, and the person moves
   it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
-- **A check with nothing to check fails.** A check that passes on an empty tree protects nothing.
+- **A check fails when what it checks has no place.** A check that passes on a tree with no layers or no
+  `docs/knowledge/` protects nothing. A new project, whose places are there and still empty, passes its first check.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
   upgrading it, in a commit of its own.
 - **The same structure in every language.** Rotproof is one binary with no language runtime, so a Rust or TypeScript
@@ -476,14 +477,21 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
 The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md), one file, so that a section can quote another by its heading:
 
 - [Overview][overview]: what is checked, and the format the records are in (OKF 0.2).
-- [Usage][usage]: the commands, how a project starts, and the files `rotproof create` writes once.
+- [Usage][usage]: the commands (`rotproof guide` prints the rules for a stack), how a project starts, and the files
+  `rotproof create` writes once.
 - [Upgrading Rotproof][upgrading-rotproof]: what `rotproof init` does after the pinned version changes.
 - [The hooks Rotproof no longer writes][the-hooks-rotproof-no-longer-writes]: what became of `stop-hook` and `time-hook`.
-- [Approving a forbidden import][approving-a-forbidden-import]: the one way an import the table forbids stays.
-- [The layers][the-layers]: the layer table, and where each layer lives in a stack.
+- [Approving a forbidden import][approving-a-forbidden-import]: the one way an import the table forbids stays, and
+  `approved_max`, the most approvals a project holds.
+- [The layers][the-layers]: the layer table, where each layer lives in a stack, and the declaration (`unchecked`,
+  `moving`, `without_import`).
 - [Units][units]: `[[unit]]`, what a unit may import, who reads the shared units, and the document of the units.
-- [The records][the-records]: knowledge documents and `follows`, alarms, areas and the log.
+- [The records][the-records]: knowledge documents with `follows` and `stale_after`, alarms, areas and the log.
 - [What `rotproof check` checks][what-rotproof-check-checks]: every rule, and how each fails.
+- [The code that is moving][the-code-that-is-moving]: how `rotproof check` counts the code in `moving` and says which
+  file to move first.
+- [The map in `AGENTS.md`][the-map-in-agentsmd]: the warning when the map in the project's own `AGENTS.md` falls
+  behind the declaration.
 - [Work put off that an issue tracks][work-put-off-that-an-issue-tracks]: `todo_link`, and a `TODO` that names its issue.
 
 [overview]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#overview
@@ -495,6 +503,8 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
 [units]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
 [the-records]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-records
 [what-rotproof-check-checks]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#what-rotproof-check-checks
+[the-code-that-is-moving]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-code-that-is-moving
+[the-map-in-agentsmd]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-map-in-agentsmd
 [work-put-off-that-an-issue-tracks]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#work-put-off-that-an-issue-tracks
 
 ## Development
