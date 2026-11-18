@@ -314,6 +314,7 @@ rotproof log --title "Round the converted price" --issue acme/shop#12 --problem 
 
 ```text
 wrote docs/log.md: the entry is under ## 2026-11-16
+next: run `rotproof check`
 ```
 
 `--problem` and `--lesson` are each needed, and `None` says there was nothing to say; repeat either for a list.
@@ -356,8 +357,8 @@ version took the major's role.
 It keeps two structures:
 
 - **The layers:** which part of the code may import which, on the onion architecture (`composition`,
-  `infrastructure`, `application`, `protocol`, `domain`, and `ui` and `presentation` for screens). Code that cannot
-  be split into these
+  `infrastructure`, `application`, `protocol`, `domain`, and, in Python and TypeScript, `ui` and `presentation` for
+  screens). Code that cannot be split into these
   layers mixes responsibilities, so the layers
   are how an LLM, or a person, is made to split it: every piece of code has to land in a layer whose role and allowed
   imports are written down. Rotproof makes them when a project starts and checks them on every run, so the direction
@@ -448,7 +449,10 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   that kept the rules keep them); from then on a document with a tag the declaration does not list fails. An update of
   `.claude/settings.json` keeps its keys, their order and their values (it takes out only the stop hook, the time hook and the deny rule
   Rotproof wrote, matched exactly), but writes the whole file again in Rotproof's layout (two spaces of indentation),
-  keeping its line endings and byte order mark. These change what a person wrote, each in a command run for that.
+  keeping its line endings and byte order mark. In a Rust project, `rotproof create` changes `members` of the root
+  `Cargo.toml`, and nothing else of it: it adds the crates and packages it made, and replaces the glob `crates/*`,
+  which Rotproof wrote before units, with the crates it matched once it would match the directory of a unit. These
+  change what a person wrote, each in a command run for that.
   Rotproof never moves or rewrites a record: from 1.0 it reads no records of work, and those of an older project stay
   where they are, as they are. Once a knowledge
   document is reviewed against its code, `rotproof follows` (the keys named) writes the hashes in its `follows`: the

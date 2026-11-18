@@ -1707,7 +1707,8 @@ entry can be told, is one.
   (`Rotproof-Approved.toml`) approves nothing, and fails. With `approved_max` in the declaration, **the approvals stay
   within it**: more entries than it lets fails, as one finding that names both files.
 - **The project's files are up to this version of Rotproof** (see "Upgrading Rotproof"): `files` in the declaration
-  (0.1.0 when it is missing) is a version as `major.minor.patch`, neither older nor newer than the running Rotproof,
+  (0.1.0 when it is missing) is a version as SemVer writes it, a pre-release such as `2.0.0-rc.1` included, neither
+  older nor newer than the running Rotproof,
   and every name in `declined` is an update or `guide-pointer`.
 - **`.rotproof/AGENTS.md` is up to date:** it equals what `rotproof create` writes for the stack with this version of
   Rotproof (see "Upgrading Rotproof"), so it fails after an upgrade until `rotproof init` has run, and when edited by

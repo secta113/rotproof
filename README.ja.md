@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 61231519. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 757636b6. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -313,11 +313,13 @@ wrote docs/knowledge/rates.md
 いちばん上に書きます。見出しが無ければ作ります。
 
 ```sh
-rotproof log --title "Round the converted price" --issue acme/shop#12 --problem None \n  --lesson "The rate is passed in, so a test of convert needs no feed"
+rotproof log --title "Round the converted price" --issue acme/shop#12 --problem None \
+  --lesson "The rate is passed in, so a test of convert needs no feed"
 ```
 
 ```text
 wrote docs/log.md: the entry is under ## 2026-11-16
+next: run `rotproof check`
 ```
 
 `--problem` と `--lesson` はどちらも必須で、書くことが無いときは `None` と書きます。どちらも繰り返すと一覧になります。
@@ -362,7 +364,8 @@ Rotproof のアップグレードで何が変わりうるかは「互換性」�
 保つ構造は 2 つです。
 
 - **層:** コードのどの部分がどの部分を import してよいか。オニオンアーキテクチャに基づきます（`composition`、
-  `infrastructure`、`application`、`protocol`、`domain` と、画面のための `ui`、`presentation`）。この層に
+  `infrastructure`、`application`、`protocol`、`domain` と、Python と TypeScript では画面のための `ui`、
+  `presentation`）。この層に
   分けられないコードは責務が混ざっているので、層は LLM や人にコードを分けさせる手段です。どのコードも、役割と
   許される import が書かれた層のどれかに収まらなければなりません。Rotproof はプロジェクトの開始時に層を作り、
   実行のたびに検査するので、依存の向きは意図したとおりに保たれます。層をそれぞれ持つ複数の部分からなるプロジェクトは、
@@ -452,7 +455,10 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
   （`areas` には knowledge の文書が使っているタグが入るので、規則を守っていた文書は守ったままになります）。それ以降、
   宣言に無いタグを持つ文書は失敗します。`.claude/settings.json` の更新は、キーとその順番と値を保ちますが
   （取り除くのは、Rotproof が書いた stop hook と time hook と deny の規則に厳密に一致するものだけです）、ファイル全体を Rotproof の
-  体裁（インデントは空白 2 つ）で書き直します。行末と byte order mark は保ちます。これらは人が書いたものを変えますが、
+  体裁（インデントは空白 2 つ）で書き直します。行末と byte order mark は保ちます。Rust のプロジェクトでは、
+  `rotproof create` がルートの `Cargo.toml` の `members` を変え、ほかは変えません。作った crate とパッケージを足し、
+  ユニットより前に Rotproof が書いた glob `crates/*` がユニットのディレクトリに当たるようになったら、それまで当たっていた
+  crate の列に置き換えます。これらは人が書いたものを変えますが、
   どれもそのために実行するコマンドの中でのことです。Rotproof は記録を動かしたり書き換えたりしません。1.0 からは
   作業の記録を読まず、古いプロジェクトの記録は、あった場所にそのまま残ります。knowledge の文書をコードに照らして
   読み直したら、`rotproof follows`（キーを名指す）が、その `follows` にハッシュを書きます。読み直すのは人かエージェントで、固定はそれを記録するだけです。`rotproof new` は、書き間違えやすい frontmatter と、
