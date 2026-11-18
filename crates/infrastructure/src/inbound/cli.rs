@@ -19,7 +19,7 @@ use protocol::inbound::{
 const START: &str = "\
 Start a project:
   1. rotproof init --stack <stack>   write .config/rotproof.toml (python, typescript, rust, or none for records only),
-     --ui <ui>                       with python and typescript: atomic for screens, none for no screens (python
+     --ui-design <ui>                with python and typescript: atomic for screens, none for no screens (python
                                      also: rendered, for views that are templates the server renders)
   2. edit it: list in absent the layers the project does not have
   3. rotproof create                 list the layers it would make, writing nothing (with none, it makes docs/ and
@@ -154,15 +154,16 @@ enum Command {
     /// record. Crossing 0.4.0, which builds the layer table on the onion architecture, it says where the code of the
     /// layers that are gone (handler, utils) and the ports go, and moves no code: `rotproof check` names what is left
     /// until it is moved. Crossing 1.0.0-rc.3, which splits the UI into the view (ui) and the state of the screens
-    /// (presentation) and declares the UI, the refresh adds ui to the declaration ("atomic" when ui/ is there, "none"
-    /// otherwise), and it says to make presentation, what moves out of ui, and to take ui out of absent once ui is
-    /// "none", and moves no code either. Crossing 2.0.0-rc.2, from which a Python project is locked, it says what to
-    /// list in pyproject.toml, to lock and to change in CI, and edits none of those files. In a project that declares
-    /// units and has no knowledge document that follows them, it drafts docs/knowledge/units.md once, or says why it
-    /// cannot (no area to tag it with). When
-    /// the map under `## Map` in the project's own AGENTS.md lacks a layer that is there or names one declared absent,
-    /// it says so in a note and leaves the file as it is. Exits 2 too for an unknown stack or UI, a stack or UI other
-    /// than the declared one, or a file that cannot be read or written.
+    /// (presentation) and declares the UI, the refresh adds ui_design to the declaration ("atomic" when ui/ is there,
+    /// "none" otherwise), and it says to make presentation, what moves out of ui, and to take ui out of absent once
+    /// ui_design is "none", and moves no code either. A declaration that names the field ui, as one written before
+    /// 2.0.0-rc.2 does, has it renamed ui_design, its value and comments kept. Crossing 2.0.0-rc.2, from which a
+    /// Python project is locked, it says what to list in pyproject.toml, to lock and to change in CI, and edits none of
+    /// those files. In a project that declares units and has no knowledge document that follows them, it drafts
+    /// docs/knowledge/units.md once, or says why it cannot (no area to tag it with). When the map under `## Map` in the
+    /// project's own AGENTS.md lacks a layer that is there or names one declared absent, it says so in a note and
+    /// leaves the file as it is. Exits 2 too for an unknown stack or UI, a stack or UI other than the declared one, or
+    /// a file that cannot be read or written.
     Init {
         /// python, typescript, rust, or none (records only). Needed when there is no declaration yet
         #[arg(long)]
@@ -170,8 +171,8 @@ enum Command {
         /// The UI, which picks the layers of the screens: atomic (the view in ui, by atomic design, and the state of
         /// the screens in presentation), rendered (python only: the views are template files in ui, which a route
         /// renders, and presentation starts absent) or none (no screens). Needed with python and typescript when
-        /// there is no declaration yet; rust offers only none
-        #[arg(long)]
+        /// there is no declaration yet; rust offers only none. The field is ui_design; --ui is the same flag
+        #[arg(long = "ui-design", alias = "ui", value_name = "UI")]
         ui: Option<String>,
     },
     /// Make the layers that .config/rotproof.toml declares and the tree lacks, and the records skeleton in docs/
@@ -211,16 +212,21 @@ enum Command {
     /// Prints the guide of the stack and the UI the project declares, or of the stack named with --stack, which needs
     /// no project: the layers of the stack with where each lives and what it may import, the rules of the records and
     /// where the page on running Rotproof is. The same text `rotproof create` writes to .rotproof/AGENTS.md. With
-    /// --stack, --ui picks the UI, as for `rotproof init` (with python, atomic, rendered or none; with typescript,
-    /// atomic or none; the layers of the fullest UI the stack offers without it). Exits 2 for an unknown stack or UI,
-    /// or when no stack is named and the declaration cannot be read.
+    /// --stack, --ui-design picks the UI, as for `rotproof init` (with python, atomic, rendered or none; with
+    /// typescript, atomic or none; the layers of the fullest UI the stack offers without it). Exits 2 for an unknown
+    /// stack or UI, or when no stack is named and the declaration cannot be read.
     Guide {
         /// python, typescript, rust, or none (records only). Without it, the stack in .config/rotproof.toml
         #[arg(long)]
         stack: Option<String>,
         /// The UI of the layers to show, as for `rotproof init`: atomic or none with python and typescript, and
-        /// rendered with python. Needs --stack
-        #[arg(long, requires = "stack")]
+        /// rendered with python. Needs --stack; --ui is the same
+        #[arg(
+            long = "ui-design",
+            alias = "ui",
+            value_name = "UI",
+            requires = "stack"
+        )]
         ui: Option<String>,
     },
     /// Keep a forbidden import for a reason (--reason), or remove the approvals that match nothing (--prune)
@@ -538,6 +544,9 @@ fn init(
         }
         Initialized::Upgraded(upgraded) => upgraded,
     };
+    for renamed in &upgraded.renamed {
+        println!("renamed in {declaration}: {renamed}");
+    }
     for (name, path) in &upgraded.applied {
         println!("updated {path}: {name}");
     }

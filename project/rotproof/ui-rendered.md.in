@@ -1,9 +1,9 @@
-- **`ui` is the view, and a view is a template the server renders (`ui = "rendered"` in `.config/rotproof.toml`).** A
+- **`ui` is the view, and a view is a template the server renders (`ui_design = "rendered"` in `.config/rotproof.toml`).** A
   view is a file of {extensions} in a level of `ui`, which follows atomic design (`pages` > `templates` > `organisms`
   > `molecules` > `atoms`; a level may refer to the levels below it and to its own), and `ui` holds only its levels. A
   template anywhere else in the project fails `rotproof check` as code outside the layers: move it into a level, or,
   when it is no template (a generated page, a report), list its path in `unchecked`. `ui` knows neither `application`,
-  `domain` nor `infrastructure`. A project with no screens declares `ui = "none"` instead, and has neither `ui` nor
+  `domain` nor `infrastructure`. A project with no screens declares `ui_design = "none"` instead, and has neither `ui` nor
   `presentation`.
 - **A route function in `infrastructure.inbound` renders a template, and `composition` registers the route.** It names
   the template with a string (`render_template("pages/home.html", ...)`), which is no import, so it imports only the

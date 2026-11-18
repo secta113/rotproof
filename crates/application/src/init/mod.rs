@@ -24,8 +24,10 @@ pub use draft::draft;
 use crate::create::refresh;
 use crate::layers::read;
 use crate::project::map_problems;
-use crate::tree::{exactly, read_text, read_written};
-use domain::declaration::{DECLARATION, Declared, declaration_text, fields, with_files};
+use crate::tree::{exactly, read_written};
+use domain::declaration::{
+    DECLARATION, Declared, declaration_text, fields, renamed_ui, with_files,
+};
 use domain::layers::{chosen_ui, known_stacks};
 use domain::upgrade::{FIRST, pending};
 use protocol::inbound::{Initialized, Upgraded};
@@ -75,8 +77,10 @@ fn upgrade(
     running: &str,
 ) -> Result<Upgraded, String> {
     let (path, _) = exactly(tree, DECLARATION)?;
-    let text = read_text(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
-    let declared = fields(&text)?;
+    let (text, was) = read_written(tree, &path).map_err(|e| format!("{DECLARATION}: {e}"))?;
+    // A declaration written before the field was renamed is read as renamed, and written so once nothing refuses
+    let renamed = renamed_ui(&text);
+    let declared = fields(renamed.as_deref().unwrap_or(&text))?;
     if let (Some(named), Some(declared)) = (stack, &declared.stack)
         && named != declared
     {
@@ -90,12 +94,12 @@ fn upgrade(
     {
         return Err(match &declared.ui {
             Some(declared) => format!(
-                "{DECLARATION} declares ui = \"{declared}\", and rotproof init never changes it: edit the declaration \
-                 to change the UI, and run it without --ui to upgrade the project's files"
+                "{DECLARATION} declares ui_design = \"{declared}\", and rotproof init never changes it: edit the \
+                 declaration to change the UI, and run it without --ui-design to upgrade the project's files"
             ),
             None => format!(
-                "{DECLARATION} has no ui yet: run rotproof init without --ui, which adds it from the layers the tree \
-                 holds, then edit it"
+                "{DECLARATION} has no ui_design yet: run rotproof init without --ui-design, which adds it from the \
+                 layers the tree holds, then edit it"
             ),
         });
     }
@@ -104,6 +108,11 @@ fn upgrade(
         from: from.clone(),
         ..Upgraded::default()
     };
+    if let Some(renamed) = renamed {
+        out.write(DECLARATION, &was.restore(&renamed))
+            .map_err(|e| format!("{DECLARATION}: {e}"))?;
+        upgraded.renamed.push("ui to ui_design".to_string());
+    }
     for update in pending(&from, running, &declared.declined)? {
         if let Some(why) = updates::apply(tree, out, update, &mut upgraded)? {
             upgraded.by_hand.push(why);
@@ -202,7 +211,7 @@ mod tests {
         assert!(
             init(&tree, &tree, None, Some("none"), "x", "0.2.0")
                 .unwrap_err()
-                .contains("declares ui = \"atomic\"")
+                .contains("declares ui_design = \"atomic\"")
         );
         let named = init(&tree, &tree, None, Some("atomic"), "x", "0.2.0");
         assert!(named.err().is_none_or(|why| !why.contains("ui")));
@@ -217,11 +226,14 @@ mod tests {
         };
         // A project with screens and one without start from the same command: no default makes the layers of either
         let why = new("python", None).unwrap_err();
-        assert!(why.contains("--ui (atomic, rendered, none)"), "{why}");
+        assert!(
+            why.contains("--ui-design (atomic, rendered, none)"),
+            "{why}"
+        );
         assert!(
             new("typescript", Some("none"))
                 .unwrap()
-                .contains("\nui = \"none\"\n")
+                .contains("\nui_design = \"none\"\n")
         );
         assert!(new("python", Some("fsd")).unwrap_err().starts_with(
             "unknown UI \"fsd\" for the python stack (known: atomic, rendered, none)"
@@ -230,11 +242,15 @@ mod tests {
         assert!(
             new("python", Some("rendered"))
                 .unwrap()
-                .contains("\nui = \"rendered\"\n")
+                .contains("\nui_design = \"rendered\"\n")
         );
         assert!(new("typescript", Some("rendered")).is_err());
         // Rust offers none alone, so it needs no --ui and takes no other
-        assert!(new("rust", None).unwrap().contains("\nui = \"none\"\n"));
+        assert!(
+            new("rust", None)
+                .unwrap()
+                .contains("\nui_design = \"none\"\n")
+        );
         assert!(new("rust", Some("atomic")).is_err());
         // A repository of records only has no UI
         assert!(!new("none", None).unwrap().contains("ui ="));

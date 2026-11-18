@@ -177,12 +177,12 @@ fn presence(declared: &Declared, layout: &Layout, seen: &Seen) -> Vec<String> {
         .map(|(unit, name)| {
             if unit.is_empty() {
                 format!(
-                    "absent names {name:?}, which ui = {:?} leaves out already: take it out of absent in {DECLARATION}",
+                    "absent names {name:?}, which ui_design = {:?} leaves out already: take it out of absent in {DECLARATION}",
                     layout.ui
                 )
             } else {
                 format!(
-                    "absent of unit {unit} names {name:?}, which ui = {:?} leaves out already: take it out of its \
+                    "absent of unit {unit} names {name:?}, which ui_design = {:?} leaves out already: take it out of its \
                      absent in {DECLARATION}",
                     layout.ui
                 )
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn a_layer_with_levels_is_listed_only_while_it_is_there_and_not_absent() {
         let with_ui = declared(
-            "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"scripts/\"]\n",
+            "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nunchecked = [\"scripts/\"]\n",
         );
         let layout = with_ui.layout.as_ref().unwrap();
         assert!(named(&with_ui).contains(&"ui/atoms".to_string()));
@@ -664,7 +664,7 @@ mod tests {
             ["", "presentation", "infrastructure", "protocol"]
         );
         let without_ui =
-            declared("stack = \"python\"\nareas = []\nui = \"atomic\"\nabsent = [\"ui\"]\n");
+            declared("stack = \"python\"\nareas = []\nui_design = \"atomic\"\nabsent = [\"ui\"]\n");
         let mut seen = Seen::default();
         for path in named(&without_ui) {
             seen.named.insert(path, Ok(()));
@@ -674,7 +674,7 @@ mod tests {
             ["", "presentation", "infrastructure", "protocol"]
         );
         // With no UI, neither is named at all
-        let no_ui = declared("stack = \"python\"\nareas = []\nui = \"none\"\n");
+        let no_ui = declared("stack = \"python\"\nareas = []\nui_design = \"none\"\n");
         assert!(
             !named(&no_ui)
                 .iter()
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn unchecked_is_read_path_by_path_and_keeps_the_ones_that_fit() {
         let declared = declared(
-            "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"a\\\\b\", \"./scripts\", \"domain/x\", \
+            "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nunchecked = [\"a\\\\b\", \"./scripts\", \"domain/x\", \
              \"gone/\", \"scripts/\"]\n",
         );
         let mut seen = Seen::default();
@@ -711,7 +711,7 @@ mod tests {
     #[test]
     fn moving_is_read_as_unchecked_is_and_the_finding_names_the_field() {
         let declared = declared(
-            "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"scripts\"]\nmoving = [\"a\\\\b\", \
+            "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nunchecked = [\"scripts\"]\nmoving = [\"a\\\\b\", \
              \"./legacy\", \"domain/x\", \"gone/\", \"legacy/\"]\n",
         );
         let mut seen = Seen::default();
@@ -737,7 +737,8 @@ mod tests {
 
     #[test]
     fn absent_naming_a_layer_the_ui_leaves_out_fails() {
-        let left = declared("stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"ui\"]\n");
+        let left =
+            declared("stack = \"python\"\nareas = []\nui_design = \"none\"\nabsent = [\"ui\"]\n");
         let layout = left.layout.as_ref().unwrap();
         let mut seen = Seen::default();
         for path in named(&left) {
@@ -749,7 +750,7 @@ mod tests {
         let found = problems(&left, layout, &seen);
         assert_eq!(
             found[0],
-            "absent names \"ui\", which ui = \"none\" leaves out already: take it out of absent in \
+            "absent names \"ui\", which ui_design = \"none\" leaves out already: take it out of absent in \
              .config/rotproof.toml"
         );
     }
@@ -773,7 +774,7 @@ mod tests {
             "src/ui/pages/home.tsx",
             "src/presentationx/y.tsx",
         ];
-        let ts = declared("stack = \"typescript\"\nareas = []\nui = \"atomic\"\n");
+        let ts = declared("stack = \"typescript\"\nareas = []\nui_design = \"atomic\"\n");
         let layout = ts.layout.as_ref().unwrap();
         let found = views(&ts, layout, &seen_with(&ts, &files));
         assert_eq!(found.len(), 2, "{found:#?}");
@@ -784,15 +785,15 @@ mod tests {
         assert!(found[1].contains("src/presentation/models/b.tsx"));
         // Declared absent, the layer's own finding says it all; with no UI it is not a layer
         let absent = declared(
-            "stack = \"typescript\"\nareas = []\nui = \"atomic\"\nabsent = [\"presentation\"]\n",
+            "stack = \"typescript\"\nareas = []\nui_design = \"atomic\"\nabsent = [\"presentation\"]\n",
         );
         let layout = absent.layout.as_ref().unwrap();
         assert!(views(&absent, layout, &seen_with(&absent, &files)).is_empty());
-        let none = declared("stack = \"typescript\"\nareas = []\nui = \"none\"\n");
+        let none = declared("stack = \"typescript\"\nareas = []\nui_design = \"none\"\n");
         let layout = none.layout.as_ref().unwrap();
         assert!(views(&none, layout, &seen_with(&none, &files)).is_empty());
         // A stack that tells a view by no extension judges nothing
-        let python = declared("stack = \"python\"\nareas = []\nui = \"atomic\"\n");
+        let python = declared("stack = \"python\"\nareas = []\nui_design = \"atomic\"\n");
         let layout = python.layout.as_ref().unwrap();
         assert!(layout.no_view.is_none());
         assert!(views(&python, layout, &seen_with(&python, &files)).is_empty());
@@ -800,7 +801,7 @@ mod tests {
 
     #[test]
     fn code_beside_the_levels_is_named_by_its_entry_in_the_layer() {
-        let python = declared("stack = \"python\"\nareas = []\nui = \"atomic\"\n");
+        let python = declared("stack = \"python\"\nareas = []\nui_design = \"atomic\"\n");
         let layout = python.layout.as_ref().unwrap();
         let mut seen = Seen::default();
         for path in named(&python) {
@@ -846,7 +847,7 @@ mod tests {
     fn where_a_part_of_the_ui_goes_names_no_level_the_unit_declares_absent() {
         let said = |absent: &str| {
             let declared = declared(&format!(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\nabsent = [{absent}]\n"
+                "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nabsent = [{absent}]\n"
             ));
             let mut seen = Seen::default();
             for path in named(&declared) {
@@ -925,7 +926,7 @@ mod tests {
         seen
     }
 
-    /// The `__init__.py` of each layer and level of a Python unit at `path` with `ui = "none"`, but for `lacks`.
+    /// The `__init__.py` of each layer and level of a Python unit at `path` with `ui_design = "none"`, but for `lacks`.
     fn python_unit(path: &str, lacks: &[&str]) -> Vec<String> {
         [
             "composition",
@@ -946,7 +947,7 @@ mod tests {
 
     /// A modular monolith: a shared unit with a manifest of its own, a unit that is not shared, and an app whose
     /// entry file is outside its path.
-    const MONOLITH: &str = "stack = \"python\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"core\"\n\
+    const MONOLITH: &str = "stack = \"python\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"core\"\n\
         path = \"packages/core/core\"\nroot = \"packages/core\"\nshared = true\n\n[[unit]]\nname = \"billing\"\n\
         path = \"modules/billing\"\n\n[[unit]]\nname = \"app\"\npath = \"modules/app\"\nentry = [\"bin/run.py\"]\n\
         absent = [\"domain\", \"application\", \"protocol\"]\n";
@@ -1057,7 +1058,7 @@ mod tests {
     fn the_levels_of_a_unit_are_judged_by_the_layer_of_that_unit() {
         // `ui` is in the first unit and absent in the second: the levels of the second are not found missing because
         // the first has the layer
-        let declaration = "stack = \"python\"\nareas = []\nui = \"atomic\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n\n\
+        let declaration = "stack = \"python\"\nareas = []\nui_design = \"atomic\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n\n\
             [[unit]]\nname = \"b\"\npath = \"b\"\nabsent = [\"ui\"]\n";
         let layers = [
             "composition",
@@ -1118,16 +1119,16 @@ mod tests {
 
     #[test]
     fn the_names_a_unit_lists_that_the_ui_leaves_out_are_said_with_their_unit() {
-        let declaration = "stack = \"python\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n\
+        let declaration = "stack = \"python\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n\
             absent = [\"ui\"]\n\n[[unit]]\nname = \"b\"\npath = \"b\"\nabsent = [\"ui\"]\n";
         let mut files = python_unit("a", &[]);
         files.extend(python_unit("b", &[]));
         assert_eq!(
             judge(declaration, &files),
             [
-                "absent of unit a names \"ui\", which ui = \"none\" leaves out already: take it out of its absent \
+                "absent of unit a names \"ui\", which ui_design = \"none\" leaves out already: take it out of its absent \
                  in .config/rotproof.toml",
-                "absent of unit b names \"ui\", which ui = \"none\" leaves out already: take it out of its absent \
+                "absent of unit b names \"ui\", which ui_design = \"none\" leaves out already: take it out of its absent \
                  in .config/rotproof.toml",
             ]
         );
@@ -1136,7 +1137,7 @@ mod tests {
     #[test]
     fn code_outside_the_layers_is_found_in_each_unit_and_stops_at_the_units_inside_it() {
         // The unit around, at the root, holds a unit inside it: what sits in the inner one is the inner one's to say
-        let declaration = "stack = \"python\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"outer\"\npath = \".\"\n\n\
+        let declaration = "stack = \"python\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"outer\"\npath = \".\"\n\n\
             [[unit]]\nname = \"inner\"\npath = \"lib/inner\"\n";
         let mut files = python_unit("", &[]);
         files.extend(python_unit("lib/inner", &[]));
@@ -1152,15 +1153,15 @@ mod tests {
         );
         // `unchecked` keeps what it names, and the inner unit's layers are no stray code of the outer one
         let kept = declaration.replace(
-            "ui = \"none\"\n",
-            "ui = \"none\"\nunchecked = [\"lib/inner/stray.py\", \"lib/other.py\"]\n",
+            "ui_design = \"none\"\n",
+            "ui_design = \"none\"\nunchecked = [\"lib/inner/stray.py\", \"lib/other.py\"]\n",
         );
         assert_eq!(judge(&kept, &files), Vec::<String>::new());
     }
 
     #[test]
     fn a_unit_holds_its_own_init_unless_its_path_is_the_root_and_its_entry_is_no_stray_code() {
-        let declaration = "stack = \"python\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n\
+        let declaration = "stack = \"python\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \"a\"\n\
             entry = [\"a/main.py\"]\n";
         let mut files = python_unit("a", &[]);
         files.extend(["a/__init__.py", "a/main.py"].map(String::from));
@@ -1175,7 +1176,7 @@ mod tests {
             ]
         );
         // A unit at the root has no such file: its `__init__.py` would make the whole project one package
-        let at_root = "stack = \"python\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \".\"\n";
+        let at_root = "stack = \"python\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \".\"\n";
         let mut files = python_unit("", &[]);
         files.push("__init__.py".to_string());
         let found = judge(at_root, &files);
@@ -1185,7 +1186,7 @@ mod tests {
 
     #[test]
     fn a_unit_of_typescript_holds_no_index_of_its_own() {
-        let declaration = "stack = \"typescript\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
+        let declaration = "stack = \"typescript\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
             path = \"packages/billing/src\"\nroot = \"packages/billing\"\n";
         let mut files: Vec<String> = [
             "composition",
@@ -1218,8 +1219,8 @@ mod tests {
         let files = monolith(&["modules/billing/helpers.py"], &[]);
         let listed = |path: &str| {
             MONOLITH.replace(
-                "ui = \"none\"\n",
-                &format!("ui = \"none\"\nunchecked = [{path:?}]\n"),
+                "ui_design = \"none\"\n",
+                &format!("ui_design = \"none\"\nunchecked = [{path:?}]\n"),
             )
         };
         assert_eq!(
@@ -1266,12 +1267,12 @@ mod tests {
             ]
         );
         let kept = MONOLITH.replace(
-            "ui = \"none\"\n",
-            "ui = \"none\"\nunchecked = [\"tools\"]\n",
+            "ui_design = \"none\"\n",
+            "ui_design = \"none\"\nunchecked = [\"tools\"]\n",
         );
         assert_eq!(judge(&kept, &files), Vec::<String>::new());
         // A project that declares no unit has no such rule: a manifest anywhere is no finding
-        let one = "stack = \"python\"\nareas = []\nui = \"none\"\n";
+        let one = "stack = \"python\"\nareas = []\nui_design = \"none\"\n";
         let mut files = python_unit("", &[]);
         files.push("tools/pyproject.toml".to_string());
         assert_eq!(judge(one, &files), Vec::<String>::new());
@@ -1299,12 +1300,12 @@ mod tests {
             [said("helper.py"), said("scripts")]
         );
         let kept = MONOLITH.replace(
-            "ui = \"none\"\n",
-            "ui = \"none\"\nunchecked = [\"helper.py\", \"scripts\"]\n",
+            "ui_design = \"none\"\n",
+            "ui_design = \"none\"\nunchecked = [\"helper.py\", \"scripts\"]\n",
         );
         assert_eq!(judge(&kept, &files), Vec::<String>::new());
         // A unit at the root holds every path, so none is in no unit
-        let at_root = "stack = \"python\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \".\"\n";
+        let at_root = "stack = \"python\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"a\"\npath = \".\"\n";
         let mut files = python_unit("", &[]);
         files.push("helper.py".to_string());
         assert_eq!(
@@ -1318,7 +1319,7 @@ mod tests {
 
     #[test]
     fn code_outside_every_unit_is_found_in_the_scope_of_typescript_and_the_root_package_of_rust() {
-        let declaration = "stack = \"typescript\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
+        let declaration = "stack = \"typescript\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
             path = \"packages/billing/src\"\nroot = \"packages/billing\"\n";
         let mut files: Vec<String> = [
             "composition",
@@ -1344,7 +1345,7 @@ mod tests {
             ]
         );
         // Rust: the layers are crates of a unit, and the root package's `src/` holds the entry of an app only
-        let declaration = "stack = \"rust\"\nareas = []\nui = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
+        let declaration = "stack = \"rust\"\nareas = []\nui_design = \"none\"\n\n[[unit]]\nname = \"billing\"\n\
             path = \"crates/billing\"\nentry = [\"src/main.rs\"]\n";
         let mut files: Vec<String> = [
             "composition",

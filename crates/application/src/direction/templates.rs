@@ -1,4 +1,4 @@
-//! The direction check of the templates of a Python project that declares `ui = "rendered"`: every reference one
+//! The direction check of the templates of a Python project that declares `ui_design = "rendered"`: every reference one
 //! template makes to another, judged by the levels of `ui` the two sit in as an import is.
 //!
 //! A reference is a path in the directory of the unit's `ui`, where the loader of the template language looks. It
@@ -94,7 +94,7 @@ mod tests {
     use infrastructure::outbound::readers::Readers;
 
     /// A project that renders on the server and keeps no `presentation`.
-    const DECLARATION: &str = "stack = \"python\"\nareas = []\nui = \"rendered\"\nabsent = [\"presentation\"]\nfiles = \"2.0.0\"\n";
+    const DECLARATION: &str = "stack = \"python\"\nareas = []\nui_design = \"rendered\"\nabsent = [\"presentation\"]\nfiles = \"2.0.0\"\n";
 
     fn run(declaration: &str, files: &[(&str, &str)]) -> Direction {
         let declared = Declared::new(parse_declaration(declaration).unwrap())
@@ -179,7 +179,7 @@ mod tests {
         assert!(premise.not_judged.is_empty());
         // A project that is not rendered says nothing of templates, and reads none
         let direction = run(
-            "stack = \"python\"\nareas = []\nui = \"atomic\"\nfiles = \"2.0.0\"\n",
+            "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nfiles = \"2.0.0\"\n",
             &[
                 ("ui/atoms/a.html", "{% include \"pages/x.html\" %}"),
                 ("ui/pages/x.html", ""),

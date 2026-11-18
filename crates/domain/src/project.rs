@@ -434,7 +434,7 @@ mod tests {
         };
         let one = workspace(
             "stack = \"rust\"\nareas = []
-ui = \"none\"\n",
+ui_design = \"none\"\n",
         );
         assert_eq!(one.len(), 2);
         assert!(one[0].1.contains("name = \"my-app\"") && !one[0].1.contains("[dependencies]"));
@@ -445,7 +445,7 @@ ui = \"none\"\n",
         );
         let units = workspace(
             "stack = \"rust\"\nareas = []
-ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
+ui_design = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
         );
         assert_eq!(
             units,
@@ -463,7 +463,7 @@ ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
     /// `infrastructure.inbound` and `composition`, and `protocol` when `protocol` says so).
     fn two_units(cli_absent: &str) -> Declared {
         let text = format!(
-            "stack = \"python\"\nareas = []\nui = \"none\"\n\
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\n\
              [[unit]]\nname = \"core\"\npath = \"packages/core/src/core\"\nshared = true\n\
              absent = [\"composition\", \"infrastructure\", \"application\", \"protocol\"]\n\
              [[unit]]\nname = \"cli\"\npath = \"apps/cli/src/cli\"\nentry = [\"apps/cli/src/cli/__main__.py\"]\n\
@@ -539,7 +539,7 @@ ui = \"none\"\n[[unit]]\nname = \"a\"\npath = \"crates/a\"\n",
             crate::declaration::parse_declaration(&format!(
                 "stack = \"python\"
 areas = []
-ui = \"none\"
+ui_design = \"none\"
 {units}"
             ))
             .unwrap(),
@@ -567,7 +567,7 @@ ui = \"none\"
     ) -> (Vec<(String, String)>, Option<String>) {
         let declared = Declared::new(
             crate::declaration::parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"none\"\n",
+                "stack = \"python\"\nareas = []\nui_design = \"none\"\n",
             )
             .unwrap(),
         )

@@ -216,7 +216,7 @@ mod tests {
     /// The declaration of a Python project with the `[[unit]]` tables `units`.
     fn declaration(units: &[String]) -> String {
         format!(
-            "stack = \"python\"\nareas = []\nui = \"none\"\nfiles = \"2.0.0\"\n{}",
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\nfiles = \"2.0.0\"\n{}",
             units.join("\n")
         )
     }
@@ -907,7 +907,7 @@ mod tests {
         }
         // The same name for a project that is no Python's
         let declaration = format!(
-            "stack = \"typescript\"\nareas = []\nui = \"none\"\nfiles = \"2.0.0\"\n{}",
+            "stack = \"typescript\"\nareas = []\nui_design = \"none\"\nfiles = \"2.0.0\"\n{}",
             unit("queue", "packages/queue/src", "")
         );
         assert!(Declared::new(parse_declaration(&declaration).unwrap()).is_ok());

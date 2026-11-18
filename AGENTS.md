@@ -202,7 +202,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 | `python.rs` | The direction check of a Python project: every import of a `.py` file in a layer, of the entry file and of the `__init__.py` of a unit, as the module it names, looked up in the directory that holds a unit when its first part is the name of one, and placed in a layer of a unit or in the unit outside its layers, or found to be an import of the `tests/` directory, which fails |
 | `typescript.rs` | The direction check of a TypeScript project: every import of a source file in a layer and of the entry file, resolved to a path through the aliases and the packages of the units, judged by the place that path sits in or the unit it is in outside its layers, and forbidden when it lands on a test, whose own imports are not read; an import of a subpath a package does not export is a problem |
 | `rust.rs` | The direction check of a Rust project: each dependency of a crate resolved to the path it comes from (through its workspace too), judged by the place, or the unit's code outside its layers, that path lands in, the entry files of every unit read through the first `Cargo.toml` with a `[package]` above them, and then the levels inside each crate; and, for a crate that depends on a crate of another shared unit, the paths its `.rs` files write through it, as the names it reads |
-| `templates.rs` | The direction check of the templates of a Python project that declares `ui = "rendered"`: each unit's `pyproject.toml` read for which template languages apply, every reference of a template in its `ui` looked up as a path from that `ui`, and judged by the level the file it names is in, as an import is; the references that name no file are not judged; and what `rotproof check` says of how they were read |
+| `templates.rs` | The direction check of the templates of a Python project that declares `ui_design = "rendered"`: each unit's `pyproject.toml` read for which template languages apply, every reference of a template in its `ui` looked up as a path from that `ui`, and judged by the level the file it names is in, as an import is; the references that name no file are not judged; and what `rotproof check` says of how they were read |
 
 ## How this repository differs from what Rotproof keeps
 
@@ -210,7 +210,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
   are kept outside this repository.
 - **In layers, and no `.config/rotproof.toml`.** Every layer of the Rust layout Rotproof keeps (specification) is a crate of
   its own in `crates/`, with the levels of `infrastructure` and `protocol` as modules, the entry file is `src/main.rs`
-  of the root package, and it declares `ui = "none"`, the one UI that layout offers. `cargo xtask ci` checks them as
+  of the root package, and it declares `ui_design = "none"`, the one UI that layout offers. `cargo xtask ci` checks them as
   `rotproof check` checks a project's (structure, direction, the environment, the I/O of the inner layers, markers), with the declaration written in
   `xtask/src/layers.rs` in place of the file, and reads the comments of `xtask/` for markers too, which the layout
   leaves out; the records are kept outside, so they are not checked here.

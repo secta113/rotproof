@@ -11,8 +11,8 @@
 # with levels holds nothing beside them.
 #
 # A layer with `ui` (a list of the UIs it belongs to, each named for the shape of its views) is there only in a project
-# that declares one of them (`ui = "atomic"` in `.config/rotproof.toml`), and in a stack whose layout offers it; one
-# that declares `ui = "none"` has none of them. The others are in every project of a stack with layers. The table is
+# that declares one of them (`ui_design = "atomic"` in `.config/rotproof.toml`), and in a stack whose layout offers it; one
+# that declares `ui_design = "none"` has none of them. The others are in every project of a stack with layers. The table is
 # the same for every UI: what differs is how a layout reads the views (`[templates]` in `python.toml`).
 #
 # Order matters: `rotproof create` makes the layers in this order, and the documentation lists the imports in it.

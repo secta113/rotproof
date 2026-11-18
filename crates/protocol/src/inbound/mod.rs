@@ -56,6 +56,9 @@ pub struct Upgraded {
     pub from: String,
     /// Each update applied, with the file it changed
     pub applied: Vec<(&'static str, &'static str)>,
+    /// Each field of the declaration renamed, as `old to new`: a declaration written before a field had its name keeps
+    /// its value under the new one
+    pub renamed: Vec<String>,
     /// What each update that could not be applied leaves to a person
     pub by_hand: Vec<String>,
     /// How to move the project's code where the new version's layers want it, which no machine can do: said once,

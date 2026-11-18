@@ -551,7 +551,7 @@ mod tests {
     fn nothing_read_fails_by_the_floor() {
         let declared = Declared::new(
             crate::declaration::parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\n",
+                "stack = \"python\"\nareas = []\nui_design = \"atomic\"\n",
             )
             .unwrap(),
         )

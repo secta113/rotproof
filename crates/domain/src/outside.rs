@@ -82,7 +82,7 @@ mod tests {
     fn declared(rest: &str) -> Declared {
         Declared::new(
             parse_declaration(&format!(
-                "stack = \"python\"\nareas = []\nui = \"none\"\n{rest}"
+                "stack = \"python\"\nareas = []\nui_design = \"none\"\n{rest}"
             ))
             .unwrap(),
         )

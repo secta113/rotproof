@@ -25,8 +25,8 @@ use crate::version::VERSION;
 pub const DECLARATION: &str = ".config/rotproof.toml";
 /// What to do when the declaration is missing, with every stack: a test keeps the list equal to [`known_stacks`]
 pub const MISSING: &str = "missing: .config/rotproof.toml. Write it with `rotproof init --stack <stack>` (python, \
-                           typescript, rust, or none for records only) and `--ui atomic` or `--ui none` for python \
-                           and typescript (`--ui rendered` too for python)";
+                           typescript, rust, or none for records only) and `--ui-design atomic` or `--ui-design none` for python \
+                           and typescript (`--ui-design rendered` too for python)";
 /// Which command brings a project's files into line, said the same way wherever a file or a field is missing: after an
 /// upgrade of Rotproof it is `rotproof init`, which also sets `files` and says what to do by hand, and `rotproof
 /// create` only otherwise
@@ -49,7 +49,7 @@ pub struct Declaration {
     /// The UI, which picks the layers of the screens: one of [`uis`] of the stack. Required with a stack that has
     /// layers, and `rotproof create` adds it ([`ADDED`]); never set for a repository of records only. Read as optional
     /// so that a declaration without it reaches the check that names it, rather than failing to read
-    #[serde(default)]
+    #[serde(default, rename = "ui_design")]
     pub ui: Option<String>,
     #[serde(default)]
     pub absent: Vec<String>,
@@ -242,6 +242,10 @@ pub fn area_problems(areas: &[String]) -> Vec<String> {
 pub fn parse_declaration(text: &str) -> Result<Declaration, String> {
     toml::from_str(text).map_err(|e| {
         let why = e.message().to_string();
+        // A field an older Rotproof wrote under another name: the upgrade renames it
+        if why.starts_with("unknown field `ui`,") {
+            return format!("{why}: {RENAMED_UI}");
+        }
         // A field a newer Rotproof requires: the upgrade is not to look the field up
         match ADDED
             .iter()
@@ -251,6 +255,42 @@ pub fn parse_declaration(text: &str) -> Result<Declaration, String> {
             None => why,
         }
     })
+}
+
+/// What a declaration that still names the field `ui` says: it is `ui_design` from 2.0.0-rc.2, and the upgrade renames
+/// it
+pub const RENAMED_UI: &str = "the field ui is named ui_design from Rotproof 2.0.0-rc.2: run `rotproof init`, which renames it";
+
+/// The declaration `text` with its field `ui` renamed `ui_design`, its value and the comments above and beside it kept,
+/// as a declaration written before 2.0.0-rc.2 names it; `None` when there is no such field, or the declaration names
+/// `ui_design` already (then the two are the project's to merge, and the check says the field it does not know). Only
+/// a line of the top table is read, above the first table header, where the field is.
+pub fn renamed_ui(text: &str) -> Option<String> {
+    let document = text.parse::<DocumentMut>().ok()?;
+    if !document.contains_key("ui") || document.contains_key("ui_design") {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len() + 7);
+    let mut renamed = false;
+    let mut in_tables = false;
+    for line in text.split_inclusive('\n') {
+        let rest = line.trim_start();
+        in_tables |= rest.starts_with('[');
+        let key = rest
+            .strip_prefix("ui")
+            .filter(|after| after.trim_start().starts_with('='));
+        if !renamed && !in_tables && key.is_some() {
+            let indent = &line[..line.len() - rest.len()];
+            out.push_str(indent);
+            out.push_str("ui_design");
+            out.push_str(&rest[2..]);
+            renamed = true;
+        } else {
+            out.push_str(line);
+        }
+    }
+    let read = out.parse::<DocumentMut>().ok()?;
+    (renamed && read.contains_key("ui_design") && !read.contains_key("ui")).then_some(out)
 }
 
 /// What a declaration that lacks a field of [`ADDED`] says: which command adds it. A declaration written by an older
@@ -374,7 +414,7 @@ pub const ADDED: [Added; 2] = [
         layers_only: false,
     },
     Added {
-        name: "ui",
+        name: "ui_design",
         comment: UI_COMMENT,
         first_value: "# Added by `rotproof create`: the UI whose layers the tree held, or \"none\" when it held none\n",
         layers_only: true,
@@ -476,7 +516,7 @@ pub fn declaration_text(stack: &str, ui: &str) -> String {
          absent = []"
     };
     format!(
-        "{head}\n# {stacks}\nstack = \"{stack}\"\n\n{areas}\n{UI_COMMENT}# {offered}\nui = \"{ui}\"\n\n\
+        "{head}\n# {stacks}\nstack = \"{stack}\"\n\n{areas}\n{UI_COMMENT}# {offered}\nui_design = \"{ui}\"\n\n\
          {absent}\n\n\
          # Paths outside the layers that Rotproof does not look into, such as \"scripts\" (helper scripts, generated\n\
          # or vendored code). A path that holds a layer, or does not exist, fails\n\
@@ -500,9 +540,9 @@ pub struct Declared {
     pub units: Vec<Unit>,
     /// The places of every unit, a unit's together, in the order of `units`
     pub places: Vec<Place>,
-    /// What `absent` names in a layer the declared UI leaves out (`ui` with `ui = "none"`): it says nothing, and the
-    /// structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs. Each
-    /// is the name of the unit that lists it ("" for the implicit unit) and the name it lists
+    /// What `absent` names in a layer the declared UI leaves out (`ui` with `ui_design = "none"`): it says nothing, and
+    /// the structure check fails on it. It does not stop `rotproof create`, so an upgrade that adds `ui` still runs.
+    /// Each is the name of the unit that lists it ("" for the implicit unit) and the name it lists
     pub left_out: Vec<(String, String)>,
     /// How a comment that keeps the first marker names its issue, from `todo_link`: `None` when it is not declared
     pub todo_link: Option<TodoLink>,
@@ -527,7 +567,7 @@ impl Declared {
             }
             if let Some(ui) = &declaration.ui {
                 found.push(format!(
-                    "{DECLARATION}: stack = \"none\" has no layers, so it has no ui: take out ui = {ui:?}"
+                    "{DECLARATION}: stack = \"none\" has no layers, so it has no ui: take out ui_design = {ui:?}"
                 ));
             }
             if let Some(link) = &declaration.todo_link {
@@ -571,11 +611,13 @@ impl Declared {
             )]);
         };
         let Some(ui) = &declaration.ui else {
-            return Err(vec![unreadable(&missing_field("missing field `ui`"))]);
+            return Err(vec![unreadable(&missing_field(
+                "missing field `ui_design`",
+            ))]);
         };
         let Some(layout) = layout(&declaration.stack, ui) else {
             return Err(vec![format!(
-                "{DECLARATION}: unknown ui {ui:?} for the {} stack (known: {})",
+                "{DECLARATION}: unknown ui_design {ui:?} for the {} stack (known: {})",
                 declaration.stack,
                 offered.join(", ")
             )]);
@@ -783,7 +825,7 @@ pub fn fields(text: &str) -> Result<Fields, String> {
     };
     Ok(Fields {
         stack: string("stack")?,
-        ui: string("ui")?,
+        ui: string("ui_design")?,
         absent: names("absent")?,
         files: string("files")?,
         declined: names("declined")?,
@@ -858,7 +900,7 @@ mod tests {
         let text = declaration_text("python", "rendered");
         assert!(text.contains("\nabsent = [\"presentation\"]\n"), "{text}");
         assert!(
-            text.contains("# atomic | rendered | none\nui = \"rendered\""),
+            text.contains("# atomic | rendered | none\nui_design = \"rendered\""),
             "{text}"
         );
         let present = |text: &str| -> Vec<String> {
@@ -888,10 +930,10 @@ mod tests {
         let names = |declared: &Declared| -> Vec<String> {
             declared.places.iter().map(|p| p.name.clone()).collect()
         };
-        let atomic = declared("stack = \"python\"\nareas = []\nui = \"atomic\"\n").unwrap();
+        let atomic = declared("stack = \"python\"\nareas = []\nui_design = \"atomic\"\n").unwrap();
         assert!(names(&atomic).contains(&"ui.pages".to_string()));
         assert!(names(&atomic).contains(&"presentation.models".to_string()));
-        let none = declared("stack = \"python\"\nareas = []\nui = \"none\"\n").unwrap();
+        let none = declared("stack = \"python\"\nareas = []\nui_design = \"none\"\n").unwrap();
         assert!(
             !names(&none)
                 .iter()
@@ -907,7 +949,7 @@ mod tests {
             .unwrap();
         assert!(!composition.imports.contains(&"ui".to_string()));
         // absent naming a layer the UI leaves out reads, so an upgrade still runs, and is kept for the check to name
-        let left = declared("stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"ui\", \"presentation.display\"]\n")
+        let left = declared("stack = \"python\"\nareas = []\nui_design = \"none\"\nabsent = [\"ui\", \"presentation.display\"]\n")
             .unwrap();
         let names = |declared: &Declared| -> Vec<String> {
             declared
@@ -920,15 +962,17 @@ mod tests {
         assert_eq!(
             declared("stack = \"python\"\nareas = []\n").unwrap_err(),
             [
-                ".config/rotproof.toml: missing field `ui`: run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise; either adds it"
+                ".config/rotproof.toml: missing field `ui_design`: run `rotproof init` after an upgrade of Rotproof, `rotproof create` otherwise; either adds it"
             ]
         );
         assert_eq!(
-            declared("stack = \"rust\"\nareas = []\nui = \"atomic\"\n").unwrap_err(),
-            [".config/rotproof.toml: unknown ui \"atomic\" for the rust stack (known: none)"]
+            declared("stack = \"rust\"\nareas = []\nui_design = \"atomic\"\n").unwrap_err(),
+            [
+                ".config/rotproof.toml: unknown ui_design \"atomic\" for the rust stack (known: none)"
+            ]
         );
         assert!(
-            declared("stack = \"none\"\nareas = []\nui = \"none\"\n").unwrap_err()[0]
+            declared("stack = \"none\"\nareas = []\nui_design = \"none\"\n").unwrap_err()[0]
                 .contains("has no ui")
         );
     }
@@ -936,7 +980,7 @@ mod tests {
     #[test]
     fn todo_link_is_one_of_two_values_and_needs_code_to_read() {
         let declared = |text: &str| Declared::new(parse_declaration(text).unwrap());
-        let python = "stack = \"python\"\nareas = []\nui = \"none\"\n";
+        let python = "stack = \"python\"\nareas = []\nui_design = \"none\"\n";
         assert_eq!(declared(python).unwrap().todo_link, None);
         assert_eq!(
             declared(&format!("{python}todo_link = \"number\"\n"))
@@ -945,12 +989,12 @@ mod tests {
             Some(TodoLink::Number)
         );
         assert_eq!(
-            declared("stack = \"rust\"\nareas = []\nui = \"none\"\ntodo_link = \"key\"\n")
+            declared("stack = \"rust\"\nareas = []\nui_design = \"none\"\ntodo_link = \"key\"\n")
                 .unwrap()
                 .todo_link,
             Some(TodoLink::Key)
         );
-        // Any other value fails, naming the two known ones, as an unknown ui does
+        // Any other value fails, naming the two known ones, as an unknown ui_design does
         for value in ["Number", "issue", "", "#"] {
             assert_eq!(
                 declared(&format!("{python}todo_link = {value:?}\n")).unwrap_err(),
@@ -990,7 +1034,7 @@ mod tests {
 
     #[test]
     fn approved_max_is_a_count_that_nothing_writes() {
-        let python = "stack = \"python\"\nareas = []\nui = \"none\"\n";
+        let python = "stack = \"python\"\nareas = []\nui_design = \"none\"\n";
         let max = |text: &str| parse_declaration(text).map(|declaration| declaration.approved_max);
         assert_eq!(max(python), Ok(None));
         assert_eq!(max(&format!("{python}approved_max = 3\n")), Ok(Some(3)));
@@ -1010,7 +1054,7 @@ mod tests {
 
     #[test]
     fn allowed_is_a_table_of_lists_that_nothing_writes() {
-        let python = "stack = \"python\"\nareas = []\nui = \"atomic\"\n";
+        let python = "stack = \"python\"\nareas = []\nui_design = \"atomic\"\n";
         let allowed = |text: &str| parse_declaration(text).map(|d| d.dependencies.allowed);
         assert_eq!(allowed(python), Ok(BTreeMap::new()));
         let read = allowed(&format!(
@@ -1088,9 +1132,9 @@ mod tests {
         assert_eq!(parse_declaration(&text).unwrap().areas, ["billing", "ops"]);
         // ui only with layers
         let python = "stack = \"python\"\nareas = []\n";
-        assert_eq!(lacking(python), Some(vec!["ui"]));
-        let (text, added) = completed(python, &[("ui", First::Name("none".into()))]);
-        assert_eq!(added, ["ui = \"none\""]);
+        assert_eq!(lacking(python), Some(vec!["ui_design"]));
+        let (text, added) = completed(python, &[("ui_design", First::Name("none".into()))]);
+        assert_eq!(added, ["ui_design = \"none\""]);
         assert!(text.contains(&format!("\n{UI_COMMENT}")), "{text}");
         assert_eq!(
             parse_declaration(&text).unwrap().ui.as_deref(),
@@ -1125,7 +1169,7 @@ mod tests {
     fn a_file_in_a_path_listed_in_unchecked_is_skipped() {
         let declared = Declared::new(
             parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"scripts/\", \"gen\"]\n",
+                "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nunchecked = [\"scripts/\", \"gen\"]\n",
             )
             .unwrap(),
         )
@@ -1140,7 +1184,7 @@ mod tests {
     fn a_path_in_unchecked_that_holds_or_sits_in_a_layer_skips_nothing() {
         let declared = Declared::new(
             parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"domain\", \"ui/atoms/gen/\"]\n",
+                "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nunchecked = [\"domain\", \"ui/atoms/gen/\"]\n",
             )
             .unwrap(),
         )
@@ -1153,7 +1197,7 @@ mod tests {
     fn a_path_in_moving_is_not_checked_as_one_in_unchecked_is_and_is_not_the_same_field() {
         let declared = Declared::new(
             parse_declaration(
-                "stack = \"python\"\nareas = []\nui = \"atomic\"\nunchecked = [\"gen\"]\nmoving = [\"legacy/\", \"old.py\", \"domain\"]\n",
+                "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nunchecked = [\"gen\"]\nmoving = [\"legacy/\", \"old.py\", \"domain\"]\n",
             )
             .unwrap(),
         )
@@ -1182,7 +1226,7 @@ mod tests {
         ] {
             let declared = Declared::new(
                 parse_declaration(&format!(
-                    "stack = \"{stack}\"\nareas = []\nui = \"{ui}\"\nabsent = []\n"
+                    "stack = \"{stack}\"\nareas = []\nui_design = \"{ui}\"\nabsent = []\n"
                 ))
                 .unwrap(),
             )
@@ -1218,7 +1262,7 @@ mod tests {
             parse_declaration(
                 "stack = \"typescript\"
 areas = []
-ui = \"none\"
+ui_design = \"none\"
 ",
             )
             .unwrap(),
@@ -1276,9 +1320,9 @@ ui = \"none\"
         assert!(added.is_empty(), "{added:?}");
     }
 
-    /// A declaration of a stack with `ui = "none"` and the `[[unit]]` tables `units`, its fields above them.
+    /// A declaration of a stack with `ui_design = "none"` and the `[[unit]]` tables `units`, its fields above them.
     fn with_units(stack: &str, units: &str) -> String {
-        format!("stack = \"{stack}\"\nareas = []\nui = \"none\"\nfiles = \"2.0.0\"\n{units}")
+        format!("stack = \"{stack}\"\nareas = []\nui_design = \"none\"\nfiles = \"2.0.0\"\n{units}")
     }
 
     const MONOREPO: &str = "[[unit]]
@@ -1398,11 +1442,13 @@ absent = [\"domain\", \"application\"]
             ]
         );
         // Empty, as `rotproof init` writes it, it names nothing
-        let empty = with_units("python", "[[unit]]\nname = \"a\"\npath = \"a\"\n")
-            .replace("ui = \"none\"\n", "ui = \"none\"\nabsent = []\n");
+        let empty = with_units("python", "[[unit]]\nname = \"a\"\npath = \"a\"\n").replace(
+            "ui_design = \"none\"\n",
+            "ui_design = \"none\"\nabsent = []\n",
+        );
         assert!(Declared::new(parse_declaration(&empty).unwrap()).is_ok());
         // Without units it is the one unit's, as it was: the failure is the same line
-        let one = "stack = \"python\"\nareas = []\nui = \"none\"\nabsent = [\"nowhere\"]\n";
+        let one = "stack = \"python\"\nareas = []\nui_design = \"none\"\nabsent = [\"nowhere\"]\n";
         assert_eq!(
             Declared::new(parse_declaration(one).unwrap()).unwrap_err(),
             [
@@ -1419,7 +1465,7 @@ absent = [\"domain\", \"application\"]
             format!(
                 "stack = \"python\"
 areas = []
-ui = \"none\"
+ui_design = \"none\"
 absent = {absent}
 "
             )
@@ -1520,7 +1566,7 @@ absent = {both}
 
     #[test]
     fn fields_added_to_a_declaration_with_units_go_above_them() {
-        let text = format!("stack = \"python\"\nui = \"none\"\n\n{MONOREPO}");
+        let text = format!("stack = \"python\"\nui_design = \"none\"\n\n{MONOREPO}");
         assert_eq!(lacking(&text), Some(vec!["areas"]));
         let (text, added) = completed(&text, &[("areas", First::List(vec!["a".into()]))]);
         assert_eq!(added, ["areas = [\"a\"]"]);
@@ -1534,5 +1580,35 @@ absent = {both}
         assert_eq!(declaration.units.len(), 3);
         // A unit is not read by the upgrade, which reads the fields above them
         assert_eq!(fields(&text).unwrap().absent, Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_field_ui_is_renamed_where_it_stands_and_nowhere_else() {
+        let older = "stack = \"python\"\nareas = []\n# The UI\n  ui   = \"atomic\" # ours\nfiles = \"2.0.0-rc.1\"\n";
+        let renamed = renamed_ui(older).unwrap();
+        assert_eq!(
+            renamed,
+            "stack = \"python\"\nareas = []\n# The UI\n  ui_design   = \"atomic\" # ours\nfiles = \"2.0.0-rc.1\"\n"
+        );
+        assert_eq!(
+            parse_declaration(&renamed).unwrap().ui.as_deref(),
+            Some("atomic")
+        );
+        // Read as it was, it says what renames it
+        assert!(parse_declaration(older).unwrap_err().ends_with(RENAMED_UI));
+        // Nothing to rename: no ui, both names (the project's to merge), a key that only starts so, a table's key
+        assert_eq!(
+            renamed_ui("stack = \"python\"\nareas = []\nui_design = \"none\"\n"),
+            None
+        );
+        assert_eq!(
+            renamed_ui("stack = \"python\"\nui = \"none\"\nui_design = \"none\"\n"),
+            None
+        );
+        assert_eq!(renamed_ui("stack = \"python\"\nuix = 1\n"), None);
+        assert_eq!(
+            renamed_ui("stack = \"python\"\n[[unit]]\nname = \"a\"\nui = \"none\"\n"),
+            None
+        );
     }
 }

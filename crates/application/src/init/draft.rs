@@ -94,7 +94,7 @@ mod tests {
     /// version, nothing to upgrade.
     fn units_declaration(areas: &str) -> String {
         format!(
-            "stack = \"python\"\nareas = {areas}\nui = \"none\"\nfiles = \"{}\"\ndeclined = []\n\n\
+            "stack = \"python\"\nareas = {areas}\nui_design = \"none\"\nfiles = \"{}\"\ndeclined = []\n\n\
              [[unit]]\nname = \"core\"\npath = \"core\"\nshared = true\n\n\
              [[unit]]\nname = \"billing\"\npath = \"billing\"\n\n\
              [[unit]]\nname = \"cli\"\npath = \"cli\"\nentry = [\"cli/main.py\"]\n",
@@ -285,7 +285,7 @@ mod tests {
         tree.write(
             DECLARATION,
             &format!(
-                "stack = \"python\"\nareas = [\"design\"]\nui = \"none\"\nfiles = \"{}\"\ndeclined = []\n\
+                "stack = \"python\"\nareas = [\"design\"]\nui_design = \"none\"\nfiles = \"{}\"\ndeclined = []\n\
                  unit = [{{ name = \"core\", path = \"core\" }}]\n",
                 domain::version::VERSION
             ),
@@ -308,7 +308,7 @@ mod tests {
         tree.write(
             DECLARATION,
             &format!(
-                "stack = \"python\"\nareas = [\"design\"]\nui = \"none\"\nfiles = \"{}\"\ndeclined = []\n",
+                "stack = \"python\"\nareas = [\"design\"]\nui_design = \"none\"\nfiles = \"{}\"\ndeclined = []\n",
                 domain::version::VERSION
             ),
         )

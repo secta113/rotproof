@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 757636b6. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 2bd08600. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -103,7 +103,7 @@ Git のリポジトリでなくてもかまいません。プロジェクトの�
 ```sh
 mkdir shop
 cd shop
-rotproof init --stack python --ui none
+rotproof init --stack python --ui-design none
 ```
 
 ```text
@@ -112,7 +112,7 @@ next: declare in absent the layers this project does not have, then run `rotproo
 ```
 
 `init` が書くのは宣言 `.config/rotproof.toml` だけです。これが、このプロジェクトが宣言する構造です。スタックと、
-画面の無いプロジェクト（コマンドラインの道具、ライブラリ、サーバー）のための `--ui none` が入っています。`absent` には
+画面の無いプロジェクト（コマンドラインの道具、ライブラリ、サーバー）のための `--ui-design none` が入っています。`absent` には
 このプロジェクトが持たない層を並べますが、今回は 5 つとも持つので、そのままにします。`rotproof create` だけを
 実行すると、作る層の一覧を出すだけで何も書きません。先に一覧を読めるようにするためです。`--yes` を付けると作ります。
 
@@ -370,7 +370,7 @@ Rotproof のアップグレードで何が変わりうるかは「互換性」�
   許される import が書かれた層のどれかに収まらなければなりません。Rotproof はプロジェクトの開始時に層を作り、
   実行のたびに検査するので、依存の向きは意図したとおりに保たれます。層をそれぞれ持つ複数の部分からなるプロジェクトは、
   それらをユニットとして宣言します（「ユニット」を参照）。ビューがサーバー側のテンプレート（Jinja、Django の
-  テンプレート）である Python のプロジェクトは `--ui rendered` を宣言します。テンプレートは `ui` の段に置き、
+  テンプレート）である Python のプロジェクトは `--ui-design rendered` を宣言します。テンプレートは `ui` の段に置き、
   `infrastructure.inbound` のルートがそれを描画し、テンプレートどうしの参照（`{% extends %}`、`{% include %}`、
   `{% import %}`、`{% from %}`）は import と同じように判定します。どのテンプレート言語のどの版として読んだかは
   毎回表示し、プロジェクトの `pyproject.toml` が別の版を求めているときは判定しません

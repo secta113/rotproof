@@ -491,7 +491,7 @@ mod tests {
     /// line it fails with, without the name of the file.
     fn read(stack: &str, unit_tables: &str) -> Result<Vec<Unit>, Vec<String>> {
         let text = format!(
-            "stack = \"{stack}\"\nareas = []\nui = \"none\"\nfiles = \"2.0.0\"\n{unit_tables}"
+            "stack = \"{stack}\"\nareas = []\nui_design = \"none\"\nfiles = \"2.0.0\"\n{unit_tables}"
         );
         let declaration = parse_declaration(&text).unwrap_or_else(|e| panic!("{e}:\n{text}"));
         match Declared::new(declaration) {
@@ -595,7 +595,7 @@ mod tests {
         // Not an array of strings either, and a field Rotproof does not know
         for more in ["entry = 1\n", "entry = [1]\n", "colour = \"red\"\n"] {
             let text = format!(
-                "stack = \"python\"\nareas = []\nui = \"none\"\n{}",
+                "stack = \"python\"\nareas = []\nui_design = \"none\"\n{}",
                 unit("a", "a", more)
             );
             assert!(parse_declaration(&text).is_err(), "{more}");
@@ -1013,7 +1013,7 @@ mod tests {
         );
         // The top level is the one unit's while the project has no unit of its own, and nobody's once it has
         let text = format!(
-            "stack = \"typescript\"\nareas = []\nui = \"none\"\nabsent = [\"domain\"]\nfiles = \"2.0.0\"\n{}",
+            "stack = \"typescript\"\nareas = []\nui_design = \"none\"\nabsent = [\"domain\"]\nfiles = \"2.0.0\"\n{}",
             unit("a", "a", "")
         );
         assert_eq!(

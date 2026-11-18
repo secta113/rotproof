@@ -137,7 +137,7 @@ mod tests {
     /// which the paths in `ignored` are excluded by a `.gitignore`.
     fn check(declaration: &str, files: &[(&str, &str)], ignored: &[&str]) -> Vec<String> {
         let text = format!(
-            "stack = \"python\"\nareas = []\nui = \"none\"\nfiles = \"2.0.0\"\n{declaration}"
+            "stack = \"python\"\nareas = []\nui_design = \"none\"\nfiles = \"2.0.0\"\n{declaration}"
         );
         let declared =
             Declared::new(parse_declaration(&text).unwrap()).unwrap_or_else(|e| panic!("{e:#?}"));
@@ -316,8 +316,10 @@ mod tests {
         let found = check("unchecked = [\"fixtures\"]\n", &files, &[]);
         assert!(found.is_empty(), "{found:#?}");
         let declared = Declared::new(
-            parse_declaration("stack = \"rust\"\nareas = []\nui = \"none\"\nfiles = \"2.0.0\"\n")
-                .unwrap(),
+            parse_declaration(
+                "stack = \"rust\"\nareas = []\nui_design = \"none\"\nfiles = \"2.0.0\"\n",
+            )
+            .unwrap(),
         )
         .unwrap();
         let tree = Fake::new(&[("venv/pyvenv.cfg", "")]);
