@@ -388,12 +388,13 @@ shared unit, two units that are not shared, and an app:
 [[unit]]
 name = "core"
 path = "packages/core/src/core"       # where its layers sit directly
+root = "packages/core"                # where its manifest is (`path` when left out)
 shared = true                         # any unit may import it
 
 [[unit]]
 name = "billing"
 path = "packages/billing/src/billing"
-root = "packages/billing"             # where its manifest is (`path` when left out)
+root = "packages/billing"
 
 [[unit]]
 name = "shipping"
@@ -403,11 +404,13 @@ root = "packages/shipping"
 [[unit]]
 name = "cli"
 path = "apps/cli/cli"
+root = "apps/cli"
 entry = ["apps/cli/__main__.py"]        # an app: its composition wires the other units
 absent = ["application", "protocol", "domain"]   # an app holds only composition and infrastructure
 ```
 
-`rotproof create --yes` then makes each unit's layers and each entry file that is missing, and the same checks hold in
+`rotproof create --yes` then makes each unit's layers, each entry file and each unit's manifest that is missing (a
+`pyproject.toml` with no dependencies, named for the unit, at its `root`), and the same checks hold in
 each unit, with the unit named in a finding. The rules between units are few:
 
 - A unit imports the layers of its own unit as the table says, and no other unit unless it is shared.

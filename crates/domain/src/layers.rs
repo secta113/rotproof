@@ -254,6 +254,11 @@ pub struct Layout {
     /// What a package's manifest is named: `pyproject.toml`, `package.json`, `Cargo.toml`, as [`Layout::code`] says
     /// one. A project that declares units keeps one to the root of each
     pub manifest: String,
+    /// What `rotproof create` writes as the manifest at the root of a declared unit that has none, with `{package}`
+    /// the unit's name: a package with no dependencies. `None` while a unit of this stack has no manifest of its own
+    /// (Rust's, whose layers are crates)
+    #[serde(default)]
+    pub unit_manifest: Option<String>,
     /// The code files a unit's own directory holds besides its layers, the nested units and its entry files, by name:
     /// a Python package's `__init__.py`, which imports no layer. Empty while this stack has none
     #[serde(default)]

@@ -1403,6 +1403,83 @@ fn guide_takes_the_ui_with_a_stack_as_init_does_and_needs_no_project() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("--stack"));
 }
 
+/// The units of the example in Rotproof's README, under `## Units`: the first ```toml block there.
+fn readme_units() -> String {
+    let readme =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md")).unwrap();
+    let section = readme.split("\n## Units\n").nth(1).unwrap();
+    let block = section.split("```toml\n").nth(1).unwrap();
+    block.split("```").next().unwrap().to_string()
+}
+
+/// The commented example of units `rotproof init` writes at the end of a declaration, taken out of its comment.
+fn uncommented_units(declaration: &str) -> String {
+    let at = declaration.find("# [[unit]]").unwrap();
+    let units: Vec<&str> = declaration[at..]
+        .lines()
+        .map(|line| {
+            line.strip_prefix("# ")
+                .unwrap_or(line.trim_start_matches('#'))
+        })
+        .collect();
+    format!("{}{}\n", &declaration[..at], units.join("\n"))
+}
+
+#[test]
+fn the_units_of_the_readme_and_of_the_declaration_init_writes_pass_the_check_once_created() {
+    // As a person would take them: the README's Python monorepo, and the example init writes for each stack
+    let readme = up_to_date("stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\n")
+        + "\n"
+        + &readme_units();
+    let mut declarations = vec![("python (README)", readme)];
+    // Not Rust's yet: the package create writes for its app's entry sits in the unit's directory, where the structure
+    // check fails it as code outside the layers
+    for stack in ["python", "typescript"] {
+        let root = tempfile::tempdir().unwrap();
+        let arg = root_arg(root.path());
+        let out = run(&[
+            "--root",
+            &arg,
+            "init",
+            "--stack",
+            stack,
+            "--ui-design",
+            "none",
+        ]);
+        assert!(out.status.success(), "{stack}: {}", error_of(&out));
+        let written = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
+        declarations.push((stack, uncommented_units(&written)));
+    }
+    for (name, declaration) in declarations {
+        let root = unlocked(&declaration);
+        let arg = root_arg(root.path());
+        let out = create(&["--root", &arg, "create", "--yes"]);
+        assert!(
+            out.status.success(),
+            "{name}: {}\n{}",
+            stdout(&out),
+            error_of(&out)
+        );
+        if declaration.contains("stack = \"python\"") {
+            // Each unit's manifest is written at its root, and only the lock file, which a tool makes, is left
+            for manifest in ["packages/billing/pyproject.toml", "apps/cli/pyproject.toml"] {
+                let text = fs::read_to_string(root.path().join(manifest));
+                assert!(
+                    text.is_ok_and(|t| t.starts_with("[project]\n")),
+                    "{name}: {manifest}"
+                );
+            }
+            fs::write(root.path().join("uv.lock"), "").unwrap();
+        }
+        let out = run(&["--root", &arg, "check"]);
+        assert!(
+            out.status.success(),
+            "{name}:\n{declaration}\n{}",
+            stdout(&out)
+        );
+    }
+}
+
 #[test]
 fn create_respects_absent_and_leaves_what_it_does_not_own() {
     let root = declared(

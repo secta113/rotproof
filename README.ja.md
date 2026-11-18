@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 7b9c8597. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at b98d732b. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -394,12 +394,13 @@ Rotproof のアップグレードで何が変わりうるかは「互換性」�
 [[unit]]
 name = "core"
 path = "packages/core/src/core"       # where its layers sit directly
+root = "packages/core"                # where its manifest is (`path` when left out)
 shared = true                         # any unit may import it
 
 [[unit]]
 name = "billing"
 path = "packages/billing/src/billing"
-root = "packages/billing"             # where its manifest is (`path` when left out)
+root = "packages/billing"
 
 [[unit]]
 name = "shipping"
@@ -409,11 +410,13 @@ root = "packages/shipping"
 [[unit]]
 name = "cli"
 path = "apps/cli/cli"
+root = "apps/cli"
 entry = ["apps/cli/__main__.py"]        # an app: its composition wires the other units
 absent = ["application", "protocol", "domain"]   # an app holds only composition and infrastructure
 ```
 
-`rotproof create --yes` は、各ユニットの層と、足りない entry ファイルを作ります。同じ検査が各ユニットの中で働き、
+`rotproof create --yes` は、各ユニットの層と、足りない entry ファイルと、足りない各ユニットのマニフェスト（`root` に置く、
+ユニットの名前で依存の無い `pyproject.toml`）を作ります。同じ検査が各ユニットの中で働き、
 指摘にはユニットの名前が付きます。ユニットのあいだの規則は少数です。
 
 - ユニットは、自分のユニットの層を表のとおりに import し、共有でない限り、ほかのユニットは import しません。
