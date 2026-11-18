@@ -35,7 +35,7 @@ rotproof --root <repository> create  # list the layers it would make, writing no
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
 rotproof --root <repository> index   # write the generated files that are out of date (docs/'s index files and the knowledge rules, and who reads the shared units)
-rotproof --root <repository> approve <file> <import> --reason "<why>"  # keep a forbidden import (see below)
+rotproof --root <repository> approve <file> <import>... --reason "<why>"  # keep a forbidden import (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof --root <repository> new <slug> [--area <area>] [--follows <key>]... [--alarm [--match <string>]...]
@@ -272,7 +272,10 @@ Rotproof's table that the finding names (`rotproof approve domain/report.py shut
 use of that entry in the file, whatever names it uses under it; a name judged by an allowlist (`os.getcwd`), a group
 (`clock`) and a method of the net (`read_text`) are entries of their own. A package no list allows in an inner layer
 is approved by the package as the finding names it (a Python distribution as PEP 503 writes it: lowercase, each run of
-`-`, `_` and `.` one `-`): `rotproof approve domain/report.py requests --reason "..."`.
+`-`, `_` and `.` one `-`): `rotproof approve domain/report.py requests --reason "..."`. Several imports of one file that are kept for one reason
+are named together (`rotproof approve domain/report.py shutil clock --reason "..."`): each gets an entry of its own,
+the same as when it is approved alone, and when any of them is not forbidden, is approved already or is named twice,
+none is written, and every reason is said.
 `rotproof approve` shows the forbidden import, signs with git's `user.name`, and adds the entry (the file keeps a byte
 order mark and its line endings, CRLF on every line when one line had it, and so it does when `--prune` removes
 entries). It asks nothing, so an agent's shell can run it, but it takes no approval without `--reason` (an empty one

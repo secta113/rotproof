@@ -308,12 +308,13 @@ pub trait Commands {
     fn pending(&self, root: &Path, file: &str, import: &str) -> Result<Vec<String>, String>;
     /// The name to sign an approval with: git's `user.name`, when it is set.
     fn user_name(&self, root: &Path) -> Option<String>;
-    /// Keep the import of `import` by `file`, approved now by `by` for `reason`. The path of the file written.
+    /// Keep each import of `imports` by `file`, approved now by `by` for `reason`, one entry for each, written at once.
+    /// The path of the file written.
     fn approve(
         &self,
         root: &Path,
         file: &str,
-        import: &str,
+        imports: &[String],
         reason: &str,
         by: &str,
     ) -> Result<String, String>;

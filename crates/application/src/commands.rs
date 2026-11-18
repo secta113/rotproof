@@ -122,24 +122,28 @@ impl Commands for Rotproof<'_> {
         &self,
         root: &Path,
         file: &str,
-        import: &str,
+        imports: &[String],
         reason: &str,
         by: &str,
     ) -> Result<String, String> {
         let files = self.machine.files(root);
-        let entry = Kept {
-            from: file.to_string(),
-            import: import.to_string(),
-            reason: reason.to_string(),
-            approved: Approved {
-                by: by.to_string(),
-                at: self
-                    .machine
-                    .now()
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            },
-        };
-        crate::approvals::approve(&*files, &*files, &entry).map(String::from)
+        let at = self
+            .machine
+            .now()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let entries: Vec<Kept> = imports
+            .iter()
+            .map(|import| Kept {
+                from: file.to_string(),
+                import: import.clone(),
+                reason: reason.to_string(),
+                approved: Approved {
+                    by: by.to_string(),
+                    at: at.clone(),
+                },
+            })
+            .collect();
+        crate::approvals::approve(&*files, &*files, &entries).map(String::from)
     }
 
     fn prune(&self, root: &Path) -> Result<Vec<Removed>, String> {

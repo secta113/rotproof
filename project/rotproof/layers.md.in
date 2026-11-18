@@ -29,9 +29,11 @@
 - **A part goes in the layer whose concept it speaks.** No layer holds general-purpose parts: a general procedure comes
   from the standard library or an external one, and wanting to write one's own is a sign of a concept not named yet.
 - **An import the table forbids passes only as an approval, and an approval is asked for by the user.** Fix a
-  forbidden import. Run `rotproof approve <file> <import> --reason "<why>"` only when the user asked you to keep it
-  (a framework forces it, a fix cannot wait for the refactoring), and say so in your report, with the reason: it adds
-  the import to `.config/rotproof-approved.toml`, signed with git's `user.name`, and asks for nothing else.
+  forbidden import. Run `rotproof approve <file> <import>... --reason "<why>"` only when the user asked you to keep
+  it (a framework forces it, a fix cannot wait for the refactoring), and say so in your report, with the reason: it
+  adds each import to `.config/rotproof-approved.toml`, signed with git's `user.name`, and asks for nothing else. The
+  imports of one file kept for one reason go in one run, which writes all of them or, when one cannot be approved,
+  none.
   `rotproof check` prints every approval on every run, fails on one that matches no forbidden import any more (after
   fixing an approved import, run `rotproof approve --prune`, which removes such entries), and fails when the
   approvals are more than `approved_max` in `.config/rotproof.toml` lets the project hold, if it has one. Raising
