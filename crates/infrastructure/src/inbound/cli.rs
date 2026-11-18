@@ -315,27 +315,21 @@ enum Command {
     /// than a title would. The slug is the file's name without .md (lower-case words and digits joined by hyphens,
     /// never index, log or rules), and it never changes once the file exists, as commit messages and other documents
     /// refer to it. --area names the area the document is tagged with, one of the areas of .config/rotproof.toml, and
-    /// may be left out when it lists only one. Each --follows KEY, repeated for more, is a key as `rotproof follows`
-    /// takes it (a file, a definition `file::Name.Name`, a table of a .toml file, or a directory), pinned at its hash
-    /// now exactly as `rotproof follows` would pin it: run it once the document says what the code does, as the pin
-    /// says it was reviewed; a key that is not there writes nothing. --alarm writes what an alarm needs: `# When` and
-    /// `# Do`, empty so that the check fails until each is written, and --match STRING, repeated for more, the strings
-    /// of `match` (each as it appears in what is seen; with none, the field is left out). Prints the file written, each
-    /// key with its hash, and the questions to ask to write the body. It never writes over a document, and does not
-    /// write the index: run `rotproof index` once the description is written. Exits 2, writing nothing, when the slug
-    /// is not one, a document of that name is there already (by Windows' reading of names too), the area is not one the
-    /// declaration lists or is left out when it lists more than one, docs/knowledge/ is not there, a key is not a form
-    /// follows takes, names what is not there or cannot be read, or --match is given without --alarm or holds a string
-    /// that cannot be written.
+    /// may be left out when it lists only one. It pins nothing in follows, as a pin says the document was reviewed
+    /// against the code and there is no body yet to review: once the body says what the code does, `rotproof follows`
+    /// pins the keys. --alarm writes what an alarm needs: `# When` and `# Do`, empty so that the check fails until each
+    /// is written, and --match STRING, repeated for more, the strings of `match` (each as it appears in what is seen;
+    /// with none, the field is left out). Prints the file written and the questions to ask to write the body. It never
+    /// writes over a document, and does not write the index: run `rotproof index` once the description is written.
+    /// Exits 2, writing nothing, when the slug is not one, a document of that name is there already (by Windows'
+    /// reading of names too), the area is not one the declaration lists or is left out when it lists more than one,
+    /// docs/knowledge/ is not there, or --match is given without --alarm or holds a string that cannot be written.
     New {
         /// The file's name in docs/knowledge/ without .md: lower-case words joined by hyphens
         slug: String,
         /// The area the document is tagged with. Needed when the declaration lists more than one
         #[arg(long)]
         area: Option<String>,
-        /// A key the document follows, pinned at its hash now; repeat it for more
-        #[arg(long = "follows", value_name = "KEY")]
-        follows: Vec<String>,
         /// The document is an alarm: it gets `# When` and `# Do`
         #[arg(long)]
         alarm: bool,
@@ -433,14 +427,12 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         Command::New {
             slug,
             area,
-            follows,
             alarm,
             matches,
         } => {
             let document = NewDocument {
                 slug,
                 area,
-                follows,
                 alarm,
                 matches,
             };
@@ -994,9 +986,6 @@ fn new_document(
 ) -> Result<(), String> {
     let started = commands.start(root, document)?;
     println!("wrote {} (area: {})", started.path, started.area);
-    for (key, hash) in &started.follows {
-        println!("  follows {key}: {hash}");
-    }
     println!();
     println!(
         "{}",

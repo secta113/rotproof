@@ -26,10 +26,9 @@ records are in `.rotproof/AGENTS.md`.
   it, and prints the questions to ask. Ask them of the person, or take the answer from what the task decided, and write
   the body from the answers: never from what the code does, and never an empty heading. `--area` is needed when the
   project declares more than one area. `--alarm` starts an alarm, with `--match <string>` for each string of the
-  output that stays when the wording changes; write `# When` and `# Do` as the output was seen. `--follows <key>`
-  pins at the hash now, which says the document was reviewed against the code: use it only for code you have read and
-  are about to describe in the same piece of work, and otherwise pin with `rotproof follows` once the document is
-  written. It never writes over a document, and does not write the index.
+  output that stays when the wording changes; write `# When` and `# Do` as the output was seen. It pins nothing: once
+  the body says what the code does, read the code against it and pin the keys with `rotproof follows`, as the pin says
+  the document was reviewed. It never writes over a document, and does not write the index.
 - **`rotproof log --title <task> --problem <text> --lesson <text>`: when a task is done, for its entry in
   `docs/log.md`.** It reads the day from the clock and puts the entry under that day's heading, so never write the
   day or the entry by hand, and the log need not be read first. `--problem` and `--lesson` are each needed: write

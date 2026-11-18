@@ -38,7 +38,7 @@ rotproof --root <repository> index   # write the generated files that are out of
 rotproof --root <repository> approve <file> <import>... --reason "<why>"  # keep a forbidden import (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
-rotproof --root <repository> new <slug> [--area <area>] [--follows <key>]... [--alarm [--match <string>]...]
+rotproof --root <repository> new <slug> [--area <area>] [--alarm [--match <string>]...]
                                      # start a knowledge document: its frontmatter, the description left empty
 rotproof --root <repository> log --title <task> [--issue <owner/repo#n>] --problem <text>... --lesson <text>...
                                      # add an entry to the log, under today's heading
@@ -1294,20 +1294,21 @@ stale_after: 2027-01-01
 easy to write wrongly, and no body. `type`, a `title` made from the slug (its words, the first one capitalised, for a
 person to change), `tags` with the area, and `status: stable` are written, and `description` is left empty, so
 `rotproof check` fails (`description: empty`) until a person writes it, and a document half done cannot be committed.
-`--area` names the area, one the declaration lists, and may be left out when it lists only one. `--follows <key>`,
-given any number of times, pins each key at its hash now exactly as `rotproof follows` would (a file, a definition, a
-table or a directory, as the same keys are written), all of the keys or none. `--alarm` writes what an alarm needs,
-`# When` and `# Do`, empty so that the check fails the same way until each is written, and `--match <string>`, given
-any number of times with `--alarm`, the strings of `match` (trimmed, each on one line and named once; with none, the
+`--area` names the area, one the declaration lists, and may be left out when it lists only one. It writes no
+`follows`: a pin says the document was reviewed against the code, and a document with no body has nothing to review,
+so `rotproof follows` pins the keys once the body says what the code does (from 2.0.0-rc.2; `--follows <key>`, which
+pinned them as the document was started, is gone, and a command line that gives it exits 2). `--alarm` writes what
+an alarm needs, `# When` and `# Do`, empty so that the check fails the same way until each is written, and
+`--match <string>`, given any number of times with `--alarm`, the strings of `match` (trimmed, each on one line and
+named once; with none, the
 field is left out). Nothing else is written into the body: a heading left empty would be a record gone stale from its
 first day, so the questions to ask are printed instead (why it is so, what was considered and dropped, how it should
 behave, what one must know that lies outside the code), and the answers are the person's or the task's, not what the
 code says. The slug is lower-case words and digits joined by single hyphens, never `index`, `log` or `rules`, and it
 never changes once the file exists. A document that is there already is never written over, whatever the case of its
 name or the dots and spaces at its end (as Windows reads names). The index is not written, as the document is not
-read until its description is: run `rotproof index` then. It exits 2, writing nothing, when the slug, the area, a key or
-a string of `match` is not as above, a key names what is not there, a document of that name is there already, or
-`docs/knowledge/` is not.
+read until its description is: run `rotproof index` then. It exits 2, writing nothing, when the slug, the area or a
+string of `match` is not as above, a document of that name is there already, or `docs/knowledge/` is not.
 
 The log holds one entry per task, under the day's `## YYYY-MM-DD` heading, newest first: the task, its issue, what went
 wrong and what was learned, which is found nowhere else, and searchable in the repository when something breaks. What
