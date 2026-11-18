@@ -405,7 +405,9 @@ does not decide where to go next: whatever opens it passes the destination in (g
 `presentation.models` and in the guide; no check reads it). `ui_design` says whether the project has screens, and `absent` which of the layers and levels it has it leaves out:
 with `ui_design = "atomic"` the two come, and a project with `ui_design = "none"` has neither. A project with screens
 may declare `presentation` absent (a screen that holds no state of its own, as a template the server renders), or a
-level of `ui`. In TypeScript, `presentation` also holds
+level of `ui`, but not both `ui` and `presentation`: that says `ui_design = "none"` a second way, and the declaration
+fails, naming it. A unit has no `ui_design` of its own, so a unit with no screens in a project that has them lists
+both in its own `absent`. In TypeScript, `presentation` also holds
 no view: a `.tsx` or `.jsx` file there fails `rotproof check`, so the state and the hooks of a screen are `.ts` files
 and a component goes in `ui` or `composition` (a provider keeps its context and state hook in `presentation` and its
 thin component in `ui.pages`, or in `composition` for the whole program). The entry file is no layer, and may
@@ -1333,7 +1335,8 @@ entry can be told, is one.
 
 - **The tree matches `.config/rotproof.toml`, either way:** the declaration names a known stack and a UI it offers,
   and only layers that stack and UI have in `absent` (a misspelled field fails; a layer the UI leaves out, as `ui`
-  with `ui_design = "none"`, fails until it is taken out). Without a declaration nothing is checked, and `rotproof check`
+  with `ui_design = "none"`, fails until it is taken out, and so does a project with screens whose top `absent` lists
+  both `ui` and `presentation`, which is `ui_design = "none"` written another way). Without a declaration nothing is checked, and `rotproof check`
   exits 2, not 1: CI tells a project that has not adopted Rotproof from one that breaks a rule. Every layer of the stack is present or declared
   absent, and no layer declared absent is present. No code sits outside the layers, the stack's own paths (`tests/`),
   the entry file, `unchecked` and `moving`. In Rust, the root package's `src/` holds the entry file and nothing else: a `.rs`

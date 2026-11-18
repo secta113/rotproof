@@ -15,7 +15,7 @@ use serde::Deserialize;
 use toml_edit::{Array, DocumentMut, Item, Value};
 
 use crate::inner_io::Allowlist;
-use crate::layers::{Layout, Place, RECORDS_ONLY, Table, known_stacks, layout, table, uis};
+use crate::layers::{Layout, NO_UI, Place, RECORDS_ONLY, Table, known_stacks, layout, table, uis};
 use crate::markers::TodoLink;
 use crate::paths::within;
 use crate::units::{self, Unit};
@@ -326,6 +326,20 @@ fn levels_without_their_layer(units: &[Unit], places: &[Place]) -> Vec<String> {
         }
     }
     found
+}
+
+/// A project with screens that lists both `ui` and `presentation` in its `absent` has none: that is what
+/// `ui_design = "none"` says, and a second way to write it would let two declarations of one project differ. Only the
+/// `absent` of a project without units is judged: a unit has no `ui_design` of its own, so a unit with no screens in a
+/// project that has them says so in its `absent`.
+fn screens_absent(declaration: &Declaration, layout: &Layout) -> Option<String> {
+    let lists = |name: &str| declaration.absent.iter().any(|a| a == name);
+    (declaration.units.is_empty() && layout.ui != NO_UI && lists("ui") && lists("presentation")).then(|| {
+        format!(
+            "{DECLARATION}: absent lists both ui and presentation, which leaves the project no screens: declare \
+             ui_design = \"none\" and take them out of absent"
+        )
+    })
 }
 
 /// What `areas` is, as the declaration says it above the field.
@@ -656,6 +670,7 @@ impl Declared {
             }
         }
         found.extend(levels_without_their_layer(&units, &places));
+        found.extend(screens_absent(&declaration, &layout));
         found.extend(dependency_problems(&declaration));
         let (allowed, problems) = Allowlist::read(&declaration, &layout, &units, &places);
         found.extend(problems);
@@ -1569,6 +1584,35 @@ absent = {both}
         assert_eq!(declaration.units.len(), 3);
         // A unit is not read by the upgrade, which reads the fields above them
         assert_eq!(fields(&text).unwrap().absent, Vec::<String>::new());
+    }
+
+    #[test]
+    fn screens_with_both_their_layers_absent_are_no_screens_and_fail() {
+        let declared = |absent: &str| {
+            Declared::new(
+                parse_declaration(&format!(
+                    "stack = \"typescript\"\nareas = []\nui_design = \"atomic\"\nabsent = {absent}\n"
+                ))
+                .unwrap(),
+            )
+        };
+        let why = declared("[\"ui\", \"presentation\"]").unwrap_err();
+        assert_eq!(
+            why,
+            [
+                ".config/rotproof.toml: absent lists both ui and presentation, which leaves the project no screens: \
+                 declare ui_design = \"none\" and take them out of absent"
+            ]
+        );
+        // Either alone is a project with screens that lacks one of them
+        assert!(declared("[\"ui\"]").is_ok());
+        assert!(declared("[\"presentation\"]").is_ok());
+        assert!(declared("[\"ui.atoms\", \"presentation\"]").is_ok());
+        // A unit has no ui_design of its own: one with no screens says so in its absent
+        let units = "stack = \"typescript\"\nareas = []\nui_design = \"atomic\"\n\n[[unit]]\nname = \"web\"\n\
+                     path = \"apps/web/src\"\n\n[[unit]]\nname = \"api\"\npath = \"apps/api/src\"\n\
+                     absent = [\"ui\", \"presentation\"]\n";
+        assert!(Declared::new(parse_declaration(units).unwrap()).is_ok());
     }
 
     #[test]
