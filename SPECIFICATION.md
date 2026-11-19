@@ -1755,7 +1755,9 @@ entry can be told, is one.
   without the word, and what spans files, says how to run or operate something, or lies outside the repository moves
   to `docs/knowledge/`, tied to the code by `follows`. A line that holds both is named under the first heading alone,
   as taking the comment out settles both. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
-  strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read. A project that declares `todo_link`
+  strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read. The check has a floor: when no code file
+  was read, it fails (`no code file was read: the <stack> layout finds none in the tree`) instead of passing with
+  nothing read. A project that declares `todo_link`
   may keep a `TODO` that names the issue tracking its work: see "Work put off that an issue tracks".
 - **No comment switches the type checker off**, in the comments the marker check reads: in Python, `# type: ignore`
   and `# mypy: ignore`, `# pyright: ignore`, `# pyrefly: ignore` or `# ty: ignore`, with or without codes, and the
