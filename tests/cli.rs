@@ -1432,9 +1432,7 @@ fn the_units_of_the_readme_and_of_the_declaration_init_writes_pass_the_check_onc
         + "\n"
         + &readme_units();
     let mut declarations = vec![("python (README)", readme)];
-    // Not Rust's yet: the package create writes for its app's entry sits in the unit's directory, where the structure
-    // check fails it as code outside the layers
-    for stack in ["python", "typescript"] {
+    for stack in ["python", "typescript", "rust"] {
         let root = tempfile::tempdir().unwrap();
         let arg = root_arg(root.path());
         let out = run(&[

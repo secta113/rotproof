@@ -387,10 +387,12 @@ fn units_comment(stack: &str) -> String {
             "apps/cli/src",
             "apps/cli/src/main.tsx",
         ),
+        // The crates of the app sit in a directory of their own, beside the package of its entry file: that package's
+        // manifest in the unit's directory would be code outside the layers
         "rust" => (
             "packages/billing",
             "packages/billing",
-            "apps/cli",
+            "apps/cli/crates",
             "apps/cli/src/main.rs",
         ),
         _ => (

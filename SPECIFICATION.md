@@ -994,7 +994,9 @@ Cargo refuses two crates of one name; the unit's directory holds the crates and 
 `Cargo.toml` it writes then is a workspace with no package, naming each crate in `members` (a glob such as
 `crates/*` would match the directory of a unit and fail in Cargo), and `src/main.rs` is not written. The entry file
 of a unit is `<dir>/src/main.rs` in Rust, and `rotproof create` makes with it the package that holds it, `<dir>/Cargo.toml`
-(named for the unit, and for the unit and its directory from its second entry on), which lists no dependency, since the
+(named for the unit, and for the unit and its directory from its second entry on, and so outside the unit's own
+directory, which holds no manifest: an app keeps its crates in a directory of their own, as the example `rotproof init`
+writes does, `path = "apps/cli/crates"`, `root = "apps/cli"`, `entry = ["apps/cli/src/main.rs"]`), which lists no dependency, since the
 dependencies check fails one the code does not name, and which `members` names; an entry file declared in another form, that is not there, fails the
 run before anything is written, and one that is there is the project's, with its package. When the root `Cargo.toml` is
 there already, `rotproof create` changes `members` and nothing else of it, only to add the crates and packages it made
