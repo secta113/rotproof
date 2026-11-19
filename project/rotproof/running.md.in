@@ -14,6 +14,12 @@ records are in `.rotproof/AGENTS.md`.
   `--yes` first and read the layers it lists: it makes each layer that is neither present nor declared in `absent`. List
   a layer the project does not want in `absent` and run it again; pass `--yes` only when the list is what the project
   should have. Never run it to upgrade: that is `init`.
+- **`rotproof baseline`: only when the user asked you to freeze the violations there are, and only once.** It writes
+  `.config/rotproof-baseline.toml` from what `rotproof check` fails on now and refuses while `moving` in
+  `.config/rotproof.toml` lists a path. After that, `rotproof baseline --prune` is the only run: it removes the entries
+  that match nothing, after you fixed a violation. Never run it to make a new violation pass, never write the file
+  again and never raise its `count`: the check fails on more entries than the count, and the diff shows a file written
+  again.
 - **`rotproof index`: after a knowledge document is added, changed or deprecated,** and, when a unit is shared, after
   the imports between units change (it rewrites `.rotproof/readers.md`). Never edit the files it writes by hand. A
   document it lists as left out is a document to fix, not an index to edit.

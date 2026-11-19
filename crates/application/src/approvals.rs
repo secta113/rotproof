@@ -7,6 +7,7 @@ use std::io;
 
 use crate::tree::{Lookup, lookup, read_written};
 use domain::approvals::{APPROVALS, Kept, parse, problems, sort, with_kept, without};
+use domain::declaration::Declared;
 use domain::direction::Forbidden;
 use domain::tree::Written;
 use protocol::outbound::Parsers;
@@ -64,9 +65,13 @@ pub fn read(tree: &dyn Tree) -> io::Result<Approvals> {
     })
 }
 
-/// Every import the table forbids in the project, and every entry of the table of I/O the inner layers use, approved or
-/// not: `None` for a repository of records only, which has no layers. `Err` when the declaration cannot be read.
-fn forbidden(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Option<Vec<Forbidden>>, String> {
+/// Every import the table forbids in the project, and every entry of the table of I/O the inner layers use, approved
+/// or not, with the declaration they were found by: `None` for a repository of records only, which has no layers.
+/// `Err` when the declaration cannot be read.
+pub(crate) fn project(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+) -> Result<Option<(Declared, Vec<Forbidden>)>, String> {
     let structure = crate::structure::problems(tree).map_err(|e| e.to_string())?;
     let Some(declared) = structure.declared else {
         return Err(structure
@@ -87,7 +92,12 @@ fn forbidden(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Option<Vec<Forbid
             .map_err(|e| e.to_string())?
             .forbidden,
     );
-    Ok(Some(found))
+    Ok(Some((declared, found)))
+}
+
+/// Every import the table forbids in the project, as [`project`] finds them: `None` for a repository of records only.
+fn forbidden(tree: &dyn Tree, parsers: &dyn Parsers) -> Result<Option<Vec<Forbidden>>, String> {
+    Ok(project(tree, parsers)?.map(|(_, found)| found))
 }
 
 /// The forbidden imports of `import` by `file` that no entry approves yet, for the person to see before approving.

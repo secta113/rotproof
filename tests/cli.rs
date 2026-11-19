@@ -7441,6 +7441,31 @@ fn approve_with_git(root: &Path, config: Option<&str>, args: &[&str]) -> Output 
 }
 
 #[test]
+fn the_guide_and_the_help_say_the_baseline_is_written_once_by_the_users_ask_and_never_raised() {
+    let flat = |text: String| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    for stack in ["python", "typescript", "rust"] {
+        let guide = flat(stdout(&run(&["guide", "--stack", stack])));
+        assert!(
+            guide.contains("**A baseline is written once, when the user asks, and only shrinks.**")
+                && guide.contains("Never run `rotproof baseline` again, never add an entry, and never raise `count`"),
+            "{stack}: {guide}"
+        );
+    }
+    let help = flat(stdout(&run(&["baseline", "--help"])));
+    assert!(
+        help.contains("Run it only when the user asked for it, never write the baseline again and never raise its count"),
+        "{help}"
+    );
+    // The page on running Rotproof, which every project gets
+    let root = clean_repo();
+    let page = flat(fs::read_to_string(root.path().join(".rotproof/running.md")).unwrap());
+    assert!(
+        page.contains("`rotproof baseline`: only when the user asked you to freeze the violations there are, and only once."),
+        "{page}"
+    );
+}
+
+#[test]
 fn approve_needs_a_reason_and_asks_nothing_and_prune_removes_only_what_matches_nothing() {
     let root = clean_repo();
     let r = root.path();
@@ -7556,6 +7581,275 @@ fn approve_needs_a_reason_and_asks_nothing_and_prune_removes_only_what_matches_n
     assert!(!fs::read_to_string(&path).unwrap().contains("[[kept]]"));
     let out = run(&["--root", &root_arg(r), "check"]);
     assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+}
+
+/// `rotproof baseline ...` in `root`.
+fn baseline_in(root: &Path, args: &[&str]) -> Output {
+    let root = root_arg(root);
+    let mut all = vec!["--root", root.as_str(), "baseline"];
+    all.extend_from_slice(args);
+    run(&all)
+}
+
+/// What `domain/model.py` holds in the tests of the baseline: three violations, each a finding of its own
+const THREE: &str = "import infrastructure.db\nimport application\nimport shutil\n\n\ndef f(a):\n    shutil.rmtree(a)\n";
+
+#[test]
+fn a_baseline_freezes_what_fails_once_a_new_violation_fails_and_a_line_says_how_many_remain() {
+    let root = clean_repo();
+    let r = root.path();
+    let path = r.join(".config/rotproof-baseline.toml");
+    let said = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
+    put(r, "domain/model.py", THREE);
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(1), "{text}");
+    // Nothing is printed of a baseline that is not there
+    assert!(!text.contains("baseline"), "{text}");
+
+    let out = baseline_in(r, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}{}", stdout(&out), said(&out));
+    assert!(
+        stdout(&out).contains("wrote .config/rotproof-baseline.toml: 3 entries"),
+        "{}",
+        stdout(&out)
+    );
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.contains("count = 3\n"), "{written}");
+    for entry in ["infrastructure.db", "application", "shutil"] {
+        assert!(
+            written.contains(&format!(
+                "[[entry]]\nfrom = \"domain/model.py\"\nimport = \"{entry}\"\n"
+            )),
+            "{written}"
+        );
+    }
+    // No reason and no name: nobody decided to keep it
+    assert!(
+        !written.contains("reason") && !written.contains("by = "),
+        "{written}"
+    );
+
+    // What it froze passes, and the one line says how many remain, without naming any
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(0), "{text}");
+    assert!(
+        text.contains("baseline: 3 entries remain in .config/rotproof-baseline.toml\n"),
+        "{text}"
+    );
+    assert!(!text.contains("infrastructure.db"), "{text}");
+
+    // A new violation fails: another import in the file, and the same import in another file
+    put(r, "domain/model.py", &format!("import tempfile\n{THREE}"));
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("uses `tempfile`") && !text.contains("uses `shutil`"),
+        "{text}"
+    );
+    put(r, "domain/model.py", THREE);
+    put(r, "domain/other.py", "import infrastructure.db\n");
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("domain/other.py:1: imports infrastructure.db"),
+        "{text}"
+    );
+    fs::remove_file(r.join("domain/other.py")).unwrap();
+
+    // It is written once: the file is there, and is not written again, which would take a new violation in
+    put(r, "domain/model.py", &format!("import tempfile\n{THREE}"));
+    let out = baseline_in(r, &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("is there already"), "{}", said(&out));
+    assert_eq!(fs::read_to_string(&path).unwrap(), written);
+
+    // An entry that matches nothing fails, and `--prune` removes it and lowers the count
+    put(
+        r,
+        "domain/model.py",
+        "import infrastructure.db\nimport shutil\n",
+    );
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("baselined, but no such forbidden import: application in domain/model.py"),
+        "{text}"
+    );
+    let out = baseline_in(r, &["--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}{}", stdout(&out), said(&out));
+    assert!(
+        stdout(&out).contains(
+            "removed from .config/rotproof-baseline.toml: application in domain/model.py"
+        ) && stdout(&out).contains("count in .config/rotproof-baseline.toml is 2 now, from 3"),
+        "{}",
+        stdout(&out)
+    );
+    let left = fs::read_to_string(&path).unwrap();
+    assert!(
+        left.contains("count = 2\n") && !left.contains("\"application\""),
+        "{left}"
+    );
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(0), "{text}");
+    assert!(text.contains("baseline: 2 entries remain"), "{text}");
+    let out = baseline_in(r, &["--prune"]);
+    assert!(
+        stdout(&out).contains("nothing to prune"),
+        "{}",
+        stdout(&out)
+    );
+
+    // More entries than the count fail, though the entry added matches a violation: a new one, added by hand
+    put(
+        r,
+        "domain/model.py",
+        "import infrastructure.db\nimport shutil\nimport socket\n",
+    );
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(1), "{text}");
+    fs::write(
+        &path,
+        format!("{left}\n[[entry]]\nfrom = \"domain/model.py\"\nimport = \"socket\"\n"),
+    )
+    .unwrap();
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("the baseline stays within its count:\n  .config/rotproof-baseline.toml: 3 entries, and count is 2,"),
+        "{text}"
+    );
+    fs::write(&path, &left).unwrap();
+    put(
+        r,
+        "domain/model.py",
+        "import infrastructure.db\nimport shutil\n",
+    );
+
+    // A count above the entries leaves room, which pruning takes away though it removes no entry
+    fs::write(&path, left.replace("count = 2\n", "count = 5\n")).unwrap();
+    let out = baseline_in(r, &["--prune"]);
+    assert!(
+        stdout(&out).contains("is 2 now, from 5"),
+        "{}",
+        stdout(&out)
+    );
+
+    // The file is spent once everything in it is fixed
+    put(r, "domain/model.py", "x = 1\n");
+    let out = baseline_in(r, &["--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}{}", stdout(&out), said(&out));
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(0), "{text}");
+    assert!(
+        text.contains(
+            "baseline: no entry remains in .config/rotproof-baseline.toml: remove the file\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_baseline_leaves_the_approved_to_the_approvals_and_is_refused_where_it_cannot_freeze() {
+    let named = Some("[user]\n\tname = Someone Else\n");
+    let root = clean_repo();
+    let r = root.path();
+    let path = r.join(".config/rotproof-baseline.toml");
+    let said = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
+
+    // Nothing to freeze
+    let out = baseline_in(r, &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("nothing to baseline"), "{}", said(&out));
+    assert!(!path.exists());
+    // Nothing to prune without a file
+    let out = baseline_in(r, &["--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}", said(&out));
+    assert!(!path.exists());
+
+    // An approved import is the approval's: the baseline does not hold it
+    put(
+        r,
+        "domain/model.py",
+        "import infrastructure.db\nimport application\n",
+    );
+    let approve = |import: &str| {
+        let out = approve_with_git(
+            r,
+            named,
+            &["domain/model.py", import, "--reason", "the ORM"],
+        );
+        assert_eq!(out.status.code(), Some(0), "{}", said(&out));
+    };
+    approve("infrastructure.db");
+    let out = baseline_in(r, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", said(&out));
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(
+        written.contains("count = 1\n")
+            && written.contains("\"application\"")
+            && !written.contains("infrastructure.db"),
+        "{written}"
+    );
+    // A baselined import approved later is the approval's, and its entry matches nothing
+    approve("application");
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("baselined, but no such forbidden import: application in domain/model.py"),
+        "{text}"
+    );
+    let out = baseline_in(r, &["--prune"]);
+    assert_eq!(out.status.code(), Some(0), "{}", said(&out));
+    let (code, text) = checked(r);
+    assert_eq!(code, Some(0), "{text}");
+
+    // Code still moving: the baseline waits until everything is in a layer
+    let root = declared(
+        "stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\nmoving = [\"legacy\"]\n",
+    );
+    let m = root.path();
+    let out = create(&["--root", &root_arg(m), "create", "--yes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    put(m, "legacy/a.py", "x = 1\n");
+    put(m, "domain/model.py", "import infrastructure.db\n");
+    let out = baseline_in(m, &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        said(&out).contains("`moving` in .config/rotproof.toml still lists legacy"),
+        "{}",
+        said(&out)
+    );
+    assert!(!m.join(".config/rotproof-baseline.toml").exists());
+
+    // A repository of records only has no layers to freeze, and an entry there matches nothing
+    let records = repo();
+    let out = baseline_in(records.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said(&out).contains("no layers"), "{}", said(&out));
+    put(
+        records.path(),
+        ".config/rotproof-baseline.toml",
+        "count = 1\n\n[[entry]]\nfrom = \"a.py\"\nimport = \"b\"\n",
+    );
+    let (code, text) = checked(records.path());
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("baselined, but no such forbidden import: b in a.py"),
+        "{text}"
+    );
+
+    // A baseline that cannot be read fails, and a count that is missing is said
+    let broken = clean_repo();
+    put(
+        broken.path(),
+        ".config/rotproof-baseline.toml",
+        "[[entry]]\nfrom = \"a.py\"\nimport = \"b\"\n",
+    );
+    let (code, text) = checked(broken.path());
+    assert_eq!(code, Some(1), "{text}");
+    assert!(text.contains("count is missing"), "{text}");
+    let out = baseline_in(broken.path(), &["--prune"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
 }
 
 #[test]

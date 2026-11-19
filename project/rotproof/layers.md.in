@@ -38,4 +38,12 @@
   fixing an approved import, run `rotproof approve --prune`, which removes such entries), and fails when the
   approvals are more than `approved_max` in `.config/rotproof.toml` lets the project hold, if it has one. Raising
   `approved_max` is the user's decision: never add, raise or remove it to pass the check.
+- **A baseline is written once, when the user asks, and only shrinks.** Run `rotproof baseline` only when the user asked
+  you to freeze what still fails (it refuses while `moving` lists a path, and when the file is there): it writes
+  `.config/rotproof-baseline.toml` with every forbidden import and every use of I/O of the inner layers that no
+  approval covers, and the count of them. `rotproof check` passes what is in it, fails on any other violation, prints on
+  every run how many entries remain, fails on an entry that matches nothing (after fixing one, run `rotproof baseline
+  --prune`, which removes such entries and lowers the count), and fails on more entries than the count. Never run
+  `rotproof baseline` again, never add an entry, and never raise `count` to pass the check: a file written again larger
+  is a new violation let through, and the diff shows it. A new violation is fixed, or approved when the user asks.
 {units}{rules}{ui}
