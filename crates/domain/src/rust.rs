@@ -508,14 +508,18 @@ const CFG_TEST: &str = "#[cfg(test)]";
 /// tests { ... }`, a function, a `use`, a `mod tests;`), and the whole of it for a file that starts with
 /// `#![cfg(test)]`: what a test compiles and the program does not. The same offsets and lines as `code`.
 pub fn without_tests(code: &str) -> String {
+    blanked(code, &test_spans(code))
+}
+
+/// The byte ranges of the code alone ([`code`]) that are a test: each item under `#[cfg(test)]`, from its attribute to
+/// its end, and the whole of a file that starts with `#![cfg(test)]`. What [`without_tests`] blanks.
+pub fn test_spans(code: &str) -> Vec<(usize, usize)> {
     if code.contains("#![cfg(test)]") {
-        return blanked(code, &[(0, code.len())]);
+        return vec![(0, code.len())];
     }
-    let skipped: Vec<(usize, usize)> = code
-        .match_indices(CFG_TEST)
+    code.match_indices(CFG_TEST)
         .map(|(at, _)| (at, item_end(code, at)))
-        .collect();
-    blanked(code, &skipped)
+        .collect()
 }
 
 /// The names of the modules a file declares without a body under `#[cfg(test)]` (`#[cfg(test)] mod tests;`), whose
@@ -1115,6 +1119,20 @@ let k = '/'; let l = 'é'; let m = '\u{2F}'; // four
         // In a string or a comment it is nothing
         let text = "// #[cfg(test)]\nfn a() { let _ = \"#[cfg(test)]\"; }\n";
         assert_eq!(without_tests(&code(text)), code(text));
+    }
+
+    #[test]
+    fn the_spans_of_the_tests_are_what_without_tests_blanks() {
+        let source = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\nfn b() {}\n";
+        let code = code(source);
+        let spans = test_spans(&code);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(
+            &source[spans[0].0..spans[0].1],
+            "#[cfg(test)]\nmod tests {\n    fn t() {}\n}"
+        );
+        assert_eq!(test_spans("#![cfg(test)]\nfn a() {}\n"), [(0, 24)]);
+        assert!(test_spans("fn a() {}\n").is_empty());
     }
 
     #[test]

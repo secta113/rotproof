@@ -34,6 +34,7 @@ rotproof --root <repository> init    # after upgrading Rotproof: update the proj
 rotproof --root <repository> create  # list the layers it would make, writing nothing (makes docs/ when it makes no layer)
 rotproof --root <repository> create --yes  # make the layers .config/rotproof.toml declares, the records and the guide
 rotproof --root <repository> check   # check the layers and the records; exits 1 when a rule is broken
+rotproof --root <repository> sizes   # print how many lines of code each layer holds, and the longest files (see "The size of the code")
 rotproof --root <repository> index   # write the generated files that are out of date (docs/'s index files and the knowledge rules, and who reads the shared units)
 rotproof --root <repository> approve <file> <import>... --reason "<why>"  # keep a forbidden import (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
@@ -1985,6 +1986,50 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next (th
   object holds) narrows nothing, as in a layer.
 - **In Rust the files are counted and no order is given:** a layer is a crate, and what a crate imports is the
   dependencies of its manifest, which are no files' to order.
+
+### The size of the code
+
+`rotproof check` prints, on every run and apart from the findings and the warnings, the share of the lines of code that
+each layer holds, and fails nothing for it. `rotproof sizes` gives the numbers behind it. Rotproof states them and
+judges none: no share is too little or too much, which is for the reader to say from what the project is for (the page
+on running Rotproof, `.rotproof/running.md`, says how to read them, with no line that judges).
+
+```
+sizes: domain 61%, application 22%, infrastructure 16%, protocol 2%, composition <1% of the lines of code
+sizes: no code in presentation
+sizes: domain defines 14 types and no function
+```
+
+- **What is counted:** the lines of code of the code files in the layers, in the entry files and in the paths of
+  `moving` and of `unchecked`: a line with something on it that is not white space, not a comment, not documentation
+  and not a test. A line that holds code and a trailing comment is a line of code, and so is a line inside a string.
+  Comments are read by the readers of the language (`#` in Python, `//` and `/* */` in TypeScript, `//`, `///`, `//!`
+  and `/* */` in Rust), and a docstring (a string that stands first in a module, a class or a function) is
+  documentation, as a doc comment is in Rust. A file that is not code (a template, JSON) is not counted.
+- **Tests are left out as the checks of the code leave them out:** in Python what is in `tests/`, in TypeScript the
+  files the layout names as tests (`*.test.*`, `*.spec.*`, `__tests__/`), in Rust the items under `#[cfg(test)]` and
+  the files of a `#[cfg(test)] mod x;`. A file is counted once: one that is in `moving` is not also in `unchecked`.
+- **The share is of all the lines counted in the unit:** the layers, the entry files, `moving` and `unchecked`. A level
+  of a layer is counted in its layer too, and is a row of its own under it in `rotproof sizes`, not a part of the total.
+  Shares are whole percents, rounded to the nearest; `<1%` is some code that rounds to none, so that no code is said to
+  be nothing, and `0%` is none.
+- **The line of `rotproof check`** lists the layers that hold code, the one with the most lines first, then `moving` and
+  `unchecked` when they hold some, so that the shares add up. It is one line for each unit when the project declares
+  units (`sizes (billing): ...`), and a repository of records only has none. Two more lines are printed only when they
+  are so: the layers that hold no code, and a `domain` whose files define at least one type and no function
+  (`domain defines 14 types and no function`; `1 type` for one). A function is a free function or a method with a
+  body (in a class, an `impl` or a trait), and a name bound to an arrow function or a function expression in
+  TypeScript; a type is a class, struct, enum, union, interface, type alias, trait or protocol. A constant, a variable,
+  a module, a variant, an `impl` block, an associated type and a trait's signature with no body are neither, and so
+  is anything under `#[cfg(test)]`. A `domain` that holds code and defines neither a function nor a type (constants
+  alone) says `domain holds 40 lines of code and defines no function or type`. The kind is read from the outline of each
+  file, the one that `follows` reads, which it does not change.
+- **`rotproof sizes`** prints, for each unit (`unit <name>:`, and `unit outside the units:` for code in `moving` or
+  `unchecked` that no unit's root holds), a table with the files, the lines and the share of each layer, its levels
+  under it, then the entry files, `moving` and `unchecked` (a row for each field the declaration lists a path in), and
+  the total; the layers with the most lines come first. Under the table, the three files of each layer with the most
+  lines, the longest first. It writes nothing and fails nothing: it exits 2 when the declaration cannot be read or a file
+  cannot be read at all, and says so when there is nothing to measure (`stack = "none"`). It prints text only.
 
 ### The map in `AGENTS.md`
 

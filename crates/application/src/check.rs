@@ -93,6 +93,7 @@ fn code(
         more: order.more,
     });
     report.outside = direction.outside.iter().map(Outside::said).collect();
+    report.sizes = Some(crate::sizes::measure(tree, parsers, declared)?);
     report.templates = direction.templates.map(|premise| Templates {
         read_as: premise.read_as,
         not_judged: premise.not_judged,

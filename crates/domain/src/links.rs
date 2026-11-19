@@ -312,6 +312,7 @@ mod tests {
             names: names.iter().map(|n| n.to_string()).collect(),
             start,
             end,
+            kind: crate::definitions::Kind::Other,
         };
         let outline = [
             at(&["f"], 0, 9),

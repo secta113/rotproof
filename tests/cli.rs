@@ -4595,7 +4595,7 @@ fn a_typescript_test_is_told_by_its_name_and_every_rule_reads_it_as_one_and_says
         "export const Wrapper = () => <p />;\n",
     );
     let out = run(&["--root", &root_arg(r), "check"]);
-    let said = stdout(&out);
+    let said = without_sizes(&stdout(&out));
     assert_eq!(
         said,
         "tests: 4 files read as tests (*.test.*, *.spec.*, __tests__/)\n\
@@ -5742,7 +5742,7 @@ fn every_stack_with_layers_checks_everything() {
         )
         .unwrap();
         let out = run(&["--root", &arg, "check"]);
-        let said = stdout(&out);
+        let said = without_sizes(&stdout(&out));
         // Nothing is skipped: the one line says that the layers, their direction and comments included, kept the rules.
         // Before it, a TypeScript project says how many files it read as tests, even when there are none
         let tests = if stack == "typescript" {
@@ -6890,7 +6890,7 @@ fn a_comment_tied_to_an_issue_is_listed_on_every_run_and_fails_nothing() {
     );
     let arg = root_arg(r);
     let out = run(&["--root", &arg, "check"]);
-    let said = stdout(&out);
+    let said = without_sizes(&stdout(&out));
     assert_eq!(out.status.code(), Some(0), "{said}");
     // Apart from the findings, and each line with its place and its reference, sorted by path
     assert_eq!(
@@ -6901,7 +6901,7 @@ fn a_comment_tied_to_an_issue_is_listed_on_every_run_and_fails_nothing() {
     assert!(out.stderr.is_empty());
     // On every run, and the same each time
     let again = run(&["--root", &arg, "check"]);
-    assert_eq!(stdout(&again), said);
+    assert_eq!(without_sizes(&stdout(&again)), said);
     // What a CI step reads: the place is the first field of a line, the reference the last
     let read: Vec<(String, String)> = said
         .lines()
@@ -6922,7 +6922,10 @@ fn a_comment_tied_to_an_issue_is_listed_on_every_run_and_fails_nothing() {
     write_file(r, "domain/model.py", "X = 1\n");
     write_file(r, "tests/test_price.py", "y = 2\n");
     let out = run(&["--root", &arg, "check"]);
-    assert_eq!(stdout(&out), "the layers and every record keep the rules\n");
+    assert_eq!(
+        without_sizes(&stdout(&out)),
+        "the layers and every record keep the rules\n"
+    );
 }
 
 #[test]
@@ -11064,4 +11067,311 @@ fn the_guide_says_what_is_allowed_in_an_inner_layer_and_that_the_list_is_the_per
         let text = fs::read_to_string(root.path().join(".config/rotproof.toml")).unwrap();
         assert!(!text.contains("allowed"), "{stack}: {text}");
     }
+}
+
+/// `said` without the lines `rotproof check` prints of the size of the code, for a test of what is printed around them.
+fn without_sizes(said: &str) -> String {
+    said.lines()
+        .filter(|line| !line.starts_with("sizes"))
+        .map(|line| format!("{line}\n"))
+        .collect()
+}
+
+/// The lines of `said` that start with `prefix`, in order.
+fn lines_starting<'a>(said: &'a str, prefix: &str) -> Vec<&'a str> {
+    said.lines()
+        .filter(|line| line.starts_with(prefix))
+        .collect()
+}
+
+#[test]
+fn sizes_counts_the_lines_of_code_of_each_layer_and_check_sums_them_up_in_one_line() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    declare(
+        r,
+        "stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\nmoving = [\"legacy\"]\nunchecked = [\"gen\"]\n",
+    );
+    write_file(
+        r,
+        "domain/rules.py",
+        "def total(a, b):\n    # sum\n    return a + b\n\n\nclass Money:\n    pass\n",
+    );
+    for name in ["a", "b", "c"] {
+        write_file(r, &format!("domain/{name}.py"), "x = 1\n");
+    }
+    write_file(
+        r,
+        "application/use.py",
+        "\"\"\"Use.\"\"\"\nfrom domain import rules\n\n\ndef run():\n    \"\"\"Run.\"\"\"\n    return rules.total(1, 2)\n",
+    );
+    write_file(r, "infrastructure/outbound/db.py", "x = 1\n");
+    write_file(r, "legacy/old.py", "o = 1\n# c\np = 2\n");
+    write_file(r, "gen/g.py", "g = 1\n");
+    // A test is none, wherever it is
+    write_file(
+        r,
+        "tests/test_rules.py",
+        "def test_a():\n    assert True\n    assert True\n",
+    );
+    let out = run(&["--root", &arg, "sizes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let expected = "\
+lines of code (not counted: blank lines, comments, tests); share: of the total row
+
+                           files  lines  share
+domain                         5      7    50%
+application                    2      3    21%
+infrastructure                 4      1     7%
+  infrastructure.inbound       1      0     0%
+  infrastructure.outbound      2      1     7%
+composition                    1      0     0%
+protocol                       3      0     0%
+  protocol.inbound             1      0     0%
+  protocol.outbound            1      0     0%
+moving                         1      2    14%
+unchecked                      1      1     7%
+total                         17     14
+
+longest files:
+  domain
+    4  domain/rules.py
+    1  domain/a.py
+    1  domain/b.py
+  application
+    3  application/use.py
+  infrastructure
+    1  infrastructure/outbound/db.py
+";
+    assert_eq!(stdout(&out), expected);
+    // `check` says it in a line, every layer with code in it, and which have none in another; it fails nothing
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert_eq!(
+        lines_starting(&stdout(&out), "sizes"),
+        [
+            "sizes: domain 50%, application 21%, infrastructure 7%, moving 14%, unchecked 7% of the lines of code",
+            "sizes: no code in composition, protocol",
+        ]
+    );
+}
+
+#[test]
+fn check_says_a_domain_of_types_and_no_function_and_sizes_says_it_too_in_each_stack() {
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    // A project that has no code says which layers hold none, and no share
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert_eq!(
+        lines_starting(&said, "sizes"),
+        ["sizes: no code in composition, infrastructure, application, protocol, domain"]
+    );
+    // Code that defines neither a function nor a type
+    write_file(r, "domain/constants.py", "A = 1\nB = 2\n");
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert_eq!(
+        lines_starting(&said, "sizes"),
+        [
+            "sizes: domain 100% of the lines of code",
+            "sizes: no code in composition, infrastructure, application, protocol",
+            "sizes: domain holds 2 lines of code and defines no function or type",
+        ]
+    );
+    // Types and no function: a class with a method is a function too, so only a class that holds data is none
+    write_file(
+        r,
+        "domain/constants.py",
+        "class Money:\n    amount = 1\n\n\nclass Rate:\n    value = 2\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    let facts = lines_starting(&said, "sizes: domain defines");
+    assert_eq!(facts, ["sizes: domain defines 2 types and no function"]);
+    let said = stdout(&run(&["--root", &arg, "sizes"]));
+    assert!(
+        said.contains("\ndomain defines 2 types and no function\n"),
+        "{said}"
+    );
+    // A method is a function, and the fact is gone
+    write_file(
+        r,
+        "domain/constants.py",
+        "class Money:\n    amount = 1\n\n    def double(self):\n        return self.amount * 2\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(!said.contains("domain defines"), "{said}");
+
+    // TypeScript: an interface and a type alias, no function
+    let root = declared("stack = \"typescript\"\nareas = [\"a\"]\nui_design = \"none\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    write_file(
+        r,
+        "src/domain/model.ts",
+        "export interface Money { amount: number }\nexport type Rate = { value: number };\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains("sizes: domain defines 2 types and no function\n"),
+        "{said}"
+    );
+    write_file(
+        r,
+        "src/domain/model.ts",
+        "export interface Money { amount: number }\nexport const double = (m: Money) => m.amount * 2;\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(!said.contains("domain defines"), "{said}");
+
+    // Rust: a struct and an enum, no function, and a function in a test module is none
+    let root = declared("stack = \"rust\"\nareas = [\"a\"]\nui_design = \"none\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    write_file(
+        r,
+        "crates/domain/src/lib.rs",
+        "pub struct Money(pub u32);\npub enum Rate { A }\n\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains("sizes: domain defines 2 types and no function\n"),
+        "{said}"
+    );
+    write_file(
+        r,
+        "crates/domain/src/lib.rs",
+        "pub struct Money(pub u32);\nimpl Money {\n    pub fn double(&self) -> u32 {\n        self.0 * 2\n    }\n}\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(!said.contains("domain defines"), "{said}");
+}
+
+#[test]
+fn sizes_leaves_out_the_tests_of_a_typescript_and_of_a_rust_project() {
+    let root = declared("stack = \"typescript\"\nareas = [\"a\"]\nui_design = \"none\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    let code = "// note\nexport const a = 1; // trailing\n\n/** doc\n * more */\nexport function f() {\n  return a;\n}\n";
+    write_file(r, "src/domain/a.ts", code);
+    write_file(r, "src/domain/a.test.ts", code);
+    write_file(r, "src/domain/b.spec.tsx", code);
+    write_file(r, "src/domain/__tests__/c.ts", code);
+    let said = stdout(&run(&["--root", &arg, "sizes"]));
+    let row = lines_starting(&said, "domain");
+    // `index.ts` holds the one line `export {};`, and `a.ts` four: the three tests and the comments add none
+    assert_eq!(row.len(), 1, "{said}");
+    assert_eq!(
+        row[0].split_whitespace().take(3).collect::<Vec<_>>(),
+        ["domain", "2", "5"],
+        "{said}"
+    );
+
+    let root = declared("stack = \"rust\"\nareas = [\"a\"]\nui_design = \"none\"\n");
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    write_file(
+        r,
+        "crates/domain/src/lib.rs",
+        "//! The domain.\n\npub mod a;\n\n#[cfg(test)]\nmod tests;\n\n/// Doc.\npub fn f() -> u32 {\n    // note\n    1\n}\n\n#[cfg(test)]\nmod more {\n    fn t() {}\n}\n",
+    );
+    write_file(r, "crates/domain/src/a.rs", "pub struct A;\n");
+    write_file(r, "crates/domain/src/tests.rs", "fn t() {}\nfn u() {}\n");
+    let said = stdout(&run(&["--root", &arg, "sizes"]));
+    let row = lines_starting(&said, "domain");
+    assert_eq!(row.len(), 1, "{said}");
+    // `pub mod a;`, the head of `f`, its `1` and its `}`, and the struct, in two files
+    assert_eq!(
+        row[0].split_whitespace().take(3).collect::<Vec<_>>(),
+        ["domain", "2", "5"],
+        "{said}"
+    );
+}
+
+#[test]
+fn sizes_is_said_for_each_unit_and_for_what_no_unit_holds() {
+    let root = declared(&two_units("true").replacen(
+        "\n\n[[unit]]",
+        "\nmoving = [\"legacy\"]\n\n[[unit]]",
+        1,
+    ));
+    let r = root.path();
+    let arg = root_arg(r);
+    assert!(
+        create(&["--root", &arg, "create", "--yes"])
+            .status
+            .success()
+    );
+    write_file(r, "packages/core/src/core/domain/a.py", "a = 1\nb = 2\n");
+    write_file(r, "packages/billing/src/billing/domain/a.py", "a = 1\n");
+    write_file(r, "legacy/old.py", "o = 1\n");
+    let out = run(&["--root", &arg, "sizes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let said = stdout(&out);
+    assert_eq!(
+        lines_starting(&said, "unit "),
+        ["unit core:", "unit billing:", "unit outside the units:"],
+        "{said}"
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    let said = stdout(&out);
+    let lines = lines_starting(&said, "sizes");
+    assert_eq!(
+        lines[0], "sizes (core): domain 100% of the lines of code",
+        "{said}"
+    );
+    assert_eq!(
+        lines[1],
+        "sizes (core): no code in composition, infrastructure, application, protocol"
+    );
+    assert!(
+        lines.contains(&"sizes (billing): domain 100% of the lines of code"),
+        "{said}"
+    );
+    assert!(
+        lines.contains(&"sizes (outside the units): moving 100% of the lines of code"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_repository_of_records_only_has_nothing_to_measure_and_sizes_fails_without_a_declaration() {
+    let root = repo();
+    let arg = root_arg(root.path());
+    let out = run(&["--root", &arg, "sizes"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    assert!(
+        stdout(&out)
+            .starts_with("nothing to measure: .config/rotproof.toml declares stack = \"none\""),
+        "{}",
+        stdout(&out)
+    );
+    let out = run(&["--root", &arg, "check"]);
+    assert!(lines_starting(&stdout(&out), "sizes").is_empty());
+    // No declaration: the answer every command gives
+    let empty = tempfile::tempdir().unwrap();
+    let out = run(&["--root", &root_arg(empty.path()), "sizes"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(".config/rotproof.toml"));
 }

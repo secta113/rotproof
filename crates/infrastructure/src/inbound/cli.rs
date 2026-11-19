@@ -1,10 +1,11 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which keeps a
 //! forbidden import for a reason it is given), `rotproof baseline` (which freezes the violations there are, once),
-//! `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof new`
-//! (which starts a knowledge document) and `rotproof log` (which adds an entry to the log), and the help that leads
-//! from one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and how it
-//! exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a
-//! project's Claude Code settings before 1.0, says they are gone and exits 1; no command of that name is left.
+//! `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof new` (which starts a knowledge document),
+//! `rotproof log` (which adds an entry to the log) and `rotproof sizes` (the lines of code each layer holds), and the
+//! help that leads from one to the next. Each command is a call of an input port of `protocol.inbound`; what it
+//! prints and how it exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof
+//! wrote into a project's Claude Code settings before 1.0, says they are gone and exits 1; no command of that name
+//! is left.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,8 @@ use protocol::inbound::{
     BaselinePruned, Baselined, Commands, Initialized, LinkedTodo, LogEntry, Made, Moving,
     MovingFile, Names, NewDocument, Templates, TestFiles, Warning,
 };
+
+use super::sizes;
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
 /// the binary reads its way from here to a checked project.
@@ -129,7 +132,11 @@ on every run that reads a template the template languages and versions it reads 
 another version of the package of a language, the references are not read as it, or not judged at all, and it says so. \
 A test is no code of a layer: its imports and its reads of the environment are not judged, and no code that is not a \
 test imports one (in Python a module of tests/, in TypeScript a file named *.test.* or *.spec.* or in __tests__/); in \
-TypeScript it prints on every run how many files it read as tests (tests:). Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
+TypeScript it prints on every run how many files it read as tests (tests:). Prints on every run, too, the share of the lines of code that each layer holds (sizes:; \
+lines of code without blank lines, comments and tests; the entry files, moving and unchecked count in the whole), \
+one line for each unit, and says apart which layer holds no code, and a domain that defines types and no function, \
+when it is so; `rotproof sizes` gives the numbers behind it. It fails nothing for them. \
+Writes nothing. Exits 1 when a rule is broken, 2 when there is no .config/rotproof.toml or a file \
 cannot be read.";
 
 /// Keeps a project's structure from drifting while LLMs and people change it: the layers (which part of the code may
@@ -215,6 +222,20 @@ enum Command {
     /// Check the layers and the records, and exit non-zero when one breaks the rules
     // Its long help is CHECK_HELP, which `command` puts in
     Check,
+    /// Print how many lines of code each layer holds, in each unit, and the longest files of each layer
+    ///
+    /// Counts the lines of code of the code files in the layers and levels of each unit, the entry files, and the code
+    /// in the paths of moving and of unchecked, each of the last two as a row of its own, without blank lines, comment
+    /// lines (a Python docstring is one) and tests: in Python what is in tests/, in TypeScript the files `rotproof
+    /// check` reads as tests, in Rust the items under #[cfg(test)] and the files of a #[cfg(test)] mod x;. A line that
+    /// holds code and a comment is a line of code. For each part it prints the files read, the lines and the share of
+    /// the unit's lines of code (in whole percent, `<1%` for some that rounds to none), a row for each level under its
+    /// layer, the layers with the most lines first; then, for each layer, its three longest files. Says, too, when a
+    /// domain defines types and no function (a method is a function). It prints facts and judges none: which share is
+    /// too little or too much is for the reader to say, and `rotproof check` prints the shares of the layers on every
+    /// run, in one line. Writes nothing and fails nothing. Exits 2 when the declaration cannot be read or a file cannot
+    /// be read at all, and says there is nothing to measure for a repository of records only.
+    Sizes,
     /// Print the rules Rotproof keeps for a stack, the text of .rotproof/AGENTS.md, writing nothing
     ///
     /// Prints the guide of the stack and the UI the project declares, or of the stack named with --stack, which needs
@@ -425,6 +446,7 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
         }
         Command::Create { yes } => create(commands, &names, root, yes).map(|()| true),
         Command::Check => check(commands, &names, root),
+        Command::Sizes => measured(commands, &names, root).map(|()| true),
         Command::Guide { stack, ui } => {
             commands
                 .guide(root, stack.as_deref(), ui.as_deref())
@@ -721,6 +743,12 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
     if let Some(tests) = &report.tests {
         println!("{}", test_line(tests));
     }
+    // The share of the lines of code each layer holds, on every run: a number is said and no verdict
+    if let Some(found) = &report.sizes {
+        for line in sizes::summary(&found.units) {
+            println!("{line}");
+        }
+    }
     // The methods the net of method names leaves out, on every run: the project's own method of the same name is not
     // the standard library's, and what is left out is not left out silently
     if let Some(line) = &report.io_net {
@@ -754,6 +782,19 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
         }
     }
     Ok(found.is_empty())
+}
+
+/// Print the lines of code each layer holds, unit by unit, as `rotproof sizes`.
+fn measured(commands: &dyn Commands, names: &Names, root: &Path) -> Result<(), String> {
+    let found = commands.sizes(root)?;
+    let none = format!(
+        "nothing to measure: {} declares stack = \"none\" (records only), so the repository has no layers",
+        names.declaration
+    );
+    for line in sizes::detail(&found.units, &none) {
+        println!("{line}");
+    }
+    Ok(())
 }
 
 /// What `print_linked` prints for `linked`: the heading with the count, then a line for each, indented by two spaces,

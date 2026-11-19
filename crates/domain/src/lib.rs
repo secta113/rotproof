@@ -42,6 +42,7 @@ pub mod scaffold;
 pub mod schema;
 pub mod sentence;
 pub mod settings;
+pub mod sizes;
 pub mod structure;
 pub mod suppressions;
 pub mod templates;
