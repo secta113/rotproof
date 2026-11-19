@@ -10,8 +10,8 @@
   left, which to move next and the layers each could go in (not `domain`, `protocol`, `application` or
   `presentation`, for a file that would do I/O there or import a package no list allows there, in Python and
   TypeScript). Move them into the layers in the order it gives, and choose among the layers that pass by what the code
-  is for. It lists, too, every import of such a path (`unchecked` as well) by those four layers, which no check
-  judges: a helper moved there is not a fix.{not_layers}
+  is for; tests stay where they are, so a path of tests in `moving` fails. It lists, too, every import of such a path
+  (`unchecked` as well) by those four layers, which no check judges: a helper moved there is not a fix.{not_layers}
 {direction}
 
 {table}

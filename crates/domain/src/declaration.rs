@@ -784,6 +784,24 @@ impl Declared {
             .any(|moving| within(path, moving))
     }
 
+    /// Whether `path` is, or lies in, a place the layout reads as tests: a path that is not a layer and holds tests
+    /// (Python's `tests/`, at the root of the project and in the directory and the root of each unit), or a test the
+    /// layout tells by its name (TypeScript's `*.test.*`, `__tests__/`). A test is no code to move into a layer.
+    pub fn is_tests(&self, path: &str) -> bool {
+        let Some(layout) = &self.layout else {
+            return false;
+        };
+        let mut places = layout.not_layers_in(&layout.scope);
+        for unit in &self.units {
+            places.extend(layout.not_layers_in(&unit.path));
+            places.extend(layout.not_layers_in(&unit.root));
+        }
+        places.iter().any(|place| within(path, place))
+            || layout.is_test_file(path)
+            // A directory the layout names for tests (`__tests__`) holds no file by this name, so ask for one in it
+            || layout.is_test_file(&format!("{path}/x"))
+    }
+
     /// Whether no check reads the file at `path`: it sits in a path of `unchecked` or of `moving`.
     pub fn is_not_checked(&self, path: &str) -> bool {
         self.is_unchecked(path) || self.is_moving(path)

@@ -5949,6 +5949,73 @@ fn check_counts_the_rust_code_that_is_moving_and_names_none_to_move_first() {
 }
 
 #[test]
+fn moving_lists_no_tests_and_the_tests_in_a_path_that_is_moving_are_not_counted() {
+    // Python: `tests/` is a place the layout reads as tests, so it is no code to move into a layer
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    write_file(r, "tests/test_a.py", "import os\n");
+    write_file(r, "legacy/old.py", "import os\n");
+    declare(
+        r,
+        "stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\nmoving = [\"tests\", \"legacy\"]\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "moving lists tests, which the layout reads as tests: tests stay where they are, so take it out of moving"
+        ),
+        "{said}"
+    );
+    declare(
+        r,
+        "stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\nmoving = [\"legacy\"]\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains("moving: 1 file is not in a layer yet"),
+        "{said}"
+    );
+    // TypeScript: a test is told by its name, so one in a path that is moving is neither counted nor given layers
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let arg = root_arg(r);
+    write_file(r, "src/legacy/old.ts", "export const a = 1;\n");
+    write_file(
+        r,
+        "src/legacy/old.test.ts",
+        "import { a } from \"./old\";\n",
+    );
+    let declaration = |moving: &str| {
+        format!(
+            "stack = \"typescript\"\nareas = [\"a\"]\n{}moving = [{moving}]\n",
+            ui_line("typescript")
+        )
+    };
+    declare(r, &declaration("\"src/legacy\""));
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains("moving: 1 file is not in a layer yet"),
+        "{said}"
+    );
+    assert!(!said.contains("old.test.ts"), "{said}");
+    declare(r, &declaration("\"src/legacy/old.test.ts\""));
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains("moving lists src/legacy/old.test.ts, which the layout reads as tests"),
+        "{said}"
+    );
+}
+
+#[test]
 fn check_leaves_out_of_the_layers_a_moving_file_could_go_in_those_the_io_check_would_fail_it_in() {
     let root = clean_repo();
     let r = root.path();

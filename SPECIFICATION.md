@@ -349,7 +349,11 @@ project declares any of them is a person's decision, which an agent never makes 
 middle of a refactoring. It is no `unchecked`: `unchecked` is for code that is never moved (generated or vendored
 files), and `moving` for code that is to go into the layers. It is written as `unchecked` is, from the root with `/`,
 and judged as it is: a path that holds or sits in a layer, that holds a unit, or that does not exist fails, and the code
-in it is judged by no check (not the direction, not the markers, not the structure). What `rotproof check` does with
+in it is judged by no check (not the direction, not the markers, not the structure). A path of `moving` that is, or
+lies in, a place the layout reads as tests (Python's `tests/`, a TypeScript file named `*.test.*` or `*.spec.*`, a
+`__tests__/` directory) fails too, since tests stay where they are and are no code to move into a layer: it is taken
+out of `moving`, or listed in `unchecked` when no check is to read it. A test in a broader path of `moving` is
+neither counted nor given layers. What `rotproof check` does with
 it is to count it and say which files to move first (see "The code that is moving"), and, as for `unchecked`, to list
 every import of it by the code of an inner layer (see "The inner layers do no I/O"). `rotproof init` writes
 `moving = []` into a declaration it makes, `rotproof create` adds it to none, and a Rotproof older than the one that
@@ -1868,7 +1872,8 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next (th
 
 - **The count is the code files in the listed paths:** `.py` files in Python, source files in TypeScript (`.ts`,
   `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`), `.rs` files in Rust. Outside `.gitignore` and the hidden
-  directories, as everywhere. A project that lists no path hears nothing; one whose listed paths hold no code says to
+  directories, as everywhere, and not the tests the layout reads (a TypeScript `*.test.*` in a listed directory). A
+  project that lists no path hears nothing; one whose listed paths hold no code says to
   take them out.
 - **The order is the import graph's, from its leaves.** An import of a file that is moving too (a module or a package
   of Python; in TypeScript, the file an import resolves to as it does for the files in a layer) is a wait: the file
