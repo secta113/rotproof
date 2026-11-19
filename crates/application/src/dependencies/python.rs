@@ -626,6 +626,38 @@ mod tests {
     }
 
     #[test]
+    fn a_package_only_tests_import_is_said_to_belong_in_a_development_group() {
+        let manifest = "[project]\nname = \"shop\"\ndependencies = []\n";
+        let found = check(
+            "",
+            &[
+                ("pyproject.toml", manifest),
+                ("application/a.py", "x = 1\n"),
+                ("tests/test_a.py", "import pytest\n"),
+            ],
+        );
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].contains("does not list it: add it to a group of [dependency-groups] ("),
+            "{found:#?}"
+        );
+        let found = check(
+            "",
+            &[
+                ("pyproject.toml", manifest),
+                ("application/a.py", "import pytest\n"),
+                ("tests/test_a.py", "import pytest\n"),
+            ],
+        );
+        assert!(
+            found[0].contains(
+                "does not list it (1 more import of it): add it to dependencies in [project] ("
+            ),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
     fn a_namespace_package_is_mapped_by_a_dotted_name() {
         let found = check(
             "[dependencies]\nimports = { \"google.cloud.storage\" = \"google-cloud-storage\" }\n",

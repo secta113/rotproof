@@ -9846,6 +9846,21 @@ fn a_python_manifest_is_compared_with_what_the_code_imports_either_way() {
         ),
         "{said}"
     );
+    // A package only tests import and the manifest lacks is to be added for development, not to runtime
+    fs::remove_file(r.join("domain/rule.py")).unwrap();
+    write_file(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\", \"python-dotenv\"]\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains(
+            "tests/test_pay.py:1: imports pytest, which needs the package pytest, and pyproject.toml does not list \
+             it: add it to a group of [dependency-groups]"
+        ),
+        "{said}"
+    );
 }
 
 #[test]

@@ -1543,7 +1543,9 @@ entry can be told, is one.
   manifest:
   1. **an import of a package the manifest does not list fails**, once for the package, at its first import, with how
      many more there are; the extras a dependency brings are no dependency of the package, so importing what one brings
-     fails as well. A package is the distribution an import is of: the entry of `imports` under `[dependencies]` of the
+     fails as well. The message says to add it to `dependencies` in `[project]`, and to a group of `[dependency-groups]`
+     when every import of it is in a test, since a runtime dependency that only tests import fails (3). A package is
+     the distribution an import is of: the entry of `imports` under `[dependencies]` of the
      declaration that covers it, or else the one named like its first part, and the message says to map it when it may
      be another. An import of another unit needs that unit's package, by the `name` its own `pyproject.toml` gives, or
      by the name of the unit when it has none; an import of a module of the unit itself, of the standard library, or of
@@ -1611,7 +1613,8 @@ entry can be told, is one.
   a builtin without `node:` (`fs`, `path/posix`, `buffer`) is Node's, unless the manifest lists a package of that
   name, which then is used. Then, in each manifest:
   1. **an import of a package the manifest does not list fails**, once for the package with how many more imports there
-     are of it; any kind of dependency lists it. A unit below the root of the project may also use the
+     are of it; any kind of dependency lists it. The message says to add it to `dependencies`, and to `devDependencies`
+     when every import of it is in a test, as in Python. A unit below the root of the project may also use the
      `devDependencies` of the project's own `package.json`, which npm hoists to every package of the workspace;
   2. **the code of a layer uses runtime and optional dependencies only**, as in Python: an import of a package that
      only `devDependencies` lists (the unit's own, or the root's hoisted) by a file that is not a test fails, once for
