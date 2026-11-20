@@ -9,7 +9,9 @@
 //!   TypeScript. Rust has none: Cargo stops a crate that names a crate it does not list.
 //! - **Unused:** the manifest lists a runtime dependency that no code imports. A dependency the code uses without an
 //!   import (a driver a library loads by name, what `pandas` uses) is listed in `without_import` of the declaration.
-//!   Development dependencies are not judged: they hold tools (`ruff`, `mypy`) that nothing imports.
+//!   Development dependencies are not judged: they hold tools (`ruff`, `mypy`) that nothing imports. The imports of the
+//!   code that is moving into the layers count as uses of a runtime dependency ([`judge_with_moving`]), and of no
+//!   other rule.
 //! - **Runtime and development:** code in a layer uses runtime dependencies only, and a test uses both. A Python test
 //!   is a file of `tests/`, and a TypeScript one a file the layout names as a test (`*.test.*`, `__tests__/`); Rust,
 //!   where Cargo keeps `[dev-dependencies]` apart, is not judged. A package of `@types/` is types, erased when the
@@ -165,6 +167,20 @@ pub fn judge(
     uses: &[Use],
     without_import: &[String],
 ) -> Vec<Problem> {
+    judge_with_moving(language, listing, uses, &[], without_import)
+}
+
+/// [`judge`], with the imports of the code that is moving into the layers (`moved`) counted for one rule alone: a
+/// runtime dependency that moving code imports is used, by code that is no test. Nothing else is judged of them, since
+/// no check judges the code that is moving: a package they import that the manifest lacks, or lists for development
+/// only, is no finding.
+pub fn judge_with_moving(
+    language: Language,
+    listing: &Listing,
+    uses: &[Use],
+    moved: &[Use],
+    without_import: &[String],
+) -> Vec<Problem> {
     let rules = Rules::of(language);
     let mut problems = Vec::new();
     // Each package in the order it is first needed, with the places that need it
@@ -223,6 +239,7 @@ pub fn judge(
         }
         let places: Vec<&Use> = uses
             .iter()
+            .chain(moved)
             .filter(|used| used.package == dep.name)
             .collect();
         if places.is_empty() {
@@ -568,6 +585,38 @@ mod tests {
             found[0].said(Language::TypeScript, "package.json", None),
             "package.json:4: lists the dependency vitest in dependencies, and only tests import it: move it to \
              devDependencies"
+        );
+    }
+
+    #[test]
+    fn the_code_that_is_moving_makes_a_runtime_dependency_used_and_is_judged_by_no_other_rule() {
+        let listing = listing(vec![
+            dep("requests", 4, Kind::Runtime),
+            dep("pytest", 5, Kind::Runtime),
+            dep("ruff", 8, Kind::Development),
+        ]);
+        let in_tests = [used("pytest", "tests/a.py", true)];
+        let moved = [
+            used("requests", "legacy/a.py", false),
+            used("pytest", "legacy/b.py", false),
+            // Not listed, and listed for development only: neither is a finding of code that is moving
+            used("flask", "legacy/a.py", false),
+            used("ruff", "legacy/a.py", false),
+        ];
+        let found = judge_with_moving(Language::Python, &listing, &in_tests, &moved, &[]);
+        assert!(found.is_empty(), "{found:?}");
+        // Without them, one dependency is unused and the other is used by tests only
+        let found = judge_with_moving(Language::Python, &listing, &in_tests, &[], &[]);
+        assert_eq!(
+            found,
+            [
+                Problem::Unused {
+                    dep: dep("requests", 4, Kind::Runtime)
+                },
+                Problem::TestsOnly {
+                    dep: dep("pytest", 5, Kind::Runtime)
+                }
+            ]
         );
     }
 

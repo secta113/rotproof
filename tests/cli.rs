@@ -10281,6 +10281,91 @@ fn a_typescript_manifest_is_compared_with_what_the_code_imports_either_way() {
     );
 }
 
+/// A manifest that lists one runtime dependency, which only a file that is moving imports, passes; the same file in
+/// `unchecked`, or with the import taken out, does not. What a file that is moving imports that the manifest lacks is
+/// no finding. `legacy` is the file, the import of the dependency, an import of a package the manifest lacks, and a
+/// text with no import, and `unused` what the finding of the dependency says.
+fn a_dependency_only_the_code_that_is_moving_imports_is_used(
+    stack: &str,
+    manifest: (&str, &str),
+    legacy: (&str, &str, &str, &str),
+    unused: &str,
+) {
+    let root = repo_with_ui(stack, "");
+    let r = root.path();
+    let arg = root_arg(r);
+    let (listed, import, other, nothing) = legacy;
+    write_file(r, manifest.0, manifest.1);
+    let declaration = |field: &str| {
+        declare(
+            r,
+            &format!(
+                "stack = \"{stack}\"\nareas = [\"a\"]\n{}{field} = [\"{}\"]\n",
+                ui_line(stack),
+                listed.rsplit_once('/').unwrap().0
+            ),
+        )
+    };
+    write_file(r, listed, import);
+    declaration("moving");
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // An import of a package the manifest does not list is no finding of code that is moving
+    write_file(r, listed, &format!("{import}{other}"));
+    let out = run(&["--root", &arg, "check"]);
+    assert!(out.status.success(), "{}", stdout(&out));
+    // `unchecked` is not read, so it counts for nothing
+    write_file(r, listed, import);
+    declaration("unchecked");
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(said.contains(unused), "{said}");
+    // The import taken out of the file that is moving
+    write_file(r, listed, nothing);
+    declaration("moving");
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(said.contains(unused), "{said}");
+}
+
+#[test]
+fn a_python_dependency_only_the_code_that_is_moving_imports_is_used() {
+    a_dependency_only_the_code_that_is_moving_imports_is_used(
+        "python",
+        (
+            "pyproject.toml",
+            "[project]\nname = \"shop\"\ndependencies = [\"requests\"]\n",
+        ),
+        (
+            "legacy/old.py",
+            "import requests\n",
+            "import flask\n",
+            "import os\n",
+        ),
+        "pyproject.toml:3: lists the dependency requests, which no code imports",
+    );
+}
+
+#[test]
+fn a_typescript_dependency_only_the_code_that_is_moving_imports_is_used() {
+    a_dependency_only_the_code_that_is_moving_imports_is_used(
+        "typescript",
+        (
+            "package.json",
+            "{\n  \"name\": \"shop\",\n  \"dependencies\": {\n    \"lodash\": \"^4\"\n  }\n}\n",
+        ),
+        (
+            "src/legacy/old.ts",
+            "import fp from \"lodash/fp\";\n",
+            "import express from \"express\";\n",
+            "export const x = 1;\n",
+        ),
+        "package.json:4: lists the dependency lodash, which no code imports",
+    );
+}
+
 #[test]
 fn a_rust_dependency_the_crate_does_not_name_is_unused_and_fails() {
     let root = repo_with_ui("rust", "");

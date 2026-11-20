@@ -83,7 +83,7 @@ layers, in Python with screens no template (.html, .htm, .jinja, .jinja2, .j2) o
 declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
 what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one; and, where a baseline froze what failed, .config/rotproof-baseline.toml: a violation in it passes, any other fails, an entry that matches nothing fails, and so do more entries than its count, and one line says on every run how many remain), that the manifest of each package \
 (the pyproject.toml of a Python unit, the package.json of a TypeScript one, the Cargo.toml of a crate, whose [dependencies] no path of its code names) lists the dependencies its code imports (a package imported and not \
-listed fails, and so does a runtime dependency no code imports or only tests import; development dependencies are never judged unused, and \
+listed fails, and so does a runtime dependency no code imports (the code in moving counts) or only tests import; development dependencies are never judged unused, and \
 the code of a layer uses runtime dependencies only, a test both (in Python a file in tests/, in TypeScript a file named \
 *.test.* or *.spec.* or in __tests__/); the distribution an import is of and a dependency used without an \
 import are said in [dependencies] of the declaration; nothing is installed, and what a .venv provides only words a \
