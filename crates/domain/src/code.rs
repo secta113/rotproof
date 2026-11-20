@@ -37,6 +37,10 @@ pub struct Source<I> {
     /// Every comment: its byte offset in the source, and its text with its delimiters. A reader reads comments past a
     /// syntax error too
     pub comments: Vec<(usize, String)>,
+    /// The byte range of every docstring (a string that stands alone as the first statement of a module, a class or a
+    /// function), which is documentation as a comment is and no comment for the marker check. Python's reader gives
+    /// them; TypeScript's JSDoc is a comment already
+    pub docstrings: Vec<(usize, usize)>,
     /// Every use of a name that resolves to something outside the file's own code, in the order of the lines: what
     /// the checks of a language judge (`domain::environment::in_python` and `in_typescript`). See [`Use`]
     pub uses: Vec<Use>,
@@ -63,6 +67,7 @@ impl<I> Default for Source<I> {
         Source {
             imports: Vec::new(),
             comments: Vec::new(),
+            docstrings: Vec::new(),
             uses: Vec::new(),
             unread: Vec::new(),
             methods: Vec::new(),

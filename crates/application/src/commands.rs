@@ -5,14 +5,14 @@ use std::path::Path;
 
 use domain::approvals::{APPROVALS, Approved, Kept};
 use domain::baseline::BASELINE;
-use domain::declaration::{DECLARATION, MISSING};
+use domain::declaration::{DECLARATION, Declared, MISSING};
 use domain::layers::RECORDS_ONLY;
 use domain::markers::{MARKERS, either};
 use domain::readers::FILE;
 use domain::version::VERSION;
 use protocol::inbound::{
     BaselinePruned, Baselined, Commands, Indexed, Initialized, LogEntry, Logged, Made, Names,
-    NewDocument, Pinned, Removed, Report, Started,
+    NewDocument, Pinned, Removed, Report, Sizes, Started,
 };
 use protocol::outbound::{Files, Machine};
 
@@ -97,6 +97,13 @@ impl Commands for Rotproof<'_> {
         }
         crate::check::check(&*files, self.machine.parsers(), self.machine.now())
             .map_err(|e| e.to_string())
+    }
+
+    fn sizes(&self, root: &Path) -> Result<Sizes, String> {
+        let files = self.machine.files(root);
+        let declaration = crate::layers::read(&*files).map_err(|e| e.to_string())??;
+        let declared = Declared::new(declaration).map_err(|found| found.join("\n"))?;
+        crate::sizes::measure(&*files, self.machine.parsers(), &declared).map_err(|e| e.to_string())
     }
 
     fn guide(&self, root: &Path, stack: Option<&str>, ui: Option<&str>) -> Result<String, String> {

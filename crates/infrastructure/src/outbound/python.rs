@@ -9,7 +9,8 @@
 //!   bound to either by `from importlib import import_module`) with a string literal as its module is an import of
 //!   that module, as `import` of it is. A name that is not a literal (a variable, an f-string, a concatenation), and a
 //!   relative one (`".x"`), is built at run time and is not seen: the reader says so in `Source::unread`.
-//! - **Its comments,** `#` to the end of the line. A docstring is a string, so it is not a comment.
+//! - **Its comments,** `#` to the end of the line. A docstring is a string, so it is not a comment; its range is given
+//!   apart (`Source::docstrings`), for the count of the lines of code, which leaves documentation out.
 //! - **Its uses** (`uses.rs`, `domain::code::Use`): every name that resolves to something outside the file's own code,
 //!   as Python's scopes resolve it, which the environment check, and the checks after it, judge.
 //! - **Its outline** ([`outline`]), every function and class with its names and its range, for a knowledge document
@@ -22,7 +23,7 @@ use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::{PySourceType, Stmt};
 
 use domain::code::{Source, module_parts};
-use domain::definitions::Definition;
+use domain::definitions::{Definition, Kind};
 use domain::text::line_of;
 
 /// Read one file, whose path from the root names the package its relative imports start from.
@@ -59,11 +60,47 @@ pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
     Source {
         imports: found,
         comments,
+        docstrings: docstrings(&parsed.syntax().body),
         uses: read.uses,
         unread: read.unread,
         methods: read.methods,
         defined: read.defined,
         error,
+    }
+}
+
+/// The byte range of every docstring in `body`: a string statement that stands first in the body of the module, of a
+/// class or of a function, wherever the class or the function is defined.
+fn docstrings(body: &[Stmt]) -> Vec<(usize, usize)> {
+    let mut found = Docstrings { found: Vec::new() };
+    found.first(body);
+    found.visit_body(body);
+    found.found
+}
+
+struct Docstrings {
+    found: Vec<(usize, usize)>,
+}
+
+impl Docstrings {
+    fn first(&mut self, body: &[Stmt]) {
+        if let Some(Stmt::Expr(expr)) = body.first()
+            && expr.value.is_string_literal_expr()
+        {
+            self.found
+                .push((expr.range.start().to_usize(), expr.range.end().to_usize()));
+        }
+    }
+}
+
+impl<'a> StatementVisitor<'a> for Docstrings {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::FunctionDef(def) => self.first(&def.body),
+            Stmt::ClassDef(class) => self.first(&class.body),
+            _ => {}
+        }
+        walk_stmt(self, stmt);
     }
 }
 
@@ -156,9 +193,21 @@ pub fn outline(source: &str) -> Vec<Definition> {
 /// The definitions in `body`, under the names in `scope`, and in the body of each.
 fn nested(body: &[Stmt], scope: &mut Vec<String>, found: &mut Vec<Definition>) {
     for stmt in body {
-        let (name, range, decorators, inner) = match stmt {
-            Stmt::FunctionDef(def) => (&def.name, def.range, &def.decorator_list, &def.body),
-            Stmt::ClassDef(class) => (&class.name, class.range, &class.decorator_list, &class.body),
+        let (name, range, decorators, inner, kind) = match stmt {
+            Stmt::FunctionDef(def) => (
+                &def.name,
+                def.range,
+                &def.decorator_list,
+                &def.body,
+                Kind::Function,
+            ),
+            Stmt::ClassDef(class) => (
+                &class.name,
+                class.range,
+                &class.decorator_list,
+                &class.body,
+                Kind::Type,
+            ),
             _ => continue,
         };
         let start = decorators
@@ -172,6 +221,7 @@ fn nested(body: &[Stmt], scope: &mut Vec<String>, found: &mut Vec<Definition>) {
             names: scope.clone(),
             start: start.to_usize(),
             end: range.end().to_usize(),
+            kind,
         });
         nested(inner, scope, found);
         scope.pop();
@@ -209,6 +259,45 @@ mod tests {
         for missing in ["g", "C.f", "f.a", "x", "C.m.z"] {
             assert_eq!(found(source, missing), Vec::<String>::new(), "{missing}");
         }
+    }
+
+    #[test]
+    fn a_function_and_a_method_are_functions_and_a_class_is_a_type() {
+        let source = r#"
+X = 1
+
+def f():
+    pass
+
+async def g():
+    pass
+
+class C:
+    y = 1
+    def m(self):
+        pass
+    class D:
+        pass
+
+class P(Protocol):
+    def q(self): ...
+"#;
+        let kinds: Vec<(String, Kind)> = outline(source)
+            .into_iter()
+            .map(|d| (d.names.join("."), d.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                ("f".to_string(), Kind::Function),
+                ("g".to_string(), Kind::Function),
+                ("C".to_string(), Kind::Type),
+                ("C.m".to_string(), Kind::Function),
+                ("C.D".to_string(), Kind::Type),
+                ("P".to_string(), Kind::Type),
+                ("P.q".to_string(), Kind::Function),
+            ]
+        );
     }
 
     #[test]
@@ -372,6 +461,28 @@ other.__import__(\"billing.domain.x\")
         let read = read("import domain\ndef (:\nimport utils\n", "ui/x.py");
         assert_eq!(read.imports.first().map(|(l, _)| *l), Some(1));
         assert_eq!(read.error.map(|(line, _)| line), Some(2));
+    }
+
+    #[test]
+    fn a_docstring_is_a_string_standing_first_in_a_module_a_class_or_a_function_and_nothing_else() {
+        let source = "\"\"\"Module.\"\"\"\nx = \"not\"\nclass C:\n    \"\"\"Class.\"\"\"\n    y = \"not\"\n    \
+                      def m(self):\n        \"\"\"Method.\"\"\"\n        z = \"not\"\n        def inner():\n            \
+                      \"inner\"\nif x:\n    def g():\n        \"\"\"G.\"\"\"\n    \"loose\"\n";
+        let found: Vec<&str> = read(source, "x.py")
+            .docstrings
+            .into_iter()
+            .map(|(from, to)| &source[from..to])
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "\"\"\"Module.\"\"\"",
+                "\"\"\"Class.\"\"\"",
+                "\"\"\"Method.\"\"\"",
+                "\"inner\"",
+                "\"\"\"G.\"\"\""
+            ]
+        );
     }
 
     #[test]

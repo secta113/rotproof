@@ -214,8 +214,21 @@ pub fn program_files(
         Language::Rust => join(&layer.path, "src"),
         Language::Python | Language::TypeScript => layer.path.clone(),
     };
+    program_files_in(tree, layout, &dir, what, found)
+}
+
+/// The code of the directory `dir` that is no test, as [`program_files`] says it for a layer: the same rules, for a
+/// directory that is no layer (code that is `unchecked` or `moving`), and, in Rust, the files of the directory
+/// whatever it is (no `src/` is looked for).
+pub fn program_files_in(
+    tree: &dyn Tree,
+    layout: &Layout,
+    dir: &str,
+    what: &str,
+    found: &mut Vec<String>,
+) -> io::Result<Vec<(String, String)>> {
     let mut files = Vec::new();
-    for path in code_files(tree, &dir, |name| layout.has_comments(name))? {
+    for path in code_files(tree, dir, |name| layout.has_comments(name))? {
         if layout.is_test_file(&path) {
             continue;
         }

@@ -3,6 +3,18 @@
 //! `infrastructure`, `rust::outline` here), and a key of `follows` selects its pieces here, the same for every
 //! language.
 
+/// What a definition is, for a rule that tells what a file defines apart from where it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// A function, or a method: a function defined in a class, an `impl` or a trait, with a body; a function bound to a
+    /// name (`const f = () => 1`)
+    Function,
+    /// A class, struct, enum, union, interface, type alias or trait
+    Type,
+    /// Anything else: a constant, a variable, a module, a variant, a member that holds no code, an `impl` block
+    Other,
+}
+
 /// One definition of a file, as a reader found it: a function, a class, a method, a type, a variant. Every language
 /// is read into the same form, which [`pieces`] reads a key from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +26,8 @@ pub struct Definition {
     pub start: usize,
     /// Where its source ends, in bytes
     pub end: usize,
+    /// What it is. A key of `follows` never reads it: only the names and the range say which text a key hashes
+    pub kind: Kind,
 }
 
 /// The source of every definition of `outline`, the outline of `source`, whose names are `dotted` (`Table.add`), in the
@@ -54,6 +68,7 @@ mod tests {
             names: names.iter().map(|n| n.to_string()).collect(),
             start,
             end,
+            kind: Kind::Other,
         }
     }
 

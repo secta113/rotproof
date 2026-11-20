@@ -20,7 +20,7 @@
 //!   whatever a function holds (an item inside a body).
 
 use super::{Token, code, comments, tokens};
-use crate::definitions::Definition;
+use crate::definitions::{Definition, Kind};
 
 /// Every definition of a Rust file, a container before what it holds. A name defined more than once appears once for
 /// each piece.
@@ -36,6 +36,7 @@ pub fn outline(source: &str) -> Vec<Definition> {
         tokens,
         docs,
         found: Vec::new(),
+        associated: false,
     };
     let end = reader.tokens.len();
     reader.items(0, end, 0, &mut Vec::new());
@@ -84,6 +85,9 @@ struct Reader {
     /// Where each outer doc comment starts
     docs: Vec<usize>,
     found: Vec<Definition>,
+    /// Whether the items being read are those of an `impl` block or a trait, where a `type` is an associated type
+    /// and no type of the program
+    associated: bool,
 }
 
 impl Reader {
@@ -198,10 +202,15 @@ impl Reader {
             .unwrap_or(at)
     }
 
-    fn define(&mut self, scope: &[String], name: &str, start: usize, end: usize) {
+    fn define(&mut self, scope: &[String], name: &str, kind: Kind, start: usize, end: usize) {
         let mut names = scope.to_vec();
         names.push(name.to_string());
-        self.found.push(Definition { names, start, end });
+        self.found.push(Definition {
+            names,
+            start,
+            end,
+            kind,
+        });
     }
 
     /// The items between tokens `lo` and `hi`, under the names in `scope`; `since` is where the block opened, which
@@ -267,15 +276,26 @@ impl Reader {
         match (keyword.as_str(), name) {
             ("fn", Some(name)) => {
                 let end = self.item_end(i + 2, hi, true);
-                self.finish(scope, &name, start, end)
+                // A signature in a trait has no body, and runs nothing
+                let kind = if self.punct(end.saturating_sub(1), ';') {
+                    Kind::Other
+                } else {
+                    Kind::Function
+                };
+                self.finish(scope, &name, kind, start, end)
             }
             ("struct" | "type", Some(name)) => {
                 let end = self.item_end(i + 2, hi, keyword == "struct");
-                self.finish(scope, &name, start, end)
+                let kind = if keyword == "type" && self.associated {
+                    Kind::Other
+                } else {
+                    Kind::Type
+                };
+                self.finish(scope, &name, kind, start, end)
             }
             ("const", Some(name)) => {
                 let end = self.item_end(i + 2, hi, false);
-                self.finish(scope, &name, start, end)
+                self.finish(scope, &name, Kind::Other, start, end)
             }
             ("static", Some(name)) => {
                 // `static mut NAME`
@@ -284,7 +304,7 @@ impl Reader {
                     _ => (name, i + 2),
                 };
                 let end = self.item_end(from, hi, false);
-                self.finish(scope, &name, start, end)
+                self.finish(scope, &name, Kind::Other, start, end)
             }
             ("union", Some(name))
                 if self.punct(i + 2, '{')
@@ -292,12 +312,12 @@ impl Reader {
                     || self.word(i + 2) == Some("where") =>
             {
                 let end = self.item_end(i + 2, hi, true);
-                self.finish(scope, &name, start, end)
+                self.finish(scope, &name, Kind::Type, start, end)
             }
             ("enum", Some(name)) => self.enumeration(i, hi, &name, start, scope),
-            ("trait", Some(name)) => self.block(i, hi, &name, start, scope),
+            ("trait", Some(name)) => self.block(i, hi, &name, Kind::Type, start, scope),
             ("mod", Some(name)) => match self.body(i + 2, hi) {
-                Some(open) => self.block_at(open, hi, &name, start, scope),
+                Some(open) => self.block_at(open, hi, &name, Kind::Other, start, scope),
                 None => self.item_end(i + 2, hi, false),
             },
             ("impl", _) => self.implementation(i, hi, start, scope),
@@ -310,7 +330,7 @@ impl Reader {
                 if !self.punct(i + 3, '{') && self.punct(end, ';') {
                     end += 1;
                 }
-                self.finish(scope, &name, start, end)
+                self.finish(scope, &name, Kind::Other, start, end)
             }
             ("use", _) | ("extern", _) => self.item_end(i + 1, hi, false),
             // A macro invocation: `name! { ... }`, `name!(...);`
@@ -326,10 +346,17 @@ impl Reader {
     }
 
     /// Define `name` from `start` to the end of the token before `end`, and give back `end`.
-    fn finish(&mut self, scope: &[String], name: &str, start: usize, end: usize) -> usize {
+    fn finish(
+        &mut self,
+        scope: &[String],
+        name: &str,
+        kind: Kind,
+        start: usize,
+        end: usize,
+    ) -> usize {
         let end = end.max(1);
         let to = self.end(end - 1);
-        self.define(scope, name, start, to);
+        self.define(scope, name, kind, start, to);
         end
     }
 
@@ -339,14 +366,15 @@ impl Reader {
         i: usize,
         hi: usize,
         name: &str,
+        kind: Kind,
         start: usize,
         scope: &mut Vec<String>,
     ) -> usize {
         match self.body(i + 2, hi) {
-            Some(open) => self.block_at(open, hi, name, start, scope),
+            Some(open) => self.block_at(open, hi, name, kind, start, scope),
             None => {
                 let end = self.item_end(i + 2, hi, false);
-                self.finish(scope, name, start, end)
+                self.finish(scope, name, kind, start, end)
             }
         }
     }
@@ -358,15 +386,19 @@ impl Reader {
         open: usize,
         hi: usize,
         name: &str,
+        kind: Kind,
         start: usize,
         scope: &mut Vec<String>,
     ) -> usize {
         let after = self.skip_group(open).min(hi);
         let close = after.saturating_sub(1).max(open + 1);
-        let end = self.finish(scope, name, start, after);
+        let end = self.finish(scope, name, kind, start, after);
         scope.push(name.to_string());
         let since = self.end(open);
+        // The items of a trait are its associated items, as those of an `impl` block
+        let outer = std::mem::replace(&mut self.associated, kind == Kind::Type);
         self.items(open + 1, close.min(after), since, scope);
+        self.associated = outer;
         scope.pop();
         end
     }
@@ -382,11 +414,11 @@ impl Reader {
     ) -> usize {
         let Some(open) = self.body(i + 2, hi) else {
             let end = self.item_end(i + 2, hi, false);
-            return self.finish(scope, name, start, end);
+            return self.finish(scope, name, Kind::Type, start, end);
         };
         let after = self.skip_group(open).min(hi);
         let close = after.saturating_sub(1).max(open + 1);
-        let end = self.finish(scope, name, start, after);
+        let end = self.finish(scope, name, Kind::Type, start, after);
         scope.push(name.to_string());
         let mut since = self.end(open);
         let mut j = open + 1;
@@ -408,7 +440,7 @@ impl Reader {
             let k = k.min(close);
             if let (Some(variant), true) = (variant, k > j) {
                 let to = self.end(k - 1);
-                self.define(scope, &variant, begin, to);
+                self.define(scope, &variant, Kind::Other, begin, to);
             }
             since = if k < close { self.end(k) } else { since };
             j = k + 1;
@@ -431,10 +463,12 @@ impl Reader {
         let after = self.skip_group(open).min(hi);
         let close = after.saturating_sub(1).max(open + 1);
         if let Some(name) = self.target(i + 1, open) {
-            let end = self.finish(scope, &name, start, after);
+            let end = self.finish(scope, &name, Kind::Other, start, after);
             scope.push(name);
             let since = self.end(open);
+            let outer = std::mem::replace(&mut self.associated, true);
             self.items(open + 1, close.min(after), since, scope);
+            self.associated = outer;
             scope.pop();
             return end;
         }
@@ -801,6 +835,48 @@ pub const unsafe fn dangerous() {}
             ["struct R<'a, T = [u8; { 1 }]> where T: 'a { r: &'a T }"]
         );
         assert_eq!(at("z"), ["fn z() {}"]);
+    }
+
+    #[test]
+    fn a_function_and_a_method_are_functions_and_a_struct_enum_union_trait_or_alias_is_a_type() {
+        let source = r#"
+const C: u8 = 1;
+static S: u8 = 2;
+fn f() {}
+struct A;
+enum E { V }
+union U { a: u8 }
+type Alias = u8;
+trait T { fn sig(&self); fn body(&self) {} type Assoc; const K: u8; }
+impl A { fn m(&self) {} type Out = u8; const Z: u8 = 1; }
+mod m { pub fn inner() {} }
+macro_rules! mac { () => {} }
+"#;
+        let kinds: Vec<(String, Kind)> = outline(source)
+            .into_iter()
+            .map(|d| (d.names.join("."), d.kind))
+            .collect();
+        let kind = |name: &str, nth: usize| {
+            kinds
+                .iter()
+                .filter(|(n, _)| n == name)
+                .nth(nth)
+                .unwrap_or_else(|| panic!("{name}: {kinds:?}"))
+                .1
+        };
+        for function in ["f", "T.body", "A.m", "m.inner"] {
+            assert_eq!(kind(function, 0), Kind::Function, "{function}");
+        }
+        for ty in ["A", "E", "U", "Alias", "T"] {
+            assert_eq!(kind(ty, 0), Kind::Type, "{ty}");
+        }
+        // The `impl` block is a piece of `A` that is no type of its own, and an associated type is no type
+        assert_eq!(kind("A", 1), Kind::Other);
+        for other in [
+            "C", "S", "E.V", "T.sig", "T.Assoc", "T.K", "A.Out", "A.Z", "m", "mac",
+        ] {
+            assert_eq!(kind(other, 0), Kind::Other, "{other}");
+        }
     }
 
     #[test]

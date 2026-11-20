@@ -159,6 +159,67 @@ pub struct TestFiles {
     pub patterns: Vec<String>,
 }
 
+/// What kind of part of the code a [`Size`] row is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Part {
+    /// A layer, whole: its levels are in it
+    Layer,
+    /// A level of a layer, counted again inside its layer's row
+    Level,
+    /// The entry files, which are no layer
+    Entry,
+    /// The code in the paths `moving` lists
+    Moving,
+    /// The code in the paths `unchecked` lists
+    Unchecked,
+}
+
+/// A file and how many lines of code it holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Longest {
+    pub path: String,
+    pub lines: usize,
+}
+
+/// How much code one part of a project holds: its files that are code and no test, and their lines of code (without
+/// blank lines, comments, docstrings and tests).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Size {
+    /// A layer or level as the declaration names it (`domain`, `ui.pages`), or `entry`, `moving` or `unchecked`
+    pub name: String,
+    pub part: Part,
+    pub files: usize,
+    pub lines: usize,
+    /// The files of a layer with the most lines, longest first. Empty for any other part
+    pub longest: Vec<Longest>,
+}
+
+/// What the files of a layer define: how many functions (a free function or a method with a body) and how many types
+/// (a class, struct, enum, union, interface, type alias or trait).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Defined {
+    pub functions: usize,
+    pub types: usize,
+}
+
+/// The size of the code of one unit of a project.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitSizes {
+    /// The unit's name: empty for a project that declares no unit
+    pub name: String,
+    /// The layers (each followed by its levels), then the entry files, `moving` and `unchecked`
+    pub parts: Vec<Size>,
+    /// What the files of `domain` define, when the unit has a `domain` there
+    pub domain_defines: Option<Defined>,
+}
+
+/// The size of the code of a project, per unit, as `rotproof sizes` prints it and `rotproof check` sums it up. Empty
+/// for a repository of records only.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Sizes {
+    pub units: Vec<UnitSizes>,
+}
+
 /// What `rotproof check` found.
 #[derive(Debug, Default)]
 pub struct Report {
@@ -190,6 +251,9 @@ pub struct Report {
     /// How many files were read as tests, said on every run apart from the findings and the warnings. `None` unless
     /// the stack tells a test by its name (TypeScript)
     pub tests: Option<TestFiles>,
+    /// The share of the lines of code each layer holds, said on every run apart from the findings and the warnings,
+    /// failing nothing. `None` for a repository of records only
+    pub sizes: Option<Sizes>,
     /// The methods the net of method names leaves out because the project defines one of the same name and number of
     /// parameters, as one line said on every run apart from the findings and the warnings, failing nothing. `None` when
     /// the project defines none that the net judges
@@ -318,6 +382,9 @@ pub trait Commands {
     fn create(&self, root: &Path, yes: bool) -> Result<Made, String>;
     /// Every broken rule.
     fn check(&self, root: &Path) -> Result<Report, String>;
+    /// How many lines of code each layer, level and unit holds, and the files with the most. Empty for a repository of
+    /// records only.
+    fn sizes(&self, root: &Path) -> Result<Sizes, String>;
     /// The guide of `stack`, with the layers of `ui` when it is named too, or of the stack the project declares.
     fn guide(&self, root: &Path, stack: Option<&str>, ui: Option<&str>) -> Result<String, String>;
     /// Write every index file, and find the items to measure again now.

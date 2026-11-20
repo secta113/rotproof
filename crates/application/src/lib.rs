@@ -28,5 +28,6 @@ pub mod project;
 pub mod readers;
 pub mod records;
 pub mod scaffold;
+pub mod sizes;
 pub mod structure;
 pub mod tree;

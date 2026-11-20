@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at 69971a81. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 489d9355. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -485,7 +485,7 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
 
 - **仕様:** [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md)（英語）。コマンド、
   アップグレード、禁じられた import の承認、層、ユニット、記録、`rotproof check` が検査するすべての規則があります。
-  README に出てこない `rotproof guide`、`approved_max`、`unchecked`、`moving`、`without_import`、`stale_after`、
+  README に出てこない `rotproof guide`、`rotproof sizes`（層ごとのコード行数）、`approved_max`、`unchecked`、`moving`、`without_import`、`stale_after`、
   プロジェクトの `AGENTS.md` の地図も、そこにあります。
 - **開発とリリース:** 英語版の
   [Development](https://github.com/secta113/rotproof/blob/main/README.md#development) を参照してください。

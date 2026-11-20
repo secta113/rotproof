@@ -8,13 +8,13 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     BindingPattern, Class, ClassElement, Declaration, Decorator, ExportDefaultDeclarationKind,
-    PropertyKey, Statement, TSEnumMemberName, TSInterfaceDeclaration, TSNamespaceDeclaration,
-    TSNamespaceDeclarationBody, TSSignature,
+    Expression, PropertyKey, Statement, TSEnumMemberName, TSInterfaceDeclaration,
+    TSNamespaceDeclaration, TSNamespaceDeclarationBody, TSSignature,
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, Span};
 
-use domain::definitions::Definition;
+use domain::definitions::{Definition, Kind};
 use domain::follows::is_name;
 use domain::layers::Language;
 
@@ -58,7 +58,14 @@ struct Outline {
 
 impl Outline {
     /// `name` under the names in `scope` is a definition: record its range, from its first decorator.
-    fn add(&mut self, scope: &[String], name: &str, span: Span, decorators: &[Decorator]) {
+    fn add(
+        &mut self,
+        scope: &[String],
+        name: &str,
+        kind: Kind,
+        span: Span,
+        decorators: &[Decorator],
+    ) {
         let start = decorators
             .iter()
             .map(|d| d.span.start)
@@ -71,6 +78,7 @@ impl Outline {
             names,
             start: start as usize,
             end: span.end as usize,
+            kind,
         });
     }
 
@@ -105,7 +113,7 @@ impl Outline {
                     .id
                     .as_ref()
                     .map_or("default", |id| id.name.as_str());
-                self.add(scope, name, span, &[]);
+                self.add(scope, name, Kind::Function, span, &[]);
             }
             ExportDefaultDeclarationKind::ClassDeclaration(class) => {
                 let name = class.id.as_ref().map_or("default", |id| id.name.as_str());
@@ -114,7 +122,11 @@ impl Outline {
             ExportDefaultDeclarationKind::TSInterfaceDeclaration(interface) => {
                 self.interface(interface, interface.id.name.as_str(), span, scope);
             }
-            _ => self.add(scope, "default", span, &[]),
+            ExportDefaultDeclarationKind::ArrowFunctionExpression(_)
+            | ExportDefaultDeclarationKind::FunctionExpression(_) => {
+                self.add(scope, "default", Kind::Function, span, &[]);
+            }
+            _ => self.add(scope, "default", Kind::Other, span, &[]),
         }
     }
 
@@ -123,13 +135,18 @@ impl Outline {
             Declaration::VariableDeclaration(variables) => {
                 for declarator in &variables.declarations {
                     if let BindingPattern::BindingIdentifier(id) = &declarator.id {
-                        self.add(scope, id.name.as_str(), span, &[]);
+                        let kind = if is_function(declarator.init.as_ref()) {
+                            Kind::Function
+                        } else {
+                            Kind::Other
+                        };
+                        self.add(scope, id.name.as_str(), kind, span, &[]);
                     }
                 }
             }
             Declaration::FunctionDeclaration(function) => {
                 if let Some(id) = &function.id {
-                    self.add(scope, id.name.as_str(), span, &[]);
+                    self.add(scope, id.name.as_str(), Kind::Function, span, &[]);
                 }
             }
             Declaration::ClassDeclaration(class) => {
@@ -138,14 +155,14 @@ impl Outline {
                 }
             }
             Declaration::TSTypeAliasDeclaration(alias) => {
-                self.add(scope, alias.id.name.as_str(), span, &[]);
+                self.add(scope, alias.id.name.as_str(), Kind::Type, span, &[]);
             }
             Declaration::TSInterfaceDeclaration(interface) => {
                 self.interface(interface, interface.id.name.as_str(), span, scope);
             }
             Declaration::TSEnumDeclaration(declared) => {
                 let name = declared.id.name.as_str();
-                self.add(scope, name, span, &[]);
+                self.add(scope, name, Kind::Type, span, &[]);
                 scope.push(name.to_string());
                 for member in &declared.body.members {
                     let name = match &member.id {
@@ -156,7 +173,7 @@ impl Outline {
                         TSEnumMemberName::ComputedTemplateString(_) => continue,
                     };
                     if is_name(Language::TypeScript, name) {
-                        self.add(scope, name, member.span, &[]);
+                        self.add(scope, name, Kind::Other, member.span, &[]);
                     }
                 }
                 scope.pop();
@@ -176,7 +193,7 @@ impl Outline {
         scope: &mut Vec<String>,
     ) {
         let name = namespace.id.name.as_str();
-        self.add(scope, name, span, &[]);
+        self.add(scope, name, Kind::Other, span, &[]);
         scope.push(name.to_string());
         match &namespace.body {
             TSNamespaceDeclarationBody::TSModuleBlock(block) => {
@@ -190,23 +207,28 @@ impl Outline {
     }
 
     fn class(&mut self, class: &Class, name: &str, span: Span, scope: &mut Vec<String>) {
-        self.add(scope, name, span, &class.decorators);
+        self.add(scope, name, Kind::Type, span, &class.decorators);
         scope.push(name.to_string());
         for element in &class.body.body {
-            let (key, span, decorators) = match element {
+            let (key, span, decorators, kind) = match element {
                 ClassElement::MethodDefinition(member) => {
-                    (&member.key, member.span, &member.decorators)
+                    (&member.key, member.span, &member.decorators, Kind::Function)
                 }
                 ClassElement::PropertyDefinition(member) => {
-                    (&member.key, member.span, &member.decorators)
+                    let kind = if is_function(member.value.as_ref()) {
+                        Kind::Function
+                    } else {
+                        Kind::Other
+                    };
+                    (&member.key, member.span, &member.decorators, kind)
                 }
                 ClassElement::AccessorProperty(member) => {
-                    (&member.key, member.span, &member.decorators)
+                    (&member.key, member.span, &member.decorators, Kind::Other)
                 }
                 ClassElement::StaticBlock(_) | ClassElement::TSIndexSignature(_) => continue,
             };
             if let Some(name) = member_name(key) {
-                self.add(scope, &name, span, decorators);
+                self.add(scope, &name, kind, span, decorators);
             }
         }
         scope.pop();
@@ -219,7 +241,7 @@ impl Outline {
         span: Span,
         scope: &mut Vec<String>,
     ) {
-        self.add(scope, name, span, &[]);
+        self.add(scope, name, Kind::Type, span, &[]);
         scope.push(name.to_string());
         for signature in &interface.body.body {
             let (key, span) = match signature {
@@ -228,11 +250,19 @@ impl Outline {
                 _ => continue,
             };
             if let Some(name) = member_name(key) {
-                self.add(scope, &name, span, &[]);
+                self.add(scope, &name, Kind::Other, span, &[]);
             }
         }
         scope.pop();
     }
+}
+
+/// Whether a value is a function: an arrow function or a function expression, which a name is bound to.
+fn is_function(value: Option<&Expression>) -> bool {
+    matches!(
+        value,
+        Some(Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_))
+    )
 }
 
 /// The name a member is addressed by: an identifier, or a string that is one (`'a'`). `None` for `#a`, for a number
@@ -440,6 +470,42 @@ type T = { a: number };
             found("declare function g(): void;\n", "a.d.ts", "g"),
             ["declare function g(): void;"]
         );
+    }
+
+    #[test]
+    fn a_function_a_method_and_a_name_bound_to_a_function_are_functions_and_a_class_or_a_type_is_a_type()
+     {
+        let source = r#"
+export function f() {}
+export const g = () => 1, h = 2;
+const k = function () {};
+export default () => 1;
+class C {
+  m() {}
+  p = 1;
+  q = () => 2;
+  accessor a = 1;
+}
+interface I { x: number; y(): void; }
+type T = { a: number };
+enum E { A, B }
+namespace N { export function n() {} }
+"#;
+        let kinds: Vec<(String, Kind)> = outline(source, "a.ts")
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.names.join("."), d.kind))
+            .collect();
+        let kind = |name: &str| kinds.iter().find(|(n, _)| n == name).unwrap().1;
+        for function in ["f", "g", "k", "default", "C.m", "C.q", "N.n"] {
+            assert_eq!(kind(function), Kind::Function, "{function}");
+        }
+        for ty in ["C", "I", "T", "E"] {
+            assert_eq!(kind(ty), Kind::Type, "{ty}");
+        }
+        for other in ["h", "C.p", "C.a", "I.x", "I.y", "E.A", "N"] {
+            assert_eq!(kind(other), Kind::Other, "{other}");
+        }
     }
 
     #[test]

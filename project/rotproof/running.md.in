@@ -41,6 +41,9 @@ records are in `.rotproof/AGENTS.md`.
   `--problem None` when nothing went wrong, and give what the task left that is found nowhere else (what went wrong,
   the cause and the workaround; what to do differently, and where it became a rule). `--issue owner/repo#n` names the
   task's issue, when it has one. Repeat `--problem` or `--lesson` for a list; a line break in a value becomes a space.
+- **`rotproof sizes`: before you refactor a part of the code, when you move code into the layers, and when the `sizes:`
+  line of `rotproof check` changed.** `rotproof check` prints that line on every run and fails nothing for it; the
+  command gives the numbers behind it (see "Reading the sizes").
 - **`rotproof guide --stack <stack>`: to read the rules for a stack before a project exists.** In a project, the same
   text is `.rotproof/AGENTS.md`.
 
@@ -75,3 +78,26 @@ Upgrade in a commit of its own, so that what the new rules bring is read apart f
      read against them and pinned again with `rotproof follows`.
 3. Run `rotproof check`. A finding that a new rule brings is fixed like any other: it is part of the upgrade, and the
    reason to keep the upgrade apart from other work.
+
+## Reading the sizes
+
+`rotproof sizes` counts lines of code: a line with something on it that is not blank, not a comment (a Python docstring
+is one) and not a test. Each part is a row with its files, its lines and its share of the total row; a level sits
+under its layer and is counted in it too; `moving` and `unchecked` are rows of their own, counted in the total, so the
+share of `moving` falls as code goes into the layers. With units, each unit has its own table. Under it, the longest
+files of each layer. Rotproof states these numbers and judges none of them, and sets no line that is too little or
+too much: that is for you to read, from what the project is for.
+
+- **Compare a number with what its layer is for, not with another project.** What is normal depends on the project: a
+  tool that reads files has more in `infrastructure.outbound` than in `infrastructure.inbound`, a server with no
+  database the other way round. Ask the person before you restructure because of one share.
+- **A layer with no code** (`sizes: no code in ...`): is the layer meant to be there? If not, declare it `absent`. If
+  it is, look for its code elsewhere: in another layer, in `moving` or in `unchecked`.
+- **`domain defines N types and no function`:** the types are there and nothing in `domain` runs. The rules of the
+  program may sit outside `domain`, in `application` or in `infrastructure`: read where the decisions are made before
+  you conclude anything. `domain holds ... lines of code and defines no function or type` is the same question for a
+  `domain` of constants alone.
+- **A layer far larger or smaller than its role suggests:** open its longest files and read what they are for. A file
+  much longer than the others of its layer often holds more than one thing.
+- **What changed since the last run says more than one value.** Compare the line with the one before it, across
+  commits: a share that moves with a change is the change's effect, which is what to read.

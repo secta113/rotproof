@@ -497,6 +497,8 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
 - [What `rotproof check` checks][what-rotproof-check-checks]: every rule, and how each fails.
 - [The code that is moving][the-code-that-is-moving]: how `rotproof check` counts the code in `moving` and says which
   file to move first.
+- [The size of the code][the-size-of-the-code]: `rotproof sizes`, and the line of `rotproof check` that gives the share of
+  the lines of code each layer holds.
 - [The map in `AGENTS.md`][the-map-in-agentsmd]: the warning when the map in the project's own `AGENTS.md` falls
   behind the declaration.
 - [Work put off that an issue tracks][work-put-off-that-an-issue-tracks]: `todo_link`, and a `TODO` that names its issue.
@@ -512,6 +514,7 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
 [the-records]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-records
 [what-rotproof-check-checks]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#what-rotproof-check-checks
 [the-code-that-is-moving]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-code-that-is-moving
+[the-size-of-the-code]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-size-of-the-code
 [the-map-in-agentsmd]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-map-in-agentsmd
 [work-put-off-that-an-issue-tracks]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#work-put-off-that-an-issue-tracks
 
