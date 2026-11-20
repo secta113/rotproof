@@ -105,7 +105,8 @@ presentation.models in TypeScript; a name no manifest lists or no file of its pl
 file and the package), that no \
 comment holds {markers}, that no comment switches the type checker off (# type: ignore, # pyright: ignore and the \
 like in Python, @ts-ignore, @ts-expect-error and @ts-nocheck in TypeScript), that the project's files are up to this version (files in the declaration; `rotproof init` \
-updates them), that .rotproof/AGENTS.md and .rotproof/running.md are up to date, that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
+updates them), that .rotproof/AGENTS.md and .rotproof/running.md are up to date, that the project answered whether its agent reads .rotproof/AGENTS.md \
+(the root's AGENTS.md or CLAUDE.md names its path, or guide-pointer is in declined), that .rotproof/readers.md lists who reads each shared unit as `rotproof index` \
 would write it (there with a shared unit, not there without), that every knowledge document in docs/knowledge/ keeps its \
 rules (docs/knowledge/rules.md), has one of the areas the declaration lists as its tag and matches the code it \
 follows, that every link in them and in the log resolves, and that the log keeps its structure, with no day later \

@@ -346,7 +346,7 @@ fn screens_absent(declaration: &Declaration, layout: &Layout) -> Option<String> 
 const AREAS_COMMENT: &str = "# The areas the knowledge documents are grouped by, in this order, such as \"billing\" or \"records\".\n\
                              # Every knowledge document has exactly one of them in tags, and its index groups by them\n";
 
-/// What `ui` is, as the declaration says it above the field.
+/// What `ui_design` is, as the declaration says it above the field.
 const UI_COMMENT: &str = "# The UI of this project, which picks the layers of its screens: \"none\" for a project with no screens\n\
                           # (a command-line tool, a library, a server), so none is made or checked\n";
 

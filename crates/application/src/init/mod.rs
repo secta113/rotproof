@@ -240,7 +240,7 @@ mod tests {
         // The UI whose views were templates is no UI of its own: a Python project with screens reads them
         assert!(new("python", Some("rendered")).is_err());
         assert!(new("typescript", Some("rendered")).is_err());
-        // Rust offers none alone, so it needs no --ui and takes no other
+        // Rust offers none alone, so it needs no --ui-design and takes no other
         assert!(
             new("rust", None)
                 .unwrap()

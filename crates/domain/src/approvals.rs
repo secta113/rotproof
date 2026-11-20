@@ -7,8 +7,8 @@
 //! - **An entry that matches no forbidden import fails.** The import moved away, was fixed, or became allowed: the
 //!   approval goes with it, through `rotproof approve --prune`, instead of waiting for the next import to cover.
 //!
-//! `rotproof approve` adds an entry, and asks for a reason. The rules here take the file's text and the forbidden
-//! imports `application` found, and give back what passes and what fails.
+//! `rotproof approve` adds an entry, with the reason it is given by `--reason`. The rules here take the file's text
+//! and the forbidden imports `application` found, and give back what passes and what fails.
 
 use std::collections::BTreeSet;
 
