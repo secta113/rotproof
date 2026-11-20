@@ -9,5 +9,5 @@
   `package.json`, which npm hoists, in its tests. A subpath is the package it is in (`lodash/fp` is `lodash`,
   `@shop/kernel/utils` is `@shop/kernel`), and `node:` names and Node's builtins (`fs`, `path`) are not packages. List
   under `without_import` in `[dependencies]` of `.config/rotproof.toml` a package the code uses without importing it.
-  Fix a missing dependency by listing it in `package.json`, and an unused one by taking it out; never list a package
-  only to pass the check.
+  Fix a missing dependency by listing it in `package.json` (in `devDependencies` when only tests import it), and an
+  unused one by taking it out; never list a package only to pass the check.

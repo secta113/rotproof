@@ -3,7 +3,9 @@
 //! check` checks"); each is judged in the module of `domain` that holds it, and this use case reads what it needs and
 //! runs them.
 //!
-//! Each check has a floor: when the scan finds nothing at all, it fails instead of passing with nothing checked.
+//! The structure, the checks of the comments and the records each have a floor: when the scan finds nothing at all,
+//! it fails instead of passing with nothing checked. The checks of the environment, the I/O of the inner layers and
+//! the dependencies have none of their own.
 
 use std::io;
 

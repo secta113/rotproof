@@ -330,6 +330,13 @@ fn unchecked_paths<'a>(declared: &'a Declared, seen: &Seen) -> (Vec<String>, Vec
                 "{field} lists {path}, which holds or sits in the layer {} ({}/): a layer cannot be switched off",
                 place.name, place.path
             ));
+        } else if field == "moving" && declared.is_tests(path) {
+            // Tests are no code to move into a layer: the layout keeps them where they are, and `unchecked` is the
+            // field for a place whose code no check reads
+            found.push(format!(
+                "{field} lists {path}, which the layout reads as tests: tests stay where they are, so take it out of \
+                 {field}"
+            ));
         } else if !seen.present(path) {
             found.push(format!(
                 "{field} lists {path}, which does not exist: remove it"
@@ -733,6 +740,44 @@ mod tests {
         );
         // The paths of both fields are kept, so the code in either is outside no layer
         assert_eq!(kept, ["scripts", "legacy"]);
+    }
+
+    #[test]
+    fn moving_a_place_the_layout_reads_as_tests_fails_and_unchecked_may_list_it() {
+        let python = declared(
+            "stack = \"python\"\nareas = []\nui_design = \"atomic\"\nunchecked = [\"tests\"]\nmoving = [\"tests/\", \
+             \"tests/audio\", \"legacy\"]\n",
+        );
+        let mut seen = Seen::default();
+        for path in named(&python) {
+            seen.named.insert(path, Ok(()));
+        }
+        let (found, kept) = unchecked_paths(&python, &seen);
+        assert_eq!(
+            found,
+            [
+                "moving lists tests, which the layout reads as tests: tests stay where they are, so take it out of \
+                 moving",
+                "moving lists tests/audio, which the layout reads as tests: tests stay where they are, so take it out \
+                 of moving",
+            ]
+        );
+        assert_eq!(kept, ["tests", "legacy"]);
+        // A test is told by its name in TypeScript: a file named so, or a directory of tests
+        let typescript = declared(
+            "stack = \"typescript\"\nareas = []\nui_design = \"none\"\nmoving = [\"src/old/a.test.ts\", \
+             \"src/old/__tests__\", \"src/old\"]\n",
+        );
+        let mut seen = Seen::default();
+        for path in named(&typescript) {
+            seen.named.insert(path, Ok(()));
+        }
+        let (found, kept) = unchecked_paths(&typescript, &seen);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(
+            found[1].starts_with("moving lists src/old/__tests__, which the layout reads as tests")
+        );
+        assert_eq!(kept, ["src/old"]);
     }
 
     #[test]

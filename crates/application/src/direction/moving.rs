@@ -65,11 +65,15 @@ impl<'a> Moving<'a> {
             let Ok((path, is_dir)) = exactly(tree, path) else {
                 continue;
             };
+            // A test is no code to move into a layer, wherever it sits: the paths of `moving` that are one fail as a
+            // declaration, and the tests inside a broader path are left out
             if is_dir {
                 for file in code_files(tree, &path, is_code)? {
-                    moving.files.insert(file, Read::default());
+                    if !declared.is_tests(&file) {
+                        moving.files.insert(file, Read::default());
+                    }
                 }
-            } else if is_code(file_name(&path)) {
+            } else if is_code(file_name(&path)) && !declared.is_tests(&path) {
                 moving.files.insert(path, Read::default());
             }
         }

@@ -341,6 +341,25 @@ mod tests {
     }
 
     #[test]
+    fn a_package_only_tests_import_is_said_to_belong_in_dev_dependencies() {
+        let found = check(
+            "",
+            &with(&[
+                ("package.json", PACKAGE),
+                (
+                    "src/application/a.test.ts",
+                    "import { test } from \"vitest\";\nimport z from \"zod\";\n",
+                ),
+            ]),
+        );
+        let said = found
+            .iter()
+            .find(|said| said.contains("imports zod"))
+            .unwrap_or_else(|| panic!("{found:#?}"));
+        assert!(said.ends_with(": add it to devDependencies"), "{found:#?}");
+    }
+
+    #[test]
     fn a_package_imported_and_not_listed_is_missing_and_one_listed_and_not_imported_is_unused() {
         let found = check(
             "",

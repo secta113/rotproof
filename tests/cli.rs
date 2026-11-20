@@ -1432,9 +1432,7 @@ fn the_units_of_the_readme_and_of_the_declaration_init_writes_pass_the_check_onc
         + "\n"
         + &readme_units();
     let mut declarations = vec![("python (README)", readme)];
-    // Not Rust's yet: the package create writes for its app's entry sits in the unit's directory, where the structure
-    // check fails it as code outside the layers
-    for stack in ["python", "typescript"] {
+    for stack in ["python", "typescript", "rust"] {
         let root = tempfile::tempdir().unwrap();
         let arg = root_arg(root.path());
         let out = run(&[
@@ -5949,6 +5947,73 @@ fn check_counts_the_rust_code_that_is_moving_and_names_none_to_move_first() {
 }
 
 #[test]
+fn moving_lists_no_tests_and_the_tests_in_a_path_that_is_moving_are_not_counted() {
+    // Python: `tests/` is a place the layout reads as tests, so it is no code to move into a layer
+    let root = clean_repo();
+    let r = root.path();
+    let arg = root_arg(r);
+    write_file(r, "tests/test_a.py", "import os\n");
+    write_file(r, "legacy/old.py", "import os\n");
+    declare(
+        r,
+        "stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\nmoving = [\"tests\", \"legacy\"]\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains(
+            "moving lists tests, which the layout reads as tests: tests stay where they are, so take it out of moving"
+        ),
+        "{said}"
+    );
+    declare(
+        r,
+        "stack = \"python\"\nareas = [\"a\"]\nui_design = \"none\"\nmoving = [\"legacy\"]\n",
+    );
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains("moving: 1 file is not in a layer yet"),
+        "{said}"
+    );
+    // TypeScript: a test is told by its name, so one in a path that is moving is neither counted nor given layers
+    let root = repo_with_ui("typescript", "");
+    let r = root.path();
+    let arg = root_arg(r);
+    write_file(r, "src/legacy/old.ts", "export const a = 1;\n");
+    write_file(
+        r,
+        "src/legacy/old.test.ts",
+        "import { a } from \"./old\";\n",
+    );
+    let declaration = |moving: &str| {
+        format!(
+            "stack = \"typescript\"\nareas = [\"a\"]\n{}moving = [{moving}]\n",
+            ui_line("typescript")
+        )
+    };
+    declare(r, &declaration("\"src/legacy\""));
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert!(out.status.success(), "{said}");
+    assert!(
+        said.contains("moving: 1 file is not in a layer yet"),
+        "{said}"
+    );
+    assert!(!said.contains("old.test.ts"), "{said}");
+    declare(r, &declaration("\"src/legacy/old.test.ts\""));
+    let out = run(&["--root", &arg, "check"]);
+    let said = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{said}");
+    assert!(
+        said.contains("moving lists src/legacy/old.test.ts, which the layout reads as tests"),
+        "{said}"
+    );
+}
+
+#[test]
 fn check_leaves_out_of_the_layers_a_moving_file_could_go_in_those_the_io_check_would_fail_it_in() {
     let root = clean_repo();
     let r = root.path();
@@ -9843,6 +9908,21 @@ fn a_python_manifest_is_compared_with_what_the_code_imports_either_way() {
     assert!(
         said.contains(
             "domain/rule.py:1: imports pytest, which pyproject.toml:5 lists for development only"
+        ),
+        "{said}"
+    );
+    // A package only tests import and the manifest lacks is to be added for development, not to runtime
+    fs::remove_file(r.join("domain/rule.py")).unwrap();
+    write_file(
+        r,
+        "pyproject.toml",
+        "[project]\nname = \"shop\"\ndependencies = [\"requests\", \"python-dotenv\"]\n",
+    );
+    let said = stdout(&run(&["--root", &arg, "check"]));
+    assert!(
+        said.contains(
+            "tests/test_pay.py:1: imports pytest, which needs the package pytest, and pyproject.toml does not list \
+             it: add it to a group of [dependency-groups]"
         ),
         "{said}"
     );

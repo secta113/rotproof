@@ -106,11 +106,13 @@ pub struct Use {
 /// What is wrong between a manifest and the code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Problem {
-    /// The code needs a package the manifest does not list, first at `first`, and `more` places beside it
+    /// The code needs a package the manifest does not list, first at `first`, and `more` places beside it.
+    /// `tests_only` when every place is a test, so that the package belongs in development
     Missing {
         package: String,
         first: Use,
         more: usize,
+        tests_only: bool,
     },
     /// The code of a layer needs a package the manifest lists for development only
     NotRuntime { dep: Dep, first: Use, more: usize },
@@ -205,6 +207,7 @@ pub fn judge(
                 package: package.to_string(),
                 first: places[0].clone(),
                 more: places.len() - 1,
+                tests_only: rules.tests && places.iter().all(|used| used.test),
             });
         }
     }
@@ -255,6 +258,7 @@ impl Problem {
                 package,
                 first,
                 more: n,
+                tests_only,
             } => {
                 let at = format!("{}:{}", first.file, first.line);
                 let what = match &first.unit {
@@ -268,7 +272,9 @@ impl Problem {
                     ),
                 };
                 let hint = hint.map(|h| format!(" ({h})")).unwrap_or_default();
-                format!("{at}: {what}{}: add it to {runtime}{hint}", more(*n))
+                // What only tests import is development, and listing it as runtime fails the next check
+                let place = if *tests_only { development } else { runtime };
+                format!("{at}: {what}{}: add it to {place}{hint}", more(*n))
             }
             Problem::NotRuntime {
                 dep,
@@ -407,6 +413,39 @@ mod tests {
             found[0].said(Language::Python, "pyproject.toml", None),
             "a.py:3: imports dotenv, which needs the package dotenv, and pyproject.toml does not list it (2 more \
              imports of it): add it to dependencies in [project]"
+        );
+    }
+
+    #[test]
+    fn a_package_only_tests_import_is_to_be_added_for_development_and_not_to_runtime() {
+        let listing = listing(vec![]);
+        let only_tests = [
+            used("pytest", "tests/a.py", true),
+            used("pytest", "tests/b.py", true),
+        ];
+        let found = judge(Language::Python, &listing, &only_tests, &[]);
+        assert_eq!(
+            found[0].said(Language::Python, "pyproject.toml", None),
+            "tests/a.py:3: imports pytest, which needs the package pytest, and pyproject.toml does not list it (1 \
+             more import of it): add it to a group of [dependency-groups]"
+        );
+        let found = judge(Language::TypeScript, &listing, &only_tests, &[]);
+        assert_eq!(
+            found[0].said(Language::TypeScript, "package.json", None),
+            "tests/a.py:3: imports pytest, which needs the package pytest, and package.json does not list it (1 \
+             more import of it): add it to devDependencies"
+        );
+        // One import outside a test, and it is runtime again
+        let one_in_code = [
+            used("pytest", "tests/a.py", true),
+            used("pytest", "domain/b.py", false),
+        ];
+        let found = judge(Language::Python, &listing, &one_in_code, &[]);
+        assert!(
+            found[0]
+                .said(Language::Python, "pyproject.toml", None)
+                .ends_with(": add it to dependencies in [project]"),
+            "{found:?}"
         );
     }
 

@@ -349,7 +349,11 @@ project declares any of them is a person's decision, which an agent never makes 
 middle of a refactoring. It is no `unchecked`: `unchecked` is for code that is never moved (generated or vendored
 files), and `moving` for code that is to go into the layers. It is written as `unchecked` is, from the root with `/`,
 and judged as it is: a path that holds or sits in a layer, that holds a unit, or that does not exist fails, and the code
-in it is judged by no check (not the direction, not the markers, not the structure). What `rotproof check` does with
+in it is judged by no check (not the direction, not the markers, not the structure). A path of `moving` that is, or
+lies in, a place the layout reads as tests (Python's `tests/`, a TypeScript file named `*.test.*` or `*.spec.*`, a
+`__tests__/` directory) fails too, since tests stay where they are and are no code to move into a layer: it is taken
+out of `moving`, or listed in `unchecked` when no check is to read it. A test in a broader path of `moving` is
+neither counted nor given layers. What `rotproof check` does with
 it is to count it and say which files to move first (see "The code that is moving"), and, as for `unchecked`, to list
 every import of it by the code of an inner layer (see "The inner layers do no I/O"). `rotproof init` writes
 `moving = []` into a declaration it makes, `rotproof create` adds it to none, and a Rotproof older than the one that
@@ -990,7 +994,9 @@ Cargo refuses two crates of one name; the unit's directory holds the crates and 
 `Cargo.toml` it writes then is a workspace with no package, naming each crate in `members` (a glob such as
 `crates/*` would match the directory of a unit and fail in Cargo), and `src/main.rs` is not written. The entry file
 of a unit is `<dir>/src/main.rs` in Rust, and `rotproof create` makes with it the package that holds it, `<dir>/Cargo.toml`
-(named for the unit, and for the unit and its directory from its second entry on), which lists no dependency, since the
+(named for the unit, and for the unit and its directory from its second entry on, and so outside the unit's own
+directory, which holds no manifest: an app keeps its crates in a directory of their own, as the example `rotproof init`
+writes does, `path = "apps/cli/crates"`, `root = "apps/cli"`, `entry = ["apps/cli/src/main.rs"]`), which lists no dependency, since the
 dependencies check fails one the code does not name, and which `members` names; an entry file declared in another form, that is not there, fails the
 run before anything is written, and one that is there is the project's, with its package. When the root `Cargo.toml` is
 there already, `rotproof create` changes `members` and nothing else of it, only to add the crates and packages it made
@@ -1543,7 +1549,9 @@ entry can be told, is one.
   manifest:
   1. **an import of a package the manifest does not list fails**, once for the package, at its first import, with how
      many more there are; the extras a dependency brings are no dependency of the package, so importing what one brings
-     fails as well. A package is the distribution an import is of: the entry of `imports` under `[dependencies]` of the
+     fails as well. The message says to add it to `dependencies` in `[project]`, and to a group of `[dependency-groups]`
+     when every import of it is in a test, since a runtime dependency that only tests import fails (3). A package is
+     the distribution an import is of: the entry of `imports` under `[dependencies]` of the
      declaration that covers it, or else the one named like its first part, and the message says to map it when it may
      be another. An import of another unit needs that unit's package, by the `name` its own `pyproject.toml` gives, or
      by the name of the unit when it has none; an import of a module of the unit itself, of the standard library, or of
@@ -1611,7 +1619,8 @@ entry can be told, is one.
   a builtin without `node:` (`fs`, `path/posix`, `buffer`) is Node's, unless the manifest lists a package of that
   name, which then is used. Then, in each manifest:
   1. **an import of a package the manifest does not list fails**, once for the package with how many more imports there
-     are of it; any kind of dependency lists it. A unit below the root of the project may also use the
+     are of it; any kind of dependency lists it. The message says to add it to `dependencies`, and to `devDependencies`
+     when every import of it is in a test, as in Python. A unit below the root of the project may also use the
      `devDependencies` of the project's own `package.json`, which npm hoists to every package of the workspace;
   2. **the code of a layer uses runtime and optional dependencies only**, as in Python: an import of a package that
      only `devDependencies` lists (the unit's own, or the root's hoisted) by a file that is not a test fails, once for
@@ -1748,7 +1757,9 @@ entry can be told, is one.
   without the word, and what spans files, says how to run or operate something, or lies outside the repository moves
   to `docs/knowledge/`, tied to the code by `follows`. A line that holds both is named under the first heading alone,
   as taking the comment out settles both. Only comments count: `Status.TODO` and `"XXX-XXXX"` are not markers, and docstrings are
-  strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read. A project that declares `todo_link`
+  strings. Comments in other files (a stylesheet, a `Cargo.toml`) are not read. The check has a floor: when no code file
+  was read, it fails (`no code file was read: the <stack> layout finds none in the tree`) instead of passing with
+  nothing read. A project that declares `todo_link`
   may keep a `TODO` that names the issue tracking its work: see "Work put off that an issue tracks".
 - **No comment switches the type checker off**, in the comments the marker check reads: in Python, `# type: ignore`
   and `# mypy: ignore`, `# pyright: ignore`, `# pyrefly: ignore` or `# ty: ignore`, with or without codes, and the
@@ -1865,7 +1876,8 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next (th
 
 - **The count is the code files in the listed paths:** `.py` files in Python, source files in TypeScript (`.ts`,
   `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`), `.rs` files in Rust. Outside `.gitignore` and the hidden
-  directories, as everywhere. A project that lists no path hears nothing; one whose listed paths hold no code says to
+  directories, as everywhere, and not the tests the layout reads (a TypeScript `*.test.*` in a listed directory). A
+  project that lists no path hears nothing; one whose listed paths hold no code says to
   take them out.
 - **The order is the import graph's, from its leaves.** An import of a file that is moving too (a module or a package
   of Python; in TypeScript, the file an import resolves to as it does for the files in a layer) is a wait: the file
