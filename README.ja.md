@@ -66,14 +66,14 @@ Rotproof は Windows x86_64、Linux x86_64（glibc 2.17 以上）、macOS arm64�
 出しています。版は厳密に固定してください。アップグレードは新しい規則を持ち込みうるので、それだけのコミットにするためです。
 
 ```sh
-pip install rotproof==2.0.0-rc.1
+pip install rotproof==2.0.0-rc.2
 ```
 
 Node のプロジェクトでは npm で固定します。プラットフォームに合ったバイナリも一緒に入ります（パッケージ `rotproof` と、
 `@rotproof/linux-x64`、`@rotproof/win32-x64`、`@rotproof/darwin-arm64` のいずれか）。
 
 ```sh
-npm install -D -E rotproof@2.0.0-rc.1
+npm install -D -E rotproof@2.0.0-rc.2
 ```
 
 wheel に入っているのはバイナリだけで、Python のコードは動きません。Python も Node も無い場合は、
