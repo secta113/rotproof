@@ -19,14 +19,14 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use super::{Ask, Read, listing, without_import};
+use super::{Ask, Read, holder, listing, without_import};
 use crate::code::lands;
 use crate::direction::{entry_files, layer_files};
 use crate::tree::{code_files, read_code};
 use domain::code::{Aliases, Package, Reach, is_source};
 use domain::declaration::Declared;
 use domain::dependencies::typescript::{Specifier, specifier};
-use domain::dependencies::{Dep, Kind, Listing, judge};
+use domain::dependencies::{Dep, Kind, Listing, judge_with_moving};
 use domain::layers::{Language, Layout, Place, table};
 use domain::paths::{join, within};
 use domain::units::Unit;
@@ -135,23 +135,24 @@ pub(super) fn typescript(
     let nothing = Listing::default();
     // The files that are moving, for the packages they import alone: no manifest is compared with them, as none is with
     // the code outside the layers
-    if let Ask::Moving(moving) = ask {
-        let mut moved: Vec<domain::dependencies::Use> = Vec::new();
+    let moved = |moving: &[String]| -> io::Result<Vec<(String, domain::dependencies::Use)>> {
+        let mut moved = Vec::new();
         for path in moving.iter().filter(|path| is_source(path)) {
-            let Some(unit) = units
-                .iter()
-                .filter(|unit| within(path, &unit.path))
-                .max_by_key(|unit| unit.path.len())
-                .or(units.first())
-            else {
+            let Some((unit, holds)) = holder(units, path) else {
                 continue;
             };
             let own = listings.get(&manifest_of(unit)).unwrap_or(&nothing);
+            // A file no declared unit holds is read for its packages and counts for no manifest
+            let manifest = if holds {
+                manifest_of(unit)
+            } else {
+                String::new()
+            };
             let Some(source) = read_code(tree, path, "imports", &mut Vec::new())? else {
                 continue;
             };
             for (line, import) in parsers.typescript(&source, path).imports {
-                if let Needs::Package(package) = needs(
+                let (package, named) = match needs(
                     tree,
                     &aliases,
                     units,
@@ -160,22 +161,42 @@ pub(super) fn typescript(
                     path,
                     &import.specifier,
                 ) {
-                    moved.push(domain::dependencies::Use {
+                    Needs::Nothing => continue,
+                    Needs::Unit(package, name) => (package, Some(name)),
+                    Needs::Package(package) => (package, None),
+                };
+                moved.push((
+                    manifest.clone(),
+                    domain::dependencies::Use {
                         file: path.clone(),
                         line,
                         shown: import.specifier,
                         package,
                         test: false,
-                        unit: None,
-                    });
-                }
+                        unit: named,
+                    },
+                ));
             }
         }
+        Ok(moved)
+    };
+    if let Ask::Moving(moving) = ask {
         // The code of the layers is no part of what was asked for
         return Ok(Read {
-            moving: moved,
+            moving: moved(moving)?
+                .into_iter()
+                .map(|(_, used)| used)
+                .filter(|used| used.unit.is_none())
+                .collect(),
             ..Read::default()
         });
+    }
+    // Where a runtime dependency is used by the files that are moving, which count for that and nothing else
+    let mut moved_by: BTreeMap<String, Vec<domain::dependencies::Use>> = BTreeMap::new();
+    if let Ask::Whole(moving) = ask {
+        for (manifest, used) in moved(moving)? {
+            moved_by.entry(manifest).or_default().push(used);
+        }
     }
     let mut files: Vec<(String, String)> = layer_files(tree, layout, places, str::to_string)?
         .into_iter()
@@ -275,7 +296,8 @@ pub(super) fn typescript(
             }
         }
         let used = uses.get(manifest).map_or(&[][..], Vec::as_slice);
-        for problem in judge(Language::TypeScript, &judged, used, &without) {
+        let moving = moved_by.get(manifest).map_or(&[][..], Vec::as_slice);
+        for problem in judge_with_moving(Language::TypeScript, &judged, used, moving, &without) {
             found.push(problem.said(Language::TypeScript, manifest, None));
         }
     }
@@ -498,6 +520,114 @@ import _ from \"lodash\";
             ]),
         );
         assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_dependency_only_the_code_that_is_moving_imports_is_used() {
+        const LODASH: &str =
+            "{\n  \"name\": \"shop\",\n  \"dependencies\": {\n    \"lodash\": \"^4\"\n  }\n}\n";
+        let files = with(&[
+            ("package.json", LODASH),
+            ("legacy/old.ts", "import fp from \"lodash/fp\";\n"),
+        ]);
+        let found = check("moving = [\"legacy\"]\n", &files);
+        assert!(found.is_empty(), "{found:#?}");
+        // The same file not listed in `moving` is code outside the layers, which this check does not read either
+        let found = check("", &files);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0]
+                .starts_with("package.json:4: lists the dependency lodash, which no code imports"),
+            "{found:#?}"
+        );
+        // Taking the import out of the moving file leaves the dependency unused again
+        let found = check(
+            "moving = [\"legacy\"]\n",
+            &with(&[
+                ("package.json", LODASH),
+                ("legacy/old.ts", "export const x = 1;\n"),
+            ]),
+        );
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].contains("lists the dependency lodash"),
+            "{found:#?}"
+        );
+        // `unchecked` is not read at all, so it counts for nothing
+        let found = check("unchecked = [\"legacy\"]\n", &files);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].contains("lists the dependency lodash"),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn an_import_by_the_code_that_is_moving_is_judged_by_no_other_rule() {
+        let found = check(
+            "moving = [\"legacy\"]\n",
+            &with(&[
+                ("package.json", PACKAGE),
+                (
+                    "src/application/a.ts",
+                    "import React from \"react\";\nimport fp from \"lodash/fp\";\n",
+                ),
+                // A package the manifest does not list, and one it lists for development only
+                (
+                    "legacy/old.ts",
+                    "import express from \"express\";\nimport { test } from \"vitest\";\n",
+                ),
+            ]),
+        );
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_dependency_the_code_that_is_moving_imports_is_not_one_only_tests_import() {
+        const VITEST: &str =
+            "{\n  \"name\": \"shop\",\n  \"dependencies\": {\n    \"vitest\": \"^2\"\n  }\n}\n";
+        let files = with(&[
+            ("package.json", VITEST),
+            (
+                "src/application/b.test.ts",
+                "import { test } from \"vitest\";\n",
+            ),
+            ("legacy/old.ts", "import { vi } from \"vitest\";\n"),
+        ]);
+        let found = check("moving = [\"legacy\"]\n", &files);
+        assert!(found.is_empty(), "{found:#?}");
+        let found = check("", &files);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(found[0].contains("only tests import it"), "{found:#?}");
+    }
+
+    #[test]
+    fn the_code_that_is_moving_counts_for_the_manifest_of_the_unit_that_holds_it() {
+        const BILLING: &str =
+            "{\n  \"name\": \"billing\",\n  \"dependencies\": {\n    \"lodash\": \"^4\"\n  }\n}\n";
+        const CORE: &str =
+            "{\n  \"name\": \"core\",\n  \"dependencies\": {\n    \"lodash\": \"^4\"\n  }\n}\n";
+        let declaration = "moving = [\"billing/legacy\"]\n\
+                           [[unit]]\nname = \"billing\"\npath = \"billing/src\"\nroot = \"billing\"\n\
+                           [[unit]]\nname = \"core\"\npath = \"core/src\"\nroot = \"core\"\nshared = true\n";
+        let found = check(
+            declaration,
+            &[
+                ("billing/src/domain/index.ts", ""),
+                ("billing/src/application/index.ts", ""),
+                ("core/src/domain/index.ts", ""),
+                ("core/src/application/index.ts", ""),
+                ("billing/package.json", BILLING),
+                ("core/package.json", CORE),
+                // Held by the root of billing, outside the path of its layers
+                ("billing/legacy/old.ts", "import fp from \"lodash/fp\";\n"),
+            ],
+        );
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].starts_with("core/package.json:4: lists the dependency lodash"),
+            "{found:#?}"
+        );
     }
 
     #[test]

@@ -20,6 +20,8 @@ use domain::declaration::Declared;
 use domain::dependencies::Listing;
 pub use domain::dependencies::Use;
 use domain::layers::{Language, table};
+use domain::paths::within;
+use domain::units::Unit;
 use protocol::outbound::{Parsers, Tree};
 
 /// The heading the findings are printed under.
@@ -62,7 +64,7 @@ pub fn packages(
     parsers: &dyn Parsers,
     declared: &Declared,
 ) -> io::Result<Packages> {
-    let read = read_all(tree, parsers, declared, Ask::Whole, &mut Vec::new())?;
+    let read = read_all(tree, parsers, declared, Ask::Whole(&[]), &mut Vec::new())?;
     Ok(Packages {
         manifests: read.any,
         listed: read.listed,
@@ -95,7 +97,13 @@ pub fn problems(
         return Ok(Vec::new());
     };
     let mut found = Vec::new();
-    let read = read_all(tree, parsers, declared, Ask::Whole, &mut found)?;
+    // The files that are moving are read for one rule: a runtime dependency only they import is used. Rust has none to
+    // read, as a crate that is moving is no crate of a layer or an entry file, which are the ones compared
+    let moving = match layout.language {
+        Language::Rust => Vec::new(),
+        Language::Python | Language::TypeScript => crate::direction::moving_files(tree, declared)?,
+    };
+    let read = read_all(tree, parsers, declared, Ask::Whole(&moving), &mut found)?;
     if read.any {
         for name in
             domain::dependencies::stale(&without_import(declared, layout.language), &read.runtime)
@@ -113,8 +121,9 @@ pub fn problems(
 /// What a reading is for.
 #[derive(Clone, Copy)]
 enum Ask<'a> {
-    /// The manifests and every import of the code the check reads, compared
-    Whole,
+    /// The manifests and every import of the code the check reads, compared; with the files that are moving, whose
+    /// imports count as uses of a runtime dependency and are compared with nothing else
+    Whole(&'a [String]),
     /// The imports of a package in these files that are moving, and nothing else: the code of the layers is not read
     Moving(&'a [String]),
 }
@@ -162,6 +171,25 @@ fn normalized(language: Language, name: &str) -> String {
         Language::TypeScript => name.to_string(),
         Language::Rust => domain::dependencies::rust::normalize(name),
     }
+}
+
+/// The unit that holds the file at `path`, which is moving: the declared unit whose `path` holds it, the closest first,
+/// else the one whose `root` does, else the first unit, which reads its imports; and whether its manifest is the
+/// file's: so for the unit that holds it and for the implicit unit of a project that declares none, whose `path` holds
+/// no file and whose manifest is the project's. In a project that declares units, a file no unit holds is still read,
+/// as the first unit's, for the packages it imports, and counts for no manifest: crediting one it does not sit under
+/// could hide a dependency that is unused there.
+fn holder<'a>(units: &'a [Unit], path: &str) -> Option<(&'a Unit, bool)> {
+    let closest = |place: fn(&Unit) -> &str| {
+        units
+            .iter()
+            .filter(|unit| within(path, place(unit)))
+            .max_by_key(|unit| place(unit).len())
+    };
+    closest(|unit| &unit.path)
+        .or_else(|| closest(|unit| &unit.root))
+        .map(|unit| (unit, true))
+        .or_else(|| units.first().map(|unit| (unit, !unit.declared)))
 }
 
 /// The manifest at `path`, read: `None` when there is none, which is no finding (a unit with no manifest is not

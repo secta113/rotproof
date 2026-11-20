@@ -22,17 +22,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 use super::venv::Venv;
-use super::{Ask, Read, listing, without_import};
+use super::{Ask, Read, holder, listing, without_import};
 use crate::direction::python::{package_files, path_of};
 use crate::direction::{entry_files, layer_files};
 use crate::tree::{Resolver, code_files, read_code};
 use domain::code::module_parts;
 use domain::declaration::{DECLARATION, Declared};
 use domain::dependencies::python::{distribution_of, normalize};
-use domain::dependencies::{Kind, Listing, Problem, Use, judge};
+use domain::dependencies::{Kind, Listing, Problem, Use, judge_with_moving};
 use domain::direction::{Landing, landing_of};
 use domain::layers::{Language, Layout, Place, table};
-use domain::paths::{join, parent, within};
+use domain::paths::{join, parent};
 use domain::python_stdlib::is_standard_library;
 use domain::units::Unit;
 use protocol::outbound::{Parsers, Tree};
@@ -193,37 +193,22 @@ pub(super) fn python(
     // The files that are moving, for the packages they import alone: no manifest is compared with them, as none is with
     // the code outside the layers
     if let Ask::Moving(moving) = ask {
-        let mut moved: Vec<Use> = Vec::new();
-        for path in moving {
-            let Some(unit) = units
-                .iter()
-                .filter(|unit| within(path, &unit.path))
-                .max_by_key(|unit| unit.path.len())
-                .or(units.first())
-            else {
-                continue;
-            };
-            let Some(source) = read_code(tree, path, "imports", &mut Vec::new())? else {
-                continue;
-            };
-            for (line, module) in parsers.python(&source, path).imports {
-                if let Needs::Package(package, _) = imports.needs(path, unit, &module) {
-                    moved.push(Use {
-                        file: path.clone(),
-                        line,
-                        shown: module.join("."),
-                        package,
-                        test: false,
-                        unit: None,
-                    });
-                }
-            }
-        }
         // The code of the layers is no part of what was asked for
         return Ok(Read {
-            moving: moved,
+            moving: moved(tree, parsers, units, &imports, moving, &manifest_of)?
+                .into_iter()
+                .map(|(_, used)| used)
+                .filter(|used| used.unit.is_none())
+                .collect(),
             ..Read::default()
         });
+    }
+    // Where a runtime dependency is used by the files that are moving, which count for that and nothing else
+    let mut moved_by: BTreeMap<String, Vec<Use>> = BTreeMap::new();
+    if let Ask::Whole(moving) = ask {
+        for (manifest, used) in moved(tree, parsers, units, &imports, moving, &manifest_of)? {
+            moved_by.entry(manifest).or_default().push(used);
+        }
     }
     let mut files: Vec<File> = Vec::new();
     let package_files = package_files(tree, layout, &table(), units)?;
@@ -311,7 +296,8 @@ pub(super) fn python(
         read.listed
             .extend(listing.deps.iter().map(|dep| dep.name.clone()));
         let used = uses.get(manifest).map_or(&[][..], Vec::as_slice);
-        for problem in judge(Language::Python, listing, used, &without) {
+        let moving = moved_by.get(manifest).map_or(&[][..], Vec::as_slice);
+        for problem in judge_with_moving(Language::Python, listing, used, moving, &without) {
             let hint = match &problem {
                 Problem::Missing { package, .. } => guesses
                     .get(&(manifest.clone(), package.clone()))
@@ -322,6 +308,52 @@ pub(super) fn python(
         }
     }
     Ok(read)
+}
+
+/// Every import of a package, or of another unit's package, in the files `moving`, each with the manifest of the unit
+/// that holds the file.
+fn moved(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    units: &[Unit],
+    imports: &Imports,
+    moving: &[String],
+    manifest_of: &dyn Fn(&Unit) -> String,
+) -> io::Result<Vec<(String, Use)>> {
+    let mut moved = Vec::new();
+    for path in moving {
+        let Some((unit, holds)) = holder(units, path) else {
+            continue;
+        };
+        // A file no declared unit holds is read for its packages and counts for no manifest
+        let manifest = if holds {
+            manifest_of(unit)
+        } else {
+            String::new()
+        };
+        let Some(source) = read_code(tree, path, "imports", &mut Vec::new())? else {
+            continue;
+        };
+        for (line, module) in parsers.python(&source, path).imports {
+            let (package, named) = match imports.needs(path, unit, &module) {
+                Needs::Nothing => continue,
+                Needs::Unit(package, name) => (package, Some(name)),
+                Needs::Package(package, _) => (package, None),
+            };
+            moved.push((
+                manifest.clone(),
+                Use {
+                    file: path.clone(),
+                    line,
+                    shown: module.join("."),
+                    package,
+                    test: false,
+                    unit: named,
+                },
+            ));
+        }
+    }
+    Ok(moved)
 }
 
 /// The environments read for the hint of a message, each once.
@@ -575,6 +607,161 @@ mod tests {
         assert!(found[0].starts_with(
             "billing/pyproject.toml:3: lists the dependency shop-core, which no code imports"
         ));
+    }
+
+    #[test]
+    fn a_dependency_only_the_code_that_is_moving_imports_is_used() {
+        let files = [
+            (
+                "pyproject.toml",
+                "[project]\nname = \"shop\"\ndependencies = [\"requests\"]\n",
+            ),
+            ("application/a.py", "import os\n"),
+            ("legacy/old.py", "import requests\n"),
+        ];
+        let found = check("moving = [\"legacy\"]\n", &files);
+        assert!(found.is_empty(), "{found:#?}");
+        // The same file not listed in `moving` is code outside the layers, which this check does not read either
+        let found = check("", &files);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].starts_with(
+                "pyproject.toml:3: lists the dependency requests, which no code imports"
+            ),
+            "{found:#?}"
+        );
+        // Taking the import out of the moving file leaves the dependency unused again
+        let found = check(
+            "moving = [\"legacy\"]\n",
+            &[files[0], files[1], ("legacy/old.py", "import os\n")],
+        );
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].contains("lists the dependency requests"),
+            "{found:#?}"
+        );
+        // `unchecked` is not read at all, so it counts for nothing
+        let found = check("unchecked = [\"legacy\"]\n", &files);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].contains("lists the dependency requests"),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn an_import_by_the_code_that_is_moving_is_judged_by_no_other_rule() {
+        let found = check(
+            "moving = [\"legacy\"]\n",
+            &[
+                (
+                    "pyproject.toml",
+                    "[project]\nname = \"shop\"\ndependencies = [\"requests\"]\n\
+                     [dependency-groups]\ndev = [\"pytest\"]\n",
+                ),
+                ("application/a.py", "import requests\n"),
+                // A package the manifest does not list, and one it lists for development only
+                ("legacy/old.py", "import flask\nimport pytest\n"),
+            ],
+        );
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_dependency_the_code_that_is_moving_imports_is_not_one_only_tests_import() {
+        let files = [
+            (
+                "pyproject.toml",
+                "[project]\nname = \"shop\"\ndependencies = [\"requests\"]\n",
+            ),
+            ("application/a.py", "import os\n"),
+            ("tests/test_a.py", "import requests\n"),
+            ("legacy/old.py", "import requests\n"),
+        ];
+        let found = check("moving = [\"legacy\"]\n", &files);
+        assert!(found.is_empty(), "{found:#?}");
+        let found = check("", &files);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(found[0].contains("only tests import it"), "{found:#?}");
+    }
+
+    #[test]
+    fn the_code_that_is_moving_counts_for_the_manifest_of_the_unit_that_holds_it() {
+        let declaration = "moving = [\"billing/legacy\", \"scripts\"]\n\
+                           [[unit]]\nname = \"billing\"\npath = \"billing\"\n\
+                           [[unit]]\nname = \"core\"\npath = \"core\"\nshared = true\n";
+        const BILLING: &str = "[project]
+name = \"billing\"
+dependencies = [\"requests\"]
+";
+        const CORE: &str = "[project]
+name = \"core\"
+dependencies = [\"requests\"]
+";
+        let with = |legacy: &'static str| {
+            vec![
+                ("billing/domain/__init__.py", ""),
+                ("billing/application/__init__.py", ""),
+                ("core/domain/__init__.py", ""),
+                ("core/application/__init__.py", ""),
+                (
+                    "billing/application/pay.py",
+                    "import os
+",
+                ),
+                (
+                    "core/domain/money.py",
+                    "import os
+",
+                ),
+                ("billing/pyproject.toml", BILLING),
+                ("core/pyproject.toml", CORE),
+                ("billing/legacy/old.py", legacy),
+            ]
+        };
+        // Billing's moving file uses billing's dependency, and core's is still unused
+        let found = check(declaration, &with("import requests\n"));
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(
+            found[0].starts_with("core/pyproject.toml:3: lists the dependency requests"),
+            "{found:#?}"
+        );
+        // A file no declared unit holds counts for no manifest: both dependencies are unused
+        let mut outside = with("import os\n");
+        outside.push(("scripts/run.py", "import requests\n"));
+        let found = check(declaration, &outside);
+        assert_eq!(found.len(), 2, "{found:#?}");
+        assert!(
+            found[0].starts_with("billing/pyproject.toml:3: lists the dependency requests"),
+            "{found:#?}"
+        );
+        assert!(
+            found[1].starts_with("core/pyproject.toml:3: lists the dependency requests"),
+            "{found:#?}"
+        );
+    }
+
+    #[test]
+    fn a_unit_the_code_that_is_moving_imports_is_a_dependency_that_is_used() {
+        let declaration = "moving = [\"billing/legacy\"]\n\
+                           [[unit]]\nname = \"billing\"\npath = \"billing\"\n\
+                           [[unit]]\nname = \"core\"\npath = \"core\"\nshared = true\n";
+        let found = check(
+            declaration,
+            &[
+                ("billing/domain/__init__.py", ""),
+                ("billing/application/__init__.py", ""),
+                ("core/domain/__init__.py", ""),
+                ("core/domain/money.py", ""),
+                ("core/pyproject.toml", "[project]\nname = \"Shop_Core\"\n"),
+                (
+                    "billing/pyproject.toml",
+                    "[project]\nname = \"billing\"\ndependencies = [\"shop-core\"]\n",
+                ),
+                ("billing/legacy/old.py", "from core.domain import money\n"),
+            ],
+        );
+        assert!(found.is_empty(), "{found:#?}");
     }
 
     #[test]

@@ -109,6 +109,15 @@ pub fn problems(
     Ok(direction)
 }
 
+/// The code files in the paths `declared` lists in `moving`, in the byte order of their paths: what the direction check
+/// reads to put the code in the order to move it, and the dependencies check counts the imports of.
+pub(crate) fn moving_files(tree: &dyn Tree, declared: &Declared) -> io::Result<Vec<String>> {
+    let Some(layout) = &declared.layout else {
+        return Ok(Vec::new());
+    };
+    Ok(Moving::list(tree, layout, declared)?.files())
+}
+
 /// The places of `declared` that are there. An import of a layer declared absent names a module the project does not
 /// have, so it is not judged.
 pub(crate) fn present_places<'a>(tree: &dyn Tree, declared: &'a Declared) -> Vec<&'a Place> {

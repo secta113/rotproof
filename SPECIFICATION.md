@@ -415,7 +415,9 @@ project declares any of them is a person's decision, which an agent never makes 
 middle of a refactoring. It is no `unchecked`: `unchecked` is for code that is never moved (generated or vendored
 files), and `moving` for code that is to go into the layers. It is written as `unchecked` is, from the root with `/`,
 and judged as it is: a path that holds or sits in a layer, that holds a unit, or that does not exist fails, and the code
-in it is judged by no check (not the direction, not the markers, not the structure). A path of `moving` that is, or
+in it is judged by no check (not the direction, not the markers, not the structure), with one exception: the imports of
+the code of `moving` count as uses in the dependencies check, so that a manifest that lists what the code needs does not
+fail for the code that has not moved yet (a runtime dependency that only that code imports is not unused). A path of `moving` that is, or
 lies in, a place the layout reads as tests (Python's `tests/`, a TypeScript file named `*.test.*` or `*.spec.*`, a
 `__tests__/` directory) fails too, since tests stay where they are and are no code to move into a layer: it is taken
 out of `moving`, or listed in `unchecked` when no check is to read it. A test in a broader path of `moving` is
@@ -555,7 +557,9 @@ body, a function, a `use`; a file that starts with `#![cfg(test)]` as a whole), 
 `examples/`, `build.rs`) are free. `cfg(all(test, ...))` and `cfg(any(test, ...))` are not read as tests, and a
 `#[cfg(test)] mod x;` inside a module with a body is not followed to its file.
 
-A path in `unchecked` or `moving` is not read by any check, tests included. `rotproof check` prints, on every run and
+A path in `unchecked` or `moving` is not read by any check, tests included, but for one rule: the imports of the code in
+`moving` count as uses in the dependencies check (3, in the Python and TypeScript items of "The manifests list the
+dependencies the code imports, both ways"). `rotproof check` prints, on every run and
 only for the TypeScript stack, how many source files it read as tests and by which names, apart from the findings and
 failing nothing:
 
@@ -1605,8 +1609,8 @@ entry can be told, is one.
   tree what its code depends on, and is compared with it as a layer is with the table, from the tree and the declaration
   alone. The manifest is the `pyproject.toml` at the root of each unit, and at the root of the project when it declares
   none; the code is what the direction check reads (the layers, the entry file, a unit's `__init__.py`) and the tests,
-  the code files in `tests/` of the unit's directory or its root, which are no layer. A path in `unchecked` or `moving` is not
-  read. A unit with no `pyproject.toml` at its root is not compared with one (the next rule fails it), and a `pyproject.toml` that cannot be read as
+  the code files in `tests/` of the unit's directory or its root, which are no layer. A path in `unchecked` is not read,
+  and one in `moving` is read for rule 3 alone. A unit with no `pyproject.toml` at its root is not compared with one (the next rule fails it), and a `pyproject.toml` that cannot be read as
   UTF-8 or TOML fails. What is listed is read as the tools that write the file say: `[project] dependencies` and the
   keys of `[tool.poetry.dependencies]` are the runtime dependencies (each a PEP 508 string, whose distribution is cut
   out of its extras, version and marker), each list of `[project.optional-dependencies]` is optional, and each group of
@@ -1629,7 +1633,14 @@ entry can be told, is one.
   3. **a runtime dependency that no code imports fails**, and one that only tests import fails too, and says to move it
      to a development group. An optional or development dependency is never judged unused: `ruff` and `mypy` are
      imported by nothing. A dependency the code uses without importing it is listed in `without_import`, which
-     counts as an import; the package of the manifest itself is no dependency of it.
+     counts as an import; the package of the manifest itself is no dependency of it. The imports of the code in
+     `moving` count as uses of a runtime dependency (of a unit's package too), by code that is no test, so a
+     dependency only moving code imports is neither unused nor imported by tests only: a project that adopts Rotproof
+     keeps its manifest while the code moves. They are counted for the manifest of the unit whose path holds the file
+     (else the one whose root does; in a project that declares no unit, the project's; a file no declared unit holds
+     counts for none) and judged by no other rule: an import of a package the
+     manifest lacks (1) or lists for development only (2) is no finding of code that is moving. `unchecked` is not
+     read, so a dependency only code there imports is listed in `without_import`.
 
   When the project has a `.venv` (at the root of the manifest, or of the project), the message of a missing dependency
   names the distribution the environment provides the module as, from the metadata of each `*.dist-info` (the top-level
@@ -1697,7 +1708,9 @@ entry can be told, is one.
      may be named anywhere, since they are erased when the code is built;
   3. **a package in `dependencies` that no source file imports fails**, unless `without_import` lists it, and one that
      only tests import fails too, and says to move it to `devDependencies`. The development, peer and optional
-     dependencies are never judged unused, nor is `@types/*`, which declares types and is imported by nothing.
+     dependencies are never judged unused, nor is `@types/*`, which declares types and is imported by nothing. As in
+     Python, the imports of the code in `moving` count as uses of a package in `dependencies`, by code that is no test,
+     for the manifest of the unit that holds the file, and are judged by no other rule; `unchecked` is not read.
 
   `imports` of the declaration is not used: an import and a dependency are one name. Not read: a file outside `src/`
   (`vite.config.ts`), so a package only that file imports is listed in `devDependencies`, or in `without_import`.
@@ -1960,6 +1973,10 @@ moving: 5 files are not in a layer yet, and none is checked. Move these next (th
   leaves out what it could not give.
 - **Files that import each other are one group,** named together: neither can go first, so they are moved together.
   A group that imports a file outside it waits for that file.
+- **Its imports of a package keep a manifest from failing as unused.** The dependencies check counts what the files
+  that are moving import as uses of a runtime dependency (Python and TypeScript; see "The manifests list the
+  dependencies the code imports, both ways"), and judges them by no other rule. Rust has nothing to count: a crate that
+  is moving is no crate of a layer or an entry file, whose manifests are the ones compared.
 - **The layers a file could go in are the places where the direction check would pass it,** innermost first: every
   layer, and every level of a layer that has levels (such a layer holds only its levels), of the unit whose directory
   holds the file, or of every unit when none does. A place passes when each import the file makes of a layer, as an
