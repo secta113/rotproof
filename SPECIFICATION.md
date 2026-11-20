@@ -85,8 +85,9 @@ Run `rotproof create` when a project starts, and again after you change `.config
 only what is missing: a layer that is neither present nor declared absent, the project's files when they do not exist
 (below), `docs/knowledge/`, and the files Rotproof generates (`.rotproof/AGENTS.md`, `.rotproof/running.md`,
 `.rotproof/readers.md` when a unit
-is shared, and the index files and the knowledge rules in `docs/`), so a new project passes its first check with
-nothing for a person to write but one answer: whether its agent reads the guide (below). It never
+is shared, and the index files and the knowledge rules in `docs/`), so a new project passes its first check once a
+person has done what `create` prints as left: answered whether its agent reads the guide (below) and, in a Python
+project, committed a lock file, which a tool makes. It never
 overwrites a file it does not generate, apart from adding the fields the declaration lacks (below) and, in a Rust
 project, adding the crates it makes to the workspace's `members` when none names them (see "Units"), and never moves
 or deletes one. Nothing runs it on its own, so a layer removed by mistake fails `rotproof check` instead of coming back.
@@ -261,8 +262,9 @@ code 1 is an error that is only shown. The hook input on stdin is not read.
 ## Approving a forbidden import
 
 Sometimes a project means to break the layer table: a framework forces an import, or a fix cannot wait for the
-refactoring. Such an import passes only as an entry in `.config/rotproof-approved.toml`, which `rotproof approve`
-adds, with the reason it is given:
+refactoring. A new such import passes only as an entry in `.config/rotproof-approved.toml`, which `rotproof approve`
+adds, with the reason it is given (what already failed when the project froze it is the baseline's: see "Freezing the
+violations there are"):
 
 ```sh
 rotproof approve domain/model.py infrastructure.db --reason "the ORM's session factory must be built where the model is"
@@ -557,9 +559,10 @@ body, a function, a `use`; a file that starts with `#![cfg(test)]` as a whole), 
 `examples/`, `build.rs`) are free. `cfg(all(test, ...))` and `cfg(any(test, ...))` are not read as tests, and a
 `#[cfg(test)] mod x;` inside a module with a body is not followed to its file.
 
-A path in `unchecked` or `moving` is not read by any check, tests included, but for one rule: the imports of the code in
-`moving` count as uses in the dependencies check (3, in the Python and TypeScript items of "The manifests list the
-dependencies the code imports, both ways"). `rotproof check` prints, on every run and
+A path in `unchecked` or `moving` is not read by any check, tests included (its lines of code are counted in "The size
+of the code", which judges nothing), but for one rule: the imports of the code in `moving` count as uses in the
+dependencies check (3, in the Python and TypeScript items of "The manifests list the dependencies the code imports,
+both ways"). `rotproof check` prints, on every run and
 only for the TypeScript stack, how many source files it read as tests and by which names, apart from the findings and
 failing nothing:
 
@@ -1934,7 +1937,9 @@ What a check finds file by file (the layers' imports, the markers, `NOTE`, the e
 type-checker suppressions; the dependencies by manifest, each in the order of the files that need it) is listed in the byte order of the whole path, written with `/` from the root and compared
 as bytes compare: `Beta.py`, `_under.py`, `alpha.py`, and `mid2.py` before `mid2/x.py`, since `.` comes before `/`. It
 is the same on every operating system, whatever order its file system lists files in, so two machines that run the
-check on the same tree print the same lines in the same order. The list of linked `TODO` comments keeps the order it
+check on the same tree print the same lines in the same order, but for what a `.venv` changes in a Python project (the
+words of the hint of a missing dependency, and the environments the lock rule finds: see "A Python project is locked,
+and keeps one virtual environment"). The list of linked `TODO` comments keeps the order it
 had (path, then line), which this order agrees with.
 
 One thing is a warning and fails nothing, besides the comments that may make a type checker check less and the map in
@@ -2101,7 +2106,8 @@ first field is the place, the last the reference (a path that holds a space is t
 field but the last).
 
 `rotproof check` does not look at whether the issue exists or is open: it reads files alone and runs offline, so it
-gives the same answer every time, and an invented number passes. Without a step that asks the tracker, nothing but the
+gives the same answer every time (but for the one exception of "A Python project is locked, and keeps one virtual
+environment"), and an invented number passes. Without a step that asks the tracker, nothing but the
 guide in `.rotproof/AGENTS.md` stops one. In GitHub Actions, with `todo_link = "number"`, a step that fails on a linked
 `TODO` whose number is closed, missing, or a pull request's (the job needs `issues: read`, and a `key` needs the
 tracker's own lookup in place of `gh`):

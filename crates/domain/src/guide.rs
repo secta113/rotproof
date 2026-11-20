@@ -321,7 +321,7 @@ mod tests {
         assert_ne!(of("none"), of("atomic"));
         assert_eq!(guide_named("rust", Some("none")), guide_named("rust", None));
         assert_eq!(guide_named("none", None), Ok(guide(RECORDS_ONLY, None)));
-        // The checks of `rotproof init --ui`, in its words
+        // The checks of `rotproof init --ui-design`, in its words
         for (stack, ui) in [("typescript", "x"), ("python", ""), ("rust", "atomic")] {
             let said = guide_named(stack, Some(ui)).unwrap_err();
             assert!(said.starts_with("unknown UI"), "{stack} {ui}: {said}");

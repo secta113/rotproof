@@ -7,4 +7,4 @@ npm install -D -E rotproof@{version}
 npx --no -- rotproof check
 ```
 
-npm installs the binary for your platform with it (Windows x64 or Linux x64).
+npm installs the binary for your platform with it (Windows x64, Linux x64 or macOS arm64).

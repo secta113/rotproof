@@ -6,7 +6,8 @@ Install the same version on your machine: take the archive for your platform and
 the one against the other, and put the binary on the `PATH`.
 
 ```sh
-# the version ROTPROOF_VERSION names; on Windows the archive is '*-x86_64-pc-windows-msvc.zip'
+# the version ROTPROOF_VERSION names; the archive is '*-x86_64-pc-windows-msvc.zip' on Windows,
+# '*-aarch64-apple-darwin.tar.gz' on macOS
 gh release download v{version} --repo secta113/rotproof --pattern '*-x86_64-unknown-linux-gnu.tar.gz' --pattern SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
 rotproof check

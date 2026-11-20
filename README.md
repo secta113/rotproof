@@ -13,8 +13,8 @@ If LLM agents write the code of a repository, these are the things nobody has to
 - **A layer an agent crosses fails the build.** Every import is checked against a layer table (the onion architecture:
   `composition`, `infrastructure`, `application`, `protocol`, `domain`, and `ui` and `presentation` for screens), in
   Python, TypeScript and Rust. Code that cannot be split into the layers mixes responsibilities, so the table is also
-  how an agent is made to split it. An exception is an entry in an approvals file, with the reason it was given, which a
-  reviewer sees in the diff.
+  how an agent is made to split it. A new exception is an entry in an approvals file, with the reason it was given,
+  which a reviewer sees in the diff.
 - **Each part of a monorepo keeps its own layers.** The packages of a monorepo, or the modules of a modular monolith,
   are declared as units: every import between them is checked, so a part reaches another only through the layers that
   may be reached, and a shared part that collects what no one needs shows in a list that the diff displays (see
@@ -446,7 +446,8 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   tree that differs from it fails, either way, and someone decides whether the tree or the declaration is wrong.
   `rotproof check` only reports. What writes is a command a person or an agent runs, and it says what it did. Such a
   command adds what is missing and leaves the values a person wrote as they are: a layer or a project's file that is
-  not there, a field the declaration lacks, an approval, what a named update of `rotproof init` brings
+  not there, a field the declaration lacks, an approval, the field `ui` renamed `ui_design` and `files` set to the
+  running version by `rotproof init` (the value and the comments kept), what a named update of `rotproof init` brings
   (see [Upgrading Rotproof](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#upgrading-rotproof)), and the files Rotproof generates, which nobody writes by hand. A field the declaration
   lacks takes its first value from the tree, once (`areas` gets the tags the knowledge documents use, so the documents
   that kept the rules keep them); from then on a document with a tag the declaration does not list fails. An update of
@@ -469,7 +470,8 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
 - **A check fails when what it checks has no place.** A check that passes on a tree with no layers or no
-  `docs/knowledge/` protects nothing. A new project, whose places are there and still empty, passes its first check.
+  `docs/knowledge/` protects nothing. A new project, whose places are there and still empty, passes its first check
+  once it has done what `rotproof create` says is left.
 - **The rules come with the tool.** A project pins one version of Rotproof, and takes improvements to the rules by
   upgrading it, in a commit of its own.
 - **The same structure in every language.** Rotproof is one binary with no language runtime, so a Rust or TypeScript
@@ -486,7 +488,7 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
   `rotproof create` writes once.
 - [Upgrading Rotproof][upgrading-rotproof]: what `rotproof init` does after the pinned version changes.
 - [The hooks Rotproof no longer writes][the-hooks-rotproof-no-longer-writes]: what became of `stop-hook` and `time-hook`.
-- [Approving a forbidden import][approving-a-forbidden-import]: the one way an import the table forbids stays, and
+- [Approving a forbidden import][approving-a-forbidden-import]: how a new import the table forbids stays, and
   `approved_max`, the most approvals a project holds.
 - [Freezing the violations there are][freezing-the-violations-there-are]: `rotproof baseline`, which writes once what
   still fails when everything is in a layer, and only shrinks.
