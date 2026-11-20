@@ -246,8 +246,20 @@ pub fn without(text: &str, gone: &[&Kept]) -> Result<String, String> {
     let mut document = text
         .parse::<DocumentMut>()
         .map_err(|e| format!("{APPROVALS}: {e}"))?;
-    let Some(Item::ArrayOfTables(kept)) = document.get("kept") else {
-        return Ok(document.to_string());
+    let keys: Vec<(&str, &str)> = gone
+        .iter()
+        .map(|g| (g.from.as_str(), g.import.as_str()))
+        .collect();
+    remove_entries(&mut document, "kept", &keys);
+    Ok(document.to_string())
+}
+
+/// The entries of the array of tables `array` in `document` that `gone` names, each by its `from` and its `import`,
+/// taken out. The baseline's file is edited the same way, so a comment above an entry is carried as the approvals'
+/// is.
+pub(crate) fn remove_entries(document: &mut DocumentMut, array: &str, gone: &[(&str, &str)]) {
+    let Some(Item::ArrayOfTables(kept)) = document.get(array) else {
+        return;
     };
     let mut left = ArrayOfTables::new();
     let mut carried = String::new();
@@ -261,7 +273,7 @@ pub fn without(text: &str, gone: &[&Kept]) -> Result<String, String> {
             .to_string();
         if gone
             .iter()
-            .any(|g| field("from") == Some(&g.from) && field("import") == Some(&g.import))
+            .any(|(from, import)| field("from") == Some(from) && field("import") == Some(import))
         {
             carried.push_str(prefix.trim_end_matches('\n'));
             if !carried.is_empty() {
@@ -279,17 +291,16 @@ pub fn without(text: &str, gone: &[&Kept]) -> Result<String, String> {
         left.push(table);
     }
     if left.is_empty() {
-        document.remove("kept");
-        let end = trailing(&document);
+        document.remove(array);
+        let end = trailing(document);
         document.set_trailing(format!("{carried}{end}"));
     } else {
-        document.insert("kept", Item::ArrayOfTables(left));
+        document.insert(array, Item::ArrayOfTables(left));
         if !carried.is_empty() {
-            let end = trailing(&document);
+            let end = trailing(document);
             document.set_trailing(format!("{end}{carried}"));
         }
     }
-    Ok(document.to_string())
 }
 
 /// What `document` holds after its last item: comments and blank lines.

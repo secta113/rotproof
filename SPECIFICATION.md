@@ -37,6 +37,8 @@ rotproof --root <repository> check   # check the layers and the records; exits 1
 rotproof --root <repository> index   # write the generated files that are out of date (docs/'s index files and the knowledge rules, and who reads the shared units)
 rotproof --root <repository> approve <file> <import>... --reason "<why>"  # keep a forbidden import (see below)
 rotproof --root <repository> approve --prune  # remove the approvals that match no forbidden import
+rotproof --root <repository> baseline  # freeze the violations there are, once, with no code moving (see "Freezing the violations there are")
+rotproof --root <repository> baseline --prune  # remove the baseline's entries that match nothing, and lower its count
 rotproof --root <repository> follows <document> <key>...  # pin keys in a knowledge document's follows, as the code is now
 rotproof --root <repository> new <slug> [--area <area>] [--alarm [--match <string>]...]
                                      # start a knowledge document: its frontmatter, the description left empty
@@ -311,6 +313,69 @@ approved = { by = "someone", at = "2026-10-06T09:00:00+09:00" }
 - **This does not prevent an exception; it makes one visible.** Nothing stops a run of `rotproof approve` that nobody
   asked for, or a script that writes the file. What stays is that an approval is a named line with its reason, printed
   on every run, which fails once it matches nothing, and which a reviewer sees in the diff.
+
+## Freezing the violations there are
+
+A project that adopts Rotproof in code that already breaks the layer table has more violations than anyone fixes on
+the first day. `moving` (see "The code that is moving") carries it while the code is moved into the layers. Once every
+file is in a layer, what still fails can be frozen in one act, from 2.0.0-rc.2, instead of being approved one import at a
+time with a reason each (see "Approving a forbidden import"):
+
+```sh
+rotproof baseline
+```
+
+It writes `.config/rotproof-baseline.toml` with every violation `rotproof approve` could keep: a forbidden import of
+the layer table, and a use of the I/O the inner layers do none of (see "The inner layers do no I/O"), each keyed as an
+approval is, by the file that imports and what it imports as `rotproof check` names it (the entry of Rotproof's table,
+for the I/O), never by the line, and one entry for each such pair whatever lines it is on. An entry has no reason and
+no name, as nobody decided to keep it: it was there. What an approval covers is left out, so each violation has one
+home. The file records how many entries it was written with:
+
+```toml
+# (a comment at the top, which says what the file is)
+count = 2
+
+[[entry]]
+from = "domain/model.py"
+import = "infrastructure.db"
+
+[[entry]]
+from = "domain/report.py"
+import = "shutil"
+```
+
+Environment reads, comments that switch the type checker off, markers and missing dependencies are not frozen: they
+stay failures to fix, and `rotproof baseline` says so.
+
+- **It is written once.** `rotproof baseline` exits 2, writing nothing, when the file is there already, when `moving`
+  in `.config/rotproof.toml` is not empty (move the code into the layers first: the baseline freezes what is left once
+  everything is in one, and a path still moving is not judged by any of these checks), when the approvals file cannot
+  be read, when the project is a repository of records only, which has no layers, and when there is nothing to freeze.
+  It needs no terminal and no `user.name`, as it signs nothing.
+- **A violation that is not in the file fails,** as it did before the file: a new import, another file importing the
+  same thing, and another entry of the table in a file that has one frozen are each a finding, printed as any is. A
+  violation in the file passes and is not printed.
+- **The baseline follows the code and only shrinks.** An entry that matches no violation fails: the import was fixed,
+  moved, became allowed, or an approval covers it now. `rotproof baseline --prune` removes those entries and lowers
+  `count` to the number of entries left, so that the room a fixed violation left cannot be taken by another. It never
+  lets anything pass that failed before. An approval and a baseline entry for one import are two homes, and the
+  entry is the one that matches nothing. `rotproof approve --prune` prunes the approvals only.
+- **The count detects growth; it is not a barrier.** `rotproof check` fails when the file holds more entries than its
+  `count`, as one finding that names the file. Nothing stops a person or an agent from writing the file again, or from
+  raising the count with a new entry: what stays is that the file is written once and `check` can read only the
+  working tree, so a baseline written again larger shows in the diff of the file, which a reviewer sees. The guide in
+  `.rotproof/AGENTS.md` says to run `rotproof baseline` only when the user asked, never to write it again and never to
+  raise `count` or add an entry to pass the check, as it says of `approved_max`. That is the same spirit as
+  `approved_max`: the file is kept in view, not made unwritable.
+- **One line is printed on every run,** apart from the findings and the warnings, once the file is there, and no line
+  for each entry: `baseline: 12 entries remain in .config/rotproof-baseline.toml` (`1 entry remains`, and
+  `baseline: no entry remains in .config/rotproof-baseline.toml: remove the file` once every violation is fixed). It
+  counts the entries of the file, an entry that matches nothing included, which fails on its own. A file that cannot
+  be read fails, with a missing `count`, an unknown field, an entry with a field empty and two entries for one import
+  among its reasons, and a file named otherwise (`Rotproof-Baseline.toml`) freezes nothing, and fails.
+- **The file keeps its line endings and its byte order mark** when `--prune` writes it, as the approvals file does.
+  `rotproof init` and `rotproof create` write and mention nothing of it: it is a decision to freeze, and the user's.
 
 ## The layers
 
@@ -1734,6 +1799,12 @@ entry can be told, is one.
   `approved.at` that is not a datetime with a time zone, and two entries for one import. A file named otherwise
   (`Rotproof-Approved.toml`) approves nothing, and fails. With `approved_max` in the declaration, **the approvals stay
   within it**: more entries than it lets fails, as one finding that names both files.
+- **A baseline, where a project froze one, keeps what it froze and nothing more** (see "Freezing the violations there
+  are"): what the approvals leave of the forbidden imports and the uses of I/O of the inner layers is judged by
+  `.config/rotproof-baseline.toml`, and a violation with an entry there for its file and import passes, with one line
+  printed on every run (how many entries remain); one without fails. An entry that matches none fails, so does a file
+  that cannot be read (a `count` missing, an unknown field, an entry with a field empty, two entries for one import,
+  a file named otherwise), and more entries than its `count` fails, as one finding that names the file.
 - **The project's files are up to this version of Rotproof** (see "Upgrading Rotproof"): `files` in the declaration
   (0.1.0 when it is missing) is a version as SemVer writes it, a pre-release such as `2.0.0-rc.1` included, neither
   older nor newer than the running Rotproof,

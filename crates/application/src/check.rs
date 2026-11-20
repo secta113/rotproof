@@ -12,6 +12,7 @@ use std::io;
 use crate::finding::{under, warn};
 use crate::tree::{exactly, read_text};
 use domain::approvals::{over_limit, shown_all, sort, stale};
+use domain::baseline;
 use domain::declaration::Declared;
 use domain::direction::Rule;
 use domain::guide::GUIDE;
@@ -109,9 +110,11 @@ fn code(
         .cloned()
         .collect();
     let sorted = sort(&forbidden, &approvals.entries);
+    // What the approvals leave is judged by the baseline: a violation it froze passes, and any other fails
+    let frozen = crate::baseline::read(tree)?;
+    let rest = baseline::sort(&sorted.forbidden, frozen.entries());
     let of_rule = |direction: bool| {
-        sorted
-            .forbidden
+        rest.forbidden
             .iter()
             .filter(move |f| (f.rule == Rule::Direction) == direction)
             .map(|f| f.detail.clone())
@@ -144,6 +147,25 @@ fn code(
         "the approvals stay within approved_max",
         over_limit(approvals.entries.len(), declared.declaration.approved_max),
     ));
+    report.findings.extend(under(
+        baseline::HEADING,
+        frozen
+            .problems
+            .iter()
+            .cloned()
+            .chain(rest.stale.iter().map(|entry| baseline::stale(entry))),
+    ));
+    report.findings.extend(under(
+        baseline::COUNT_HEADING,
+        frozen
+            .baseline
+            .as_ref()
+            .and_then(|b| baseline::over_count(b.entries.len(), b.count)),
+    ));
+    report.baseline = frozen
+        .baseline
+        .as_ref()
+        .map(|b| baseline::remaining(b.entries.len()));
     report
         .findings
         .extend(under(domain::readers::HEADING, listed));

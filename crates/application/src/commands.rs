@@ -4,14 +4,15 @@
 use std::path::Path;
 
 use domain::approvals::{APPROVALS, Approved, Kept};
+use domain::baseline::BASELINE;
 use domain::declaration::{DECLARATION, MISSING};
 use domain::layers::RECORDS_ONLY;
 use domain::markers::{MARKERS, either};
 use domain::readers::FILE;
 use domain::version::VERSION;
 use protocol::inbound::{
-    Commands, Indexed, Initialized, LogEntry, Logged, Made, Names, NewDocument, Pinned, Removed,
-    Report, Started,
+    BaselinePruned, Baselined, Commands, Indexed, Initialized, LogEntry, Logged, Made, Names,
+    NewDocument, Pinned, Removed, Report, Started,
 };
 use protocol::outbound::{Files, Machine};
 
@@ -51,6 +52,7 @@ impl Commands for Rotproof<'_> {
             version: VERSION,
             declaration: DECLARATION,
             approvals: APPROVALS,
+            baseline: BASELINE,
             records_only: RECORDS_ONLY,
             markers: either(&MARKERS),
         }
@@ -156,6 +158,31 @@ impl Commands for Rotproof<'_> {
                 from: entry.from,
             })
             .collect())
+    }
+
+    fn baseline(&self, root: &Path) -> Result<Baselined, String> {
+        let files = self.machine.files(root);
+        let done = crate::baseline::baseline(&*files, self.machine.parsers(), &*files)?;
+        Ok(Baselined {
+            path: done.path.to_string(),
+            entries: done.entries,
+        })
+    }
+
+    fn prune_baseline(&self, root: &Path) -> Result<BaselinePruned, String> {
+        let files = self.machine.files(root);
+        let pruned = crate::baseline::prune(&*files, self.machine.parsers(), &*files)?;
+        Ok(BaselinePruned {
+            removed: pruned
+                .removed
+                .into_iter()
+                .map(|entry| Removed {
+                    import: entry.import,
+                    from: entry.from,
+                })
+                .collect(),
+            count: pruned.count,
+        })
     }
 
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String> {

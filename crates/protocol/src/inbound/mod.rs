@@ -13,6 +13,8 @@ pub struct Names {
     pub declaration: &'static str,
     /// Where the approvals of forbidden imports are, from the root
     pub approvals: &'static str,
+    /// Where the baseline of violations is, from the root
+    pub baseline: &'static str,
     /// The stack of a repository that keeps records only
     pub records_only: &'static str,
     /// The words the marker check fails on, joined as a sentence ("A, B or C")
@@ -167,6 +169,9 @@ pub struct Report {
     pub layers_checked: bool,
     /// Every forbidden import that was approved, as printed on every run: one line per entry that approves something
     pub approved: Vec<String>,
+    /// How many baseline entries remain, as one line said on every run apart from the findings and the warnings,
+    /// failing nothing. `None` when the project has no baseline
+    pub baseline: Option<String>,
     /// Every comment that keeps the first marker with the reference of an issue, sorted by path and then by
     /// line: printed on every run apart from the findings and the warnings, and failing nothing. Empty unless the
     /// declaration has `todo_link`
@@ -279,6 +284,24 @@ pub struct Removed {
     pub from: String,
 }
 
+/// What `rotproof baseline` wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Baselined {
+    /// The baseline file, from the root
+    pub path: String,
+    /// How many entries it holds: each a file and an import, whatever lines it is on
+    pub entries: usize,
+}
+
+/// What `rotproof baseline --prune` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaselinePruned {
+    /// The entries removed
+    pub removed: Vec<Removed>,
+    /// `count` before and after, which is the number of entries left
+    pub count: (usize, usize),
+}
+
 /// Every command of Rotproof, on the project at `root`. `Err` is what to say when a file cannot be read or written,
 /// or a command cannot do its work.
 pub trait Commands {
@@ -316,6 +339,11 @@ pub trait Commands {
     ) -> Result<String, String>;
     /// Remove every approval that matches no forbidden import.
     fn prune(&self, root: &Path) -> Result<Vec<Removed>, String>;
+    /// Freeze every violation there is that no approval covers, once, in the baseline file. `Err`, writing nothing,
+    /// when the file is there, `moving` lists a path, or there is none to freeze.
+    fn baseline(&self, root: &Path) -> Result<Baselined, String>;
+    /// Remove every baseline entry that matches no forbidden import, and lower `count` to the entries left.
+    fn prune_baseline(&self, root: &Path) -> Result<BaselinePruned, String>;
     /// Pin each of `keys` in the knowledge document `document` names, at its hash now: all of them, or none.
     fn pin(&self, root: &Path, document: &str, keys: &[String]) -> Result<Pinned, String>;
     /// Write a new knowledge document with its frontmatter and nothing else but an alarm's two headings, the

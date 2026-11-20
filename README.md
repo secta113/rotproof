@@ -462,7 +462,9 @@ in [Units](https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
   review is the person's or the agent's, and pinning only records it. `rotproof new` starts a document with the
   frontmatter, which is easy to write wrongly, and an empty description that the check fails on, and no body.
   `rotproof log` adds an entry to the log under today's heading, read from the clock. And `rotproof approve --prune` removes the approvals that match no forbidden import, which
-  `rotproof check` fails on: it only takes away, so nothing passes that failed before. Code it never moves: when the
+  `rotproof check` fails on: it only takes away, so nothing passes that failed before. `rotproof baseline` writes once the
+  violations there are, which `rotproof check` then lets pass and counts, and its `--prune` only takes entries away too.
+  Code it never moves: when the
   layer table changes (0.4.0, 1.0.0-rc.3), `rotproof init` says where each layer's code goes, and the person moves
   it.
 - **Every rule has a check that can fail.** A rule without a check is only a label, and soon drifts.
@@ -486,6 +488,8 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
 - [The hooks Rotproof no longer writes][the-hooks-rotproof-no-longer-writes]: what became of `stop-hook` and `time-hook`.
 - [Approving a forbidden import][approving-a-forbidden-import]: the one way an import the table forbids stays, and
   `approved_max`, the most approvals a project holds.
+- [Freezing the violations there are][freezing-the-violations-there-are]: `rotproof baseline`, which writes once what
+  still fails when everything is in a layer, and only shrinks.
 - [The layers][the-layers]: the layer table, where each layer lives in a stack, and the declaration (`unchecked`,
   `moving`, `without_import`).
 - [Units][units]: `[[unit]]`, what a unit may import, who reads the shared units, and the document of the units.
@@ -502,6 +506,7 @@ The reference is [SPECIFICATION.md](https://github.com/secta113/rotproof/blob/ma
 [upgrading-rotproof]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#upgrading-rotproof
 [the-hooks-rotproof-no-longer-writes]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-hooks-rotproof-no-longer-writes
 [approving-a-forbidden-import]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#approving-a-forbidden-import
+[freezing-the-violations-there-are]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#freezing-the-violations-there-are
 [the-layers]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-layers
 [units]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#units
 [the-records]: https://github.com/secta113/rotproof/blob/main/SPECIFICATION.md#the-records

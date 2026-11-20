@@ -1,5 +1,6 @@
 //! The command line: `rotproof init`, `rotproof create`, `rotproof check`, `rotproof approve` (which keeps a
-//! forbidden import for a reason it is given), `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof new`
+//! forbidden import for a reason it is given), `rotproof baseline` (which freezes the violations there are, once),
+//! `rotproof guide`, `rotproof index`, `rotproof follows`, `rotproof new`
 //! (which starts a knowledge document) and `rotproof log` (which adds an entry to the log), and the help that leads
 //! from one to the next. Each command is a call of an input port of `protocol.inbound`; what it prints and how it
 //! exits are decided here. A command line that names `stop-hook` or `time-hook`, the hooks Rotproof wrote into a
@@ -11,8 +12,8 @@ use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use protocol::inbound::{
-    Commands, Initialized, LinkedTodo, LogEntry, Made, Moving, MovingFile, Names, NewDocument,
-    Templates, TestFiles, Warning,
+    BaselinePruned, Baselined, Commands, Initialized, LinkedTodo, LogEntry, Made, Moving,
+    MovingFile, Names, NewDocument, Templates, TestFiles, Warning,
 };
 
 /// What every help says after the commands: how to start, where the rules are, and the exit codes. An agent with only
@@ -31,6 +32,9 @@ Start a project:
                                      file the agent reads first, or a name in declined
   6. rotproof check                  check them; this is the project's CI
 
+Adopt Rotproof in code that already breaks the layers: list it in moving and move it into the layers; once all of it is
+in one, the user may ask for `rotproof baseline`, which freezes the violations left, once.
+
 Upgrade Rotproof: change the pinned version, install it, run `rotproof init` (it updates the project's files), then
 `rotproof check`.
 
@@ -42,7 +46,8 @@ Exit codes: 0 when the rules are kept and the command did its work; 1 when `rotp
 its --root is not a directory, `rotproof create` would make layers
 without --yes, `rotproof create` or `rotproof init` asks a question the project has not answered (whether its agent
 reads .rotproof/AGENTS.md), `rotproof init` leaves an update of the project's files to a person,
-or `rotproof approve` is given no reason, or an import that is not forbidden.";
+or `rotproof approve` is given no reason, or an import that is not forbidden, or `rotproof baseline` has nothing to freeze,
+or is refused (a baseline is there already, or `moving` lists a path).";
 
 /// What `rotproof new` asks, for a document of knowledge: what the code cannot tell, which only a person or the task
 /// can. The text is here and not in a file Rotproof writes, so that what an agent is told to ask is what the command it
@@ -73,7 +78,7 @@ Check the layers and the records, and exit non-zero when one breaks the rules
 Checks that the tree matches .config/rotproof.toml (every layer present or declared absent, no code outside the \
 layers, in Python with screens no template (.html, .htm, .jinja, .jinja2, .j2) outside the levels of ui, and in TypeScript no .tsx or .jsx file in presentation, which holds no view; in each unit, when the \
 declaration has [[unit]], with no manifest outside the root of every unit), that each layer imports only \
-what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one), that the manifest of each package \
+what the layer table allows, without what is declared absent, or was approved in .config/rotproof-approved.toml (each approval printed on every run, one that matches nothing failing, and so more approvals than approved_max in the declaration allows, when it has one; and, where a baseline froze what failed, .config/rotproof-baseline.toml: a violation in it passes, any other fails, an entry that matches nothing fails, and so do more entries than its count, and one line says on every run how many remain), that the manifest of each package \
 (the pyproject.toml of a Python unit, the package.json of a TypeScript one, the Cargo.toml of a crate, whose [dependencies] no path of its code names) lists the dependencies its code imports (a package imported and not \
 listed fails, and so does a runtime dependency no code imports or only tests import; development dependencies are never judged unused, and \
 the code of a layer uses runtime dependencies only, a test both (in Python a file in tests/, in TypeScript a file named \
@@ -272,6 +277,28 @@ enum Command {
         #[arg(long)]
         prune: bool,
     },
+    /// Freeze the violations there are, once, in .config/rotproof-baseline.toml, or remove the entries that match
+    /// nothing (--prune)
+    ///
+    /// `rotproof baseline` writes every violation `rotproof approve` could keep, that is, every forbidden import of
+    /// the layer table and every use of the I/O the inner layers do none of, that .config/rotproof-approved.toml does
+    /// not approve, each by its file and what it imports as `rotproof check` names it, and the count of them. It
+    /// writes it once: it exits 2, writing nothing, when the file is there already, when `moving` in
+    /// .config/rotproof.toml still lists a path (move the code into the layers first, then freeze what is left), when
+    /// the approvals file cannot be read, or when there is nothing to freeze. An entry has no reason and no name. After
+    /// that `rotproof check` passes a violation in the file and fails on any other, fails on an entry that matches
+    /// nothing, fails on more entries than the count it was written with, and prints on every run how many entries
+    /// remain. The file only shrinks: `rotproof baseline --prune` removes the entries that match nothing, lowers the
+    /// count to the entries left, and never lets anything pass that failed before. Environment reads, comments that
+    /// switch the type checker off, markers and missing dependencies are not frozen: they are fixed. Run it only when
+    /// the user asked for it, never write the baseline again and never raise its count, and say that you ran it.
+    /// Exits 2 too when a file cannot be read or written. `--prune` with no baseline file says there is nothing to
+    /// prune, and exits 0.
+    Baseline {
+        /// Remove the entries that match no forbidden import, and lower the count
+        #[arg(long)]
+        prune: bool,
+    },
     /// Write docs/index.md and docs/knowledge/index.md from the frontmatter, and the rules.md Rotproof keeps
     ///
     /// Rewrites docs/index.md and docs/knowledge/index.md from the frontmatter of the knowledge documents, and
@@ -423,6 +450,8 @@ pub fn run(commands: &dyn Commands) -> ExitCode {
                 )
             }
         },
+        Command::Baseline { prune: true } => baseline_prune(commands, &names, root).map(|()| true),
+        Command::Baseline { prune: false } => baseline(commands, root).map(|()| true),
         Command::Follows { document, keys } => {
             follows(commands, root, &document, &keys).map(|()| true)
         }
@@ -663,6 +692,10 @@ fn check(commands: &dyn Commands, names: &Names, root: &Path) -> Result<bool, St
         for line in &report.approved {
             println!("  {line}");
         }
+    }
+    // The baseline is one line, on every run: how many violations are still frozen, which each fails nothing
+    if let Some(line) = &report.baseline {
+        println!("{line}");
     }
     // A comment tied to an issue is listed apart, on every run, before the warnings and what fails, and fails nothing
     print_linked(&report.linked);
@@ -924,6 +957,52 @@ fn approve(
     println!(
         "wrote {path}: {named} in {file} kept by {by}; `rotproof check` prints it on every run"
     );
+    Ok(())
+}
+
+/// Freeze the violations there are, once, and say what was written and what stays to fix.
+fn baseline(commands: &dyn Commands, root: &Path) -> Result<(), String> {
+    let Baselined { path, entries } = commands.baseline(root)?;
+    let count = match entries {
+        1 => "1 entry".to_string(),
+        n => format!("{n} entries"),
+    };
+    println!(
+        "wrote {path}: {count}, one for each forbidden import or entry of the table of I/O of the inner layers that \
+         `rotproof check` found in a file and no approval covers"
+    );
+    println!(
+        "the baseline only shrinks: a violation not in it fails, so does an entry that matches nothing (`rotproof \
+         baseline --prune` removes it) and more entries than {entries}, and `rotproof check` prints how many remain \
+         on every run. Never write it again or raise its count"
+    );
+    println!(
+        "not frozen, so still to fix: reads of the environment, comments that switch the type checker off, markers and \
+         missing dependencies"
+    );
+    Ok(())
+}
+
+/// Remove the baseline entries that match no forbidden import, and say which.
+fn baseline_prune(commands: &dyn Commands, names: &Names, root: &Path) -> Result<(), String> {
+    let BaselinePruned { removed, count } = commands.prune_baseline(root)?;
+    for entry in &removed {
+        println!(
+            "removed from {}: {} in {}",
+            names.baseline, entry.import, entry.from
+        );
+    }
+    if count.0 != count.1 {
+        println!(
+            "count in {} is {} now, from {}",
+            names.baseline, count.1, count.0
+        );
+    } else if removed.is_empty() {
+        println!(
+            "nothing to prune: no entry of {} matches nothing",
+            names.baseline
+        );
+    }
     Ok(())
 }
 

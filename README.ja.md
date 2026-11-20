@@ -2,7 +2,7 @@
 
 [English](https://github.com/secta113/rotproof/blob/main/README.md) | 日本語
 
-<!-- Translated from README.md at b98d732b. `cargo xtask ci` fails when README.md is another text: bring this file to
+<!-- Translated from README.md at 69971a81. `cargo xtask ci` fails when README.md is another text: bring this file to
 it, then write the hash the failure names here. -->
 
 Rotproof は、LLM と人がコードを変えていくあいだにプロジェクトの構造がずれて腐っていくのを防ぎます。言語のランタイムを
@@ -468,7 +468,8 @@ absent = ["application", "protocol", "domain"]   # an app holds only composition
   check が失敗する空の description だけを書いて文書を始め、本文は書きません。`rotproof log` は、今日の日付を時計から読み、
   その日の見出しの下に記録を足します。`rotproof approve --prune` は、
   どの禁じられた import にも合わない承認を取り除きます。`rotproof check` はそういう承認があると失敗します。
-  取り除くだけなので、前に落ちていたものが通ることはありません。Rotproof はコードを動かしません。層の表が変わるとき
+  取り除くだけなので、前に落ちていたものが通ることはありません。`rotproof baseline` は、今ある違反を一度だけ書きます。
+  `rotproof check` はそれを通して件数を数え、その `--prune` も、エントリを取り除くだけです。Rotproof はコードを動かしません。層の表が変わるとき
   （0.4.0、1.0.0-rc.3）、`rotproof init` は各層のコードの行き先を言い、動かすのは人です。
 - **どの規則にも、失敗しうる検査がある。** 検査の無い規則はただの札で、すぐにずれます。
 - **検査するものの置き場が無い検査は、失敗する。** 層や `docs/knowledge/` の無い木で通る検査は、何も守りません。
