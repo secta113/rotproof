@@ -5,11 +5,14 @@
 //! It parses the file itself and, unlike [`read`](super::read), gives up on a file oxc gives up on: a program that is
 //! empty because of an error would say every definition is gone.
 
+use std::collections::HashSet;
+
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     BindingPattern, Class, ClassElement, Declaration, Decorator, ExportDefaultDeclarationKind,
     Expression, PropertyKey, Statement, TSEnumMemberName, TSInterfaceDeclaration,
-    TSNamespaceDeclaration, TSNamespaceDeclarationBody, TSSignature,
+    TSNamespaceDeclaration, TSNamespaceDeclarationBody, TSSignature, TSType, TSTypeName,
+    TSTypeQueryExprName, UnaryOperator, VariableDeclarationKind,
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, Span};
@@ -37,6 +40,15 @@ use super::{first_error, source_type};
 /// a member named by a computed key that is not a string, by a number or by `#name`, a call, construct or index
 /// signature, a static block, `declare module "x"` and `declare global`, a variable declared by destructuring.
 ///
+/// Each definition also has a [`Shape`], for the vocabularies of `protocol.inbound`; every one not named here is
+/// `Plain`:
+///
+/// - **`Vocabulary`**: a `const` at the top of the file (not in a namespace) bound to an array of string or number
+///   literals `as const` (a `satisfies` after it too), with no spread, hole or template and at least one element; and
+///   a type alias without type parameters that takes the elements of such a `const` of the same file, before or after
+///   it (`typeof X[number]`).
+/// - **`Enum`**: every `enum` (`const` and `declare` too), wherever it is declared. Its members stay `Plain`.
+///
 /// `Err` with the first error when oxc gives up on the file: it then gives an empty program, and reading that would
 /// say every definition is gone, those above the error too. A file oxc recovers from is read as far as it recovers.
 pub fn outline(source: &str, path: &str) -> Result<Vec<Definition>, (usize, String)> {
@@ -46,7 +58,10 @@ pub fn outline(source: &str, path: &str) -> Result<Vec<Definition>, (usize, Stri
         return Err(first_error(source, &parsed)
             .unwrap_or_else(|| (1, "the parser gave up on the file".to_string())));
     }
-    let mut outline = Outline { found: Vec::new() };
+    let mut outline = Outline {
+        found: Vec::new(),
+        vocabularies: vocabulary_consts(&parsed.program.body),
+    };
     outline.statements(&parsed.program.body, &mut Vec::new());
     Ok(outline.found)
 }
@@ -54,6 +69,9 @@ pub fn outline(source: &str, path: &str) -> Result<Vec<Definition>, (usize, Stri
 /// The definitions of a program, as they are met.
 struct Outline {
     found: Vec<Definition>,
+    /// The names of the `const`s at the top of the file that are vocabularies, found before the walk: an alias may
+    /// come before the `const` it takes the elements of
+    vocabularies: HashSet<String>,
 }
 
 impl Outline {
@@ -65,6 +83,19 @@ impl Outline {
         kind: Kind,
         span: Span,
         decorators: &[Decorator],
+    ) {
+        self.add_shaped(scope, name, kind, span, decorators, Shape::Plain);
+    }
+
+    /// [`Self::add`] for a definition that is more than `Plain`.
+    fn add_shaped(
+        &mut self,
+        scope: &[String],
+        name: &str,
+        kind: Kind,
+        span: Span,
+        decorators: &[Decorator],
+        shape: Shape,
     ) {
         let start = decorators
             .iter()
@@ -79,7 +110,7 @@ impl Outline {
             start: start as usize,
             end: span.end as usize,
             kind,
-            shape: Shape::Plain,
+            shape,
         });
     }
 
@@ -141,7 +172,16 @@ impl Outline {
                         } else {
                             Kind::Other
                         };
-                        self.add(scope, id.name.as_str(), kind, span, &[]);
+                        // Only a `const` at the top: the rule that reads a vocabulary does not look into a namespace
+                        let shape = if scope.is_empty()
+                            && variables.kind == VariableDeclarationKind::Const
+                            && is_vocabulary(declarator.init.as_ref())
+                        {
+                            Shape::Vocabulary
+                        } else {
+                            Shape::Plain
+                        };
+                        self.add_shaped(scope, id.name.as_str(), kind, span, &[], shape);
                     }
                 }
             }
@@ -156,14 +196,22 @@ impl Outline {
                 }
             }
             Declaration::TSTypeAliasDeclaration(alias) => {
-                self.add(scope, alias.id.name.as_str(), Kind::Type, span, &[]);
+                let shape = if scope.is_empty()
+                    && alias.type_parameters.is_none()
+                    && takes_elements_of(&alias.type_annotation, &self.vocabularies)
+                {
+                    Shape::Vocabulary
+                } else {
+                    Shape::Plain
+                };
+                self.add_shaped(scope, alias.id.name.as_str(), Kind::Type, span, &[], shape);
             }
             Declaration::TSInterfaceDeclaration(interface) => {
                 self.interface(interface, interface.id.name.as_str(), span, scope);
             }
             Declaration::TSEnumDeclaration(declared) => {
                 let name = declared.id.name.as_str();
-                self.add(scope, name, Kind::Type, span, &[]);
+                self.add_shaped(scope, name, Kind::Type, span, &[], Shape::Enum);
                 scope.push(name.to_string());
                 for member in &declared.body.members {
                     let name = match &member.id {
@@ -256,6 +304,109 @@ impl Outline {
         }
         scope.pop();
     }
+}
+
+/// The names of the `const`s at the top of a program (exported or not) that are vocabularies.
+fn vocabulary_consts(body: &[Statement]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for statement in body {
+        let declaration = match statement {
+            Statement::ExportDeclaration(export) => Some(&export.declaration),
+            other => other.as_declaration(),
+        };
+        let Some(Declaration::VariableDeclaration(variables)) = declaration else {
+            continue;
+        };
+        if variables.kind != VariableDeclarationKind::Const {
+            continue;
+        }
+        for declarator in &variables.declarations {
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id
+                && is_vocabulary(declarator.init.as_ref())
+            {
+                names.insert(id.name.to_string());
+            }
+        }
+    }
+    names
+}
+
+/// The expression inside any parentheses around it.
+fn unparenthesized<'a, 'b>(mut value: &'b Expression<'a>) -> &'b Expression<'a> {
+    while let Expression::ParenthesizedExpression(inner) = value {
+        value = &inner.expression;
+    }
+    value
+}
+
+/// Whether a value is the initializer of a vocabulary: an array of string or number literals `as const`, with a
+/// `satisfies` after it once at most. A spread, a hole, a template or any other element, and an empty array, say that
+/// the values are not all written there.
+fn is_vocabulary(value: Option<&Expression>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let mut value = unparenthesized(value);
+    if let Expression::TSSatisfiesExpression(satisfies) = value {
+        value = unparenthesized(&satisfies.expression);
+    }
+    let Expression::TSAsExpression(cast) = value else {
+        return false;
+    };
+    let is_const = matches!(
+        &cast.type_annotation,
+        TSType::TSTypeReference(reference)
+            if reference.type_arguments.is_none()
+                && matches!(
+                    &reference.type_name,
+                    TSTypeName::IdentifierReference(id) if id.name == "const"
+                )
+    );
+    let Expression::ArrayExpression(array) = unparenthesized(&cast.expression) else {
+        return false;
+    };
+    is_const
+        && !array.elements.is_empty()
+        && array
+            .elements
+            .iter()
+            .all(|element| element.as_expression().is_some_and(is_literal_value))
+}
+
+/// Whether an element is a string, a number, or a number after a minus.
+fn is_literal_value(element: &Expression) -> bool {
+    match element {
+        Expression::StringLiteral(_) | Expression::NumericLiteral(_) => true,
+        Expression::UnaryExpression(unary) => {
+            unary.operator == UnaryOperator::UnaryNegation
+                && matches!(unary.argument, Expression::NumericLiteral(_))
+        }
+        _ => false,
+    }
+}
+
+/// Whether a type is `typeof X[number]` (parentheses round `typeof X` too) where `X` is in `vocabularies`.
+fn takes_elements_of(ty: &TSType, vocabularies: &HashSet<String>) -> bool {
+    let TSType::TSIndexedAccessType(indexed) = ty else {
+        return false;
+    };
+    if !matches!(indexed.index_type, TSType::TSNumberKeyword(_)) {
+        return false;
+    }
+    let mut object = &indexed.object_type;
+    while let TSType::TSParenthesizedType(inner) = object {
+        object = &inner.type_annotation;
+    }
+    matches!(
+        object,
+        TSType::TSTypeQuery(query)
+            if query.type_arguments.is_none()
+                && matches!(
+                    &query.expr_name,
+                    TSTypeQueryExprName::IdentifierReference(id)
+                        if vocabularies.contains(id.name.as_str())
+                )
+    )
 }
 
 /// Whether a value is a function: an arrow function or a function expression, which a name is bound to.
@@ -539,5 +690,190 @@ namespace N { export function n() {} }
             let (at, _) = outline(source, "a.ts").unwrap_err();
             assert_eq!(at, line, "{source:?}");
         }
+    }
+
+    /// The shape of every definition of a name in a file, as the outline gives it.
+    fn shapes(source: &str, dotted: &str) -> Vec<Shape> {
+        outline(source, "a.ts")
+            .unwrap()
+            .into_iter()
+            .filter(|d| d.names.join(".") == dotted)
+            .map(|d| d.shape)
+            .collect()
+    }
+
+    fn is_vocabulary_of(source: &str, name: &str) -> bool {
+        shapes(source, name) == [Shape::Vocabulary]
+    }
+
+    #[test]
+    fn a_const_array_of_literals_as_const_is_a_vocabulary_exported_or_not() {
+        for source in [
+            "export const A = ['a', 'b'] as const;",
+            "const A = ['a', 'b'] as const;",
+            "const A = [1, 2.5, -3] as const;",
+            "const A = ['a', 1, -1] as const;",
+            "const A = ['a'] as const satisfies readonly string[];",
+            "const A = (['a'] as const) satisfies readonly string[];",
+            "const A = (['a', 'b'] as const);",
+            "const A = (((['a'] as const)));",
+            "const A = ['a',] as const;",
+            "const A = [\"a\"] as const;",
+        ] {
+            assert!(is_vocabulary_of(source, "A"), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_const_that_is_not_an_array_of_literals_as_const_stays_plain() {
+        for source in [
+            "let A = ['a'] as const;",
+            "var A = ['a'] as const;",
+            "const A = ['a'];",
+            "const A = ['a'] satisfies readonly string[];",
+            "const A = ['a'] as string[];",
+            "const A = ['a'] as const as const;",
+            "const A = ['a'] as const satisfies readonly string[] satisfies unknown;",
+            "const A = [] as const;",
+            "const A = [...B] as const;",
+            "const A = ['a', ...B] as const;",
+            "const A = ['a', , 'b'] as const;",
+            "const A = [`a`] as const;",
+            "const A = [`a${B}`] as const;",
+            "const A = ['a', B] as const;",
+            "const A = ['a', +1] as const;",
+            "const A = ['a', -B] as const;",
+            "const A = ['a', null] as const;",
+            "const A = [['a']] as const;",
+            "const A = { a: 1 } as const;",
+            "const A = 'a' as const;",
+            "declare const A: readonly ['a'];",
+        ] {
+            assert_eq!(shapes(source, "A"), [Shape::Plain], "{source}");
+        }
+    }
+
+    #[test]
+    fn one_statement_can_declare_a_vocabulary_beside_plain_values() {
+        let source = "const A = 1, B = ['a'] as const, C = ['c'];";
+        assert_eq!(shapes(source, "A"), [Shape::Plain]);
+        assert_eq!(shapes(source, "B"), [Shape::Vocabulary]);
+        assert_eq!(shapes(source, "C"), [Shape::Plain]);
+    }
+
+    #[test]
+    fn a_const_inside_a_namespace_or_a_function_is_not_a_vocabulary() {
+        let source = "namespace N { export const A = ['a'] as const; } \
+            function f() { const B = ['b'] as const; } \
+            if (true) { const C = ['c'] as const; }";
+        let outline = outline(source, "a.ts").unwrap();
+        assert!(
+            outline.iter().all(|d| d.shape == Shape::Plain),
+            "{outline:?}"
+        );
+        assert!(outline.iter().any(|d| d.names == ["N", "A"]));
+    }
+
+    #[test]
+    fn a_type_alias_over_the_elements_of_a_vocabulary_is_a_vocabulary() {
+        let declared = "const A = ['a', 'b'] as const;";
+        for alias in [
+            "type T = typeof A[number];",
+            "type T = (typeof A)[number];",
+            "export type T = (typeof A)[number];",
+            "type T = ((typeof A))[number];",
+        ] {
+            // Before the const, after it, and with the const exported
+            for source in [
+                format!("{alias} {declared}"),
+                format!("{declared} {alias}"),
+                format!("export {declared} {alias}"),
+            ] {
+                assert!(is_vocabulary_of(&source, "T"), "{source}");
+                assert!(is_vocabulary_of(&source, "A"), "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_type_alias_that_does_not_take_the_elements_of_a_vocabulary_stays_plain() {
+        let declared = "const A = ['a', 'b'] as const;";
+        for alias in [
+            // Type parameters, even unused
+            "type T<U> = (typeof A)[number];",
+            // Not `number` as the index, or not `typeof` of a plain name as the object
+            "type T = (typeof A)[0];",
+            "type T = (typeof A)['length'];",
+            "type T = (typeof A)[string];",
+            "type T = (typeof A)[keyof typeof A];",
+            "type T = typeof A;",
+            "type T = A[number];",
+            "type T = (typeof A.b)[number];",
+            "type T = (typeof B)[number];",
+            "type T = (typeof A)[number] | 'c';",
+            "type T = readonly (typeof A)[number][];",
+            "type T = (typeof A)[number][];",
+            "type T = ((typeof A)[number]);",
+            "type T = (typeof A<string>)[number];",
+        ] {
+            let source = format!("{declared} {alias}");
+            assert_eq!(shapes(&source, "T"), [Shape::Plain], "{source}");
+        }
+        // A const that is no vocabulary, a const of another name, and a nested one
+        for (const_source, alias) in [
+            (
+                "const A = ['a', 1n] as const;",
+                "type T = (typeof A)[number];",
+            ),
+            ("const A = ['a'];", "type T = (typeof A)[number];"),
+            ("let A = ['a'] as const;", "type T = (typeof A)[number];"),
+            ("const B = ['a'] as const;", "type T = (typeof A)[number];"),
+            (
+                "function f() { const A = ['a'] as const; }",
+                "type T = (typeof A)[number];",
+            ),
+            (
+                "namespace N { export const A = ['a'] as const; }",
+                "type T = (typeof A)[number];",
+            ),
+            ("", "type T = (typeof A)[number];"),
+        ] {
+            let source = format!("{const_source} {alias}");
+            assert_eq!(shapes(&source, "T"), [Shape::Plain], "{source}");
+        }
+        // An alias inside a namespace is not read, even over a vocabulary at the top
+        let source =
+            "const A = ['a'] as const; namespace N { export type T = (typeof A)[number]; }";
+        assert_eq!(shapes(source, "N.T"), [Shape::Plain]);
+    }
+
+    #[test]
+    fn every_enum_is_an_enum_and_its_members_stay_plain() {
+        let source = "enum A { X, Y } export enum B { X = 1 } const enum C { X } declare enum D { X } \
+            declare const enum E { X } namespace N { export enum F { X } }";
+        for name in ["A", "B", "C", "D", "E", "N.F"] {
+            assert_eq!(shapes(source, name), [Shape::Enum], "{name}");
+        }
+        for member in ["A.X", "B.X", "C.X", "D.X", "E.X", "N.F.X"] {
+            assert_eq!(shapes(source, member), [Shape::Plain], "{member}");
+        }
+        assert_eq!(shapes(source, "N"), [Shape::Plain]);
+    }
+
+    #[test]
+    fn what_is_neither_a_vocabulary_nor_an_enum_is_plain() {
+        let outline = outline(DEFINED, "src/api.ts").unwrap();
+        let shape = |name: &str| {
+            outline
+                .iter()
+                .find(|d| d.names == [name])
+                .unwrap()
+                .shape
+                .clone()
+        };
+        for name in ["Router", "f", "h", "i", "j", "default", "T", "A"] {
+            assert_eq!(shape(name), Shape::Plain, "{name}");
+        }
+        assert_eq!(shape("Color"), Shape::Enum);
     }
 }
