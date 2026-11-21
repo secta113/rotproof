@@ -23,7 +23,7 @@ use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::{PySourceType, Stmt};
 
 use domain::code::{Source, module_parts};
-use domain::definitions::{Definition, Kind};
+use domain::definitions::{Definition, Kind, Shape};
 use domain::text::line_of;
 
 /// Read one file, whose path from the root names the package its relative imports start from.
@@ -222,6 +222,7 @@ fn nested(body: &[Stmt], scope: &mut Vec<String>, found: &mut Vec<Definition>) {
             start: start.to_usize(),
             end: range.end().to_usize(),
             kind,
+            shape: Shape::Plain,
         });
         nested(inner, scope, found);
         scope.pop();

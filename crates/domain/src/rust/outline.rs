@@ -20,7 +20,7 @@
 //!   whatever a function holds (an item inside a body).
 
 use super::{Token, code, comments, tokens};
-use crate::definitions::{Definition, Kind};
+use crate::definitions::{Definition, Kind, Shape};
 
 /// Every definition of a Rust file, a container before what it holds. A name defined more than once appears once for
 /// each piece.
@@ -210,6 +210,7 @@ impl Reader {
             start,
             end,
             kind,
+            shape: Shape::Plain,
         });
     }
 

@@ -313,6 +313,7 @@ mod tests {
             start,
             end,
             kind: crate::definitions::Kind::Other,
+            shape: crate::definitions::Shape::Plain,
         };
         let outline = [
             at(&["f"], 0, 9),

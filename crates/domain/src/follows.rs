@@ -45,7 +45,7 @@ use sha2::{Digest, Sha256};
 
 use toml_edit::{Document, Item, Table, Value};
 
-use crate::definitions::{Definition, Kind, selected};
+use crate::definitions::{Definition, Kind, Shape, selected};
 use crate::layers::Language;
 use crate::text::line_of;
 
@@ -328,6 +328,7 @@ pub fn table_text(source: &str, name: &str) -> Result<Option<String>, String> {
                 start,
                 end,
                 kind: Kind::Other,
+                shape: Shape::Plain,
             });
         }
     }

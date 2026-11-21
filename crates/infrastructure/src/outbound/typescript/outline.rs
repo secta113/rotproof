@@ -14,7 +14,7 @@ use oxc_ast::ast::{
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, Span};
 
-use domain::definitions::{Definition, Kind};
+use domain::definitions::{Definition, Kind, Shape};
 use domain::follows::is_name;
 use domain::layers::Language;
 
@@ -79,6 +79,7 @@ impl Outline {
             start: start as usize,
             end: span.end as usize,
             kind,
+            shape: Shape::Plain,
         });
     }
 

@@ -15,6 +15,30 @@ pub enum Kind {
     Other,
 }
 
+/// What a definition is beyond its [`Kind`], for the rule that lets `protocol.inbound` read a vocabulary of its own
+/// unit's `domain` and no other definition of it. A key of `follows` never reads it, and neither does the count of
+/// sizes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Shape {
+    /// Nothing more that a rule reads
+    Plain,
+    /// A vocabulary of values, with no rule of the domain in it, and at least one value: in TypeScript, a `const` bound
+    /// to an array of string or number literals `as const` (a `satisfies` after it too), or a type alias that takes
+    /// the elements of such a `const` of the same file (`(typeof X)[number]`); in Python, a class whose bases are an
+    /// enum of the module `enum` (with `str` or `int` beside it) and whose body holds only members bound to a literal
+    /// or to `auto()`, a docstring, and methods named `__x__` or `_x_`; in Rust, an `enum` whose variants have no
+    /// fields. The methods of a Rust `enum` are in its `impl` blocks, anywhere in its crate, so the rule reads them
+    /// from [`Shape::Implementation`]
+    Vocabulary,
+    /// A TypeScript `enum`, which no layer holds: a vocabulary is an array `as const`
+    Enum,
+    /// A Rust trait
+    Trait,
+    /// A Rust `impl` block: the last name of the trait it implements (`Display` for `impl fmt::Display for T`), or
+    /// `None` for an inherent one
+    Implementation(Option<String>),
+}
+
 /// One definition of a file, as a reader found it: a function, a class, a method, a type, a variant. Every language
 /// is read into the same form, which [`pieces`] reads a key from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +52,8 @@ pub struct Definition {
     pub end: usize,
     /// What it is. A key of `follows` never reads it: only the names and the range say which text a key hashes
     pub kind: Kind,
+    /// What it is beyond its kind, for the vocabularies of `protocol.inbound`
+    pub shape: Shape,
 }
 
 /// The source of every definition of `outline`, the outline of `source`, whose names are `dotted` (`Table.add`), in the
@@ -69,6 +95,7 @@ mod tests {
             start,
             end,
             kind: Kind::Other,
+            shape: Shape::Plain,
         }
     }
 
