@@ -52,3 +52,4 @@ pub mod units;
 pub mod units_doc;
 pub mod upgrade;
 pub mod version;
+pub mod vocabulary;

@@ -83,9 +83,9 @@ const APPLICATION: &str = "application";
 /// The layer of the contracts, both levels of which an app's `composition` reads in a unit that is not shared.
 const PROTOCOL: &str = "protocol";
 /// The level of the input ports, which reads no `domain` but a shared unit's.
-const PROTOCOL_INBOUND: &str = "protocol.inbound";
+pub(crate) const PROTOCOL_INBOUND: &str = "protocol.inbound";
 /// The layer of the concepts, which `protocol.inbound` and every `composition` read in a shared unit.
-const DOMAIN: &str = "domain";
+pub(crate) const DOMAIN: &str = "domain";
 /// The places the example of a layer to import in a finding is taken from, the first that the unit holds: the input
 /// ports first, since that is what another unit is read for, then the rest in the order of the table.
 const EXAMPLES: [&str; 9] = [

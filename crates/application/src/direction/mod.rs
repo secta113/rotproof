@@ -8,18 +8,22 @@ pub(crate) mod rust;
 mod templates;
 mod typescript;
 
+use std::collections::BTreeMap;
 use std::io;
 
-use crate::tree::{code_files, exactly, is_file};
+use crate::tree::{code_files, exactly, is_file, program_files, read_text};
 use domain::declaration::Declared;
+use domain::definitions::Definition;
 use domain::direction::{Edge, Forbidden, cycles, place_of};
 use domain::layers::{Language, Layout, Place, table};
 use domain::moving::Order;
 use domain::outside::Outside;
 use domain::readers::Read;
+use domain::rust::{code, without_tests};
 use domain::templates::Premise;
 use domain::units::Unit;
 use domain::units_doc::Link;
+use domain::vocabulary::Defined;
 use moving::Moving;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -173,6 +177,83 @@ pub(crate) fn test_dirs(tree: &dyn Tree, layout: &Layout, units: &[Unit]) -> Vec
     dirs
 }
 
+/// The outline of the code file at `path`, as the reader of `language` gives it, for the rule that lets a
+/// `protocol.inbound` import the vocabularies of its own unit's `domain` by name. `None` when the file cannot be
+/// read as text or parsed: the layers' own walk says so for every file it reads, so no finding is made twice, and
+/// the import it lands in is judged as before, forbidden. An error is a file that could not be read at all.
+pub fn outline_of(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    language: Language,
+    path: &str,
+) -> io::Result<Option<Vec<Definition>>> {
+    let source = match read_text(tree, path) {
+        Ok(source) => source,
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => return Ok(None),
+        Err(e) => return Err(io::Error::new(e.kind(), format!("{path}: {e}"))),
+    };
+    Ok(parsers.outline(language, &source, path).ok())
+}
+
+/// What the files that `protocol.inbound` imports from the `domain` of its own unit define, each file read once for
+/// a run: `defined` for a Python or a TypeScript file, read by its path from the root.
+pub struct Landings<'p> {
+    tree: &'p dyn Tree,
+    parsers: &'p dyn Parsers,
+    language: Language,
+    known: BTreeMap<String, Option<Defined>>,
+}
+
+impl<'p> Landings<'p> {
+    pub fn new(tree: &'p dyn Tree, parsers: &'p dyn Parsers, language: Language) -> Self {
+        Landings {
+            tree,
+            parsers,
+            language,
+            known: BTreeMap::new(),
+        }
+    }
+
+    /// The names the file at `path` defines, for `domain::vocabulary::judged`. `None` when the file cannot be read
+    /// ([`outline_of`]): the import is then judged by the table, which forbids it.
+    pub fn defined(&mut self, path: &str) -> io::Result<Option<&Defined>> {
+        if !self.known.contains_key(path) {
+            let defined = outline_of(self.tree, self.parsers, self.language, path)?
+                .map(|outline| Defined::new(&outline));
+            self.known.insert(path.to_string(), defined);
+        }
+        Ok(self.known[path].as_ref())
+    }
+}
+
+/// The outline of each file of a crate, with the file's path from the root.
+pub type Outlines = Vec<(String, Vec<Definition>)>;
+
+/// The outline of every file of the Rust crate of `domain`, each with its path: what an `enum` of a file needs to be
+/// told a vocabulary from an enum with rules (`domain::vocabulary::disqualified_by_impls` reads every `impl` block of
+/// the crate), and the landing file's own outline too. The files are those the I/O checks read ([`program_files`]: a
+/// test file is none), and the items under `#[cfg(test)]` are blanked first, as the program does not hold them.
+/// `None` when a file cannot be parsed, since an `impl` in it could not be seen and the enum must not be let through
+/// for it; a file that is not UTF-8 is a finding of the Rust walk, which reads it too. An error is a file that could
+/// not be read at all.
+pub fn crate_outlines(
+    tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    layout: &Layout,
+    domain: &Place,
+) -> io::Result<Option<Outlines>> {
+    let mut walk = Vec::new();
+    let mut outlines = Vec::new();
+    for (path, source) in program_files(tree, layout, domain, "definitions", &mut walk)? {
+        let program = without_tests(&code(&source));
+        match parsers.outline(Language::Rust, &program, &path) {
+            Ok(outline) => outlines.push((path, outline)),
+            Err(_) => return Ok(None),
+        }
+    }
+    Ok(Some(outlines))
+}
+
 /// The finding for a file a reader gave up on at `line`: what it read before is judged, and the rest may be misread.
 fn misread(path: &str, language: &str, line: usize, why: &str) -> String {
     format!(
@@ -187,6 +268,7 @@ mod tests {
     use domain::declaration::parse_declaration;
     use domain::units::Unit;
     use infrastructure::outbound::readers::Readers;
+    use protocol::outbound::Writer;
 
     /// A Python project whose units, made in code, are `core` and `steps` (both shared) and `app`, at the directories
     /// of the same names.
@@ -1056,5 +1138,86 @@ import os
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_python_or_typescript_landing_file_is_read_once_and_gives_what_it_defines() {
+        let tree = Fake::new(&[
+            (
+                "core/domain/song.py",
+                "from enum import Enum\n\nclass Dir(Enum):\n    UP = 1\n\nclass Song:\n    pass\n",
+            ),
+            (
+                "web/domain/dir.ts",
+                "export const Dir = [\"up\", \"down\"] as const;\nexport type Dir = (typeof Dir)[number];\n\
+                 export enum Mode { A }\nexport interface Song { id: number }\n",
+            ),
+        ]);
+        let mut python = Landings::new(&tree, &Readers, Language::Python);
+        let defined = python.defined("core/domain/song.py").unwrap().unwrap();
+        assert_eq!(defined.vocabularies(), ["Dir"]);
+        let mut typescript = Landings::new(&tree, &Readers, Language::TypeScript);
+        let defined = typescript.defined("web/domain/dir.ts").unwrap().unwrap();
+        assert_eq!(defined.vocabularies(), ["Dir"]);
+        // A second ask is answered from what was read, even when the file has changed since
+        tree.write("web/domain/dir.ts", "").unwrap();
+        let again = typescript.defined("web/domain/dir.ts").unwrap().unwrap();
+        assert_eq!(again.vocabularies(), ["Dir"]);
+    }
+
+    #[test]
+    fn a_landing_file_that_cannot_be_parsed_is_none_and_one_that_is_missing_an_error() {
+        let tree = Fake::new(&[("web/domain/broken.ts", "export const = ;;; {\n")]);
+        let mut typescript = Landings::new(&tree, &Readers, Language::TypeScript);
+        assert!(
+            typescript
+                .defined("web/domain/broken.ts")
+                .unwrap()
+                .is_none()
+        );
+        // A file that is not there is an error, not a file that fails the import silently
+        assert!(typescript.defined("web/domain/missing.ts").is_err());
+    }
+
+    #[test]
+    fn the_outlines_of_a_rust_crate_are_those_of_its_program_files_without_what_is_under_cfg_test()
+    {
+        let table = table();
+        let layout = domain::layers::layout("rust", "none").unwrap();
+        let places = layout.places_in(&table, "crates", &domain::layers::UnitTag::default());
+        let place = places.iter().find(|p| p.name == "domain").unwrap();
+        let tree = Fake::new(&[
+            ("crates/domain/src/lib.rs", "pub mod song;\n"),
+            (
+                "crates/domain/src/song.rs",
+                "pub enum Dir { Up }\n#[cfg(test)]\nmod tests { impl Dir { fn f(&self) {} } }\n",
+            ),
+            (
+                "crates/domain/src/rank.rs",
+                "impl crate::song::Dir { pub fn flip(&self) {} }\n",
+            ),
+            ("crates/domain/tests/x.rs", "impl Dir { fn g(&self) {} }\n"),
+        ]);
+        let outlines = crate_outlines(&tree, &Readers, &layout, place)
+            .unwrap()
+            .unwrap();
+        let paths: Vec<&str> = outlines.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "crates/domain/src/lib.rs",
+                "crates/domain/src/rank.rs",
+                "crates/domain/src/song.rs"
+            ]
+        );
+        let files: Vec<&[Definition]> = outlines.iter().map(|(_, o)| o.as_slice()).collect();
+        let found = domain::vocabulary::disqualified_by_impls(&files);
+        assert_eq!(found.len(), 1, "{found:?}");
+        // The impl of `rank.rs` counts, the one under `cfg(test)` and the one of `tests/` do not
+        let song = &outlines[2].1;
+        let defined = Defined::in_scope(song, &[], &found);
+        assert!(defined.vocabularies().is_empty());
+        let alone = domain::vocabulary::disqualified_by_impls(&[song.as_slice()]);
+        assert!(alone.is_empty(), "{alone:?}");
     }
 }
