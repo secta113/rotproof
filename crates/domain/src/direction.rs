@@ -39,10 +39,11 @@
 //!    in the importer's own unit, so the table decides, the place itself included. One place is read beyond the
 //!    table: a shared unit's `domain`, which the `protocol.inbound` of any unit may read, since a shared unit is
 //!    where the value types used across units live, and an input port that could not name them would copy their
-//!    shape. It reads nothing of its own unit and nothing of a unit that is not shared, as the table says. A
-//!    `composition` is read beyond the table the other way: of a shared unit it reads the `protocol`, the `domain`
-//!    (the value types the ports take, which it builds the arguments from) and, an app's, the `composition`, and no
-//!    other place.
+//!    shape. Of its own unit's `domain` it reads the vocabularies alone, by name, from the file that defines them
+//!    (`domain::vocabulary`, which the reader of each language applies before the table is asked: the table itself
+//!    lets it import no other layer), and of a unit that is not shared nothing, as the table says. A `composition` is
+//!    read beyond the table the other way: of a shared unit it reads the `protocol`, the `domain` (the value types the
+//!    ports take, which it builds the arguments from) and, an app's, the `composition`, and no other place.
 //! 5. The entry file reads the `composition` of its own unit and nothing of another unit: rules 2 to 4 refuse it.
 //!
 //! The `composition` of an app, where rule 2 lets it read a unit that is not shared, reads that unit's `composition`
@@ -82,7 +83,8 @@ const COMPOSITION: &str = "composition";
 const APPLICATION: &str = "application";
 /// The layer of the contracts, both levels of which an app's `composition` reads in a unit that is not shared.
 const PROTOCOL: &str = "protocol";
-/// The level of the input ports, which reads no `domain` but a shared unit's.
+/// The level of the input ports, which reads a shared unit's `domain` and, of its own unit's, the vocabularies by name
+/// (`domain::vocabulary`).
 pub(crate) const PROTOCOL_INBOUND: &str = "protocol.inbound";
 /// The layer of the concepts, which `protocol.inbound` and every `composition` read in a shared unit.
 pub(crate) const DOMAIN: &str = "domain";

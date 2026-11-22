@@ -8,7 +8,9 @@
 //!   A call that resolves to `importlib.import_module` or to the builtin `__import__` (`builtins.__import__`, or a name
 //!   bound to either by `from importlib import import_module`) with a string literal as its module is an import of
 //!   that module, as `import` of it is. A name that is not a literal (a variable, an f-string, a concatenation), and a
-//!   relative one (`".x"`), is built at run time and is not seen: the reader says so in `Source::unread`.
+//!   relative one (`".x"`), is built at run time and is not seen: the reader says so in `Source::unread`. How each
+//!   entry was written is in `Source::forms` (`domain::code::Form`): the module and the name taken from it, none for
+//!   an `import`, so that `from m import n` and `import m.n` are told apart.
 //! - **Its comments,** `#` to the end of the line. A docstring is a string, so it is not a comment; its range is given
 //!   apart (`Source::docstrings`), for the count of the lines of code, which leaves documentation out.
 //! - **Its uses** (`uses.rs`, `domain::code::Use`): every name that resolves to something outside the file's own code,
@@ -29,7 +31,7 @@ use ruff_python_ast::{
     UnaryOp,
 };
 
-use domain::code::{Source, module_parts};
+use domain::code::{Form, Source, module_parts};
 use domain::definitions::{Definition, Kind, Shape};
 use domain::text::line_of;
 
@@ -45,9 +47,19 @@ pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
     imports.visit_body(&parsed.syntax().body);
     let mut found = imports.found;
     let read = uses::read(source, &parsed.syntax().body, &package);
-    found.extend(read.dynamic);
+    found.extend(read.dynamic.into_iter().map(|(line, module)| {
+        let form = Form {
+            module: module.clone(),
+            name: None,
+        };
+        (line, module, form)
+    }));
     // In the order of the lines, as the statements are read, with the calls among them
-    found.sort_by_key(|(line, _)| *line);
+    found.sort_by_key(|(line, _, _)| *line);
+    let (imports, forms): (Vec<_>, Vec<_>) = found
+        .into_iter()
+        .map(|(line, module, form)| ((line, module), form))
+        .unzip();
     let comments = parsed
         .tokens()
         .iter()
@@ -65,7 +77,8 @@ pub fn read(source: &str, path: &str) -> Source<Vec<String>> {
         )
     });
     Source {
-        imports: found,
+        imports,
+        forms,
         comments,
         docstrings: docstrings(&parsed.syntax().body),
         uses: read.uses,
@@ -131,7 +144,7 @@ fn base_of(package: &[String], level: u32, module: Option<&str>) -> Option<Vec<S
 struct Imports<'s> {
     source: &'s str,
     package: &'s [String],
-    found: Vec<(usize, Vec<String>)>,
+    found: Vec<(usize, Vec<String>, Form)>,
 }
 
 impl Imports<'_> {
@@ -145,9 +158,13 @@ impl<'a> StatementVisitor<'a> for Imports<'_> {
         match stmt {
             Stmt::Import(import) => {
                 for alias in &import.names {
-                    let module = alias.name.split('.').map(String::from).collect();
+                    let module: Vec<String> = alias.name.split('.').map(String::from).collect();
+                    let form = Form {
+                        module: module.clone(),
+                        name: None,
+                    };
                     self.found
-                        .push((self.line(alias.range.start().to_usize()), module));
+                        .push((self.line(alias.range.start().to_usize()), module, form));
                 }
             }
             Stmt::ImportFrom(import) => {
@@ -162,8 +179,12 @@ impl<'a> StatementVisitor<'a> for Imports<'_> {
                     if alias.name.as_str() != "*" {
                         module.push(alias.name.to_string());
                     }
+                    let form = Form {
+                        module: base.clone(),
+                        name: Some(alias.name.to_string()),
+                    };
                     self.found
-                        .push((self.line(alias.range.start().to_usize()), module));
+                        .push((self.line(alias.range.start().to_usize()), module, form));
                 }
             }
             _ => {}
@@ -684,6 +705,103 @@ from ui import *
         let expected: Vec<(usize, String)> =
             expected.iter().map(|(l, m)| (*l, m.to_string())).collect();
         assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn every_import_says_the_module_and_the_name_it_takes_and_an_import_takes_none() {
+        let source = "\
+import os, domain.song as song
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from application import play, load as l
+def f():
+    import infrastructure.db
+    from domain.song import Kind as K
+class C:
+    from . import theme
+from .. import organisms
+from ..molecules.row import Row, Cell as C2
+from ... import beyond
+from ui import *
+from .x import *
+import importlib
+importlib.import_module(\"a.b\")
+try:
+    from domain import (
+        Dir,
+        Level as L,
+    )
+except ImportError:
+    import legacy as old
+";
+        let read = read(source, "ui/atoms/__init__.py");
+        assert_eq!(read.error, None);
+        // Each entry of the imports has its form, in the same order, and names the module and the name joined
+        assert_eq!(read.forms.len(), read.imports.len());
+        for ((_, module), form) in read.imports.iter().zip(&read.forms) {
+            let mut named = form.module.clone();
+            named.extend(form.name.iter().filter(|name| *name != "*").cloned());
+            assert_eq!(*module, named);
+        }
+        let found: Vec<(usize, String, Option<String>)> = read
+            .imports
+            .iter()
+            .zip(&read.forms)
+            .map(|((line, _), form)| (*line, form.module.join("."), form.name.clone()))
+            .collect();
+        let expected = [
+            (1, "os", None),
+            (1, "domain.song", None),
+            (2, "typing", Some("TYPE_CHECKING")),
+            (4, "application", Some("play")),
+            (4, "application", Some("load")),
+            (6, "infrastructure.db", None),
+            (7, "domain.song", Some("Kind")),
+            (9, "ui.atoms", Some("theme")),
+            (10, "ui", Some("organisms")),
+            (11, "ui.molecules.row", Some("Row")),
+            (11, "ui.molecules.row", Some("Cell")),
+            // Line 12 climbs above the top package `ui`, which Python fails on: it imports nothing
+            (13, "ui", Some("*")),
+            (14, "ui.atoms.x", Some("*")),
+            (15, "importlib", None),
+            (16, "a.b", None),
+            (19, "domain", Some("Dir")),
+            (20, "domain", Some("Level")),
+            (23, "legacy", None),
+        ];
+        let expected: Vec<(usize, String, Option<String>)> = expected
+            .iter()
+            .map(|(l, m, n)| (*l, m.to_string(), n.map(String::from)))
+            .collect();
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn a_call_that_imports_a_module_by_a_literal_is_an_import_of_it_with_no_name() {
+        let source = "\
+from importlib import import_module as load
+def f():
+    load(\"billing.domain.x\")
+";
+        let read = read(source, "app/main.py");
+        let found: Vec<(usize, String, Option<String>)> = read
+            .forms
+            .iter()
+            .zip(&read.imports)
+            .map(|(form, (line, _))| (*line, form.module.join("."), form.name.clone()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    1,
+                    "importlib".to_string(),
+                    Some("import_module".to_string())
+                ),
+                (3, "billing.domain.x".to_string(), None),
+            ]
+        );
     }
 
     #[test]

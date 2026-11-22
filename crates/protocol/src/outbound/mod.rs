@@ -59,7 +59,7 @@ pub trait Writer {
 /// The readers of code: the port the checks read code through.
 pub trait Parsers {
     /// A Python file, whose path from the root names the package its relative imports start from: every module it
-    /// imports, as parts.
+    /// imports, as parts, and in `forms` how each was written (the module and the name it takes).
     fn python(&self, source: &str, path: &str) -> Source<Vec<String>>;
     /// The outline of a file of `language`, whose path from the root is `path`: every definition in it, each with its
     /// names from the outermost and the range of its source, from its first decorator or attribute to its end.

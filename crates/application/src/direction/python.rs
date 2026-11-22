@@ -7,15 +7,19 @@
 //! from the root, as Python does when the program starts there: it lands in the layer of a unit at the root and, where
 //! the root has none, nowhere, so what it imports is not judged. The `__init__.py` directly in a unit's directory is
 //! read too, as a place that imports no layer.
+//!
+//! An import by a `protocol.inbound` file of its own unit's `domain` is judged by the names it takes, as the reader
+//! says it was written (`Source::forms`), not by the table: a module and a glob take no name, and a name is judged by
+//! what the file of the module defines (`named_in`, `domain::vocabulary`). Every other import is judged by the table.
 
 use std::collections::BTreeMap;
 use std::io;
 
 use super::moving::{Moving, python_files};
 use super::templates::templates;
-use super::{Direction, entry_files, layer_files, misread, test_dirs};
-use crate::tree::{Resolver, exactly, read_code};
-use domain::code::module_parts;
+use super::{Direction, Landings, entry_files, layer_files, misread, test_dirs};
+use crate::tree::{Resolver, exactly, is_file, read_code};
+use domain::code::{Form, module_parts};
 use domain::declaration::Declared;
 use domain::direction::{Landing, Way, edge, imports_test, judged_landing, landing_of};
 use domain::layers::{Layout, Place, Table, table};
@@ -24,6 +28,7 @@ use domain::paths::{join, within};
 use domain::readers::read_of;
 use domain::units::Unit;
 use domain::units_doc::link;
+use domain::vocabulary::{self, Defined};
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -58,6 +63,8 @@ pub(super) fn python<'a>(
     // The files read are the layers', the entry files' and the packages': none is a test, and no test is read
     let tests = test_dirs(tree, layout, units);
     let resolver = Resolver::new(tree);
+    // What the files that `protocol.inbound` imports from its own unit's `domain` define, each read once
+    let mut landings = Landings::new(tree, parsers, layout.language);
     for (path, from) in files {
         let Some(source) = read_code(tree, &path, "imports", &mut found)? else {
             continue;
@@ -66,7 +73,7 @@ pub(super) fn python<'a>(
         if let Some((line, why)) = read.error {
             found.push(misread(&path, "Python", line, &why));
         }
-        for (line, module) in read.imports {
+        for (index, (line, module)) in read.imports.into_iter().enumerate() {
             let (target, by_unit) = path_of(&module, &imported);
             let at = resolver.of(&target);
             moving.read_by(from, || python_files(&at));
@@ -95,17 +102,31 @@ pub(super) fn python<'a>(
             let Some(to) = landing_of(&at, places, units) else {
                 continue;
             };
-            // A name that no unit gives, found in a layer of a unit at the root
-            let bare = !by_unit && at_root(to, units);
-            forbidden.extend(judged_landing(
-                &path,
-                line,
-                &dotted,
-                &format!("imports {dotted}"),
-                from,
-                to,
-                &Way::Module { bare },
-            ));
+            let what = format!("imports {dotted}");
+            // A `protocol.inbound` importing its own unit's `domain` is judged by the names it takes, not by the table
+            let named = match (to, read.forms.get(index)) {
+                (Landing::Place(place), Some(form)) if vocabulary::applies(from, place) => {
+                    named_in(tree, &resolver, &imported, &mut landings, place, form)?
+                }
+                _ => None,
+            };
+            if let Some((taken, defined)) = named {
+                forbidden.extend(vocabulary::judged(
+                    &path, line, &dotted, &what, &taken, &defined,
+                ));
+            } else {
+                // A name that no unit gives, found in a layer of a unit at the root
+                let bare = !by_unit && at_root(to, units);
+                forbidden.extend(judged_landing(
+                    &path,
+                    line,
+                    &dotted,
+                    &what,
+                    from,
+                    to,
+                    &Way::Module { bare },
+                ));
+            }
             edges.extend(edge(&path, line, &dotted, from, to));
             reads.extend(read_of(from, to, &dotted));
             links.extend(link(from, to));
@@ -162,6 +183,56 @@ pub(crate) fn path_of(module: &[String], imported: &BTreeMap<&str, &str>) -> (St
     }
 }
 
+/// What an import of the `domain` of `to` takes, and what the file of its module defines, for the rule that lets a
+/// `protocol.inbound` read the vocabularies of its own unit's `domain`. The reader says how the import was written
+/// (`Form`): the module and the name it takes. The file of the module is `m.py` or `m/__init__.py`, inside `domain`.
+///
+/// - **`from m import n`:** `n` is taken from that file, which must define it. A name that is also a module of `m`
+///   (`m/n.py` or `m/n/__init__.py`, inside `domain`) is the module, so it takes no name.
+/// - **`from m import *` and `import m.n`:** the first takes `*`, which names nothing, and the second takes none.
+///
+/// `None` when the file of the module is not in `domain` or cannot be parsed: the table judges the import and forbids
+/// it, as before.
+fn named_in(
+    tree: &dyn Tree,
+    resolver: &Resolver,
+    imported: &BTreeMap<&str, &str>,
+    landings: &mut Landings,
+    to: &Place,
+    form: &Form,
+) -> io::Result<Option<(Vec<String>, Defined)>> {
+    let (target, _) = path_of(&form.module, imported);
+    if target.is_empty() {
+        return Ok(None);
+    }
+    let at = resolver.of(&target);
+    let in_domain = |file: &String| is_file(tree, file) && within(file, &to.path);
+    let Some(file) = [format!("{at}.py"), join(&at, "__init__.py")]
+        .into_iter()
+        .find(in_domain)
+    else {
+        return Ok(None);
+    };
+    let taken = match form.name.as_deref() {
+        None => Vec::new(),
+        Some("*") => vec!["*".to_string()],
+        Some(name) => {
+            let own = join(&at, name);
+            if [format!("{own}.py"), join(&own, "__init__.py")]
+                .iter()
+                .any(in_domain)
+            {
+                Vec::new()
+            } else {
+                vec![name.to_string()]
+            }
+        }
+    };
+    Ok(landings
+        .defined(&file)?
+        .map(|defined| (taken, defined.clone())))
+}
+
 /// Whether an import lands in a place of the unit that sits at the root of the project.
 fn at_root(to: Landing, units: &[Unit]) -> bool {
     match to {
@@ -205,6 +276,7 @@ mod tests {
     use super::super::problems;
     use crate::tree::fake::Fake;
     use domain::declaration::{Declared, parse_declaration};
+    use domain::direction::Rule;
     use domain::paths::join;
     use infrastructure::outbound::readers::Readers;
 
@@ -696,7 +768,8 @@ mod tests {
                     "steps/protocol/inbound/dto.py",
                     "from core.domain import money\n",
                 ),
-                // The unit's own domain, the domain of a unit that is not shared, and the levels beside it, are not
+                // The unit's own domain is read by name, which these files do not give (the package file of the
+                // domain defines nothing); the domain of a unit that is not shared, and the levels beside it, are not
                 (
                     "billing/protocol/inbound/own.py",
                     "from billing.domain import invoice\nfrom shipping.domain import parcel\n\
@@ -723,18 +796,246 @@ mod tests {
             [
                 "billing/infrastructure/inbound/api.py:1: imports core.domain.money, in domain of unit core; \
                  infrastructure.inbound may import `protocol.inbound`",
-                "billing/protocol/inbound/own.py:1: imports billing.domain.invoice, in domain; protocol.inbound \
-                 imports no other layer",
+                "billing/protocol/inbound/own.py:1: imports billing.domain.invoice, in domain; protocol.inbound may \
+                 import only vocabularies, by name, from the file of domain that defines them: `invoice` is not \
+                 defined in this file (a name it only re-exports is not followed): import it from the file that \
+                 defines it",
                 "billing/protocol/inbound/own.py:2: imports shipping.domain.parcel, in domain of unit shipping; \
                  billing imports no unit that is not shared, and shipping is not: an app's composition wires the two",
                 "billing/protocol/inbound/own.py:3: imports core.protocol.outbound.port, in protocol.outbound of \
                  unit core; protocol.inbound imports no other layer",
-                "core/protocol/inbound/own.py:1: imports core.domain.money, in domain; protocol.inbound imports no \
-                 other layer",
+                "core/protocol/inbound/own.py:1: imports core.domain.money, in domain; protocol.inbound may import \
+                 only vocabularies, by name, from the file of domain that defines them: `money` is not defined in \
+                 this file (a name it only re-exports is not followed): import it from the file that defines it",
                 "steps/protocol/inbound/own.py:1: imports shipping.domain.parcel, in domain of unit shipping; the \
                  shared unit steps imports only shared units, and shipping is not shared",
             ]
         );
+    }
+
+    /// What the domain of `billing` holds for the tests of its input ports: a vocabulary (`Kind`, `Level`), a record
+    /// (`Song`), an enum with a rule (`Mood`) and a function (`play`) in `song.py`, a vocabulary in a package, and a
+    /// module that only re-exports.
+    const DOMAIN_FILES: &[(&str, &str)] = &[
+        (
+            "billing/domain/song.py",
+            "from enum import Enum\n\nclass Kind(Enum):\n    A = 1\n    B = 2\n\n\
+             class Level(str, Enum):\n    LOW = \"low\"\n\nclass Song:\n    title = \"\"\n\n\
+             class Mood(Enum):\n    HAPPY = 1\n    def shout(self):\n        return 1\n\ndef play():\n    pass\n",
+        ),
+        (
+            "billing/domain/shapes/__init__.py",
+            "from enum import Enum\n\nclass Shape(Enum):\n    ROUND = 1\n",
+        ),
+        (
+            "billing/domain/reexport.py",
+            "from billing.domain.song import Kind\n",
+        ),
+    ];
+
+    /// What the direction check finds in the units of a modular monolith, with `DOMAIN_FILES` of `billing` and `files`.
+    fn with_domain(files: &[(&str, &str)]) -> (Vec<String>, Vec<String>) {
+        let all: Vec<(&str, &str)> = DOMAIN_FILES.iter().chain(files).copied().collect();
+        check(&monolith(), MONOLITH, &all)
+    }
+
+    #[test]
+    fn an_input_port_imports_a_vocabulary_of_its_own_domain_by_name() {
+        let (forbidden, problems) = with_domain(&[
+            (
+                "billing/protocol/inbound/dto.py",
+                // By the unit's name and relatively, with an alias, several names at once, and from a package
+                "from billing.domain.song import Kind\nfrom ...domain.song import Level\n\
+                 from billing.domain.song import Kind as K, Level as L\nfrom billing.domain.shapes import Shape\n",
+            ),
+            // Where the import is written in the level does not matter
+            (
+                "billing/protocol/inbound/deep/more.py",
+                "from billing.domain.song import Kind\n",
+            ),
+        ]);
+        assert!(problems.is_empty(), "{problems:#?}");
+        assert!(forbidden.is_empty(), "{forbidden:#?}");
+    }
+
+    #[test]
+    fn an_input_port_is_told_why_a_record_or_a_function_of_its_own_domain_is_no_vocabulary() {
+        let (forbidden, problems) = with_domain(&[(
+            "billing/protocol/inbound/dto.py",
+            "from billing.domain.song import Song\nfrom billing.domain.song import Mood\n\
+             from billing.domain.song import play\nfrom billing.domain.song import Kind, Song as S\n",
+        )]);
+        assert!(problems.is_empty(), "{problems:#?}");
+        let said = |line: usize, import: &str, name: &str| {
+            format!(
+                "billing/protocol/inbound/dto.py:{line}: imports {import}, in domain; protocol.inbound may import only \
+                 vocabularies, by name, from the file of domain that defines them: `{name}` is a record, class, \
+                 function or type, no vocabulary: write the shape the port shows in protocol.inbound, and convert in \
+                 application"
+            )
+        };
+        // The vocabulary beside a record passes, and the record is named as the file defines it, not by its alias
+        assert_eq!(
+            forbidden,
+            [
+                said(1, "billing.domain.song.Song", "Song"),
+                said(2, "billing.domain.song.Mood", "Mood"),
+                said(3, "billing.domain.song.play", "play"),
+                said(4, "billing.domain.song.Song", "Song"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_name_the_file_of_its_own_domain_does_not_define_is_told_to_come_from_the_file_that_does() {
+        let (forbidden, problems) = with_domain(&[(
+            "billing/protocol/inbound/dto.py",
+            // Re-exported by a module, and by the package, which defines nothing; and a name nowhere
+            "from billing.domain.reexport import Kind\nfrom billing.domain import Kind as K\n\
+             from billing.domain.song import Missing\n",
+        )]);
+        assert!(problems.is_empty(), "{problems:#?}");
+        let said = |line: usize, import: &str, name: &str| {
+            format!(
+                "billing/protocol/inbound/dto.py:{line}: imports {import}, in domain; protocol.inbound may import only \
+                 vocabularies, by name, from the file of domain that defines them: `{name}` is not defined in this \
+                 file (a name it only re-exports is not followed): import it from the file that defines it"
+            )
+        };
+        assert_eq!(
+            forbidden,
+            [
+                said(1, "billing.domain.reexport.Kind", "Kind"),
+                said(2, "billing.domain.Kind", "Kind"),
+                said(3, "billing.domain.song.Missing", "Missing"),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_import_of_a_module_of_its_own_domain_or_a_glob_of_it_takes_no_name_and_fails() {
+        let (forbidden, problems) = with_domain(&[(
+            "billing/protocol/inbound/dto.py",
+            // `domain.song.Kind` would be read by attribute then, and a submodule that `from` imports is a module too
+            "import billing.domain.song\nfrom billing.domain import song\nfrom billing.domain.song import *\n\
+             import billing.domain\nfrom billing.domain import *\nimport billing.domain.shapes as s\n\
+             from billing.domain import shapes\n",
+        )]);
+        assert!(problems.is_empty(), "{problems:#?}");
+        let said = |line: usize, import: &str| {
+            format!(
+                "billing/protocol/inbound/dto.py:{line}: imports {import}, in domain; protocol.inbound may import only \
+                 vocabularies, by name, from the file of domain that defines them: this import takes no name, and \
+                 what it brings in cannot be told: import each vocabulary by name"
+            )
+        };
+        assert_eq!(
+            forbidden,
+            [
+                said(1, "billing.domain.song"),
+                said(2, "billing.domain.song"),
+                said(3, "billing.domain.song"),
+                said(4, "billing.domain"),
+                said(5, "billing.domain"),
+                said(6, "billing.domain.shapes"),
+                said(7, "billing.domain.shapes"),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_import_of_a_module_not_in_domain_is_judged_by_the_table_and_fails_as_before() {
+        let (forbidden, problems) = check(
+            &monolith(),
+            MONOLITH,
+            &[(
+                "billing/protocol/inbound/dto.py",
+                // No file of domain is the module of the first, and the module of the second is the unit's own package
+                "from billing.domain.nothing import Kind\nfrom billing import domain\n",
+            )],
+        );
+        assert!(problems.is_empty(), "{problems:#?}");
+        assert_eq!(
+            forbidden,
+            [
+                "billing/protocol/inbound/dto.py:1: imports billing.domain.nothing.Kind, in domain; protocol.inbound \
+                 imports no other layer",
+                "billing/protocol/inbound/dto.py:2: imports billing.domain, in domain; protocol.inbound imports no \
+                 other layer",
+            ]
+        );
+    }
+
+    #[test]
+    fn other_places_and_the_domain_of_another_unit_are_judged_by_the_table_as_before() {
+        let (forbidden, problems) = with_domain(&[
+            // The layers that the table lets read the domain, and the one it does not
+            (
+                "billing/application/pay.py",
+                "from billing.domain.song import Song\n",
+            ),
+            (
+                "billing/protocol/outbound/port.py",
+                "from billing.domain.song import Kind\n",
+            ),
+            (
+                "billing/infrastructure/inbound/api.py",
+                "from billing.domain.song import Kind\n",
+            ),
+            // The input port of a unit reads a shared unit's domain whole, a record too, and the domain of a unit
+            // that is not shared not at all
+            (
+                "billing/protocol/inbound/dto.py",
+                "from core.domain.money import Money\nfrom shipping.domain.parcel import Kind\n",
+            ),
+            ("core/domain/money.py", "class Money:\n    pass\n"),
+            (
+                "shipping/domain/parcel.py",
+                "from enum import Enum\n\nclass Kind(Enum):\n    A = 1\n",
+            ),
+        ]);
+        assert!(problems.is_empty(), "{problems:#?}");
+        assert_eq!(
+            forbidden,
+            [
+                "billing/infrastructure/inbound/api.py:1: imports billing.domain.song.Kind, in domain; \
+                 infrastructure.inbound may import `protocol.inbound`",
+                "billing/protocol/inbound/dto.py:2: imports shipping.domain.parcel.Kind, in domain of unit shipping; \
+                 billing imports no unit that is not shared, and shipping is not: an app's composition wires the two",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_finding_for_an_import_of_the_own_domain_is_keyed_by_its_file_and_import() {
+        let declared =
+            Declared::new(parse_declaration(&declaration(&monolith())).unwrap()).unwrap();
+        let mut tree: Vec<(String, &str)> = MONOLITH
+            .iter()
+            .flat_map(|(at, names)| {
+                names
+                    .iter()
+                    .map(move |name| (join(at, &format!("{name}/__init__.py")), ""))
+            })
+            .collect();
+        tree.extend(
+            DOMAIN_FILES
+                .iter()
+                .map(|(path, text)| (path.to_string(), *text)),
+        );
+        tree.push((
+            "billing/protocol/inbound/dto.py".to_string(),
+            "from billing.domain.song import Song as S\n",
+        ));
+        let tree: Vec<(&str, &str)> = tree.iter().map(|(p, t)| (p.as_str(), *t)).collect();
+        let found = problems(&Fake::new(&tree), &Readers, &declared).unwrap();
+        let [one] = found.forbidden.as_slice() else {
+            panic!("{:#?}", found.forbidden);
+        };
+        // The module and the name, as an import of a layer's file is keyed: the alias is no part of it
+        assert_eq!(one.file, "billing/protocol/inbound/dto.py");
+        assert_eq!(one.import, "billing.domain.song.Song");
+        assert_eq!(one.rule, Rule::Direction);
     }
 
     #[test]
