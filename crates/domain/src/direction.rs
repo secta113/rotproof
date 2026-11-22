@@ -274,6 +274,24 @@ pub fn imports_test(file: &str, line: usize, import: &str, what: &str, test: &st
     }
 }
 
+/// What to write in place of a TypeScript `enum`, which the finding of one ([`enum_written`]) and the one for an import
+/// of it (`vocabulary::judged`) both say.
+pub const ENUM_INSTEAD: &str = "write it as an array `as const`, with a type of its elements";
+
+/// The finding for a TypeScript `enum` that `file` declares on `line`, named `name` (`Mode`, or `Ns.Mode` inside a
+/// namespace): no layer holds one, wherever it is declared, since a vocabulary is an array `as const`. Not an import,
+/// but kept as one is, so that an approval finds it by its file and the `import` `enum <name>`, which names no module.
+pub fn enum_written(file: &str, line: usize, name: &str) -> Forbidden {
+    Forbidden {
+        file: file.to_string(),
+        import: format!("enum {name}"),
+        detail: format!(
+            "{file}:{line}: declares enum {name}, a TypeScript enum, which no layer holds: {ENUM_INSTEAD}"
+        ),
+        rule: Rule::Direction,
+    }
+}
+
 /// [`judged`] for an import that lands in a place or in a unit's code outside its layers. `way` says how the stack
 /// writes an import of a layer, for the finding of the second; for a Python import that names a place by its own name
 /// alone (`domain.song`), which Python looks up from where the program starts, not from the unit, a finding for another
@@ -1739,5 +1757,44 @@ mod tests {
         assert!(edge("core.application", to("billing.domain")).is_none());
         assert!(edge("billing.application", to("core.domain")).is_none());
         assert!(edge("cli.composition", to("core.composition")).is_none());
+    }
+
+    #[test]
+    fn a_typescript_enum_is_a_finding_keyed_by_its_file_and_its_name_and_says_what_to_write() {
+        let found = enum_written("src/domain/song.ts", 4, "Mode");
+        assert_eq!(found.file, "src/domain/song.ts");
+        assert_eq!(found.import, "enum Mode");
+        assert_eq!(found.rule, Rule::Direction);
+        assert_eq!(
+            found.detail,
+            "src/domain/song.ts:4: declares enum Mode, a TypeScript enum, which no layer holds: write it as an array \
+             `as const`, with a type of its elements"
+        );
+        // Inside a namespace it is named by the names that hold it
+        assert_eq!(enum_written("a.ts", 1, "Ns.Mode").import, "enum Ns.Mode");
+    }
+
+    #[test]
+    fn the_advice_for_an_enum_is_the_one_the_finding_of_an_import_of_it_gives() {
+        use crate::definitions::{Definition, Kind, Shape};
+        use crate::vocabulary::{Defined, judged};
+        let outline = [Definition {
+            names: vec!["Mode".to_string()],
+            start: 0,
+            end: 1,
+            kind: Kind::Type,
+            shape: Shape::Enum,
+        }];
+        let taken = ["Mode".to_string()];
+        let said = judged(
+            "a.ts",
+            1,
+            "./x",
+            "imports ./x",
+            &taken,
+            &Defined::new(&outline),
+        )
+        .unwrap();
+        assert!(said.detail.contains(ENUM_INSTEAD), "{}", said.detail);
     }
 }
