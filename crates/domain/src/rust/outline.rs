@@ -11,6 +11,12 @@
 //!   `impl<T> Table<T>`), and `Type.item` the item of that name in any of them, whether the block implements a trait
 //!   or not. The name of an `impl` block is the last name of the type after `for` (or after `impl`), so a block for
 //!   `Vec<Table>` is a piece of `Vec`.
+//! - **A shape beyond the kind,** for the rule on `protocol.inbound`: an `enum` that is a vocabulary (no generic
+//!   parameters, at least one variant, and no variant with fields, a discriminant allowed), a `trait`, and an `impl`
+//!   block, which names the last segment of the trait it implements without its generic arguments (`Display` for
+//!   `impl fmt::Display for T`, `Sync` for `impl !Sync for T`) or nothing when it is inherent. Everything else, the
+//!   items and variants too, is plain. The outline reads one file: the rule that refuses an enum with an `impl` block
+//!   reads the outline of every file of the crate.
 //! - **A definition starts at its first outer attribute,** and `///` and `/** */` doc comments count as attributes,
 //!   wherever they sit before the item and its attributes; the comments before that are not part of it. It ends at its
 //!   closing brace or semicolon, the first one outside any group: the `< >` of generics are a group too, so the `{`
@@ -316,7 +322,13 @@ impl Reader {
                 self.finish(scope, &name, Kind::Type, start, end)
             }
             ("enum", Some(name)) => self.enumeration(i, hi, &name, start, scope),
-            ("trait", Some(name)) => self.block(i, hi, &name, Kind::Type, start, scope),
+            ("trait", Some(name)) => {
+                // `block` defines the trait before anything in it, whether it has a body or not
+                let at = self.found.len();
+                let end = self.block(i, hi, &name, Kind::Type, start, scope);
+                self.found[at].shape = Shape::Trait;
+                end
+            }
             ("mod", Some(name)) => match self.body(i + 2, hi) {
                 Some(open) => self.block_at(open, hi, &name, Kind::Other, start, scope),
                 None => self.item_end(i + 2, hi, false),
@@ -419,8 +431,12 @@ impl Reader {
         };
         let after = self.skip_group(open).min(hi);
         let close = after.saturating_sub(1).max(open + 1);
+        let at = self.found.len();
         let end = self.finish(scope, name, Kind::Type, start, after);
         scope.push(name.to_string());
+        // A vocabulary has no generics and no variant with fields: it is only a list of names
+        let mut vocabulary = !self.punct(i + 2, '<');
+        let mut variants = 0;
         let mut since = self.end(open);
         let mut j = open + 1;
         while j < close {
@@ -442,11 +458,17 @@ impl Reader {
             if let (Some(variant), true) = (variant, k > j) {
                 let to = self.end(k - 1);
                 self.define(scope, &variant, Kind::Other, begin, to);
+                variants += 1;
+                // A group right after the name holds fields; `= 1` is a discriminant, which holds none
+                vocabulary &= !matches!(self.tokens.get(j + 1), Some((_, Token::Punct('(' | '{'))));
             }
             since = if k < close { self.end(k) } else { since };
             j = k + 1;
         }
         scope.pop();
+        if vocabulary && variants > 0 {
+            self.found[at].shape = Shape::Vocabulary;
+        }
         end
     }
 
@@ -464,7 +486,10 @@ impl Reader {
         let after = self.skip_group(open).min(hi);
         let close = after.saturating_sub(1).max(open + 1);
         if let Some(name) = self.target(i + 1, open) {
+            let shape = Shape::Implementation(self.implemented(i + 1, open));
+            let at = self.found.len();
             let end = self.finish(scope, &name, Kind::Other, start, after);
+            self.found[at].shape = shape;
             scope.push(name);
             let since = self.end(open);
             let outer = std::mem::replace(&mut self.associated, true);
@@ -480,30 +505,7 @@ impl Reader {
     /// path after `for`, or after the generics when there is no `for`. `None` for a type with no name (`[T]`,
     /// `(A, B)`).
     fn target(&self, from: usize, open: usize) -> Option<String> {
-        let mut j = from;
-        // Generics of the impl: `<T: Fn() -> u8>`, where `->` does not close
-        if self.punct(j, '<') {
-            let mut depth = 0;
-            while j < open {
-                match self.tokens[j].1 {
-                    // A group holds no angle of the generics: `{ 1 < 2 }`
-                    Token::Punct('(' | '[' | '{') => {
-                        j = self.skip_group(j).min(open);
-                        continue;
-                    }
-                    Token::Punct('<') => depth += 1,
-                    Token::Punct('>') if !self.arrow(j) => {
-                        depth -= 1;
-                        if depth == 0 {
-                            j += 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                j += 1;
-            }
-        }
+        let j = self.past_generics(from, open);
         // The type is after the last `for` outside groups and angles, before `where`
         let mut at = j;
         let mut depth = 0;
@@ -549,6 +551,84 @@ impl Reader {
             }
         }
         name
+    }
+
+    /// The last name of the trait an `impl` block implements, without its generic arguments (`Display` for
+    /// `fmt::Display`, `From` for `From<T>`), from the tokens `from` to `open` (its brace): the path before the first
+    /// `for` outside groups and angles, and before `where`. `None` for an inherent block, which has no `for`. The
+    /// first `for` is the one of the block: a second one would be that of a type (`for<'a> fn(&'a u8)`).
+    fn implemented(&self, from: usize, open: usize) -> Option<String> {
+        let mut j = self.past_generics(from, open);
+        let mut depth = 0;
+        let mut k = j;
+        let mut at = None;
+        while k < open {
+            match &self.tokens[k].1 {
+                Token::Word(w) if w == "where" && depth == 0 => break,
+                Token::Word(w) if w == "for" && depth == 0 => {
+                    at = Some(k);
+                    break;
+                }
+                Token::Punct('(' | '[' | '{') => {
+                    k = self.skip_group(k).min(open);
+                    continue;
+                }
+                Token::Punct('<') => depth += 1,
+                Token::Punct('>') if !self.arrow(k) => depth -= 1,
+                _ => {}
+            }
+            k += 1;
+        }
+        let end = at?;
+        // `!Sync`, `const Tr` and a leading `::`: past what comes before the path
+        while j < end {
+            match &self.tokens[j].1 {
+                Token::Punct('!') | Token::PathSep => j += 1,
+                Token::Word(w) if w == "const" => j += 1,
+                _ => break,
+            }
+        }
+        if j >= end {
+            return None;
+        }
+        let mut name = plain(self.word(j)?).to_string();
+        j += 1;
+        // `::Name`, until what ends the path: its arguments open with `<`
+        while j < end && matches!(self.tokens.get(j), Some((_, Token::PathSep))) {
+            let Some(next) = self.word(j + 1) else { break };
+            name = plain(next).to_string();
+            j += 2;
+        }
+        Some(name)
+    }
+
+    /// The index after the generics of an `impl` block, whose keyword is before token `from`, or `from` when it has
+    /// none: `<T: Fn() -> u8>`, where `->` does not close. `open` is its brace.
+    fn past_generics(&self, from: usize, open: usize) -> usize {
+        let mut j = from;
+        if self.punct(j, '<') {
+            let mut depth = 0;
+            while j < open {
+                match self.tokens[j].1 {
+                    // A group holds no angle of the generics: `{ 1 < 2 }`
+                    Token::Punct('(' | '[' | '{') => {
+                        j = self.skip_group(j).min(open);
+                        continue;
+                    }
+                    Token::Punct('<') => depth += 1,
+                    Token::Punct('>') if !self.arrow(j) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            j += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+        }
+        j
     }
 }
 
@@ -923,6 +1003,148 @@ macro_rules! mac { () => {} }
         assert_eq!(definition("r#fn f() {}\nfn g() {}", "g"), ["fn g() {}"]);
         // `r # x` apart is not a raw identifier
         assert_eq!(definition("fn r # x() {}", "r"), ["fn r # x() {}"]);
+    }
+
+    /// The shape of the first definition of that name in a file.
+    fn shape_of(source: &str, dotted: &str) -> Shape {
+        outline(source)
+            .into_iter()
+            .find(|d| d.names.join(".") == dotted)
+            .unwrap_or_else(|| panic!("{dotted} is not defined in {source}"))
+            .shape
+    }
+
+    /// The shape of each `impl` block of a type, in the order they appear.
+    fn implementations(source: &str, name: &str) -> Vec<Shape> {
+        outline(source)
+            .into_iter()
+            .filter(|d| d.names == [name] && matches!(d.shape, Shape::Implementation(_)))
+            .map(|d| d.shape)
+            .collect()
+    }
+
+    fn implements(name: &str) -> Shape {
+        Shape::Implementation(Some(name.to_string()))
+    }
+
+    #[test]
+    fn an_enum_of_unit_variants_is_a_vocabulary_whatever_its_attributes_docs_and_discriminants() {
+        let source = "/// Docs.\n#[derive(Debug)]\npub enum Level {\n    /// Low.\n    #[default]\n    Low,\n    \
+                      Mid = 1,\n    /* a block comment */\n    High = -2,\n    Top = { 3 },\n}\n\
+                      enum Bare { A }\npub(crate) enum NoComma { A, B }\n\
+                      mod inner { enum Deep { A, B, } pub enum Wide { X = 1 << 2 } }\n";
+        for name in ["Level", "Bare", "NoComma", "inner.Deep", "inner.Wide"] {
+            assert_eq!(shape_of(source, name), Shape::Vocabulary, "{name}");
+        }
+        // The variants stay plain
+        for variant in [
+            "Level.Low",
+            "Level.Mid",
+            "Level.High",
+            "Level.Top",
+            "Bare.A",
+            "inner.Deep.B",
+        ] {
+            assert_eq!(shape_of(source, variant), Shape::Plain, "{variant}");
+        }
+        // The definition still ends at its closing brace
+        assert!(definition(source, "Level")[0].ends_with("Top = { 3 },\n}"));
+    }
+
+    #[test]
+    fn an_enum_with_fields_generics_or_no_variant_stays_plain() {
+        let source = "enum Tuple { A, B(u8) }\nenum Record { A, B { x: u8 }, C }\n\
+                      enum Both { #[allow(dead_code)] A(), B }\nenum Generic<T> { A, B }\n\
+                      enum Lifetime<'a> { A, B }\nenum Constant<const N: usize = { 1 }> { A }\n\
+                      enum Empty {}\nenum Later { A = 1, B(u8) = 2 }\n";
+        for name in [
+            "Tuple", "Record", "Both", "Generic", "Lifetime", "Constant", "Empty", "Later",
+        ] {
+            assert_eq!(shape_of(source, name), Shape::Plain, "{name}");
+        }
+        // Each variant is plain either way, and the variants after one with fields are found as before
+        assert_eq!(shape_of(source, "Tuple.B"), Shape::Plain);
+        assert_eq!(definition(source, "Record.C"), ["C"]);
+    }
+
+    #[test]
+    fn a_trait_is_a_trait_whatever_its_form_and_its_items_are_plain() {
+        let source = "trait Plain { fn f(&self); }\npub trait Public {}\npub unsafe trait Danger {}\n\
+                      pub trait Generic<T: Clone>: Sized + Send where T: Copy { type Out; fn g(&self) -> T; }\n\
+                      trait Const<const N: usize = { 1 }> { const K: u8; }\n\
+                      mod m { pub(crate) trait Inner { fn h(&self) {} } }\n";
+        for name in ["Plain", "Public", "Danger", "Generic", "Const", "m.Inner"] {
+            assert_eq!(shape_of(source, name), Shape::Trait, "{name}");
+        }
+        for item in [
+            "Plain.f",
+            "Generic.Out",
+            "Generic.g",
+            "Const.K",
+            "m.Inner.h",
+        ] {
+            assert_eq!(shape_of(source, item), Shape::Plain, "{item}");
+        }
+        // A module that holds a trait is no trait
+        assert_eq!(shape_of(source, "m"), Shape::Plain);
+    }
+
+    #[test]
+    fn an_impl_block_of_a_trait_names_the_last_segment_of_the_trait_without_its_arguments() {
+        let source = "struct A;\nstruct X<T>(T);\n\
+                      impl Clone for A { fn clone(&self) -> A { A } }\n\
+                      impl fmt::Display for A { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { Ok(()) } }\n\
+                      impl<T> From<T> for X<T> where T: Into<u8> { fn from(t: T) -> Self { X(t) } }\n\
+                      unsafe impl Send for A {}\nimpl !Sync for A {}\n\
+                      impl<F: Fn() -> u8> ::std::ops::Add<Vec<m::B>> for A where F: Copy {}\n\
+                      impl<'a, F: Fn(&'a u8) -> u8> crate::m::Tr<F, { 1 < 2 }> for &'a mut m::A {}\n\
+                      impl<T> Tr<for<'a> fn(&'a T)> for A {}\n";
+        assert_eq!(
+            implementations(source, "A"),
+            [
+                implements("Clone"),
+                implements("Display"),
+                implements("Send"),
+                implements("Sync"),
+                implements("Add"),
+                implements("Tr"),
+                implements("Tr"),
+            ]
+        );
+        assert_eq!(implementations(source, "X"), [implements("From")]);
+        // The items inside and the struct keep their shape
+        assert_eq!(shape_of(source, "A.clone"), Shape::Plain);
+        assert_eq!(shape_of(source, "X.from"), Shape::Plain);
+        assert_eq!(shape_of(source, "A"), Shape::Plain);
+    }
+
+    #[test]
+    fn an_inherent_impl_block_has_no_trait() {
+        let source = "struct A;\nstruct T<U>(U);\nimpl A { fn f() {} }\n\
+                      impl<T> T<T> { const C: u8 = 1; }\nimpl<U: Fn() -> u8> T<U> where U: Copy { fn g() {} }\n\
+                      impl<'a> m::A<'a> {}\nenum E { V }\nimpl E { fn name(&self) -> &str { \"v\" } }\n";
+        let none = Shape::Implementation(None);
+        assert_eq!(implementations(source, "A"), [none.clone(), none.clone()]);
+        assert_eq!(implementations(source, "T"), [none.clone(), none.clone()]);
+        assert_eq!(implementations(source, "E"), [none]);
+        // An enum with an `impl` block is a vocabulary here: the rule reads the blocks of the whole crate
+        assert_eq!(shape_of(source, "E"), Shape::Vocabulary);
+        assert_eq!(shape_of(source, "T.C"), Shape::Plain);
+    }
+
+    #[test]
+    fn a_shape_changes_neither_the_names_nor_the_ranges_of_an_impl_block() {
+        let source = "struct A;\nimpl<T> From<T> for A { fn from(t: T) -> Self { A } }\nimpl A { fn f() {} }\n";
+        assert_eq!(
+            definition(source, "A"),
+            [
+                "struct A;",
+                "impl<T> From<T> for A { fn from(t: T) -> Self { A } }",
+                "impl A { fn f() {} }"
+            ]
+        );
+        // A block for a type with no name is no definition, so it has no shape either
+        assert!(outline("impl Tr for [u8] { fn y() {} }").is_empty());
     }
 
     #[test]

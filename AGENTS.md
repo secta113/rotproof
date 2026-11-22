@@ -155,7 +155,7 @@ Also tracked, as in most repositories: `.gitattributes`, `.gitignore`, `Cargo.lo
 
 | Module of `crates/domain/src/rust/` | Content |
 |---|---|
-| `outline.rs` | The outline of a Rust file, read from the scanner's tokens: functions, types, traits, constants, macros and inline modules, the variants of an enum and the items of a trait and of an `impl` block, each from its first attribute or doc comment to its end, an `impl` block a definition of the type it is for |
+| `outline.rs` | The outline of a Rust file, read from the scanner's tokens: functions, types, traits, constants, macros and inline modules, the variants of an enum and the items of a trait and of an `impl` block, each from its first attribute or doc comment to its end, an `impl` block a definition of the type it is for; and the shape of each: an enum of variants without fields is a vocabulary, a trait a trait, an `impl` block names the trait it implements (none when inherent) |
 
 | Module of `crates/application/src/` | Content |
 |---|---|
