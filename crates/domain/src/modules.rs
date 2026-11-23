@@ -31,6 +31,7 @@ use crate::direction::{Forbidden, judged};
 use crate::layers::Place;
 use crate::rust::{Token, attributes, code, inline_modules, paths, renames, tokens};
 use crate::text::line_of;
+use crate::vocabulary::{Crate, applies};
 use std::collections::BTreeMap;
 
 /// What the reading of one crate with levels found: what sits beside the levels or cannot be judged, and every path
@@ -47,6 +48,11 @@ pub struct Dependency<'a> {
     pub name: String,
     pub layer: &'a Place,
     pub levels: Vec<&'a Place>,
+    /// What the crate defines, when it is the `domain` of the unit that the `protocol` crate belongs to, which the
+    /// imports of `protocol.inbound` from it are judged by (the vocabularies, by name, from the module that defines
+    /// them). `None` for any other layer, and for a `domain` that could not be read, whose every import is then judged
+    /// by the table, which forbids it.
+    pub vocabularies: Option<Crate>,
 }
 
 /// Every finding in the `.rs` files of the crate of `layer` (path from the root, and source) that sit in its `src/`,
@@ -112,14 +118,24 @@ pub fn judged_crate(
         starts.extend(aliases.keys().map(String::as_str));
         for (at, written_from) in paths(&code, &starts) {
             for (segments, through) in followed(&aliases, written_from) {
+                let mut vocabularies = None;
                 let to = match dependencies.iter().find(|d| d.name == segments[0]) {
                     // Another layer's crate: one of its levels when the path names one, or the layer
-                    Some(dependency) => dependency
-                        .levels
-                        .iter()
-                        .copied()
-                        .find(|level| segments.get(1).map(String::as_str) == Some(directory(level)))
-                        .unwrap_or(dependency.layer),
+                    Some(dependency) => {
+                        let to = dependency
+                            .levels
+                            .iter()
+                            .copied()
+                            .find(|level| {
+                                segments.get(1).map(String::as_str) == Some(directory(level))
+                            })
+                            .unwrap_or(dependency.layer);
+                        // The `domain` of the own unit, read by `protocol.inbound`: by name, not whole
+                        if applies(from, to) {
+                            vocabularies = dependency.vocabularies.as_ref();
+                        }
+                        to
+                    }
                     None => {
                         // The module the path is written in: the file's, then each module with a body around it
                         let base = base_at(&module, &bodies, at);
@@ -137,14 +153,11 @@ pub fn judged_crate(
                     Some(alias) => format!("uses {written} through `{alias}`"),
                     None => format!("uses {written}"),
                 };
-                found.forbidden.extend(judged(
-                    path,
-                    line_of(source, at),
-                    &written,
-                    &what,
-                    from,
-                    to,
-                ));
+                let line = line_of(source, at);
+                found.forbidden.extend(match vocabularies {
+                    Some(domain) => domain.judged(path, line, &written, &what, &segments[1..]),
+                    None => judged(path, line, &written, &what, from, to),
+                });
             }
         }
     }
@@ -379,11 +392,13 @@ mod tests {
                 name: "protocol".into(),
                 layer: place("protocol"),
                 levels: vec![place("protocol.inbound"), place("protocol.outbound")],
+                vocabularies: None,
             },
             Dependency {
                 name: "core".into(),
                 layer: place("domain"),
                 levels: Vec::new(),
+                vocabularies: None,
             },
         ];
         judged_crate(&files, &layer, &levels, &dependencies)
@@ -581,6 +596,153 @@ mod tests {
             )]))
             .len(),
             1
+        );
+    }
+
+    /// What the Rust layout makes of `protocol` read as a crate whose `src/` holds `files`, with a dependency on the
+    /// `domain` of its own unit, which defines `domain` (`None`: a `domain` that could not be read).
+    fn protocol(files: &[(&str, &str)], domain: Option<&[(&str, &str)]>) -> Found {
+        let places = layout("rust", "none").unwrap().places(&table());
+        let place = |name: &str| places.iter().find(|p| p.name == name).unwrap();
+        let levels = [place("protocol.inbound"), place("protocol.outbound")];
+        let dependencies = [Dependency {
+            name: "domain".into(),
+            layer: place("domain"),
+            levels: Vec::new(),
+            vocabularies: domain.map(crate::vocabulary::tests::krate),
+        }];
+        let files: Vec<(String, String)> = files
+            .iter()
+            .map(|(p, s)| (format!("crates/protocol/{p}"), s.to_string()))
+            .collect();
+        judged_crate(&files, place("protocol"), &levels, &dependencies)
+    }
+
+    /// A `domain` of two modules: `song`, with a vocabulary `Kind`, an enum with methods `Rank`, and a record
+    /// `Record`, and `prelude`, which only re-exports `Kind`.
+    const DOMAIN: &[(&str, &str)] = &[
+        ("", "pub mod song;\npub mod prelude;\n"),
+        (
+            "song",
+            "pub enum Kind { A, B }\npub enum Rank { A }\nimpl Rank { pub fn up(&self) {} }\npub struct Record;\n",
+        ),
+        ("prelude", "pub use crate::song::Kind;\n"),
+    ];
+
+    #[test]
+    fn the_inbound_level_imports_the_vocabularies_of_the_domain_of_its_unit_by_name() {
+        let said = details(&protocol(
+            &[(
+                "src/inbound/mod.rs",
+                "use domain::song::Kind;\nuse domain::song::{Kind as K, Rank, Record};\nfn f(_: domain::song::Kind::A) {}\n\
+                 use domain::song;\nuse domain::song::*;\nuse domain::prelude::Kind;\nuse domain::Kind;\n\
+                 use domain as d;\nfn g(_: d::song::Kind, _: d::song::Rank) {}\nuse domain::song::{self};\n",
+            )],
+            Some(DOMAIN),
+        ));
+        let name = "crates/protocol/src/inbound/mod.rs";
+        let by_name = "protocol.inbound may import only vocabularies, by name, from the file of domain that defines them";
+        let takes_none = "this import takes no name, and what it brings in cannot be told: import each vocabulary by name";
+        for line in [
+            format!(
+                "{name}:2: uses domain::song::Rank, in domain; {by_name}: `Rank` is an enum that has methods, a rule of \
+                 domain, so it is no vocabulary: move the methods into a function of domain that takes the kind"
+            ),
+            format!(
+                "{name}:2: uses domain::song::Record, in domain; {by_name}: `Record` is a record, class, function or \
+                 type, no vocabulary: write the shape the port shows in protocol.inbound, and convert in application"
+            ),
+            format!("{name}:4: uses domain::song, in domain; {by_name}: {takes_none}"),
+            format!("{name}:5: uses domain::song::*, in domain; {by_name}: {takes_none}"),
+            format!(
+                "{name}:6: uses domain::prelude::Kind, in domain; {by_name}: `Kind` is not defined in this file (a \
+                 name it only re-exports is not followed): import it from the file that defines it"
+            ),
+            format!(
+                "{name}:7: uses domain::Kind, in domain; {by_name}: `Kind` is not defined in this file (a name it \
+                 only re-exports is not followed): import it from the file that defines it"
+            ),
+            format!(
+                "{name}:9: uses domain::song::Rank through `d`, in domain; {by_name}: `Rank` is an enum that has methods, \
+                 a rule of domain, so it is no vocabulary: move the methods into a function of domain that takes the kind"
+            ),
+            format!("{name}:10: uses domain::song::self, in domain; {by_name}: {takes_none}"),
+        ] {
+            assert!(said.contains(&line), "{line}:\n{said:#?}");
+        }
+        // A vocabulary by its name, renamed, with a variant after it, or through a rename of the crate: no finding
+        assert_eq!(said.len(), 8, "{said:#?}");
+    }
+
+    #[test]
+    fn the_finding_of_a_vocabulary_import_is_keyed_by_the_file_and_the_path_as_a_table_finding_is()
+    {
+        let found = protocol(
+            &[("src/inbound/mod.rs", "use domain::song::Rank;\n")],
+            Some(DOMAIN),
+        );
+        let [forbidden] = found.forbidden.as_slice() else {
+            panic!("{:#?}", found.forbidden);
+        };
+        assert_eq!(forbidden.file, "crates/protocol/src/inbound/mod.rs");
+        assert_eq!(forbidden.import, "domain::song::Rank");
+        assert_eq!(forbidden.rule, crate::direction::Rule::Direction);
+        assert!(found.problems.is_empty(), "{:#?}", found.problems);
+        // The table's finding of the same import has the same key
+        let table = protocol(&[("src/inbound/mod.rs", "use domain::song::Rank;\n")], None);
+        assert_eq!(table.forbidden[0].import, forbidden.import);
+        assert_eq!(table.forbidden[0].file, forbidden.file);
+    }
+
+    #[test]
+    fn the_outbound_level_and_a_domain_that_could_not_be_read_are_judged_as_before() {
+        // The outbound level reads the whole `domain`, and the table says so
+        let outbound = details(&protocol(
+            &[(
+                "src/outbound/mod.rs",
+                "use domain::song::Rank;\nuse domain::prelude::Kind;\n",
+            )],
+            Some(DOMAIN),
+        ));
+        assert!(outbound.is_empty(), "{outbound:#?}");
+        // With no read of the `domain`, the table forbids what it forbade: any import of it from the inbound level
+        let unread = details(&protocol(
+            &[("src/inbound/mod.rs", "use domain::song::Kind;\n")],
+            None,
+        ));
+        assert_eq!(
+            unread,
+            [
+                "crates/protocol/src/inbound/mod.rs:1: uses domain::song::Kind, in domain; protocol.inbound imports \
+                 no other layer"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_vocabulary_is_taken_by_the_module_that_defines_it_whatever_the_file_it_is_written_in() {
+        let domain: &[(&str, &str)] = &[
+            ("", "pub mod song;\n"),
+            ("song", "pub mod kind;\npub enum Top { A }\n"),
+            (
+                "song::kind",
+                "pub enum Kind { A }\nmod inline { pub enum Deep { A } }\n",
+            ),
+        ];
+        let said = details(&protocol(
+            &[(
+                "src/inbound/cli.rs",
+                "use domain::song::kind::Kind;\nuse domain::song::Top;\nuse domain::song::kind::inline::Deep;\n\
+                 use domain::song::Kind;\n",
+            )],
+            Some(domain),
+        ));
+        // The file is a module of the inbound level, and the third names an inline module, which is no module of the
+        // crate's files but is one all the same; the last names what the module `song` does not define
+        assert_eq!(said.len(), 1, "{said:#?}");
+        assert!(
+            said[0].contains("`Kind` is not defined in this file"),
+            "{said:#?}"
         );
     }
 

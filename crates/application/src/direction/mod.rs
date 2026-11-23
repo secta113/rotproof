@@ -231,9 +231,9 @@ impl<'p> Landings<'p> {
 /// vocabularies of its own unit's `domain` by name (`domain::vocabulary::Crate`): the program files of its `src/`
 /// (a test file is none, and the items under `#[cfg(test)]` are blanked first, as the program does not hold them),
 /// each read as the module it is, since the rules of an enum are written in any of them. `None` when a file cannot be
-/// parsed, since a rule in it could not be seen and the enum must not be let through for it, so every import is judged
-/// by the table; a file that is not UTF-8 is a finding of the Rust walk, which reads it too. An error is a file that
-/// could not be read at all.
+/// read as text or parsed, since a rule in it could not be seen and the enum must not be let through for it, so every
+/// import is judged by the table; the Rust walk, which reads the file too, says why. An error is a file that could not
+/// be read at all.
 pub fn domain_crate(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -243,7 +243,11 @@ pub fn domain_crate(
     let src = format!("{}/src/", place.path);
     let mut walk = Vec::new();
     let mut programs = Vec::new();
-    for (path, source) in program_files(tree, layout, place, "definitions", &mut walk)? {
+    let read = program_files(tree, layout, place, "definitions", &mut walk)?;
+    if !walk.is_empty() {
+        return Ok(None);
+    }
+    for (path, source) in read {
         // A build script or an example sits beside the crate's modules and is none of them
         let Some(rel) = path.strip_prefix(&src) else {
             continue;
@@ -1226,5 +1230,17 @@ import os
             .unwrap()
             .unwrap();
         assert!(krate.module(&song()).unwrap().vocabularies().is_empty());
+        // A file that is not UTF-8 may hold a block, so the crate is not read, and the table judges every import
+        let tree = Fake::new(&[
+            ("crates/domain/src/lib.rs", "pub mod song;\npub mod rank;\n"),
+            ("crates/domain/src/song.rs", "pub enum Dir { Up }\n"),
+            ("crates/domain/src/rank.rs", ""),
+        ]);
+        tree.not_text("crates/domain/src/rank.rs");
+        assert!(
+            domain_crate(&tree, &Readers, &layout, place)
+                .unwrap()
+                .is_none()
+        );
     }
 }
