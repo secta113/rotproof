@@ -74,8 +74,8 @@ pub enum Class {
     Vocabulary,
     /// A TypeScript `enum`
     Enum,
-    /// A Rust `enum` of variants without fields that holds a rule: in an `impl` block anywhere in its crate, in a
-    /// derive, or in what the crate hides
+    /// An enum of values that holds a rule: a Python enum with a method, or a Rust `enum` of variants without fields
+    /// with one in an `impl` block anywhere in its crate, in a derive, or in what the crate hides
     Implemented(Disqualified),
     /// Anything else: a record, a class, a function, a type, a constant, a trait, a module
     Other,
@@ -125,6 +125,7 @@ impl Defined {
             let class = match (&definition.shape, why) {
                 (Shape::Vocabulary, None) => Class::Vocabulary,
                 (Shape::Vocabulary, Some(why)) => Class::Implemented(why),
+                (Shape::Methods, _) => Class::Implemented(Disqualified::Methods),
                 (Shape::Enum, _) => Class::Enum,
                 _ => Class::Other,
             };

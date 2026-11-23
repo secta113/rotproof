@@ -209,9 +209,9 @@ fn package(path: &str) -> Vec<String> {
 /// The outline of a Python file: every function and class at the top, and inside a class or a function (a method, a
 /// function in a function), each with its names from the outermost and its range from its first decorator to its end,
 /// for a knowledge document that follows it (`follows.rs` in `domain`). What sits in an `if` or a `try` is not in the
-/// outline, as a name after `::` leads through classes and functions alone. A class at the top that is a vocabulary
-/// (see [`Enums::vocabulary`]) has the shape [`Shape::Vocabulary`]; every other definition is plain. A file with a
-/// syntax error is read as far as the parser recovers.
+/// outline, as a name after `::` leads through classes and functions alone. A class at the top has the shape
+/// [`Enums::shape`] gives it; every other definition is plain. A file with a syntax error is read as far as the parser
+/// recovers.
 pub fn outline(source: &str) -> Vec<Definition> {
     let module = ruff_python_parser::parse_unchecked_source(source, PySourceType::Python);
     let body = &module.syntax().body;
@@ -249,9 +249,7 @@ fn nested(body: &[Stmt], enums: &Enums, scope: &mut Vec<String>, found: &mut Vec
             .expect("the definition's own start is there");
         // A class inside another class or a function is no vocabulary: only the top of the module is read
         let shape = match stmt {
-            Stmt::ClassDef(class) if scope.is_empty() && enums.vocabulary(class) => {
-                Shape::Vocabulary
-            }
+            Stmt::ClassDef(class) if scope.is_empty() => enums.shape(class),
             _ => Shape::Plain,
         };
         scope.push(name.to_string());
@@ -441,11 +439,24 @@ impl Enums {
                 && self.member(&call.func) == Some("auto"))
     }
 
-    /// Whether `class` is a vocabulary of values: a class that is an enum of the module `enum` (with `str` or `int`
-    /// beside the enum) and holds nothing but its members, a docstring, and methods named `__x__` or `_x_`. The rule
-    /// that reads it lets a vocabulary cross, as it holds no rule of the domain; a plain method may hold one, so a
-    /// class with one is no vocabulary, nor is one whose metaclass, a decorator or a base could change what it is.
-    fn vocabulary(&self, class: &StmtClassDef) -> bool {
+    /// The shape of the class `class` at the top of the module: [`Shape::Vocabulary`] for an enum of the module `enum`
+    /// (with `str` or `int` beside the enum) that holds nothing but its members, a docstring, and methods named
+    /// `__x__` or `_x_`; [`Shape::Methods`] for one that would be, but holds another method too; and
+    /// [`Shape::Plain`] for every other class, one whose metaclass, a decorator or a base could change what it is
+    /// among them.
+    fn shape(&self, class: &StmtClassDef) -> Shape {
+        if self.enum_of_members(class, false) {
+            Shape::Vocabulary
+        } else if self.enum_of_members(class, true) {
+            Shape::Methods
+        } else {
+            Shape::Plain
+        }
+    }
+
+    /// Whether `class` is an enum of the module `enum` whose body holds members and nothing but them, a docstring, and
+    /// methods named `__x__` or `_x_`, or, with `methods`, other methods too and at least one of them.
+    fn enum_of_members(&self, class: &StmtClassDef, methods: bool) -> bool {
         if class.type_params.is_some() {
             return false;
         }
@@ -480,6 +491,7 @@ impl Enums {
             return false;
         }
         let mut members = 0;
+        let mut others = 0;
         for (at, stmt) in class.body.iter().enumerate() {
             match stmt {
                 Stmt::Expr(expr) if at == 0 && expr.value.is_string_literal_expr() => {}
@@ -487,10 +499,11 @@ impl Enums {
                 Stmt::Pass(_) => {}
                 Stmt::Assign(assign) if self.member_assignment(assign) => members += 1,
                 Stmt::FunctionDef(def) if self.special_method(def) => {}
+                Stmt::FunctionDef(_) if methods => others += 1,
                 _ => return false,
             }
         }
-        members > 0
+        members > 0 && (others > 0) == methods
     }
 
     fn member_assignment(&self, assign: &StmtAssign) -> bool {
@@ -1059,15 +1072,23 @@ X = 1
     }
 
     #[test]
-    fn a_class_with_a_plain_method_is_not_a_vocabulary() {
+    fn a_class_with_a_plain_method_is_an_enum_with_methods() {
         let source = "from enum import Enum\n\nclass C(Enum):\n    A = 1\n\n    def label(self):\n        return 1\n";
-        assert!(!vocabulary(source));
+        assert_eq!(shape(source, "C"), Shape::Methods);
         let property = "from enum import Enum\n\nclass C(Enum):\n    A = 1\n\n    @property\n    def __x__(self):\n        return 1\n";
-        assert!(!vocabulary(property));
+        assert_eq!(shape(property, "C"), Shape::Methods);
         let asynchronous = "from enum import Enum\n\nclass C(Enum):\n    A = 1\n\n    async def __x__(self):\n        pass\n";
-        assert!(!vocabulary(asynchronous));
+        assert_eq!(shape(asynchronous, "C"), Shape::Methods);
         let shadowed = "from enum import Enum\nclassmethod = print\n\nclass C(Enum):\n    A = 1\n\n    @classmethod\n    def _x_(cls):\n        pass\n";
-        assert!(!vocabulary(shadowed));
+        assert_eq!(shape(shadowed, "C"), Shape::Methods);
+        // A method does not make a class of no members, or of something that is no member, an enum of values
+        let empty =
+            "from enum import Enum\n\nclass C(Enum):\n    def label(self):\n        return 1\n";
+        assert_eq!(shape(empty, "C"), Shape::Plain);
+        let other = "from enum import Enum\n\nclass C(Enum):\n    A = None\n\n    def label(self):\n        return 1\n";
+        assert_eq!(shape(other, "C"), Shape::Plain);
+        let record = "class C:\n    A = 1\n\n    def label(self):\n        return 1\n";
+        assert_eq!(shape(record, "C"), Shape::Plain);
     }
 
     #[test]

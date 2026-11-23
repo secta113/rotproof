@@ -30,6 +30,8 @@ pub enum Shape {
     /// fields. The methods of a Rust `enum` are in its `impl` blocks, anywhere in its crate, so the rule reads them
     /// from [`Shape::Implementation`]
     Vocabulary,
+    /// A Python enum that would be a [`Shape::Vocabulary`] but for a method not named `__x__` or `_x_`
+    Methods,
     /// A TypeScript `enum`, which no layer holds: a vocabulary is an array `as const`
     Enum,
     /// A Rust trait

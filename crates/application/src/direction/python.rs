@@ -859,7 +859,8 @@ mod tests {
     }
 
     #[test]
-    fn an_input_port_is_told_why_a_record_or_a_function_of_its_own_domain_is_no_vocabulary() {
+    fn an_input_port_is_told_why_a_record_an_enum_with_methods_or_a_function_of_its_own_domain_is_no_vocabulary()
+     {
         let (forbidden, problems) = with_domain(&[(
             "billing/protocol/inbound/dto.py",
             "from billing.domain.song import Song\nfrom billing.domain.song import Mood\n\
@@ -874,12 +875,17 @@ mod tests {
                  application"
             )
         };
+        // An enum with a method is told to move it out, as in Rust
+        let methods = "billing/protocol/inbound/dto.py:2: imports billing.domain.song.Mood, in domain; protocol.inbound \
+                       may import only vocabularies, by name, from the file of domain that defines them: `Mood` is an \
+                       enum that has methods, a rule of domain, so it is no vocabulary: move the methods into a \
+                       function of domain that takes the kind";
         // The vocabulary beside a record passes, and the record is named as the file defines it, not by its alias
         assert_eq!(
             forbidden,
             [
                 said(1, "billing.domain.song.Song", "Song"),
-                said(2, "billing.domain.song.Mood", "Mood"),
+                methods.to_string(),
                 said(3, "billing.domain.song.play", "play"),
                 said(4, "billing.domain.song.Song", "Song"),
             ]
