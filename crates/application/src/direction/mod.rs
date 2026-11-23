@@ -16,14 +16,15 @@ use domain::declaration::Declared;
 use domain::definitions::Definition;
 use domain::direction::{Edge, Forbidden, cycles, place_of};
 use domain::layers::{Language, Layout, Place, table};
+use domain::modules::crate_module;
 use domain::moving::Order;
 use domain::outside::Outside;
 use domain::readers::Read;
-use domain::rust::{code, without_tests};
+use domain::rust::{Source, code, without_tests};
 use domain::templates::Premise;
 use domain::units::Unit;
 use domain::units_doc::Link;
-use domain::vocabulary::Defined;
+use domain::vocabulary::{Crate, Defined};
 use moving::Moving;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
@@ -226,32 +227,43 @@ impl<'p> Landings<'p> {
     }
 }
 
-/// The outline of each file of a crate, with the file's path from the root.
-pub type Outlines = Vec<(String, Vec<Definition>)>;
-
-/// The outline of every file of the Rust crate of `domain`, each with its path: what an `enum` of a file needs to be
-/// told a vocabulary from an enum with rules (`domain::vocabulary::disqualified_by_impls` reads every `impl` block of
-/// the crate), and the landing file's own outline too. The files are those the I/O checks read ([`program_files`]: a
-/// test file is none), and the items under `#[cfg(test)]` are blanked first, as the program does not hold them.
-/// `None` when a file cannot be parsed, since an `impl` in it could not be seen and the enum must not be let through
-/// for it; a file that is not UTF-8 is a finding of the Rust walk, which reads it too. An error is a file that could
-/// not be read at all.
-pub fn crate_outlines(
+/// What the Rust crate of `domain` defines, module by module, for the rule that lets a `protocol.inbound` import the
+/// vocabularies of its own unit's `domain` by name (`domain::vocabulary::Crate`): the program files of its `src/`
+/// (a test file is none, and the items under `#[cfg(test)]` are blanked first, as the program does not hold them),
+/// each read as the module it is, since the rules of an enum are written in any of them. `None` when a file cannot be
+/// parsed, since a rule in it could not be seen and the enum must not be let through for it, so every import is judged
+/// by the table; a file that is not UTF-8 is a finding of the Rust walk, which reads it too. An error is a file that
+/// could not be read at all.
+pub fn domain_crate(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
     layout: &Layout,
-    domain: &Place,
-) -> io::Result<Option<Outlines>> {
+    place: &Place,
+) -> io::Result<Option<Crate>> {
+    let src = format!("{}/src/", place.path);
     let mut walk = Vec::new();
-    let mut outlines = Vec::new();
-    for (path, source) in program_files(tree, layout, domain, "definitions", &mut walk)? {
+    let mut programs = Vec::new();
+    for (path, source) in program_files(tree, layout, place, "definitions", &mut walk)? {
+        // A build script or an example sits beside the crate's modules and is none of them
+        let Some(rel) = path.strip_prefix(&src) else {
+            continue;
+        };
         let program = without_tests(&code(&source));
         match parsers.outline(Language::Rust, &program, &path) {
-            Ok(outline) => outlines.push((path, outline)),
+            Ok(outline) => programs.push((crate_module(rel), program, outline, path)),
             Err(_) => return Ok(None),
         }
     }
-    Ok(Some(outlines))
+    let files: Vec<Source> = programs
+        .iter()
+        .map(|(module, code, outline, path)| Source {
+            path,
+            module,
+            code,
+            outline,
+        })
+        .collect();
+    Ok(Some(Crate::new(&files)))
 }
 
 /// The finding for a file a reader gave up on at `line`: what it read before is judged, and the rest may be misread.
@@ -1180,44 +1192,39 @@ import os
     }
 
     #[test]
-    fn the_outlines_of_a_rust_crate_are_those_of_its_program_files_without_what_is_under_cfg_test()
-    {
+    fn the_crate_of_a_domain_is_read_from_its_program_files_without_what_is_under_cfg_test() {
         let table = table();
         let layout = domain::layers::layout("rust", "none").unwrap();
         let places = layout.places_in(&table, "crates", &domain::layers::UnitTag::default());
         let place = places.iter().find(|p| p.name == "domain").unwrap();
+        let song = || vec!["song".to_string()];
         let tree = Fake::new(&[
             ("crates/domain/src/lib.rs", "pub mod song;\n"),
             (
                 "crates/domain/src/song.rs",
                 "pub enum Dir { Up }\n#[cfg(test)]\nmod tests { impl Dir { fn f(&self) {} } }\n",
             ),
-            (
-                "crates/domain/src/rank.rs",
-                "impl crate::song::Dir { pub fn flip(&self) {} }\n",
-            ),
             ("crates/domain/tests/x.rs", "impl Dir { fn g(&self) {} }\n"),
+            ("crates/domain/build.rs", "impl Dir { fn h(&self) {} }\n"),
         ]);
-        let outlines = crate_outlines(&tree, &Readers, &layout, place)
+        // The impl blocks of the test module, of `tests/` and of a build script are none of the program's
+        let krate = domain_crate(&tree, &Readers, &layout, place)
             .unwrap()
             .unwrap();
-        let paths: Vec<&str> = outlines.iter().map(|(path, _)| path.as_str()).collect();
-        assert_eq!(
-            paths,
-            [
-                "crates/domain/src/lib.rs",
-                "crates/domain/src/rank.rs",
-                "crates/domain/src/song.rs"
-            ]
-        );
-        let files: Vec<&[Definition]> = outlines.iter().map(|(_, o)| o.as_slice()).collect();
-        let found = domain::vocabulary::disqualified_by_impls(&files);
-        assert_eq!(found.len(), 1, "{found:?}");
-        // The impl of `rank.rs` counts, the one under `cfg(test)` and the one of `tests/` do not
-        let song = &outlines[2].1;
-        let defined = Defined::in_scope(song, &[], &found);
-        assert!(defined.vocabularies().is_empty());
-        let alone = domain::vocabulary::disqualified_by_impls(&[song.as_slice()]);
-        assert!(alone.is_empty(), "{alone:?}");
+        assert_eq!(krate.module(&song()).unwrap().vocabularies(), ["Dir"]);
+        assert!(krate.module(&[]).unwrap().vocabularies().is_empty());
+        // A block in another file of the crate counts, by the path it is written with
+        let tree = Fake::new(&[
+            ("crates/domain/src/lib.rs", "pub mod song;\npub mod rank;\n"),
+            ("crates/domain/src/song.rs", "pub enum Dir { Up }\n"),
+            (
+                "crates/domain/src/rank/mod.rs",
+                "impl crate::song::Dir { pub fn flip(&self) {} }\n",
+            ),
+        ]);
+        let krate = domain_crate(&tree, &Readers, &layout, place)
+            .unwrap()
+            .unwrap();
+        assert!(krate.module(&song()).unwrap().vocabularies().is_empty());
     }
 }

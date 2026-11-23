@@ -13,10 +13,22 @@
 //!   `Vec<Table>` is a piece of `Vec`.
 //! - **A shape beyond the kind,** for the rule on `protocol.inbound`: an `enum` that is a vocabulary (no generic
 //!   parameters, at least one variant, and no variant with fields, a discriminant allowed), a `trait`, and an `impl`
-//!   block, which names the last segment of the trait it implements without its generic arguments (`Display` for
-//!   `impl fmt::Display for T`, `Sync` for `impl !Sync for T`) or nothing when it is inherent. Everything else, the
-//!   items and variants too, is plain. The outline reads one file: the rule that refuses an enum with an `impl` block
-//!   reads the outline of every file of the crate.
+//!   block, which gives the paths it is written with: the type's (`crate::song::Kind`) and the trait's (`fmt::Display`
+//!   for `impl fmt::Display for T`, `Sync` for `impl !Sync for T`), without generic arguments, nothing for the trait
+//!   when the block is inherent, and whether the type is a parameter of the block (`impl<T: Bound> Rank for T`).
+//!   References and pointers before the type are passed (`&'a mut m::Kind` is `m::Kind`). Everything else, the items
+//!   and variants too, is plain. The outline reads one file: the rule that refuses an enum with an `impl` block
+//!   reads the outline of every file of the crate, and resolves the paths there.
+//! - **The `impl` blocks the outline does not see are given by [`nested_impls`],** for the rule on vocabularies alone:
+//!   those in the body of a function or a method (in any block, closure or `if` inside it), and in the initializer of a
+//!   `const` or a `static` (`const _: () = { ... };`), as that rule needs every block that puts a method on a type, and
+//!   the traits declared there, which such a block may implement. The items there are read as items are: a body is
+//!   walked token by token, and an `impl` in it starts an item, as the
+//!   `impl Trait` of a type stands in a signature, which the reading of the function has passed. The blocks are named
+//!   as those of the outline are, by the module they are in, but [`outline`] never holds them, so a key of `follows`
+//!   selects the same text whether or not such a block exists. The arguments of a macro call are no code and are not
+//!   walked; what a macro writes from pieces stays unseen, and a rule that needs to know of an `impl` in a call reads
+//!   the call (`rust::calls_holding`).
 //! - **A definition starts at its first outer attribute,** and `///` and `/** */` doc comments count as attributes,
 //!   wherever they sit before the item and its attributes; the comments before that are not part of it. It ends at its
 //!   closing brace or semicolon, the first one outside any group: the `< >` of generics are a group too, so the `{`
@@ -26,11 +38,24 @@
 //!   whatever a function holds (an item inside a body).
 
 use super::{Token, code, comments, tokens};
-use crate::definitions::{Definition, Kind, Shape};
+use crate::definitions::{Definition, Impl, Kind, Shape};
 
 /// Every definition of a Rust file, a container before what it holds. A name defined more than once appears once for
 /// each piece.
 pub fn outline(source: &str) -> Vec<Definition> {
+    read(source).0
+}
+
+/// The `impl` blocks of a Rust file that [`outline`] does not hold, each with the items in it, as the outline gives
+/// them: those written in the body of a function or a method, and in the initializer of a `const` or a `static`, in
+/// the order they are written, and the traits declared there, which such a block may implement. What a key of
+/// `follows` selects never comes from here.
+pub fn nested_impls(source: &str) -> Vec<Definition> {
+    read(source).1
+}
+
+/// The outline of the file, and the `impl` blocks it leaves out.
+fn read(source: &str) -> (Vec<Definition>, Vec<Definition>) {
     let code = code(source);
     let tokens = raw_identifiers(tokens(&code));
     let docs = comments(source)
@@ -43,10 +68,14 @@ pub fn outline(source: &str) -> Vec<Definition> {
         docs,
         found: Vec::new(),
         associated: false,
+        chain: Vec::new(),
+        nested: Vec::new(),
     };
     let end = reader.tokens.len();
     reader.items(0, end, 0, &mut Vec::new());
-    reader.found
+    // The blocks were found where the walk met them, an inner body before the one around it
+    reader.nested.sort_by_key(|definition| definition.start);
+    (reader.found, reader.nested)
 }
 
 /// The tokens with each raw identifier (`r#match`: an `r`, a `#` and a word, written together) made one word that keeps
@@ -94,6 +123,11 @@ struct Reader {
     /// Whether the items being read are those of an `impl` block or a trait, where a `type` is an associated type
     /// and no type of the program
     associated: bool,
+    /// The names of the modules with a body that the reading is in, from the outermost: what the items found in a
+    /// body are named under, as a body is no module
+    chain: Vec<String>,
+    /// The `impl` blocks found in bodies and initializers, with their items
+    nested: Vec<Definition>,
 }
 
 impl Reader {
@@ -289,7 +323,15 @@ impl Reader {
                 } else {
                     Kind::Function
                 };
-                self.finish(scope, &name, kind, start, end)
+                let open = self.body(i + 2, hi);
+                let done = self.finish(scope, &name, kind, start, end);
+                match open {
+                    Some(open) if kind == Kind::Function => {
+                        self.enter(open + 1, end.saturating_sub(1))
+                    }
+                    _ => {}
+                }
+                done
             }
             ("struct" | "type", Some(name)) => {
                 let end = self.item_end(i + 2, hi, keyword == "struct");
@@ -302,7 +344,9 @@ impl Reader {
             }
             ("const", Some(name)) => {
                 let end = self.item_end(i + 2, hi, false);
-                self.finish(scope, &name, Kind::Other, start, end)
+                let done = self.finish(scope, &name, Kind::Other, start, end);
+                self.enter(i + 2, end);
+                done
             }
             ("static", Some(name)) => {
                 // `static mut NAME`
@@ -311,7 +355,9 @@ impl Reader {
                     _ => (name, i + 2),
                 };
                 let end = self.item_end(from, hi, false);
-                self.finish(scope, &name, Kind::Other, start, end)
+                let done = self.finish(scope, &name, Kind::Other, start, end);
+                self.enter(from, end);
+                done
             }
             ("union", Some(name))
                 if self.punct(i + 2, '{')
@@ -330,7 +376,12 @@ impl Reader {
                 end
             }
             ("mod", Some(name)) => match self.body(i + 2, hi) {
-                Some(open) => self.block_at(open, hi, &name, Kind::Other, start, scope),
+                Some(open) => {
+                    self.chain.push(name.clone());
+                    let end = self.block_at(open, hi, &name, Kind::Other, start, scope);
+                    self.chain.pop();
+                    end
+                }
                 None => self.item_end(i + 2, hi, false),
             },
             ("impl", _) => self.implementation(i, hi, start, scope),
@@ -485,8 +536,15 @@ impl Reader {
         };
         let after = self.skip_group(open).min(hi);
         let close = after.saturating_sub(1).max(open + 1);
-        if let Some(name) = self.target(i + 1, open) {
-            let shape = Shape::Implementation(self.implemented(i + 1, open));
+        let head = self.head(i + 1, open);
+        if let Some(target) = head.target {
+            let name = target.last().cloned().unwrap_or_default();
+            let blanket = target.len() == 1 && head.params.contains(&name);
+            let shape = Shape::Implementation(Impl {
+                target,
+                of: head.of,
+                blanket,
+            });
             let at = self.found.len();
             let end = self.finish(scope, &name, Kind::Other, start, after);
             self.found[at].shape = shape;
@@ -501,115 +559,20 @@ impl Reader {
         after
     }
 
-    /// The name of the type an `impl` block is for, from the tokens `from` to `open` (its brace): the last name of the
-    /// path after `for`, or after the generics when there is no `for`. `None` for a type with no name (`[T]`,
-    /// `(A, B)`).
-    fn target(&self, from: usize, open: usize) -> Option<String> {
-        let j = self.past_generics(from, open);
-        // The type is after the last `for` outside groups and angles, before `where`
-        let mut at = j;
-        let mut depth = 0;
-        let mut k = j;
-        while k < open {
-            match &self.tokens[k].1 {
-                Token::Word(w) if w == "where" && depth == 0 => break,
-                Token::Word(w) if w == "for" && depth == 0 => at = k + 1,
-                Token::Punct('(' | '[' | '{') => {
-                    k = self.skip_group(k).min(open);
-                    continue;
-                }
-                Token::Punct('<') => depth += 1,
-                Token::Punct('>') if !self.arrow(k) => depth -= 1,
-                _ => {}
-            }
-            k += 1;
-        }
-        // `&'a mut dyn path::Name<T>`: past what comes before the path
-        let mut name = None;
-        let mut j = at;
-        while j < k {
-            match &self.tokens[j].1 {
-                Token::Word(w) if matches!(w.as_str(), "mut" | "dyn" | "const" | "unsafe") => {
-                    j += 1
-                }
-                Token::Punct('&' | '*' | '\'' | '!') => j += 1,
-                // A lifetime is a `'` and a name
-                Token::Word(_) if j > 0 && self.punct(j - 1, '\'') => j += 1,
-                Token::Word(w) => {
-                    name = Some(plain(w).to_string());
-                    j += 1;
-                    // `::Name`, until what ends the path
-                    while matches!(self.tokens.get(j), Some((_, Token::PathSep))) {
-                        if let Some(next) = self.word(j + 1) {
-                            name = Some(plain(next).to_string());
-                        }
-                        j += 2;
-                    }
-                    break;
-                }
-                _ => return None,
-            }
-        }
-        name
-    }
-
-    /// The last name of the trait an `impl` block implements, without its generic arguments (`Display` for
-    /// `fmt::Display`, `From` for `From<T>`), from the tokens `from` to `open` (its brace): the path before the first
-    /// `for` outside groups and angles, and before `where`. `None` for an inherent block, which has no `for`. The
-    /// first `for` is the one of the block: a second one would be that of a type (`for<'a> fn(&'a u8)`).
-    fn implemented(&self, from: usize, open: usize) -> Option<String> {
-        let mut j = self.past_generics(from, open);
-        let mut depth = 0;
-        let mut k = j;
-        let mut at = None;
-        while k < open {
-            match &self.tokens[k].1 {
-                Token::Word(w) if w == "where" && depth == 0 => break,
-                Token::Word(w) if w == "for" && depth == 0 => {
-                    at = Some(k);
-                    break;
-                }
-                Token::Punct('(' | '[' | '{') => {
-                    k = self.skip_group(k).min(open);
-                    continue;
-                }
-                Token::Punct('<') => depth += 1,
-                Token::Punct('>') if !self.arrow(k) => depth -= 1,
-                _ => {}
-            }
-            k += 1;
-        }
-        let end = at?;
-        // `!Sync`, `const Tr` and a leading `::`: past what comes before the path
-        while j < end {
-            match &self.tokens[j].1 {
-                Token::Punct('!') | Token::PathSep => j += 1,
-                Token::Word(w) if w == "const" => j += 1,
-                _ => break,
-            }
-        }
-        if j >= end {
-            return None;
-        }
-        let mut name = plain(self.word(j)?).to_string();
-        j += 1;
-        // `::Name`, until what ends the path: its arguments open with `<`
-        while j < end && matches!(self.tokens.get(j), Some((_, Token::PathSep))) {
-            let Some(next) = self.word(j + 1) else { break };
-            name = plain(next).to_string();
-            j += 2;
-        }
-        Some(name)
-    }
-
-    /// The index after the generics of an `impl` block, whose keyword is before token `from`, or `from` when it has
-    /// none: `<T: Fn() -> u8>`, where `->` does not close. `open` is its brace.
-    fn past_generics(&self, from: usize, open: usize) -> usize {
+    /// What the head of an `impl` block says, from the tokens `from` (after its keyword) to `open` (its brace), read
+    /// in one walk: the type parameters it declares (`T` and `U` of `<'a, T: Tr<A, B>, const N: usize, U>`, `->` and a
+    /// group holding no angle of them), the path of the trait (the path before the first `for` outside groups and
+    /// angles, and before `where`: `fmt::Display` for `fmt::Display`, `From` for `From<T>`, none for an inherent
+    /// block; a second `for` would be that of a type, `for<'a> fn(&'a u8)`), and the path of the type (the path after
+    /// the last such `for`, or after the generics when there is none), each without generic arguments. The type has
+    /// no path for `[T]` and `(A, B)`.
+    fn head(&self, from: usize, open: usize) -> Head {
+        let mut params = Vec::new();
         let mut j = from;
         if self.punct(j, '<') {
-            let mut depth = 0;
+            let mut depth = 0usize;
             while j < open {
-                match self.tokens[j].1 {
+                match &self.tokens[j].1 {
                     // A group holds no angle of the generics: `{ 1 < 2 }`
                     Token::Punct('(' | '[' | '{') => {
                         j = self.skip_group(j).min(open);
@@ -617,25 +580,155 @@ impl Reader {
                     }
                     Token::Punct('<') => depth += 1,
                     Token::Punct('>') if !self.arrow(j) => {
-                        depth -= 1;
+                        depth = depth.saturating_sub(1);
                         if depth == 0 {
                             j += 1;
                             break;
                         }
+                    }
+                    Token::Word(w)
+                        if depth == 1
+                            && w != "const"
+                            && (self.punct(j - 1, '<') || self.punct(j - 1, ',')) =>
+                    {
+                        params.push(plain(w).to_string());
                     }
                     _ => {}
                 }
                 j += 1;
             }
         }
-        j
+        let after = j;
+        let (mut first, mut last) = (None, None);
+        let mut depth = 0usize;
+        let mut k = after;
+        while k < open {
+            match &self.tokens[k].1 {
+                Token::Word(w) if w == "where" && depth == 0 => break,
+                Token::Word(w) if w == "for" && depth == 0 => {
+                    first.get_or_insert(k);
+                    last = Some(k);
+                }
+                Token::Punct('(' | '[' | '{') => {
+                    k = self.skip_group(k).min(open);
+                    continue;
+                }
+                Token::Punct('<') => depth += 1,
+                Token::Punct('>') if !self.arrow(k) => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            k += 1;
+        }
+        Head {
+            params,
+            of: first.and_then(|at| self.path_at(after, at, true)),
+            // A leading `::` names another crate, and the outline has never held a block for such a type
+            target: self.path_at(last.map_or(after, |at| at + 1), k, false),
+        }
     }
+
+    /// The path of the type that starts at token `j`, before token `end` ([`super::type_path`]), as a key writes its
+    /// names: without the `r#` of a raw identifier.
+    fn path_at(&self, j: usize, end: usize, leading: bool) -> Option<Vec<String>> {
+        super::type_path(&self.tokens, j, end, leading)
+            .map(|path| path.iter().map(|name| plain(name).to_string()).collect())
+    }
+
+    /// The items inside the tokens `lo` to `hi` of a body or an initializer, which the items of a module do not
+    /// reach: their `impl` blocks and traits, with the items in them, go to `nested` (a trait declared there is what a
+    /// block there may implement), and nothing else is kept, so what the outline holds does not change. They are named
+    /// under the modules around them, not under a type or a function.
+    fn enter(&mut self, lo: usize, hi: usize) {
+        if lo >= hi {
+            return;
+        }
+        let mark = self.found.len();
+        let outer = std::mem::replace(&mut self.associated, false);
+        let mut scope = self.chain.clone();
+        self.walk(lo, hi.min(self.tokens.len()), &mut scope);
+        self.associated = outer;
+        let found = self.found.split_off(mark);
+        let blocks: Vec<(usize, usize)> = found
+            .iter()
+            .filter(|d| matches!(d.shape, Shape::Implementation(_) | Shape::Trait))
+            .map(|d| (d.start, d.end))
+            .collect();
+        self.nested.extend(found.into_iter().filter(|d| {
+            matches!(d.shape, Shape::Implementation(_) | Shape::Trait)
+                || blocks.iter().any(|(s, e)| *s <= d.start && d.end <= *e)
+        }));
+    }
+
+    /// The tokens `lo` to `hi` of a body, read from the start to the end: every group is entered, and an item
+    /// starts where a word that starts one stands, and is read as any item is (a function enters its own body). A
+    /// macro call is passed whole, as its arguments cannot be read as code. Nothing is guessed from the token before
+    /// an `impl`: in a body it only starts an item, since the `impl Trait` of a type stands in a signature, which the
+    /// reading of the function has passed. A word that only looks like the start of an item (the `static` of
+    /// `&'static str`, the `const` of `*const T`) makes a definition that is dropped, and its tokens are walked as
+    /// the initializer of a `const` or a `static` is, so a block in them is found all the same.
+    fn walk(&mut self, lo: usize, hi: usize, scope: &mut Vec<String>) {
+        let mut i = lo;
+        while i < hi {
+            let Some(word) = self.word(i).map(str::to_string) else {
+                i += 1;
+                continue;
+            };
+            let call = self.punct(i + 1, '!')
+                && matches!(
+                    self.tokens.get(i + 2),
+                    Some((_, Token::Punct('(' | '[' | '{')))
+                );
+            if call && word != "macro_rules" {
+                i = self.skip_group(i + 2).min(hi);
+                continue;
+            }
+            let starts = matches!(
+                word.as_str(),
+                "impl"
+                    | "fn"
+                    | "mod"
+                    | "trait"
+                    | "struct"
+                    | "enum"
+                    | "union"
+                    | "type"
+                    | "const"
+                    | "static"
+                    | "macro_rules"
+            );
+            if !starts {
+                i += 1;
+                continue;
+            }
+            // `unsafe impl` and `default impl` start at their qualifier
+            let mut first = i;
+            while word == "impl"
+                && first > lo
+                && matches!(self.word(first - 1), Some("unsafe" | "default"))
+            {
+                first -= 1;
+            }
+            let start = self.tokens[first].0;
+            let done = self.item(i, hi, start, scope);
+            i = done.max(i + 1).min(hi);
+        }
+    }
+}
+
+/// What the head of an `impl` block says ([`Reader::head`]).
+struct Head {
+    /// The names of the type parameters it declares
+    params: Vec<String>,
+    /// The path of the trait it implements, or none for an inherent block
+    of: Option<Vec<String>>,
+    /// The path of the type it is for, or none for a type with no path
+    target: Option<Vec<String>>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::definitions::pieces;
+    use crate::definitions::{pieces, selected};
 
     /// The source of every definition of that name in a file, as a key hashes it.
     fn definition(source: &str, dotted: &str) -> Vec<String> {
@@ -1014,17 +1107,29 @@ macro_rules! mac { () => {} }
             .shape
     }
 
-    /// The shape of each `impl` block of a type, in the order they appear.
-    fn implementations(source: &str, name: &str) -> Vec<Shape> {
-        outline(source)
+    /// What each `impl` block of a type says of itself, in the order they appear: the path of its trait, joined with
+    /// `::`, or `None` for an inherent block.
+    fn implementations(source: &str, name: &str) -> Vec<Option<String>> {
+        blocks(source, name)
             .into_iter()
-            .filter(|d| d.names == [name] && matches!(d.shape, Shape::Implementation(_)))
-            .map(|d| d.shape)
+            .map(|block| block.of.map(|path| path.join("::")))
             .collect()
     }
 
-    fn implements(name: &str) -> Shape {
-        Shape::Implementation(Some(name.to_string()))
+    /// The `impl` blocks of the type that is named `name` in the outline, in the order they appear.
+    fn blocks(source: &str, name: &str) -> Vec<Impl> {
+        outline(source)
+            .into_iter()
+            .filter(|d| d.names.last().map(String::as_str) == Some(name))
+            .filter_map(|d| match d.shape {
+                Shape::Implementation(block) => Some(block),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn implements(path: &str) -> Option<String> {
+        Some(path.to_string())
     }
 
     #[test]
@@ -1090,7 +1195,7 @@ macro_rules! mac { () => {} }
     }
 
     #[test]
-    fn an_impl_block_of_a_trait_names_the_last_segment_of_the_trait_without_its_arguments() {
+    fn an_impl_block_of_a_trait_gives_the_path_of_the_trait_without_its_arguments() {
         let source = "struct A;\nstruct X<T>(T);\n\
                       impl Clone for A { fn clone(&self) -> A { A } }\n\
                       impl fmt::Display for A { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { Ok(()) } }\n\
@@ -1103,11 +1208,11 @@ macro_rules! mac { () => {} }
             implementations(source, "A"),
             [
                 implements("Clone"),
-                implements("Display"),
+                implements("fmt::Display"),
                 implements("Send"),
                 implements("Sync"),
-                implements("Add"),
-                implements("Tr"),
+                implements("std::ops::Add"),
+                implements("crate::m::Tr"),
                 implements("Tr"),
             ]
         );
@@ -1119,17 +1224,165 @@ macro_rules! mac { () => {} }
     }
 
     #[test]
+    fn an_impl_block_gives_the_path_of_its_type_as_written_without_arguments_or_references() {
+        let source = "impl A {}\nimpl crate::song::Kind {}\nimpl super::Kind {}\nimpl<'a> Tr for &'a mut m::Kind {}\n\
+                      impl Tr for *const Kind {}\nimpl Tr for Box<Kind> {}\nimpl Tr for dyn p::Tr {}\n\
+                      impl Tr for [Kind] {}\nimpl Tr for (Kind, u8) {}\n";
+        let targets: Vec<Vec<String>> = outline(source)
+            .into_iter()
+            .filter_map(|d| match d.shape {
+                Shape::Implementation(block) => Some(block.target),
+                _ => None,
+            })
+            .collect();
+        let path = |text: &str| text.split("::").map(String::from).collect::<Vec<_>>();
+        assert_eq!(
+            targets,
+            [
+                path("A"),
+                path("crate::song::Kind"),
+                path("super::Kind"),
+                path("m::Kind"),
+                path("Kind"),
+                path("Box"),
+                path("p::Tr"),
+            ]
+        );
+        // The definition is named by the last name of the path, as before
+        assert_eq!(definition(source, "Kind").len(), 4);
+        assert_eq!(definition(source, "Box").len(), 1);
+        // A type that starts with `::` names another crate, for which the outline has never held a block
+        assert!(outline("impl ::alloc::Kind { fn f() {} }").is_empty());
+        assert!(nested_impls("fn g() { impl ::alloc::Kind { fn f() {} } }").is_empty());
+    }
+
+    #[test]
+    fn an_impl_block_for_a_type_parameter_is_blanket() {
+        let source = "impl<T: Copy> Rank for T { fn r(&self) {} }\nimpl<'a, T> Rank for &'a T {}\n\
+                      impl<const N: usize, U, T: Tr<U, T>> Rank for [T; N] {}\nimpl<T> Rank for Wrapper<T> {}\n\
+                      impl<A, T: Tr<A, T>> Rank for T {}\nimpl Rank for T {}\nimpl<U> Rank for T {}\n";
+        let blanket: Vec<bool> = blocks(source, "T")
+            .into_iter()
+            .map(|block| block.blanket)
+            .collect();
+        assert_eq!(blanket, [true, true, true, false, false]);
+        // `[T; N]` is no path, and `Wrapper<T>` is for `Wrapper`
+        assert!(blocks(source, "Wrapper").iter().all(|block| !block.blanket));
+        assert_eq!(blocks(source, "N").len(), 0);
+    }
+
+    #[test]
     fn an_inherent_impl_block_has_no_trait() {
         let source = "struct A;\nstruct T<U>(U);\nimpl A { fn f() {} }\n\
                       impl<T> T<T> { const C: u8 = 1; }\nimpl<U: Fn() -> u8> T<U> where U: Copy { fn g() {} }\n\
                       impl<'a> m::A<'a> {}\nenum E { V }\nimpl E { fn name(&self) -> &str { \"v\" } }\n";
-        let none = Shape::Implementation(None);
-        assert_eq!(implementations(source, "A"), [none.clone(), none.clone()]);
-        assert_eq!(implementations(source, "T"), [none.clone(), none.clone()]);
-        assert_eq!(implementations(source, "E"), [none]);
+        assert_eq!(implementations(source, "A"), [None, None]);
+        assert_eq!(implementations(source, "T"), [None, None]);
+        assert_eq!(implementations(source, "E"), [None]);
         // An enum with an `impl` block is a vocabulary here: the rule reads the blocks of the whole crate
         assert_eq!(shape_of(source, "E"), Shape::Vocabulary);
         assert_eq!(shape_of(source, "T.C"), Shape::Plain);
+    }
+
+    #[test]
+    fn an_impl_block_in_a_body_a_block_a_closure_a_const_or_a_static_is_nested_and_no_outline_of_it()
+     {
+        let source = "enum Kind { A }\n\
+                      fn f() { struct Local; impl Kind { fn g(&self) {} } }\n\
+                      const _: () = { impl Rank for Kind { fn r(&self) {} } };\n\
+                      static S: u8 = { unsafe impl Send for Kind {} 1 };\n\
+                      mod m { fn h() { impl crate::Kind { fn i() {} } } pub struct Q; impl Q { fn j() { impl Tr for Kind {} } } }\n\
+                      fn c(x: bool) { if x { impl Kind { fn k() {} } } let f = |y: u8| { impl Kind { fn l() {} } y }; }\n\
+                      fn d() { fn e() { trait T { fn t(&self) {} } impl T for Kind {} } m!(impl Kind { fn n() {} }); }\n";
+        let blocks_of = |definitions: Vec<Definition>| -> Vec<(Vec<String>, Option<String>)> {
+            definitions
+                .into_iter()
+                .filter_map(|d| match d.shape {
+                    Shape::Implementation(block) => {
+                        Some((d.names, block.of.map(|path| path.join("::"))))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        let names = |text: &str| text.split('.').map(String::from).collect::<Vec<_>>();
+        // The outline holds the block of the module alone
+        assert_eq!(blocks_of(outline(source)), [(names("m.Q"), None)]);
+        assert_eq!(
+            blocks_of(nested_impls(source)),
+            [
+                (names("Kind"), None),
+                (names("Kind"), implements("Rank")),
+                (names("Kind"), implements("Send")),
+                (names("m.Kind"), None),
+                (names("m.Kind"), implements("Tr")),
+                (names("Kind"), None),
+                (names("Kind"), None),
+                (names("Kind"), implements("T")),
+            ],
+        );
+        // A trait declared in a body is handed over with its items, as a block there may implement it
+        let traits: Vec<Vec<String>> = nested_impls(source)
+            .into_iter()
+            .filter(|d| d.shape == Shape::Trait)
+            .map(|d| d.names)
+            .collect();
+        assert_eq!(traits, [names("T")]);
+        // The items of a nested block are under the type, as the items of any block are
+        let nested = nested_impls(source);
+        let items: Vec<String> = nested
+            .iter()
+            .filter(|d| d.kind == Kind::Function)
+            .map(|d| source[d.start..d.end].to_string())
+            .collect();
+        assert_eq!(
+            items,
+            [
+                "fn g(&self) {}",
+                "fn r(&self) {}",
+                "fn i() {}",
+                "fn k() {}",
+                "fn l() {}",
+                "fn t(&self) {}"
+            ]
+        );
+        // The arguments of a macro call are no code, so the block in `m!(..)` is not read
+        assert!(!items.contains(&"fn n() {}".to_string()));
+        // A body that holds no block, an `impl Trait` type in a signature, a body or a tuple, make none
+        let types = "fn a(x: impl Fn()) -> impl Fn() { x }\nfn b() -> Box<impl Tr> { todo!() }\n\
+                     fn c(x: &impl Tr, y: impl Tr + Send) where impl Tr: Sized {}\nstruct S { f: Box<dyn Fn() -> impl Tr> }\n\
+                     fn d() { fn e() -> impl Iterator<Item = u8> { 0..1 } fn g() -> (impl Tr, u8) { todo!() } \
+                     let p = &d as *const _; let s: &'static str = \"\"; const { 1 }; }\n";
+        assert!(nested_impls(types).is_empty());
+    }
+
+    #[test]
+    fn a_key_selects_the_same_text_whether_or_not_an_impl_block_of_the_type_is_written_in_a_body() {
+        let plain = "enum Kind { A }\nimpl Kind { fn f(&self) {} }\nfn h() {}\n";
+        let nested = "enum Kind { A }\nimpl Kind { fn f(&self) {} }\nfn h() { if true { let c = || { impl Kind { fn g(&self) {} } }; } }\n\
+                      const _: () = { impl Kind { fn k() {} } };\nstatic S: u8 = { impl Rank for Kind { fn r() {} } 1 };\n";
+        for key in ["Kind", "Kind.f", "h"] {
+            let pieces = |source: &str| selected(source, &outline(source), key);
+            let before = pieces(plain);
+            let after = pieces(nested);
+            if key == "h" {
+                // The text of the function is its own, with the block it holds
+                assert_eq!(
+                    after.as_deref(),
+                    Some("fn h() { if true { let c = || { impl Kind { fn g(&self) {} } }; } }")
+                );
+            } else {
+                assert_eq!(before, after, "{key}");
+            }
+        }
+        assert_eq!(
+            selected(nested, &outline(nested), "Kind").as_deref(),
+            Some("enum Kind { A }\nimpl Kind { fn f(&self) {} }")
+        );
+        // What is in a body is no key: its items are not selected from outside
+        for key in ["Kind.g", "Kind.k", "Kind.r"] {
+            assert_eq!(selected(nested, &outline(nested), key), None, "{key}");
+        }
     }
 
     #[test]

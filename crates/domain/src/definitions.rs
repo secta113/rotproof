@@ -34,9 +34,25 @@ pub enum Shape {
     Enum,
     /// A Rust trait
     Trait,
-    /// A Rust `impl` block: the last name of the trait it implements (`Display` for `impl fmt::Display for T`), or
-    /// `None` for an inherent one
-    Implementation(Option<String>),
+    /// A Rust `impl` block, with the paths it is written with
+    Implementation(Impl),
+}
+
+/// An `impl` block of Rust as it is written, for the rule on the vocabularies of `protocol.inbound`: the paths of the
+/// type and of the trait, not yet resolved to an item, which the rule resolves in the module the block is in (the
+/// names of its definition, but the last, are that module). The generic arguments of a path are dropped (`Vec<Kind>`
+/// is `Vec`), and so are the references and pointers before a type (`&'a mut m::Kind` is `m::Kind`): they put no
+/// method on another type than the one they point to, and a rule that reads them as that type fails more, not less.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Impl {
+    /// The path of the type the block is for (`crate::song::Kind`), whose last name is the last of the definition's
+    /// names
+    pub target: Vec<String>,
+    /// The path of the trait the block implements (`std::fmt::Display`), or `None` for an inherent block
+    pub of: Option<Vec<String>>,
+    /// Whether the type is a type parameter of the block (`impl<T: Bound> Rank for T`), which stands for every type
+    /// that meets its bound
+    pub blanket: bool,
 }
 
 /// One definition of a file, as a reader found it: a function, a class, a method, a type, a variant. Every language

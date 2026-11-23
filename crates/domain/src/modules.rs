@@ -254,6 +254,15 @@ fn module_of(rel: &str) -> Vec<String> {
     parts
 }
 
+/// The module a file in `src/` is, from the crate's root, when it is read as a crate's names are: the root file
+/// (`lib.rs`, `main.rs`) is the root itself, `[]`, and any other is as [`module_of`] has it.
+pub fn crate_module(rel: &str) -> Vec<String> {
+    match rel {
+        "lib.rs" | "main.rs" => Vec::new(),
+        _ => module_of(rel),
+    }
+}
+
 /// A path as a module path from the crate's root, written in the module `base`: `None` when it climbs above the root,
 /// which Rust rejects. A `self` at its end names what comes before it.
 fn resolved(base: &[String], segments: &[String]) -> Option<Vec<String>> {
@@ -573,5 +582,20 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    #[test]
+    fn the_files_of_a_crate_are_the_modules_the_names_of_the_crate_read_them_as() {
+        for (file, module) in [
+            ("lib.rs", ""),
+            ("main.rs", ""),
+            ("song.rs", "song"),
+            ("song/mod.rs", "song"),
+            ("song/kind.rs", "song::kind"),
+        ] {
+            assert_eq!(crate_module(file).join("::"), module, "{file}");
+        }
+        // The levels' files keep the names they had: `lib.rs` is none of them
+        assert_eq!(module_of("lib.rs"), ["lib"]);
     }
 }
