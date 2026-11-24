@@ -5,7 +5,9 @@
 //!   `imports` name, and the levels below it in an ordered layer (`ui`); not the levels beside it otherwise, nor its
 //!   layer beside the levels. A place may always import itself, and a layer the levels inside it.
 //! - Only direct imports are judged. What the table allows is closed under chaining (a test keeps it so), so a chain
-//!   of allowed imports never reaches what its first module may not import.
+//!   of allowed imports never reaches what its first module may not import, but for one: what may import
+//!   `protocol.inbound` reaches the vocabularies of its own `domain` that `protocol.inbound` re-exports (a test names
+//!   the places).
 //! - An import of a module in no layer present (the standard library, a third-party package, a layer declared absent)
 //!   is not judged. A Python call of `importlib.import_module` or `__import__` with a string literal is an import of
 //!   that module; one built at run time (a variable, an f-string, a relative name) is not seen.
@@ -53,7 +55,7 @@
 //! unit that is not shared at all.
 //!
 //! Only direct imports are judged between units too, and what these rules allow is closed under chaining but in
-//! three places. The chain of an entry file is the point of one: it imports the composition of its unit, which
+//! four places. The chain of an entry file is the point of one: it imports the composition of its unit, which
 //! imports what the entry file may not, in its own unit and in others. A `composition` builds its own unit and
 //! imports the `protocol` of another (an app's, the `composition` too, and a shared unit's `domain`), which import what
 //! a `composition` may not read in another unit, so it reaches them through what it builds and through what it is
@@ -62,7 +64,8 @@
 //! that `domain` itself; this holds in a type alone,
 //! since nothing but a `protocol.inbound` imports it, and a `protocol.inbound` that reads the `domain` of another
 //! shared unit, which reads its own, closes a cycle (`cycles`) (a test runs every chain of places across units and
-//! names the exceptions). `import billing` followed by `billing.protocol.x` is not seen, as a
+//! names the exceptions). And whatever reads a `protocol.inbound` reaches the vocabularies of that unit's `domain`,
+//! as within a unit. `import billing` followed by `billing.protocol.x` is not seen, as a
 //! module reached through an attribute never is: rule 1 fails the first, which names no layer. The finding for the
 //! first says how to import a layer in the stack of the reader (`Way`), with a layer the unit holds as the example.
 //!
@@ -666,6 +669,50 @@ mod tests {
             }
         }
         assert!(chains > places.len(), "{chains} chains");
+    }
+
+    #[test]
+    fn what_the_table_and_the_vocabularies_allow_is_closed_under_chaining_but_through_the_input_port()
+     {
+        // With the import of a vocabulary of the own `domain` by `protocol.inbound`, a chain reaches the `domain` from
+        // what may import `protocol.inbound` and not `domain`: the vocabularies it re-exports, the one exception.
+        // The import of a vocabulary is an edge of a chain, and never lets the first import the last whole; a chain
+        // through a place twice adds nothing
+        let places = python_places();
+        let may =
+            |from: &Place, to: &Place| allowed(from, to) || crate::vocabulary::applies(from, to);
+        let mut through = std::collections::BTreeSet::new();
+        for a in &places {
+            for b in &places {
+                for c in &places {
+                    let again = std::ptr::eq(a, b) || std::ptr::eq(b, c);
+                    if again || !(may(a, b) && may(b, c)) || allowed(a, c) {
+                        continue;
+                    }
+                    assert!(
+                        crate::vocabulary::applies(b, c),
+                        "{} may import {}, which may import {}, but {} may not import {}",
+                        a.name,
+                        b.name,
+                        c.name,
+                        a.name,
+                        c.name
+                    );
+                    through.insert(a.name.as_str());
+                }
+            }
+        }
+        // The places that read the input ports and not the domain: the entry points, the screens' models and the pages
+        // (the layer `ui` takes in its levels)
+        assert_eq!(
+            through.into_iter().collect::<Vec<_>>(),
+            [
+                "infrastructure.inbound",
+                "presentation.models",
+                "ui",
+                "ui.pages"
+            ]
+        );
     }
 
     #[test]
@@ -1383,7 +1430,7 @@ mod tests {
     }
 
     #[test]
-    fn what_the_rules_allow_between_units_is_closed_under_chaining_but_in_four_places() {
+    fn what_the_rules_allow_between_units_is_closed_under_chaining_but_in_five_places() {
         // Only direct imports are judged, so a chain of allowed imports must never reach what its first may not. Across
         // units this holds because a place asks no more of a place of another unit than the table asks of the same
         // place of its own, but in the places below, each named by what it is for (a test counts each, so that none is
@@ -1398,22 +1445,28 @@ mod tests {
         // - what reads a `protocol.inbound`, which reaches the shared `domain` it reads by the type of its data, in no
         //   import: the one thing that imports that `domain` is the `protocol.inbound`;
         // - and, in that, the `protocol.inbound` of a shared unit that reads the `domain` of another, which reads its
-        //   own: the shared units import each other in a cycle, which `cycles` fails and no approval covers
+        //   own: the shared units import each other in a cycle, which `cycles` fails and no approval covers;
+        // - what reads a `protocol.inbound`, which reaches the vocabularies of that unit's own `domain` that it
+        //   re-exports, the one import of its own `domain` it may make (`vocabulary::applies`)
         let world = World::new();
-        let may = |from: &Place, to: &Place| {
+        // The import of a vocabulary is an edge of a chain, and never lets the first import the last whole; a chain
+        // through a place twice adds nothing
+        let whole = |from: &Place, to: &Place| {
             verdict(from, Landing::Place(to), &Way::default()) == Verdict::Allowed
         };
+        let may =
+            |from: &Place, to: &Place| whole(from, to) || crate::vocabulary::applies(from, to);
         let entry = |p: &Place| p.name.ends_with("__main__.py");
         let mut chains = 0;
-        let mut through = [0; 5];
+        let mut through = [0; 6];
         for a in &world.places {
             for b in &world.places {
                 for c in &world.places {
-                    if !(may(a, b) && may(b, c)) {
+                    if std::ptr::eq(a, b) || std::ptr::eq(b, c) || !(may(a, b) && may(b, c)) {
                         continue;
                     }
                     chains += 1;
-                    if may(a, c) {
+                    if whole(a, c) {
                         continue;
                     }
                     let other = |p: &Place, q: &Place| p.unit.name != q.unit.name;
@@ -1431,6 +1484,7 @@ mod tests {
                             && b.name == "domain"
                             && c.name == "domain"
                             && !other(a, c),
+                        crate::vocabulary::applies(b, c),
                     ];
                     let at = known.iter().position(|&known| known);
                     let name = |p: &Place| format!("{}.{}", p.unit.name, p.name);
