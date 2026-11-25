@@ -290,9 +290,16 @@ pub mod fake {
         reads: RefCell<Vec<String>>,
         /// The paths a `.gitignore` of the project excludes, with what is below them
         ignored: RefCell<BTreeSet<String>>,
+        /// The paths whose bytes are not UTF-8: reading one fails as a real file's would
+        not_text: RefCell<BTreeSet<String>>,
     }
 
     impl Fake {
+        /// Make the file at `path` one whose bytes are not UTF-8, as `read` then says
+        pub fn not_text(&self, path: &str) {
+            self.not_text.borrow_mut().insert(path.to_string());
+        }
+
         /// Exclude `path`, and what is below it, as a `.gitignore` of the project does: `files` leaves it out
         pub fn ignore(&self, path: &str) {
             self.ignored.borrow_mut().insert(path.to_string());
@@ -324,6 +331,9 @@ pub mod fake {
     impl Tree for Fake {
         fn read(&self, path: &str) -> io::Result<String> {
             self.reads.borrow_mut().push(path.to_string());
+            if self.not_text.borrow().contains(path) {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, path.to_string()));
+            }
             self.text(path)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.to_string()))
         }

@@ -1,0 +1,11 @@
+  In TypeScript a vocabulary is an array of string or number literals `as const`, with the type of its elements
+  beside it, in a file of `domain`:
+
+  ```ts
+  export const KINDS = ["major", "minor"] as const;
+  export type Kind = (typeof KINDS)[number];
+  ```
+
+  and `protocol.inbound` re-exports it by name from that file: `export { KINDS, type Kind } from "../../domain/song";`.
+  A plain union has no values at run time, so it is none, and an `enum` fails in every layer. An import that takes no
+  name (`import * as`, a default import, `export * from`) fails, and so does a name the file only re-exports.

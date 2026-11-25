@@ -3,18 +3,22 @@
 use std::io;
 
 use super::moving::Moving;
-use super::{Direction, entry_files, layer_files, misread};
+use super::{Direction, Landings, entry_files, layer_files, misread};
 use crate::code::{is_test_module, lands, module_candidates};
 use crate::tree::{read_code, resolved};
 use domain::code::{Aliases, Reach, is_source, without_extension};
 use domain::declaration::Declared;
-use domain::direction::{Landing, Way, edge, imports_test, judged_landing, landing_of};
-use domain::layers::{Layout, Place};
+use domain::definitions::Shape;
+use domain::direction::{
+    Landing, Way, edge, enum_written, imports_test, judged_landing, landing_of,
+};
+use domain::layers::{Language, Layout, Place};
 use domain::outside::{asks, outside as outside_of};
 use domain::paths::{join, parent, relative};
 use domain::readers::read_of;
 use domain::units::Unit;
 use domain::units_doc::link;
+use domain::vocabulary;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -22,7 +26,11 @@ use protocol::outbound::Tree;
 /// (`typescript.rs`), judged by the place that path sits in, or by the unit it sits in outside the places. An import
 /// through the name of a unit's package resolves through its `package.json`, as `exports` says; one of a subpath the
 /// package does not export is a problem, since where it lands is not known, and so is one it exports as a path where no
-/// file is (`"./*": "./src/*/index.ts"` takes `domain/invoice.ts` to `src/domain/invoice.ts/index.ts`).
+/// file is (`"./*": "./src/*/index.ts"` takes `domain/invoice.ts` to `src/domain/invoice.ts/index.ts`). What a
+/// `protocol.inbound` imports from the `domain` of its own unit is judged by the names the import takes and what the
+/// file it lands in defines (`domain::vocabulary`), a file being the first that can make the module that is there; a
+/// file that is not, or cannot be parsed, leaves the import to the table, which forbids it.
+/// An `enum` in a file of a layer or the entry file is a finding of its own, wherever it is declared.
 pub(super) fn typescript<'a>(
     tree: &dyn Tree,
     parsers: &dyn Parsers,
@@ -52,6 +60,7 @@ pub(super) fn typescript<'a>(
         .collect();
     let mut files = layer_files(tree, layout, places, str::to_string)?;
     files.extend(entry_files(tree, entries));
+    let mut landings = Landings::new(tree, parsers, layout.language);
     for (path, from) in files {
         // A test is no code of a layer: its imports are no layer's, as the imports of Python's `tests/` are read by no
         // check
@@ -64,6 +73,15 @@ pub(super) fn typescript<'a>(
         let read = parsers.typescript(&source, &path);
         if let Some((line, why)) = read.error {
             found.push(misread(&path, "TypeScript", line, &why));
+        }
+        // No layer holds an enum, in a file of a layer or the entry file, wherever it is declared. A file the outline
+        // cannot read is the walk's finding above, and gives no second one
+        if let Ok(outline) = parsers.outline(Language::TypeScript, &source, &path) {
+            for definition in outline.iter().filter(|d| d.shape == Shape::Enum) {
+                let before = source.get(..definition.start).unwrap_or_default();
+                let line = before.matches('\n').count() + 1;
+                forbidden.push(enum_written(&path, line, &definition.names.join(".")));
+            }
         }
         for (line, import) in read.imports {
             let specifier = import.specifier;
@@ -122,15 +140,37 @@ pub(super) fn typescript<'a>(
             let Some(to) = landing_of(&target, places, units) else {
                 continue;
             };
-            forbidden.extend(judged_landing(
-                &path,
-                line,
-                &specifier,
-                &format!("imports {specifier} ({target})"),
-                from,
-                to,
-                &way_of(to, &aliases, &path),
-            ));
+            let what = format!("imports {specifier} ({target})");
+            let by_table = || {
+                judged_landing(
+                    &path,
+                    line,
+                    &specifier,
+                    &what,
+                    from,
+                    to,
+                    &way_of(to, &aliases, &path),
+                )
+            };
+            // A `protocol.inbound` importing the `domain` of its own unit is judged by what the file it lands in
+            // defines, and by the table when that cannot be told: no file is there, or it cannot be parsed
+            let finding = match (to, landing_file(tree, &target)) {
+                (Landing::Place(place), Some(file)) if vocabulary::applies(from, place) => {
+                    match landings.defined(&file)? {
+                        Some(defined) => vocabulary::judged(
+                            &path,
+                            line,
+                            &specifier,
+                            &what,
+                            &import.names,
+                            defined,
+                        ),
+                        None => by_table(),
+                    }
+                }
+                _ => by_table(),
+            };
+            forbidden.extend(finding);
             edges.extend(edge(&path, line, &specifier, from, to));
             links.extend(link(from, to));
             // A name is the module the import lands in and each name it takes from it, or the module alone
@@ -154,6 +194,14 @@ pub(super) fn typescript<'a>(
         templates: None,
         outside,
     })
+}
+
+/// The file a module that an import lands at is, `target` being the path from the root as the import writes it: the
+/// first of the files that can make it ([`module_candidates`]) that is there. `None` when none is.
+fn landing_file(tree: &dyn Tree, target: &str) -> Option<String> {
+    module_candidates(target)
+        .into_iter()
+        .find(|file| tree.found(file) == Some(false))
 }
 
 /// What each of the files that are moving imports, resolved as it is for the files in the layers: a file that is
@@ -725,5 +773,277 @@ mod tests {
         // Judged as the finding of an import is: an approval keeps it, by its file and import
         assert_eq!(found.forbidden[0].file, "src/application/pay.ts");
         assert_eq!(found.forbidden[0].import, "../domain/song.test");
+    }
+
+    /// What `domain` of billing defines, for what its `protocol.inbound` imports of it.
+    const KINDS: &str = "export const KINDS = [\"a\", \"b\"] as const;\n\
+        export type Kind = (typeof KINDS)[number];\n\
+        export interface Song { title: string }\n\
+        export class Album {}\n\
+        export function play(): void {}\n\
+        export enum Mode { On }\n";
+
+    /// The findings for imports alone, the enum of `KINDS` being a finding of its own.
+    fn imports(direction: &super::Direction) -> Vec<&str> {
+        direction
+            .forbidden
+            .iter()
+            .filter(|f| !f.import.starts_with("enum "))
+            .map(|f| f.detail.as_str())
+            .collect()
+    }
+
+    const INBOUND: &str = "packages/billing/src/protocol/inbound/play.ts";
+
+    /// The findings for the import statements of billing's `protocol.inbound`, with `KINDS` as `domain/kinds.ts` and
+    /// a barrel `domain/index.ts` that only re-exports.
+    fn inbound(imports: &str) -> super::Direction {
+        read(&[
+            ("packages/billing/src/domain/kinds.ts", KINDS),
+            (
+                "packages/billing/src/domain/index.ts",
+                "export { KINDS } from \"./kinds\";\n",
+            ),
+            (INBOUND, imports),
+        ])
+    }
+
+    fn said(line: usize, import: &str, target: &str, ways: &str) -> String {
+        format!(
+            "{INBOUND}:{line}: imports {import} ({target}), in domain; protocol.inbound may import only vocabularies, \
+             by name, from the file of domain that defines them: {ways}"
+        )
+    }
+
+    #[test]
+    fn a_protocol_inbound_imports_the_vocabularies_of_its_own_domain_by_name_from_the_file_that_defines_them()
+     {
+        let found = inbound(
+            "import { KINDS, type Kind } from \"../../domain/kinds\";\n\
+             import type { Kind as K } from \"../../domain/kinds.ts\";\n\
+             import { KINDS as ALL } from \"../../domain/kinds\";\n\
+             export { KINDS, type Kind } from \"../../domain/kinds\";\n",
+        );
+        assert_eq!(found.problems, Vec::<String>::new());
+        assert_eq!(imports(&found), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn what_is_no_vocabulary_of_the_file_fails_with_how_to_write_it_instead() {
+        let found = inbound(
+            "import { Song } from \"../../domain/kinds\";\n\
+             import { Album, play } from \"../../domain/kinds\";\n\
+             import { Mode } from \"../../domain/kinds\";\n\
+             import { Kind, Absent } from \"../../domain/kinds\";\n",
+        );
+        let target = "packages/billing/src/domain/kinds";
+        let specifier = "../../domain/kinds";
+        let shape = "a record, class, function or type, no vocabulary: write the shape the port shows in \
+                     protocol.inbound, and convert in application";
+        assert_eq!(
+            imports(&found),
+            [
+                said(1, specifier, target, &format!("`Song` is {shape}")),
+                said(
+                    2,
+                    specifier,
+                    target,
+                    &format!("`Album`, `play` are each {shape}")
+                ),
+                said(
+                    3,
+                    specifier,
+                    target,
+                    "`Mode` is a TypeScript enum, which no layer holds: write it as an array `as const`, with a type \
+                     of its elements, and import that"
+                ),
+                said(
+                    4,
+                    specifier,
+                    target,
+                    "`Absent` is not defined in this file (a name it only re-exports is not followed): import it \
+                     from the file that defines it"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_barrel_that_only_re_exports_a_vocabulary_does_not_define_it() {
+        let found = inbound("import { KINDS } from \"../../domain\";\n");
+        assert_eq!(
+            imports(&found),
+            [said(
+                1,
+                "../../domain",
+                "packages/billing/src/domain",
+                "`KINDS` is not defined in this file (a name it only re-exports is not followed): import it from \
+                 the file that defines it"
+            )]
+        );
+    }
+
+    #[test]
+    fn an_import_that_names_nothing_fails_for_it() {
+        let found = inbound(
+            "import * as kinds from \"../../domain/kinds\";\n\
+             import kinds2 from \"../../domain/kinds\";\n\
+             import \"../../domain/kinds\";\n\
+             export * from \"../../domain/kinds\";\n",
+        );
+        let nothing = "this import takes no name, and what it brings in cannot be told: import each vocabulary by name";
+        let target = "packages/billing/src/domain/kinds";
+        assert_eq!(
+            imports(&found),
+            (1..=4)
+                .map(|line| said(line, "../../domain/kinds", target, nothing))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn the_approval_of_such_an_import_is_keyed_by_the_file_and_the_specifier_as_it_always_was() {
+        let found = inbound("import { Song } from \"../../domain/kinds\";\n");
+        let key = |f: &&domain::direction::Forbidden| f.file == INBOUND;
+        let ours: Vec<_> = found.forbidden.iter().filter(key).collect();
+        assert_eq!(ours.len(), 1);
+        assert_eq!(ours[0].import, "../../domain/kinds");
+        assert_eq!(ours[0].rule, domain::direction::Rule::Direction);
+    }
+
+    #[test]
+    fn a_landing_file_that_is_not_there_or_cannot_be_parsed_is_judged_by_the_table() {
+        let found = read(&[
+            (
+                "packages/billing/src/domain/broken.ts",
+                "export const = ;\nexport {\n",
+            ),
+            (
+                INBOUND,
+                "import { A } from \"../../domain/broken\";\nimport { B } from \"../../domain/nowhere\";\n",
+            ),
+        ]);
+        let table = |line: usize, specifier: &str, target: &str| {
+            format!(
+                "{INBOUND}:{line}: imports {specifier} ({target}), in domain; protocol.inbound imports no other layer"
+            )
+        };
+        assert_eq!(
+            imports(&found),
+            [
+                table(
+                    1,
+                    "../../domain/broken",
+                    "packages/billing/src/domain/broken"
+                ),
+                table(
+                    2,
+                    "../../domain/nowhere",
+                    "packages/billing/src/domain/nowhere"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn another_place_importing_the_domain_and_another_units_domain_are_judged_as_before() {
+        let found = read(&[
+            ("packages/billing/src/domain/kinds.ts", KINDS),
+            ("packages/db/src/domain/kinds.ts", KINDS),
+            (
+                "packages/billing/src/application/play.ts",
+                "import { Song, Mode } from \"../domain/kinds\";\n",
+            ),
+            // The domain of a shared unit is read whole by the others, as it always was
+            (
+                INBOUND,
+                "import { Song } from \"../../../../db/src/domain/kinds\";\n",
+            ),
+            // The domain of a unit that is not shared is not read by another unit
+            (
+                "apps/web/src/protocol/inbound/play.ts",
+                "import { KINDS } from \"../../../../../packages/billing/src/domain/kinds\";\n",
+            ),
+        ]);
+        assert_eq!(found.problems, Vec::<String>::new());
+        assert_eq!(
+            imports(&found),
+            [
+                "apps/web/src/protocol/inbound/play.ts:1: imports ../../../../../packages/billing/src/domain/kinds \
+                 (packages/billing/src/domain/kinds), in domain of unit billing; web imports no unit that is not \
+                 shared, and billing is not: an app's composition wires the two"
+            ]
+        );
+    }
+
+    fn enum_said(file: &str, line: usize, name: &str) -> String {
+        format!(
+            "{file}:{line}: declares enum {name}, a TypeScript enum, which no layer holds: write it as an array \
+             `as const`, with a type of its elements"
+        )
+    }
+
+    #[test]
+    fn an_enum_in_the_code_of_any_layer_or_the_entry_file_is_a_finding_wherever_it_is_declared() {
+        let found = read(&[
+            (
+                "packages/billing/src/domain/song.ts",
+                "export const KINDS = [\"a\"] as const;\nexport enum Mode { On }\n\
+                 declare const enum Hidden { A }\n",
+            ),
+            (
+                "packages/billing/src/application/play.ts",
+                "export default {};\n\nnamespace Ns {\n  export enum Inner { A }\n}\ndeclare enum Out { B }\n",
+            ),
+            ("apps/web/src/main.ts", "enum Entry { A }\n"),
+            ("apps/web/src/composition/wire.ts", "const e = 1;\n"),
+        ]);
+        assert_eq!(found.problems, Vec::<String>::new());
+        let mut said = details(&found);
+        said.sort();
+        assert_eq!(
+            said,
+            [
+                enum_said("apps/web/src/main.ts", 1, "Entry"),
+                enum_said("packages/billing/src/application/play.ts", 4, "Ns.Inner"),
+                enum_said("packages/billing/src/application/play.ts", 6, "Out"),
+                enum_said("packages/billing/src/domain/song.ts", 2, "Mode"),
+                enum_said("packages/billing/src/domain/song.ts", 3, "Hidden"),
+            ]
+        );
+        // An approval finds one by its file and the name written as `enum <name>`
+        assert!(
+            found
+                .forbidden
+                .iter()
+                .any(|f| f.file == "apps/web/src/main.ts" && f.import == "enum Entry")
+        );
+    }
+
+    #[test]
+    fn a_test_or_a_file_the_outline_cannot_read_gives_no_finding_for_an_enum() {
+        let found = read(&[
+            ("packages/billing/src/domain/song.test.ts", "enum T { A }\n"),
+            (
+                "packages/billing/src/domain/__tests__/helper.ts",
+                "enum U { A }\n",
+            ),
+            (
+                "packages/billing/src/domain/broken.ts",
+                "enum V { A }\nexport {\n",
+            ),
+            (
+                "packages/billing/src/domain/plain.ts",
+                "export const a = 1;\n",
+            ),
+        ]);
+        assert!(found.forbidden.is_empty(), "{:?}", found.forbidden);
+        // The walk says the file cannot be read, once
+        assert_eq!(found.problems.len(), 1, "{:?}", found.problems);
+        assert!(
+            found.problems[0].starts_with("packages/billing/src/domain/broken.ts"),
+            "{:?}",
+            found.problems
+        );
     }
 }

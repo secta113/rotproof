@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::io;
 
-use super::{Direction, layer_files};
+use super::{Direction, domain_crate, layer_files};
 use crate::tree::{code_files, is_file, read_code};
 use domain::code::{Dependency as ManifestDependency, Manifest, Origin};
 use domain::declaration::Declared;
@@ -17,6 +17,7 @@ use domain::paths::{join, parent};
 use domain::readers::{Read, read_of};
 use domain::rust::{code, is_source as is_rust, paths, renames};
 use domain::units_doc::link;
+use domain::vocabulary::applies;
 use protocol::outbound::Parsers;
 use protocol::outbound::Tree;
 
@@ -95,7 +96,7 @@ pub(super) fn rust<'a>(
             reads.extend(read_of_crate(tree, &path, from, &shared, &mut found)?);
         }
     }
-    forbidden.extend(levels(tree, places, &depends, &mut found)?);
+    forbidden.extend(levels(tree, parsers, layout, places, &depends, &mut found)?);
     Ok(Direction {
         problems: found,
         forbidden,
@@ -208,10 +209,13 @@ fn no_package(entry: &Place) -> String {
 }
 
 /// The levels inside each crate that has them, which its manifest cannot tell apart: its code is read, and judged with
-/// what the crate depends on in other layers (`depends`, by the path of each manifest). Every file that could not be
-/// read goes into `found`.
+/// what the crate depends on in other layers (`depends`, by the path of each manifest). A `protocol` crate that depends
+/// on the `domain` of its own unit has that crate read too, whole, so that its `inbound` module can import the
+/// vocabularies of it by name ([`domain_crate`]). Every file that could not be read goes into `found`.
 fn levels(
     tree: &dyn Tree,
+    parsers: &dyn Parsers,
+    layout: &Layout,
     places: &[&Place],
     depends: &BTreeMap<String, Vec<(String, &Place)>>,
     found: &mut Vec<String>,
@@ -232,7 +236,12 @@ fn levels(
                 files.push((path, source));
             }
         }
-        let dependencies = dependencies_of(layer, places, depends);
+        let mut dependencies = dependencies_of(layer, places, depends);
+        for dependency in &mut dependencies {
+            if levels.iter().any(|level| applies(level, dependency.layer)) {
+                dependency.vocabularies = domain_crate(tree, parsers, layout, dependency.layer)?;
+            }
+        }
         let inside = judged_crate(&files, layer, &levels, &dependencies);
         found.extend(inside.problems);
         forbidden.extend(inside.forbidden);
@@ -260,6 +269,7 @@ fn dependencies_of<'a>(
                 .copied()
                 .filter(|p| p.is_level_of(to))
                 .collect(),
+            vocabularies: None,
         })
         .collect()
 }
@@ -608,8 +618,8 @@ mod tests {
     }
 
     #[test]
-    fn the_inbound_module_of_a_protocol_crate_names_the_domain_crate_of_a_shared_unit_and_no_other()
-    {
+    fn the_inbound_module_of_a_protocol_crate_names_the_domain_crate_of_a_shared_unit_and_the_vocabularies_of_its_own()
+     {
         let (tree, declared) = project(
             UNITS,
             &[
@@ -629,15 +639,30 @@ mod tests {
                 ),
                 (
                     "packages/billing/protocol/src/inbound/mod.rs",
-                    "use core_domain::Money;\nuse billing_domain::Invoice;\n",
+                    "use core_domain::Money;\nuse billing_domain::Invoice;\nuse billing_domain::money::{Currency, Tier};\n\
+                     use billing_domain::money::Currency as C;\nuse billing_domain::money::Moved;\nfn f(_: C) {}\n\
+                     use billing_domain::money;\nuse billing_domain::money::Kind::A;\n",
                 ),
                 (
                     "packages/billing/protocol/src/outbound/mod.rs",
-                    "use core_domain::Money;\nuse billing_domain::Invoice;\n",
+                    "use core_domain::Money;\nuse billing_domain::Invoice;\nuse billing_domain::money::Tier;\n",
                 ),
                 (
                     "packages/billing/domain/Cargo.toml",
                     &package("billing_domain", &[]),
+                ),
+                (
+                    "packages/billing/domain/src/lib.rs",
+                    "pub mod money;\npub struct Invoice;\n#[cfg(test)]\nmod tests;\n",
+                ),
+                (
+                    "packages/billing/domain/src/money.rs",
+                    "pub enum Currency { Jpy, Usd }\npub enum Tier { A }\nimpl Tier { pub fn up(&self) {} }\n\
+                     pub use crate::Invoice as Moved;\npub enum Kind { A }\n",
+                ),
+                (
+                    "packages/billing/domain/src/tests.rs",
+                    "impl crate::money::Currency { fn f(&self) {} }\n",
                 ),
                 (
                     "packages/core/domain/Cargo.toml",
@@ -647,13 +672,33 @@ mod tests {
         );
         let (problems, forbidden) = details(&tree, &declared);
         assert!(problems.is_empty(), "{problems:?}");
-        // The crate depends on both, as `protocol` may depend on `domain`; the level that is for ports of the use
-        // cases takes the shared unit's, and its own unit's no more than it takes its own in any project
+        // The crate depends on both, as `protocol` may depend on `domain`. The level that is for ports of the use
+        // cases takes the shared unit's whole, and its own unit's vocabularies by name from the module that defines
+        // them: a record, an enum with methods, a name only re-exported, and a module are no vocabulary. The
+        // outbound level takes the whole of it, as in any project
+        let by_name = "protocol.inbound may import only vocabularies, by name, from the file of domain that defines them";
+        let inbound = "packages/billing/protocol/src/inbound/mod.rs";
         assert_eq!(
             forbidden,
             [
-                "packages/billing/protocol/src/inbound/mod.rs:2: uses billing_domain::Invoice, in domain; \
-                 protocol.inbound imports no other layer"
+                format!(
+                    "{inbound}:2: uses billing_domain::Invoice, in domain; {by_name}: `Invoice` is a record, class, \
+                     function or type, no vocabulary: write the shape the port shows in protocol.inbound, and \
+                     convert in application"
+                ),
+                format!(
+                    "{inbound}:3: uses billing_domain::money::Tier, in domain; {by_name}: `Tier` is an enum that has \
+                     methods, a rule of domain, so it is no vocabulary: move the methods into a function of domain \
+                     that takes the kind"
+                ),
+                format!(
+                    "{inbound}:5: uses billing_domain::money::Moved, in domain; {by_name}: `Moved` is not defined in \
+                     this file (a name it only re-exports is not followed): import it from the file that defines it"
+                ),
+                format!(
+                    "{inbound}:7: uses billing_domain::money, in domain; {by_name}: this import takes no name, and \
+                     what it brings in cannot be told: import each vocabulary by name"
+                ),
             ]
         );
     }

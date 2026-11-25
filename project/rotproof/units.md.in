@@ -22,8 +22,8 @@
   `infrastructure.inbound` imports `protocol.inbound` of a shared unit `core`, as it imports its own.
 - **A unit's `domain`, and every layer that may read its own `domain`, may read a shared unit's `domain`.** The layer
   table, which says `domain` imports no other layer, does not show it: `billing`'s `domain` may import `core`'s
-  `Money` and `OrderId`. A `protocol.inbound` may too, though it reads no `domain` of its own unit: an input port names
-  a shared type and does not copy its shape.
+  `Money` and `OrderId`. A `protocol.inbound` may too, though of its own unit's `domain` it reads only the
+  vocabularies: an input port names a shared type and does not copy its shape.
 - **`application` never imports another unit's `application`.** `composition` passes the use cases in: `billing`'s
   `application` takes `core`'s use case as an argument and never imports it.
 - **A `composition` imports another unit's `composition` (an app's only), `protocol` and, when that unit is shared,
@@ -35,7 +35,8 @@
   `protocol`, never another app's.** `billing`'s `domain` stays closed to the app's `composition`.
 - **An entry file imports the `composition` of its own unit alone.**
 - **The table is not closed under chaining across units.** What reads a `protocol.inbound` meets the types of a shared
-  `domain` in its data, though it may not import that `domain`.
+  `domain` in its data, and the vocabularies of that unit's own `domain` the port re-exports, though it may import
+  neither `domain`.
 - **An import of another unit names a module of one of its layers, never the unit as a whole.** An import that lands
   in the unit's directory outside its layers fails, since what the code reads from it afterwards cannot be seen.
   {names}

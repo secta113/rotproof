@@ -14,8 +14,11 @@
 use std::collections::BTreeMap;
 
 mod outline;
+mod resolve;
 
-pub use outline::outline;
+pub use outline::{nested_impls, outline};
+pub(crate) use resolve::join;
+pub use resolve::{Names, Resolved, Source, inline_chains, module_at};
 
 /// Whether a file name is Rust source. Case does not count: Windows compiles `LIB.RS` for `mod lib`.
 pub fn is_source(name: &str) -> bool {
@@ -212,6 +215,301 @@ pub fn renames(code: &str) -> Vec<(usize, String, Vec<String>)> {
             if let Some(name) = alias {
                 out.push((*at, name, segments));
             }
+        }
+    }
+    out
+}
+
+/// Every name a `use` of the code alone ([`code`]) binds to a path, with the offset of the statement: `use a::b;`
+/// binds `b` to `a::b`, and `use a::{c as d, self}` binds `d` to `a::c` and `a` to `a`. A glob (`use a::*;`) binds no
+/// name: it is `None`, with the path of the module it takes the names of. A path that starts with `::` is read as if it
+/// did not. The paths are as written, so `self`, `super` and `crate` start some.
+pub fn bindings(code: &str) -> Vec<(usize, Option<String>, Vec<String>)> {
+    let tokens = tokens(code);
+    let mut out = Vec::new();
+    for (i, (at, token)) in tokens.iter().enumerate() {
+        if !matches!(token, Token::Word(w) if w == "use") {
+            continue;
+        }
+        let mut start = i + 1;
+        if tokens.get(start).map(|(_, t)| t) == Some(&Token::PathSep) {
+            start += 1;
+        }
+        let mut found = Vec::new();
+        path_tree(&tokens, start, Vec::new(), &mut found);
+        for (mut segments, alias) in found {
+            if segments.last().map(String::as_str) == Some("*") {
+                segments.pop();
+                out.push((*at, None, segments));
+                continue;
+            }
+            if segments.len() > 1 && segments.last().map(String::as_str) == Some("self") {
+                segments.pop();
+            }
+            if let Some(name) = alias.or_else(|| segments.last().cloned()) {
+                out.push((*at, Some(name), segments));
+            }
+        }
+    }
+    out
+}
+
+/// Every `type` alias of the code alone ([`code`]) whose type has a path: the offset of its keyword, its name, and the
+/// path, without generic arguments and with a reference before it passed (`type K = &'a a::Kind<T>;` is `K` and
+/// `a::Kind`). An associated type with no value, and an alias of a type with no path (`[T]`, `(A, B)`), are left out.
+pub fn aliases(code: &str) -> Vec<(usize, String, Vec<String>)> {
+    let tokens = tokens(code);
+    tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, token))| matches!(token, Token::Word(w) if w == "type"))
+        .filter_map(|(i, (at, _))| alias_of(&tokens, i).map(|(name, path)| (*at, name, path)))
+        .collect()
+}
+
+/// The name and the path of the type alias whose `type` keyword is at token `i`: `K` and `a::Kind` for `type K<T> =
+/// a::Kind<T>;`. `None` for what is no alias with a type that has a path, such as an associated type with no value.
+fn alias_of(tokens: &[(usize, Token)], i: usize) -> Option<(String, Vec<String>)> {
+    let Some((_, Token::Word(name))) = tokens.get(i + 1) else {
+        return None;
+    };
+    let mut j = i + 2;
+    if tokens.get(j).map(|(_, t)| t) == Some(&Token::Punct('<')) {
+        let mut depth = 0usize;
+        while let Some((at, token)) = tokens.get(j) {
+            let arrow = j > 0 && tokens[j - 1].1 == Token::Punct('-') && tokens[j - 1].0 + 1 == *at;
+            match token {
+                Token::Punct('<') => depth += 1,
+                Token::Punct('>') if !arrow => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        j += 1;
+                        break;
+                    }
+                }
+                Token::Punct(';' | '{') => return None,
+                _ => {}
+            }
+            j += 1;
+        }
+    }
+    if tokens.get(j).map(|(_, t)| t) != Some(&Token::Punct('=')) {
+        return None;
+    }
+    Some((name.clone(), type_path(tokens, j + 1, tokens.len(), true)?))
+}
+
+/// The path of the type that starts at token `j`, before token `end`, without its generic arguments: past what comes
+/// before a path (`&'a mut dyn`, `*const`, `!`, `const`, and a leading `::` when `leading` says to pass it), each name
+/// of it. `None` when what stands there is no path (`[T]`, `(A, B)`).
+pub(crate) fn type_path(
+    tokens: &[(usize, Token)],
+    mut j: usize,
+    end: usize,
+    leading: bool,
+) -> Option<Vec<String>> {
+    let end = end.min(tokens.len());
+    while j < end {
+        match &tokens[j].1 {
+            Token::Word(w) if matches!(w.as_str(), "mut" | "dyn" | "const" | "unsafe") => j += 1,
+            Token::Punct('&' | '*' | '\'' | '!') => j += 1,
+            Token::PathSep if leading => j += 1,
+            // A lifetime is a `'` and a name
+            Token::Word(_) if j > 0 && tokens[j - 1].1 == Token::Punct('\'') => j += 1,
+            Token::Word(w) => {
+                let mut path = vec![w.clone()];
+                j += 1;
+                // `::Name`, until what ends the path: its arguments open with `<`
+                while j < end && tokens[j].1 == Token::PathSep {
+                    if let Some((_, Token::Word(next))) = tokens.get(j + 1) {
+                        path.push(next.clone());
+                    }
+                    j += 2;
+                }
+                return Some(path);
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Every `enum` of the code alone ([`code`]) that has a derive, with the offset of its keyword, its name, and the
+/// path of each trait it derives: `#[derive(Debug, a::Rank)]`, and the `derive` inside another attribute
+/// (`#[cfg_attr(test, derive(Rank))]`), on an item that is an `enum`. Enums with no derive are left out.
+pub fn derives(code: &str) -> Vec<(usize, String, Vec<Vec<String>>)> {
+    let t = tokens(code);
+    let punct = |i: usize, c: char| matches!(t.get(i), Some((_, Token::Punct(p))) if *p == c);
+    let word = |i: usize| match t.get(i) {
+        Some((_, Token::Word(w))) => Some(w.as_str()),
+        _ => None,
+    };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < t.len() {
+        let first = i;
+        let mut traits: Vec<Vec<String>> = Vec::new();
+        while punct(i, '#') && punct(i + 1, '[') {
+            // To the bracket that closes the attribute
+            let mut depth = 0usize;
+            let mut end = i + 1;
+            while end < t.len() {
+                match t[end].1 {
+                    Token::Punct('[') => depth += 1,
+                    Token::Punct(']') => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                end += 1;
+            }
+            derived(&t, i + 2, end, &mut traits);
+            i = end + 1;
+        }
+        if i == first {
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        if word(j) == Some("pub") {
+            j += 1;
+            if punct(j, '(') {
+                while j < t.len() && !punct(j, ')') {
+                    j += 1;
+                }
+                j += 1;
+            }
+        }
+        if word(j) == Some("enum")
+            && !traits.is_empty()
+            && let Some(name) = word(j + 1)
+        {
+            out.push((t[j].0, name.to_string(), traits));
+        }
+    }
+    out
+}
+
+/// The calls of a macro in the code alone ([`code`]), `name!(..)`, `name![..]` or `name!{..}` with any delimiter, whose
+/// arguments hold the word `word`, at any depth: the offset of each and its name. The arguments of a call are no code
+/// that can be read, so a rule that needs to know what they write reads the call. A `macro_rules!` is no call, and a
+/// `!=` is none.
+pub fn calls_holding(code: &str, word: &str) -> Vec<(usize, String)> {
+    let t = tokens(code);
+    let mut out = Vec::new();
+    for (i, (at, token)) in t.iter().enumerate() {
+        let Token::Word(name) = token else {
+            continue;
+        };
+        if name == "macro_rules"
+            || t.get(i + 1).map(|(_, next)| next) != Some(&Token::Punct('!'))
+            || !matches!(t.get(i + 2), Some((_, Token::Punct('{' | '(' | '['))))
+        {
+            continue;
+        }
+        let mut depth = 0usize;
+        let mut holds = false;
+        for (_, inner) in &t[i + 2..] {
+            match inner {
+                Token::Punct('{' | '(' | '[') => depth += 1,
+                Token::Punct('}' | ')' | ']') => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Token::Word(w) if w == word => holds = true,
+                _ => {}
+            }
+        }
+        if holds {
+            out.push((*at, name.clone()));
+        }
+    }
+    out
+}
+
+/// The traits that the tokens `lo` to `hi` of an attribute derive, into `out`: the path of each item in the parentheses
+/// of every `derive(...)` among them.
+fn derived(t: &[(usize, Token)], lo: usize, hi: usize, out: &mut Vec<Vec<String>>) {
+    let mut k = lo;
+    while k < hi.min(t.len()) {
+        let derive = matches!(&t[k].1, Token::Word(w) if w == "derive")
+            && t.get(k + 1).map(|(_, token)| token) == Some(&Token::Punct('('));
+        if !derive {
+            k += 1;
+            continue;
+        }
+        k += 2;
+        while k < hi.min(t.len()) && t[k].1 != Token::Punct(')') {
+            if t[k].1 == Token::Punct(',') {
+                k += 1;
+                continue;
+            }
+            let before = k;
+            let mut found = Vec::new();
+            k = path_tree(t, k, Vec::new(), &mut found);
+            out.extend(found.into_iter().map(|(segments, _)| segments));
+            if k == before {
+                k += 1;
+            }
+        }
+    }
+}
+
+/// The offsets of every `name!` the code alone ([`code`]) invokes, written alone or after a path (`include!(...)`,
+/// `std::include!`).
+pub fn invocations(code: &str, name: &str) -> Vec<usize> {
+    let t = tokens(code);
+    let mut out = Vec::new();
+    for (i, (at, token)) in t.iter().enumerate() {
+        if matches!(token, Token::Word(w) if w == name)
+            && t.get(i + 1).map(|(_, token)| token) == Some(&Token::Punct('!'))
+            && t.get(i + 2).map(|(_, token)| token) != Some(&Token::Punct('='))
+        {
+            out.push(*at);
+        }
+    }
+    out
+}
+
+/// The macros the code alone ([`code`]) defines with `macro_rules!` whose body holds the word `word`: the offset of
+/// each and its name.
+pub fn macros_holding(code: &str, word: &str) -> Vec<(usize, String)> {
+    let t = tokens(code);
+    let mut out = Vec::new();
+    for (i, (at, token)) in t.iter().enumerate() {
+        if !matches!(token, Token::Word(w) if w == "macro_rules") {
+            continue;
+        }
+        let (
+            Some((_, Token::Punct('!'))),
+            Some((_, Token::Word(name))),
+            Some((_, Token::Punct('{' | '(' | '['))),
+        ) = (t.get(i + 1), t.get(i + 2), t.get(i + 3))
+        else {
+            continue;
+        };
+        let mut depth = 0usize;
+        let mut holds = false;
+        for (_, inner) in &t[i + 3..] {
+            match inner {
+                Token::Punct('{' | '(' | '[') => depth += 1,
+                Token::Punct('}' | ')' | ']') => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                Token::Word(w) if w == word => holds = true,
+                _ => {}
+            }
+        }
+        if holds {
+            out.push((*at, name.clone()));
         }
     }
     out

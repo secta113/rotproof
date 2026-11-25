@@ -1,0 +1,16 @@
+  In Python a vocabulary is an enum of the module `enum` (`Enum`, `StrEnum`, `IntEnum`, `Flag`, `IntFlag`) whose
+  body holds only members bound to a literal or to `auto()`, a docstring and methods named `__x__` or `_x_`:
+
+  ```python
+  from enum import StrEnum, auto
+
+
+  class Kind(StrEnum):
+      MAJOR = auto()
+      MINOR = auto()
+  ```
+
+  and `protocol.inbound` imports it by name from the module that defines it, `from domain.song import Kind` (in a
+  unit, `from billing.domain.song import Kind`), so that what reads the port imports it from there. An enum with any
+  other method is none. `import domain.song` takes no name and fails, and so does a name the module only imports from
+  another.

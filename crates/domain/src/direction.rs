@@ -5,7 +5,9 @@
 //!   `imports` name, and the levels below it in an ordered layer (`ui`); not the levels beside it otherwise, nor its
 //!   layer beside the levels. A place may always import itself, and a layer the levels inside it.
 //! - Only direct imports are judged. What the table allows is closed under chaining (a test keeps it so), so a chain
-//!   of allowed imports never reaches what its first module may not import.
+//!   of allowed imports never reaches what its first module may not import, but for one: what may import
+//!   `protocol.inbound` reaches the vocabularies of its own `domain` that `protocol.inbound` re-exports (a test names
+//!   the places).
 //! - An import of a module in no layer present (the standard library, a third-party package, a layer declared absent)
 //!   is not judged. A Python call of `importlib.import_module` or `__import__` with a string literal is an import of
 //!   that module; one built at run time (a variable, an f-string, a relative name) is not seen.
@@ -39,10 +41,11 @@
 //!    in the importer's own unit, so the table decides, the place itself included. One place is read beyond the
 //!    table: a shared unit's `domain`, which the `protocol.inbound` of any unit may read, since a shared unit is
 //!    where the value types used across units live, and an input port that could not name them would copy their
-//!    shape. It reads nothing of its own unit and nothing of a unit that is not shared, as the table says. A
-//!    `composition` is read beyond the table the other way: of a shared unit it reads the `protocol`, the `domain`
-//!    (the value types the ports take, which it builds the arguments from) and, an app's, the `composition`, and no
-//!    other place.
+//!    shape. Of its own unit's `domain` it reads the vocabularies alone, by name, from the file that defines them
+//!    (`domain::vocabulary`, which the reader of each language applies before the table is asked: the table itself
+//!    lets it import no other layer), and of a unit that is not shared nothing, as the table says. A `composition` is
+//!    read beyond the table the other way: of a shared unit it reads the `protocol`, the `domain` (the value types the
+//!    ports take, which it builds the arguments from) and, an app's, the `composition`, and no other place.
 //! 5. The entry file reads the `composition` of its own unit and nothing of another unit: rules 2 to 4 refuse it.
 //!
 //! The `composition` of an app, where rule 2 lets it read a unit that is not shared, reads that unit's `composition`
@@ -52,7 +55,7 @@
 //! unit that is not shared at all.
 //!
 //! Only direct imports are judged between units too, and what these rules allow is closed under chaining but in
-//! three places. The chain of an entry file is the point of one: it imports the composition of its unit, which
+//! four places. The chain of an entry file is the point of one: it imports the composition of its unit, which
 //! imports what the entry file may not, in its own unit and in others. A `composition` builds its own unit and
 //! imports the `protocol` of another (an app's, the `composition` too, and a shared unit's `domain`), which import what
 //! a `composition` may not read in another unit, so it reaches them through what it builds and through what it is
@@ -61,7 +64,8 @@
 //! that `domain` itself; this holds in a type alone,
 //! since nothing but a `protocol.inbound` imports it, and a `protocol.inbound` that reads the `domain` of another
 //! shared unit, which reads its own, closes a cycle (`cycles`) (a test runs every chain of places across units and
-//! names the exceptions). `import billing` followed by `billing.protocol.x` is not seen, as a
+//! names the exceptions). And whatever reads a `protocol.inbound` reaches the vocabularies of that unit's `domain`,
+//! as within a unit. `import billing` followed by `billing.protocol.x` is not seen, as a
 //! module reached through an attribute never is: rule 1 fails the first, which names no layer. The finding for the
 //! first says how to import a layer in the stack of the reader (`Way`), with a layer the unit holds as the example.
 //!
@@ -82,10 +86,11 @@ const COMPOSITION: &str = "composition";
 const APPLICATION: &str = "application";
 /// The layer of the contracts, both levels of which an app's `composition` reads in a unit that is not shared.
 const PROTOCOL: &str = "protocol";
-/// The level of the input ports, which reads no `domain` but a shared unit's.
-const PROTOCOL_INBOUND: &str = "protocol.inbound";
+/// The level of the input ports, which reads a shared unit's `domain` and, of its own unit's, the vocabularies by name
+/// (`domain::vocabulary`).
+pub(crate) const PROTOCOL_INBOUND: &str = "protocol.inbound";
 /// The layer of the concepts, which `protocol.inbound` and every `composition` read in a shared unit.
-const DOMAIN: &str = "domain";
+pub(crate) const DOMAIN: &str = "domain";
 /// The places the example of a layer to import in a finding is taken from, the first that the unit holds: the input
 /// ports first, since that is what another unit is read for, then the rest in the order of the table.
 const EXAMPLES: [&str; 9] = [
@@ -269,6 +274,24 @@ pub fn imports_test(file: &str, line: usize, import: &str, what: &str, test: &st
         detail: format!(
             "{file}:{line}: {what}, {test}; code that is not a test imports no test: move what it needs out of the \
              test into a layer"
+        ),
+        rule: Rule::Direction,
+    }
+}
+
+/// What to write in place of a TypeScript `enum`, which the finding of one ([`enum_written`]) and the one for an import
+/// of it (`vocabulary::judged`) both say.
+pub const ENUM_INSTEAD: &str = "write it as an array `as const`, with a type of its elements";
+
+/// The finding for a TypeScript `enum` that `file` declares on `line`, named `name` (`Mode`, or `Ns.Mode` inside a
+/// namespace): no layer holds one, wherever it is declared, since a vocabulary is an array `as const`. Not an import,
+/// but kept as one is, so that an approval finds it by its file and the `import` `enum <name>`, which names no module.
+pub fn enum_written(file: &str, line: usize, name: &str) -> Forbidden {
+    Forbidden {
+        file: file.to_string(),
+        import: format!("enum {name}"),
+        detail: format!(
+            "{file}:{line}: declares enum {name}, a TypeScript enum, which no layer holds: {ENUM_INSTEAD}"
         ),
         rule: Rule::Direction,
     }
@@ -646,6 +669,50 @@ mod tests {
             }
         }
         assert!(chains > places.len(), "{chains} chains");
+    }
+
+    #[test]
+    fn what_the_table_and_the_vocabularies_allow_is_closed_under_chaining_but_through_the_input_port()
+     {
+        // With the import of a vocabulary of the own `domain` by `protocol.inbound`, a chain reaches the `domain` from
+        // what may import `protocol.inbound` and not `domain`: the vocabularies it re-exports, the one exception.
+        // The import of a vocabulary is an edge of a chain, and never lets the first import the last whole; a chain
+        // through a place twice adds nothing
+        let places = python_places();
+        let may =
+            |from: &Place, to: &Place| allowed(from, to) || crate::vocabulary::applies(from, to);
+        let mut through = std::collections::BTreeSet::new();
+        for a in &places {
+            for b in &places {
+                for c in &places {
+                    let again = std::ptr::eq(a, b) || std::ptr::eq(b, c);
+                    if again || !(may(a, b) && may(b, c)) || allowed(a, c) {
+                        continue;
+                    }
+                    assert!(
+                        crate::vocabulary::applies(b, c),
+                        "{} may import {}, which may import {}, but {} may not import {}",
+                        a.name,
+                        b.name,
+                        c.name,
+                        a.name,
+                        c.name
+                    );
+                    through.insert(a.name.as_str());
+                }
+            }
+        }
+        // The places that read the input ports and not the domain: the entry points, the screens' models and the pages
+        // (the layer `ui` takes in its levels)
+        assert_eq!(
+            through.into_iter().collect::<Vec<_>>(),
+            [
+                "infrastructure.inbound",
+                "presentation.models",
+                "ui",
+                "ui.pages"
+            ]
+        );
     }
 
     #[test]
@@ -1363,7 +1430,7 @@ mod tests {
     }
 
     #[test]
-    fn what_the_rules_allow_between_units_is_closed_under_chaining_but_in_four_places() {
+    fn what_the_rules_allow_between_units_is_closed_under_chaining_but_in_five_places() {
         // Only direct imports are judged, so a chain of allowed imports must never reach what its first may not. Across
         // units this holds because a place asks no more of a place of another unit than the table asks of the same
         // place of its own, but in the places below, each named by what it is for (a test counts each, so that none is
@@ -1378,22 +1445,28 @@ mod tests {
         // - what reads a `protocol.inbound`, which reaches the shared `domain` it reads by the type of its data, in no
         //   import: the one thing that imports that `domain` is the `protocol.inbound`;
         // - and, in that, the `protocol.inbound` of a shared unit that reads the `domain` of another, which reads its
-        //   own: the shared units import each other in a cycle, which `cycles` fails and no approval covers
+        //   own: the shared units import each other in a cycle, which `cycles` fails and no approval covers;
+        // - what reads a `protocol.inbound`, which reaches the vocabularies of that unit's own `domain` that it
+        //   re-exports, the one import of its own `domain` it may make (`vocabulary::applies`)
         let world = World::new();
-        let may = |from: &Place, to: &Place| {
+        // The import of a vocabulary is an edge of a chain, and never lets the first import the last whole; a chain
+        // through a place twice adds nothing
+        let whole = |from: &Place, to: &Place| {
             verdict(from, Landing::Place(to), &Way::default()) == Verdict::Allowed
         };
+        let may =
+            |from: &Place, to: &Place| whole(from, to) || crate::vocabulary::applies(from, to);
         let entry = |p: &Place| p.name.ends_with("__main__.py");
         let mut chains = 0;
-        let mut through = [0; 5];
+        let mut through = [0; 6];
         for a in &world.places {
             for b in &world.places {
                 for c in &world.places {
-                    if !(may(a, b) && may(b, c)) {
+                    if std::ptr::eq(a, b) || std::ptr::eq(b, c) || !(may(a, b) && may(b, c)) {
                         continue;
                     }
                     chains += 1;
-                    if may(a, c) {
+                    if whole(a, c) {
                         continue;
                     }
                     let other = |p: &Place, q: &Place| p.unit.name != q.unit.name;
@@ -1411,6 +1484,7 @@ mod tests {
                             && b.name == "domain"
                             && c.name == "domain"
                             && !other(a, c),
+                        crate::vocabulary::applies(b, c),
                     ];
                     let at = known.iter().position(|&known| known);
                     let name = |p: &Place| format!("{}.{}", p.unit.name, p.name);
@@ -1739,5 +1813,44 @@ mod tests {
         assert!(edge("core.application", to("billing.domain")).is_none());
         assert!(edge("billing.application", to("core.domain")).is_none());
         assert!(edge("cli.composition", to("core.composition")).is_none());
+    }
+
+    #[test]
+    fn a_typescript_enum_is_a_finding_keyed_by_its_file_and_its_name_and_says_what_to_write() {
+        let found = enum_written("src/domain/song.ts", 4, "Mode");
+        assert_eq!(found.file, "src/domain/song.ts");
+        assert_eq!(found.import, "enum Mode");
+        assert_eq!(found.rule, Rule::Direction);
+        assert_eq!(
+            found.detail,
+            "src/domain/song.ts:4: declares enum Mode, a TypeScript enum, which no layer holds: write it as an array \
+             `as const`, with a type of its elements"
+        );
+        // Inside a namespace it is named by the names that hold it
+        assert_eq!(enum_written("a.ts", 1, "Ns.Mode").import, "enum Ns.Mode");
+    }
+
+    #[test]
+    fn the_advice_for_an_enum_is_the_one_the_finding_of_an_import_of_it_gives() {
+        use crate::definitions::{Definition, Kind, Shape};
+        use crate::vocabulary::{Defined, judged};
+        let outline = [Definition {
+            names: vec!["Mode".to_string()],
+            start: 0,
+            end: 1,
+            kind: Kind::Type,
+            shape: Shape::Enum,
+        }];
+        let taken = ["Mode".to_string()];
+        let said = judged(
+            "a.ts",
+            1,
+            "./x",
+            "imports ./x",
+            &taken,
+            &Defined::new(&outline),
+        )
+        .unwrap();
+        assert!(said.detail.contains(ENUM_INSTEAD), "{}", said.detail);
     }
 }

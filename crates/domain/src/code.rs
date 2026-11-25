@@ -34,6 +34,10 @@ use crate::paths::{join, normalize, parent};
 pub struct Source<I> {
     /// Everything the file imports, each with the line (from 1) it is imported on
     pub imports: Vec<(usize, I)>,
+    /// How each of `imports` was written, one for each and in the same order: Python's reader gives them, so that a
+    /// rule that judges the names an import takes need not guess the form from the module (see [`Form`]). TypeScript's
+    /// reader gives none, as its imports carry their names ([`Import`])
+    pub forms: Vec<Form>,
     /// Every comment: its byte offset in the source, and its text with its delimiters. A reader reads comments past a
     /// syntax error too
     pub comments: Vec<(usize, String)>,
@@ -66,6 +70,7 @@ impl<I> Default for Source<I> {
     fn default() -> Self {
         Source {
             imports: Vec::new(),
+            forms: Vec::new(),
             comments: Vec::new(),
             docstrings: Vec::new(),
             uses: Vec::new(),
@@ -75,6 +80,26 @@ impl<I> Default for Source<I> {
             error: None,
         }
     }
+}
+
+/// How one entry of a Python file's `imports` was written. The entry names `module` alone, or `module.name` when the
+/// statement takes a name from the module, so `from m import n` and `import m.n` read alike there; this tells them
+/// apart.
+///
+/// - `from m import a, b as c`: an entry for `a` and one for `b`, each with the module `m` and the name as `m` defines
+///   it (`b`, not the alias `c`).
+/// - `from m import *`: the module `m` and the name `*`.
+/// - `import m.n`, with or without `as`, and a call of `importlib.import_module("m.n")` or `__import__("m.n")`: the
+///   module `m.n` and no name.
+///
+/// A relative import is resolved against the file's package as the entry is, and one that climbs above the top package
+/// has no entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Form {
+    /// The module the statement names, as the parts of its path from the root
+    pub module: Vec<String>,
+    /// The name it takes from that module, `*` for all of them; `None` when it takes none
+    pub name: Option<String>,
 }
 
 /// What the first positional argument of a call is, when it is a literal a rule asks about.

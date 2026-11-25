@@ -475,6 +475,9 @@ What the layers are is written once, in `layers/table.toml`, on the onion archit
 | `protocol` | `inbound` (input ports, with plain data), `outbound` (output ports) | `inbound`: nothing. `outbound`: `domain` |
 | `domain` | | nothing |
 
+One import is allowed beside the table: `protocol.inbound` imports, of its own unit's `domain`, the vocabularies (the
+kinds a value may have, with no rule of the domain in them) by name, from the file that defines them (see "What
+`rotproof check` checks").
 The levels of a layer other than `ui` and `presentation` never import each other. `ui` is the view and
 `presentation` the state and behaviour of the screens apart from it, the Presentation Model (Fowler) held to the
 inward direction of the onion: a model calls the use cases through `protocol.inbound`, as an entry point does, and
@@ -1158,8 +1161,9 @@ units, the rules are these, applied to an import from one unit's layer into anot
    of a unit is imported by the `composition` of an app alone, and with two more. The `protocol.inbound` of any unit
    also imports the `domain` of a shared unit, where the value types used across units live: an input port that could
    not name them would copy their shape into its own data, and a copy drops what the original has (the currency of a
-   sum of money). It imports nothing of its own unit's `domain` and nothing of a unit that is not shared, as the table
-   says. And a `composition` imports of a shared unit its `protocol` and its `domain` (a kernel of value types such as
+   sum of money). Of its own unit's `domain` it imports only the vocabularies, by name, and nothing of a unit that is
+   not shared.
+   And a `composition` imports of a shared unit its `protocol` and its `domain` (a kernel of value types such as
    `Money` and `OrderId` is what the ports take and the app builds), an app's its `composition` too, and no other layer
    of it: each unit, a shared one included, builds its own insides in its own `composition`, and the app wires them (a
    shared database client offers a factory there), as rule 2 says of a unit that is not shared.
@@ -1169,7 +1173,7 @@ units, the rules are these, applied to an import from one unit's layer into anot
 
 An import across units that the rules forbid is approved as any other forbidden import is
 (`rotproof approve <file> <import>`), except for the cycle. Only direct imports are judged across units too, and a chain
-of allowed imports across units can reach a layer that one import could not, in three places:
+of allowed imports across units can reach a layer that one import could not, in four places:
 
 - The entry file of an app, as in a project of one unit, imports its `composition`, which imports what the entry file
   may not.
@@ -1182,6 +1186,9 @@ of allowed imports across units can reach a layer that one import could not, in 
   nothing but a `protocol.inbound` imports that `domain`. A `protocol.inbound` of a shared unit that imports the
   `domain` of another shared unit, which imports the first one's `domain`, closes a cycle of shared units, which rule 6
   fails.
+- A place that imports a `protocol.inbound` reaches the vocabularies of that unit's own `domain` that the
+  `protocol.inbound` re-exports, as it does inside a unit: it uses the kinds the port takes and gives back, and never
+  writes a list of its own.
 
 ### Who reads the shared units
 
@@ -1453,7 +1460,8 @@ entry can be told, is one.
   layer may import itself and what its `imports` name (a layer with its levels, or one level); a level what its own
   `imports` name, and in `ui` and `presentation` the levels below it. Only direct imports
   are judged: what the table allows is closed under chaining, so a chain of allowed imports inside a unit never reaches
-  a forbidden layer (between units it can: see "Units"). A module is placed where its parts, as a path, land as the operating system that runs the check resolves
+  a forbidden layer, but for the vocabularies `protocol.inbound` re-exports (below; between units it can: see "Units").
+  A module is placed where its parts, as a path, land as the operating system that runs the check resolves
   them: on Windows, `Infrastructure.db` lands in `infrastructure`, as Python imports it with `PYTHONCASEOK` set.
   Imports of modules in no layer (the standard library, packages) are not judged. A call of
   `importlib.import_module` or `__import__` (also as `builtins.__import__`, or by a name imported with `from
@@ -1552,6 +1560,53 @@ entry can be told, is one.
   `protocol::outbound::Port` does), and so is a name bound to such a name; the file is read as one scope, so a name
   bound twice stands for both. Not seen: a path a macro builds from pieces, and a name bound in one file and used
   through another.
+- **`protocol.inbound` imports of its own unit's `domain` only the vocabularies, by name, from the file that defines
+  them** (every language), which the table alone would refuse: an input port names the kinds it takes and gives back,
+  and the kinds are written once, in `domain`, and re-exported by the port, which the entry points, the screens and
+  the tests use; `application` converts nothing between two copies. A vocabulary is a list of values with no rule of
+  the domain in it, and at least one value:
+  - TypeScript: a `const` at the top of the file bound to an array of string or number literals `as const` (with a
+    `satisfies` after it, once at most), with no spread, hole or template, and a type alias of the same file that
+    takes the elements of one (`type Kind = (typeof KINDS)[number]`). A plain union, an object `as const` and an
+    `enum` are none.
+  - Python: a class at the top of the module whose bases are `Enum`, `StrEnum`, `IntEnum`, `Flag` or `IntFlag` of the
+    module `enum` (with `str` or `int` beside it), with no keyword and no type parameter, decorated with `unique` or
+    `verify(...)` alone, and whose body holds only members bound to a literal or to `auto()`, a docstring and methods
+    named `__x__` or `_x_`. A subclass of an enum of the project, the functional form `Enum("K", "A B")` and an alias
+    of `Literal[...]` are none, and a class that holds any other method is an enum with methods, which is none.
+  - Rust: an `enum` whose variants have no fields (a discriminant, attributes and derives may be there), while nothing
+    in its crate gives it a rule: the crate is read whole, every file of `src/` but the items under `#[cfg(test)]`,
+    the bodies of functions and the initializers of a `const` or a `static` too, and each path an `impl` block, a
+    derive or a `type` alias is written with is resolved to the item it stands for in its module (through `use` and
+    `use .. as`). An inherent `impl` that holds a function, an `impl` of a trait the crate defines that holds a
+    function or whose trait has a method with a body, and a derive of such a trait take the enum out; an `impl` or a
+    derive of a trait of the standard library or of another crate, and an `impl` that brings constants or types alone,
+    leave it in. A path that cannot be resolved (a name a glob may bring) is matched by its last name. What hides the
+    rules of every enum fails every enum of the crate, with what and where: a `macro_rules!` whose body holds `impl`,
+    a macro call with `impl` in its arguments, an `include!`, and an `impl` of such a trait for a type parameter.
+
+  The import names the vocabularies it takes, each defined in the file it lands in: in TypeScript, `import { KINDS,
+  type Kind } from` and `export { KINDS } from` (the file being the first that makes the module there; where none is,
+  or it cannot be parsed, the table judges the import); in Python, `from domain.song import Kind`; in Rust, a path the
+  `inbound` module of the `protocol` crate writes into the `domain` crate of its own unit, through the module that
+  defines the enum (`domain::song::Kind`, `domain::song::Kind::Major`). A name a file only re-exports is not defined
+  there, so it fails, as re-exports are followed by no rule of Rotproof, and so does an import that takes no name,
+  whatever it brings in: `import * as`, a default import, `export * from` and an import for its side effect in
+  TypeScript, `import domain.song` in Python, a glob or a module in Rust. The finding says what each name is and how to
+  write it instead: ``protocol/inbound/dto.py:3: imports domain.song.Song, in domain; protocol.inbound may import
+  only vocabularies, by name, from the file of domain that defines them: `Song` is a record, class, function or type,
+  no vocabulary: write the shape the port shows in protocol.inbound, and convert in application``; for an enum with
+  methods, `move the methods into a function of domain that takes the kind`; for a TypeScript `enum`, write it as an
+  array `as const`; for a name not defined there, import it from the file that defines it; for no name, import each
+  vocabulary by name. A record is written again in `protocol.inbound` in the shape the port shows, since it changes
+  for other reasons than the port does. Nothing checks a copy: a project that writes a vocabulary twice still passes. A
+  refused import is approved as any other is, by its file and its import.
+- **No layer holds a TypeScript `enum`** (TypeScript): every `enum` declared in a file of a layer or in the entry
+  file, at the top or inside a namespace, `const` and `declare` ones too, fails: ``src/domain/song.ts:4: declares enum
+  Mode, a TypeScript enum, which no layer holds: write it as an array `as const`, with a type of its elements``. A
+  vocabulary is an array `as const`, which gives its values at run time and a type of them without the code an
+  `enum` emits. The finding is approved as an import is, by its file and `enum <name>` (`enum Ns.Mode` inside a
+  namespace).
 - **Imports between units follow the units' rules** (every language): the units are the parts of the code that each
   hold the layers (see Units); a project that declares none is one unit, and none of this applies. An import inside a
   unit is judged as above. An import into another unit is judged by what each is, first:
@@ -1576,14 +1631,15 @@ entry can be told, is one.
      in), the `composition` of a shared unit is imported by the `composition` of an app alone, the `domain` of a shared
      unit is imported by the `protocol.inbound` of any unit, which the table lets import nothing (the value types used
      across units live in a shared unit, and an input port that cannot name them copies their shape into its own
-     data; a `protocol.inbound` imports no `domain` of its own unit and none of a unit that is not shared), and a
+     data; a `protocol.inbound` imports of its own unit's `domain` only the vocabularies, by name, and nothing of a
+     unit that is not shared), and a
      `composition` reads of it its `protocol` and its `domain` (the value types the ports take) and no other layer,
      an app's its `composition` too (`the composition of a unit imports only the protocol and domain of a shared
      unit: core builds its own insides in its own composition`; of an app, `...imports only the composition, protocol
      and domain of a shared unit: ...`): a shared unit builds its own insides as any unit does.
 
   The entry file reads the `composition` of its own unit and nothing of another unit. Only direct imports are
-  judged, and what these rules allow is closed under chaining except in three places. An entry file imports a
+  judged, and what these rules allow is closed under chaining except in four places. An entry file imports a
   `composition` that wires what the entry file may not import. A `composition` builds its own unit, whose places
   import places of other units that the `composition` may not import itself, and imports the `protocol` of another
   unit (an app's `composition` its `composition` too, and a shared unit's `domain`), which import what it may not
@@ -1591,7 +1647,8 @@ entry can be told, is one.
   `protocol.inbound` (the `ui`, `presentation.models`, `infrastructure.inbound`, `application` and `composition`)
   meets in the data of its ports the types of the shared `domain` that `protocol.inbound` imports, which it may not
   import itself: this holds in what the data carries, and in no import, since nothing but a `protocol.inbound`
-  imports that `domain`. A forbidden import between units is approved as any
+  imports that `domain`. And every such place reaches the vocabularies of that unit's own `domain` that the
+  `protocol.inbound` re-exports, as inside a unit. A forbidden import between units is approved as any
   other. The shared units that import each other, one way round or more, fail once each, as one finding that names
   the units in a cycle and the first import of each step (`the shared units import each other in a cycle: core →
   steps → core (core/application/x.py:3 imports steps.domain.a; steps/domain/b.py:1 imports core.domain.c)`); it is
