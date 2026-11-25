@@ -1,4 +1,5 @@
 - **Each layer imports only what this table allows, besides itself.** `rotproof check` reads the imports and fails on
   any other, and on an import of a layer or level declared in `absent`, which the table allows but the project does
-  not have. Only direct imports are judged: what the table allows is closed under chaining. Imports built at run
+  not have. Only direct imports are judged: what the table allows is closed under chaining, but for
+  the vocabularies `protocol.inbound` re-exports (below). Imports built at run
   time are not seen. Each layer's role is in the documentation `rotproof create` wrote into it.

@@ -95,6 +95,7 @@ fn layers_section(layout: &Layout) -> String {
         .replace("{not_layers}", &not_layers(layout))
         .replace("{table}", &rows(layout))
         .replace("{ui}", &ui(layout))
+        .replace("{vocabulary}\n", crate::vocabulary::guide(layout.language))
 }
 
 /// The rules of the units, which a project that declares `[[unit]]` is held to: the same in every stack but for where
@@ -495,26 +496,33 @@ mod tests {
     }
 
     #[test]
-    fn a_vocabulary_of_values_is_allowed_twice_with_the_three_rules_that_keep_it_from_a_third_copy()
-    {
+    fn a_vocabulary_is_written_once_in_domain_and_re_exported_with_what_one_is_in_the_stack() {
+        let said = [
+            ("python", "`from domain.song import Kind`"),
+            (
+                "typescript",
+                "`export { KINDS, type Kind } from \"../../domain/song\";`",
+            ),
+            ("rust", "`domain::song::Kind`"),
+        ];
         for stack in known_stacks().iter().filter(|s| **s != RECORDS_ONLY) {
             let text = guide(stack, layout(stack, &fullest_ui(stack)).as_ref());
             let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
             for rule in [
-                "may be written twice, in `protocol.inbound` and in the unit's own `domain`, and no more",
-                "a third copy is born where the values are needed at run time",
-                // 1: the type comes from the run-time values
-                "builds its type from its run-time values",
-                "`typeof KINDS[number]` from an `as const` array",
-                // 2: `protocol.inbound` gives the values, and nobody lists them again
-                "`protocol.inbound` gives those values, not only the type",
+                "is written once, in the unit's own `domain`, and `protocol.inbound` re-exports it",
                 "never write a list of their own",
-                // 3: the conversion fails the type checker for a kind that is missing
-                "`application` converts between the two copies exhaustively",
-                "fails the type checker",
+                "a function of `domain` that takes the kind",
+                "A record is never imported so",
             ] {
                 assert!(text.contains(rule), "{stack}: {rule}");
             }
+            let (_, import) = said.iter().find(|(s, _)| s == stack).unwrap();
+            assert!(text.contains(import), "{stack}: {import}");
+            // Each stack says its own language alone, and no placeholder is left
+            for (other, import) in said.iter().filter(|(s, _)| s != stack) {
+                assert!(!text.contains(import), "{stack} says {other}");
+            }
+            assert!(!text.contains("{vocabulary}"), "{stack}");
         }
         assert!(!guide(RECORDS_ONLY, None).contains("vocabulary"));
     }

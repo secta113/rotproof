@@ -1,0 +1,18 @@
+  In Rust a vocabulary is an `enum` whose variants have no fields, with no rule of `domain` anywhere in its crate: no
+  inherent `impl` that holds a function, and no `impl` or derive of a trait the crate defines (one of `std` or of
+  another crate, such as `Display` or `serde::Serialize`, leaves it a vocabulary):
+
+  ```rust
+  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+  pub enum Kind {
+      Major,
+      Minor,
+  }
+  ```
+
+  The `domain` crate makes the module that defines it public (`pub mod song;`), and the `inbound` module of the
+  `protocol` crate names it through that module, `domain::song::Kind` (`billing_domain::song::Kind` in a unit), and
+  `pub use domain::song::Kind;` re-exports it.
+  A glob or the module alone fails, and so does a name the module only re-exports. A `macro_rules!` or a macro call
+  that holds `impl`, or an `include!`, in the `domain` crate fails every enum of it, since the rules they hide cannot
+  be read.

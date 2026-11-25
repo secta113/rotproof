@@ -34,12 +34,27 @@ use std::collections::BTreeMap;
 
 use crate::definitions::{Definition, Kind, Shape};
 use crate::direction::{DOMAIN, ENUM_INSTEAD, Forbidden, PROTOCOL_INBOUND, Rule};
-use crate::layers::Place;
+use crate::layers::{Language, Place};
 use crate::rust::{
     Names, Resolved, Source, calls_holding, derives, inline_chains, invocations, join,
     macros_holding, module_at, nested_impls,
 };
 use crate::text::line_of;
+
+const GUIDE_PYTHON: &str = include_str!("../../../project/rotproof/vocabulary-python.md.in");
+const GUIDE_TYPESCRIPT: &str =
+    include_str!("../../../project/rotproof/vocabulary-typescript.md.in");
+const GUIDE_RUST: &str = include_str!("../../../project/rotproof/vocabulary-rust.md.in");
+
+/// What the guide says of a vocabulary in `language`, after the rule the stacks share in the section on the layers:
+/// what one is and how `protocol.inbound` takes it.
+pub fn guide(language: Language) -> &'static str {
+    match language {
+        Language::Python => GUIDE_PYTHON,
+        Language::TypeScript => GUIDE_TYPESCRIPT,
+        Language::Rust => GUIDE_RUST,
+    }
+}
 
 /// The names an import takes that name no definition: the whole module (`import * as ns`, `from m import *`) and the
 /// default export.
